@@ -6,6 +6,8 @@ import org.junit.Assert.fail
 import org.junit.Test
 import java.io.File
 import java.nio.file.Files
+import java.nio.charset.StandardCharsets
+import java.util.Base64
 
 class DaemonConnectionConfigTest {
 
@@ -170,6 +172,202 @@ class DaemonConnectionConfigTest {
         assertTrue(error.message.orEmpty().contains("active profile"))
     }
 
+    @Test
+    fun `remote registry selects active tailscale daemon endpoint`() {
+        val config = DaemonConnectionConfig.parse(
+            """
+            {
+              "schemaVersion": 1,
+              "connectionMode": "remote_registry",
+              "activeAccount": "jason",
+              "activeDaemon": "studio",
+              "accounts": [
+                {
+                  "id": "jason",
+                  "label": "Jason",
+                  "relayUrl": "https://relay.freehand.local/relay/"
+                }
+              ],
+              "daemons": [
+                {
+                  "id": "studio",
+                  "accountId": "jason",
+                  "label": "Mac Studio",
+                  "nodeId": "studio-node",
+                  "activeEndpoint": "tailscale-main",
+                  "endpoints": [
+                    {
+                      "id": "tailscale-main",
+                      "kind": "tailscale",
+                      "host": "100.66.1.82",
+                      "port": 4042
+                    },
+                    {
+                      "id": "relay-web",
+                      "kind": "relay",
+                      "webUrl": "https://relay.freehand.local/daemon/studio/web",
+                      "relayHostId": "studio-host"
+                    }
+                  ]
+                }
+              ]
+            }
+            """.trimIndent(),
+        )
+
+        val host = config.activeHostConfig()
+
+        assertEquals("remote_registry", config.connectionMode)
+        assertEquals("100.66.1.82", host.host)
+        assertEquals(4042, host.port)
+        assertEquals(1, config.accounts.size)
+        assertEquals(1, config.daemons.size)
+    }
+
+    @Test
+    fun `remote registry relay endpoint loads explicit relay WebUI url`() {
+        val config = DaemonConnectionConfig.parse(
+            """
+            {
+              "connectionMode": "remote_registry",
+              "activeAccount": "jason",
+              "activeDaemon": "studio",
+              "accounts": [
+                {
+                  "id": "jason",
+                  "relayUrl": "https://relay.freehand.local/relay/"
+                }
+              ],
+              "daemons": [
+                {
+                  "id": "studio",
+                  "accountId": "jason",
+                  "nodeId": "studio-node",
+                  "activeEndpoint": "relay-web",
+                  "endpoints": [
+                    {
+                      "id": "relay-web",
+                      "kind": "relay",
+                      "webUrl": "https://relay.freehand.local/daemon/studio/web"
+                    }
+                  ]
+                }
+              ]
+            }
+            """.trimIndent(),
+        )
+
+        val host = config.activeHostConfig()
+
+        assertEquals("relay.freehand.local", host.host)
+        assertEquals(443, host.port)
+        assertEquals(
+            "https://relay.freehand.local/daemon/studio/web?client=android-webview",
+            host.webUiUrl,
+        )
+    }
+
+    @Test
+    fun `remote registry missing active endpoint fails explicitly`() {
+        val json = """
+            {
+              "connectionMode": "remote_registry",
+              "activeAccount": "jason",
+              "activeDaemon": "studio",
+              "accounts": [{ "id": "jason" }],
+              "daemons": [
+                {
+                  "id": "studio",
+                  "accountId": "jason",
+                  "nodeId": "studio-node",
+                  "activeEndpoint": "missing",
+                  "endpoints": [
+                    {
+                      "id": "tailscale-main",
+                      "kind": "tailscale",
+                      "host": "100.66.1.82",
+                      "port": 4042
+                    }
+                  ]
+                }
+              ]
+            }
+        """.trimIndent()
+
+        val error = expectConfigError { DaemonConnectionConfig.parse(json) }
+
+        assertTrue(error.message.orEmpty().contains("active endpoint"))
+    }
+
+    @Test
+    fun `remote registry relay endpoint requires account relay url`() {
+        val json = """
+            {
+              "connectionMode": "remote_registry",
+              "activeAccount": "jason",
+              "activeDaemon": "studio",
+              "accounts": [{ "id": "jason" }],
+              "daemons": [
+                {
+                  "id": "studio",
+                  "accountId": "jason",
+                  "nodeId": "studio-node",
+                  "activeEndpoint": "relay-web",
+                  "endpoints": [
+                    {
+                      "id": "relay-web",
+                      "kind": "relay",
+                      "webUrl": "https://relay.freehand.local/daemon/studio/web"
+                    }
+                  ]
+                }
+              ]
+            }
+        """.trimIndent()
+
+        val error = expectConfigError { DaemonConnectionConfig.parse(json) }
+
+        assertTrue(error.message.orEmpty().contains("requires account 'jason' relayUrl"))
+    }
+
+    @Test
+    fun `bootstrap link imports account daemon endpoint and one time credential`() {
+        val link = buildBootstrapLink(expiresAtUnix = 200)
+
+        val config = DaemonConnectionConfig.parseBootstrapLink(link, nowUnix = 100)
+        val host = config.activeHostConfig()
+
+        assertEquals("remote_registry", config.connectionMode)
+        assertEquals("jason", config.activeAccount)
+        assertEquals("studio", config.activeDaemon)
+        assertEquals("one-time-secret", config.accounts.first().authToken)
+        assertEquals("relay.freehand.local", host.host)
+        assertEquals(443, host.port)
+    }
+
+    @Test
+    fun `store imports bootstrap link into app owned config file`() {
+        val dir = Files.createTempDirectory("freehand-android-bootstrap").toFile()
+        val configFile = File(dir, DaemonConnectionConfig.DEFAULT_CONFIG_FILE)
+        val store = DaemonConnectionConfigStore(configFile) { readBundledConfig() }
+
+        store.importBootstrapLink(buildBootstrapLink(expiresAtUnix = 200), nowUnix = 100)
+
+        assertTrue(configFile.exists())
+        val reloaded = store.load()
+        assertEquals("remote_registry", reloaded.connectionMode)
+        assertEquals("studio", reloaded.activeDaemon)
+    }
+
+    @Test
+    fun `expired bootstrap link fails explicitly`() {
+        val error = expectConfigError {
+            DaemonConnectionConfig.parseBootstrapLink(buildBootstrapLink(expiresAtUnix = 100), nowUnix = 100)
+        }
+
+        assertTrue(error.message.orEmpty().contains("expired"))
+    }
+
     private fun readBundledConfig(): String {
         val candidates = listOf(
             File("src/main/assets/config/client.json"),
@@ -188,5 +386,45 @@ class DaemonConnectionConfigTest {
         } catch (e: DaemonConnectionConfigException) {
             e
         }
+    }
+
+    private fun buildBootstrapLink(expiresAtUnix: Long): String {
+        val json = """
+            {
+              "kind": "freehand.remote-daemon-bootstrap",
+              "schemaVersion": 1,
+              "exportedAtUnix": 10,
+              "expiresAtUnix": $expiresAtUnix,
+              "nonce": "nonce-1",
+              "account": {
+                "id": "jason",
+                "label": "Jason",
+                "relayUrl": "https://relay.freehand.local/relay/"
+              },
+              "daemon": {
+                "id": "studio",
+                "accountId": "jason",
+                "label": "Mac Studio",
+                "nodeId": "studio-node",
+                "activeEndpoint": "relay-web",
+                "endpoints": [
+                  {
+                    "id": "relay-web",
+                    "kind": "relay",
+                    "webUrl": "https://relay.freehand.local/daemon/studio/web",
+                    "relayHostId": "studio-host"
+                  }
+                ]
+              },
+              "credential": {
+                "kind": "one_time_token",
+                "value": "one-time-secret"
+              }
+            }
+        """.trimIndent()
+        val encoded = Base64.getUrlEncoder()
+            .withoutPadding()
+            .encodeToString(json.toByteArray(StandardCharsets.UTF_8))
+        return "freehand://daemon/import?payload=$encoded"
     }
 }

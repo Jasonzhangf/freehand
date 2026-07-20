@@ -9,6 +9,8 @@
 - resource operations:
   - `task.project_to_ui`
 - owner entry symbols:
+  - `UiTurnProjection`
+  - `TurnProjectionInput`
   - `validate_command`
   - `accept_command_ingress`
   - `protocol_rejection`
@@ -67,7 +69,7 @@
 - query and subscribe stay separate
 - ADP WebSocket clients use protocol-owned typed frames for command, query, and subscribe requests instead of app-local JSON envelopes
 - task list and task history queries are protocol-owned ADP/query command shapes, but the protocol only defines UI-safe DTOs and query-port routing; persisted task truth remains owned by `task.orchestration`
-- Phase 1 TaskBoard, AgentBoard, and AgentLifecycle queries are protocol-owned ADP/query command shapes; protocol defines UI-safe DTOs while runtime/task owners supply truth
+- Phase 1 TaskBoard, AgentBoard, and AgentLifecycle queries are protocol-owned ADP/query command shapes; protocol defines UI-safe DTOs while runtime/task owners supply truth, including task `created_at` for submit-receipt correlation without relying on heartbeat `updated_at`
 - task mutation commands (`CreateTask`, `CreateTaskAgent`, `AssignTask`, `ClaimNextTask`, `SubmitTaskReview`, `RejectTaskReview`, `ApproveTaskReview`, `CloseTask`) are protocol-owned mutation intents that validate required fields and route to `task.orchestration` through runtime; protocol does not write task truth
 - `UiTaskDispatchCommand` lets a task create command explicitly choose self dispatch, agent dispatch, or no immediate dispatch so Phase 2A can create a waiting task before assignment
 - Phase 1 `ApplyExecutionFact` and `RunSchedulerTick` are protocol-owned mutation intents routed to `task.orchestration`; protocol does not update task state or make scheduler decisions
@@ -78,14 +80,19 @@
 - `RunMasterPoll.replay_from_start` is a protocol-owned cursor-mode field;
   protocol validates that it is not combined with `after_cursor`, while
   `task.orchestration` owns the actual replay and cursor persistence semantics
+- turn projection input may carry owner-created turn time; protocol preserves
+  that timestamp as optional projection truth and does not synthesize wall-clock
+  message time from client render time
 - Phase 2C `WorkerControl` and `QueryWorkerControl` are protocol-owned
   command/query shapes for already-running worker execution control; protocol
   validates IDs/op payloads and routes mutation intent to `worker.control`
   while task/runtime owners supply control-event truth
 - task list subscriptions are protocol-owned ADP/subscribe command shapes; task list projection contents must be supplied by runtime/task owners and remain read-only UI DTOs
 - error-center event queries and subscriptions are protocol-owned ADP/query/subscribe command shapes, but metadata truth remains owned by `metadata.core` and classified by `error.center`
-- config status query is a protocol-owned ADP/query command shape, but selected config truth remains owned by `config.core` and supplied through `runtime.ui-command-dispatch`
-- provider/model update is a protocol-owned mutation command shape (`UpdateProviderConfig`) that carries only editable provider id/type/protocol/base URL/default model/env-var auth fields and routes to `config.core`; WebUI and CLI must not write config files directly
+- config status query is a protocol-owned ADP/query command shape carrying the complete safe provider registry plus current primary/fallback selection, but selected config truth remains owned by `config.core` and supplied through `runtime.ui-command-dispatch`
+- provider definition upsert is a protocol-owned mutation command shape (`UpsertProviderConfig`) that carries only editable provider id/type/protocol/base URL/default model/env-var auth fields and routes to `config.core` without switching active selection
+- provider selection is a protocol-owned mutation command shape (`UpdateAgentProviderSelection`) that carries only agent name plus primary/fallback provider ids and routes to `config.core` without rewriting provider definitions
+- legacy provider/model update remains a protocol-owned mutation command shape (`UpdateProviderConfig`) for existing CLI callers; WebUI and CLI must not write config files directly or send raw API-key values
 - Agent resource-count update is a protocol-owned mutation command shape (`UpdateAgentResourceConfig`) that carries only agent name plus `resource_count`; protocol rejects values outside `1..=5` before runtime dispatch and routes valid intent to `config.core`
 - subscriptions may target latest active turn, specific turn, specific turn debug state, or node/progress streams
 
@@ -99,8 +106,13 @@
 - ADP subscribe returns an explicit `SubscriptionAccepted` frame before later `SubscriptionEvent` frames so UI-less clients can distinguish waiting from transport failure
 - projections are read-only views over owner-written truth
 - model request lifecycle is projected as typed `UiModelRequestActivity` inside `UiTurnProjection` when runtime reports the provider request has been built and sent, when completion-schema validation rejects a model terminal block and runtime sends repair feedback back to the model, when provider recovery is retrying or switching to fallback, or when tool results have been paired and the model continuation request is waiting; `kind` distinguishes `Thinking`, `SchemaRetry`, `ProviderRetry`, `ProviderFailover`, and `ToolResultContinuation`, and the activity clears when response/tool/usage/terminal/error projection arrives
+- selected-session transcript replacement preserves same-turn nonterminal live-only `model_request` and `tool_activities` already present in `UiProtocolState`, so a persistence-backed refresh cannot erase provider retry/waiting or per-tool-call activity; terminal replacement remains authoritative and clears stale live waiting state
 - terminal completion shows only final projected text
 - turn projections preserve terminal status separately from terminal text so UI clients can distinguish success, failed, blocked, interrupted, running, and cancelled terminal states
+- turn projections preserve owner-created turn time as
+  `UiTurnProjection.created_at` when runtime/reason supplies it, allowing UI
+  clients to render per-message local-time labels without becoming timestamp
+  owners
 - public conversation projection strips raw completion schema blocks and excludes reasoning, usage, provider payload, debug details, and verbose tool term text from the main user-visible stream
 - public conversation projection preserves the user prompt while still stripping raw completion schema blocks and excluding reasoning, usage, provider payload, debug details, and verbose tool term text from the main user-visible stream
 - public conversation session selection stays explicit: submit can target a selected session id, and session-level transcript queries stay separate from the global latest turn
@@ -110,7 +122,7 @@
 - task board projections carry `parent_session_id`, observing `attached_session_ids`, and canonical `worker_session_id` so WebUI can scope tasks to the selected parent/observer session and open the Worker transcript without synthesizing an id
 - rollback command ingress exposes append-only latest-turn rollback as a reason.persistence mutation intent; protocol does not remove turns or mutate local transcript truth
 - task list and task history query results expose UI-safe task snapshot and ledger-event projections supplied by runtime owner code through `UiRuntimeQueryPort`
-- Phase 1 TaskBoard, AgentBoard, and AgentLifecycle query results expose UI-safe board/lifecycle projections supplied by runtime owner code through `UiRuntimeQueryPort`
+- Phase 1 TaskBoard, AgentBoard, and AgentLifecycle query results expose UI-safe board/lifecycle projections supplied by runtime owner code through `UiRuntimeQueryPort`; TaskBoard task snapshots carry parent scope, canonical Worker session id, and `created_at`
 - Phase 2B EventInbox and MasterPoll results expose UI-safe event rows,
   cursor values, compact classifications, and recommended semantic action
   labels supplied by runtime owner code through `UiRuntimeQueryPort`
@@ -240,7 +252,7 @@
 | 06 | `UiProtocolState::subscribe` | `crates/freehand-ui-protocol/src/lib.rs` | expose the protocol-owned continuous subscription channel for app transports | none | `UiSubscriptionEvent` receiver | app/transport adapters | protocol state | bound |
 | 07 | `subscription_selector` | `crates/freehand-ui-protocol/src/lib.rs` | build read-only subscribe selector | subscribe command | subscription selector | protocol boundary | stream handler | bound |
 | 08 | `subscription_matches` | `crates/freehand-ui-protocol/src/lib.rs` | route incremental projection to matching subscription | subscription selector + projection | delivery decision | stream handler | selector matcher | bound |
-| 09 | `turn_projection_from_events` | `crates/freehand-ui-protocol/src/lib.rs` | project whole-turn state into UI snapshot, including tool lifecycle activities | semantic/tool/tool-result/usage/terminal/error/user inputs | UI turn projection | query/stream handler | projector | bound |
+| 09 | `TurnProjectionInput` / `turn_projection_from_events` / `UiTurnProjection` | `crates/freehand-ui-protocol/src/lib.rs` | project whole-turn state into UI snapshot, including owner-created turn time and tool lifecycle activities | semantic/tool/tool-result/usage/terminal/error/user inputs plus optional owner-created timestamp | UI turn projection with `created_at` when supplied by runtime/reason truth | query/stream handler | projector | bound |
 | 10 | `terminal_text_projection` | `crates/freehand-ui-protocol/src/lib.rs` | project terminal text | terminal semantic payload | UI terminal text | query/stream handler | projector | bound |
 | 10a | `public_conversation_items` / `public_turn_projection` | `crates/freehand-ui-protocol/src/lib.rs` | derive public user-visible conversation stream, preserve user prompt, and strip raw completion schema | full turn projection | public turn projection | app transports/renderers | projector | bound |
 | 10b | `UiProtocolState::apply_terminal_event` / `turn_projection_from_events` | `crates/freehand-ui-protocol/src/lib.rs` | preserve terminal status alongside terminal text in UI turn projections | terminal semantic event | terminal text + terminal status projection | runtime/app protocol consumers | protocol projector | bound |
@@ -256,14 +268,15 @@
 | 17 | `UiProtocolState::set_checkpoint_snapshot` / `checkpoint_projection_from_runtime_summary` | `crates/freehand-ui-protocol/src/lib.rs` | store and query read-only checkpoint summaries supplied by runtime owner | runtime checkpoint summary DTO | checkpoint query result | runtime dispatcher / app query handlers | protocol state | bound |
 | 18 | `UiAdpRequest` / `UiAdpResponse` | `crates/freehand-ui-protocol/src/lib.rs` | define protocol-owned WebSocket ADP frames for command/query/subscribe automation | ADP JSON frame | typed command/query/subscription response or failure | WebUI/Android/CLI automation transports | protocol owner | bound |
 | 19 | `validate_command` / `command_dispatch_target` | `crates/freehand-ui-protocol/src/lib.rs` | validate session-management mutation intents and route them to the session persistence owner | session CRUD or rollback command | owner-routed dispatch envelope or protocol rejection | WebUI/Android/CLI transports | runtime/reason persistence owner path | bound |
-| 19a | `UiProtocolState::replace_session_turn_projections` | `crates/freehand-ui-protocol/src/lib.rs` | replace one session's effective transcript projection after persistence-owned rollback | session id plus effective turn projections | queryable session transcript without rolled-back turns | runtime.ui-command-dispatch | protocol state | bound |
+| 19a | `UiProtocolState::replace_session_turn_projections` / `preserve_live_activity_on_nonterminal_refresh` / `merge_tool_activity` | `crates/freehand-ui-protocol/src/lib.rs` | replace one session's effective transcript projection after persistence-owned rollback or selected-session refresh while preserving same-turn nonterminal live provider/tool activity and keeping terminal snapshots authoritative | session id plus effective turn projections plus current protocol state | queryable session transcript without rolled-back turns and without losing active provider retry/tool-call observability | runtime.ui-command-dispatch | protocol state | bound |
 | 20 | `UiRuntimeQueryPort::query_runtime` | `crates/freehand-ui-protocol/src/lib.rs` | define runtime-backed read-only query extension point without making app transports import runtime owners | UI query command | optional runtime-owned query result or explicit dispatch failure | WebUI/daemon ADP query transport | runtime query owner | bound |
-| 20a | `UiCommand::QueryConfigStatus` / `UiQueryResult::ConfigStatus` / `UiConfigStatusProjection` | `crates/freehand-ui-protocol/src/lib.rs` | define UI-safe active config query/result DTO without secrets | config status query | active agent/provider/model/auth-source/resource-count projection | ADP query transport | runtime query port | bound |
-| 20b | `UiProviderConfigUpdate` / `UiCommand::UpdateProviderConfig` | `crates/freehand-ui-protocol/src/lib.rs` | define provider/model update command DTO without credential values and route it to the config owner | provider/model/base-url/env-var update | validated mutation intent routed to `config.core` | WebUI/CLI ADP command transport | runtime.ui-command-dispatch | bound |
+| 20a | `UiCommand::QueryConfigStatus` / `UiQueryResult::ConfigStatus` / `UiConfigStatusProjection` / `UiProviderConfigSummaryProjection` | `crates/freehand-ui-protocol/src/lib.rs` | define UI-safe active config query/result DTO with complete provider registry and no secrets | config status query | active agent/provider/fallback/model/auth-source/resource-count projection plus safe configured provider registry | ADP query transport | runtime query port | bound |
+| 20b | `UiProviderConfigUpdate` / `UiCommand::UpdateProviderConfig` / `UiCommand::UpsertProviderConfig` | `crates/freehand-ui-protocol/src/lib.rs` | define provider definition mutation DTOs without credential values and route them to the config owner | provider/model/base-url/env-var update | validated mutation intent routed to `config.core` | WebUI/CLI ADP command transport | runtime.ui-command-dispatch | bound |
+| 20b1 | `UiAgentProviderSelectionUpdate` / `UiCommand::UpdateAgentProviderSelection` | `crates/freehand-ui-protocol/src/lib.rs` | define active provider selection mutation DTO without credential values and route it to the config owner | agent name plus primary/fallback provider ids | validated mutation intent routed to `config.core` | WebUI/CLI ADP command transport | runtime.ui-command-dispatch | bound |
 | 20c | `UiAgentResourceConfigUpdate` / `UiCommand::UpdateAgentResourceConfig` | `crates/freehand-ui-protocol/src/lib.rs` | define Agent resource-count update command DTO without provider credentials and route it to the config owner | agent name + `1..=5` resource count | validated mutation intent routed to `config.core` | WebUI/CLI ADP command transport | runtime.ui-command-dispatch | bound |
 | 21 | `UiCommand::QueryErrorCenterEvents` / `UiQueryResult::ErrorCenterEvents` | `crates/freehand-ui-protocol/src/lib.rs` | define read-only error-center query/result DTOs | session/trace/turn/domain filters | UI-safe error-center projection | ADP query transport | runtime query port | bound |
 | 22 | `UiCommand::SubscribeErrorCenterEvents` / `UiProjection::ErrorCenterEvents` | `crates/freehand-ui-protocol/src/lib.rs` | define error-center subscription command and projection event shape | error-center subscription filters | UI-safe error-center subscription event | ADP subscribe transport | protocol selector matcher | bound |
-| 23 | `UiCommand::QueryTaskBoard` / `UiCommand::QueryAgentBoard` / `UiCommand::QueryAgentLifecycle` | `crates/freehand-ui-protocol/src/lib.rs` | define Phase 1 board and lifecycle query DTOs without owning task/lifecycle truth | board or lifecycle query filters | runtime-backed UI-safe board/lifecycle projections | ADP query transport | runtime query port | bound |
+| 23 | `UiCommand::QueryTaskBoard` / `UiCommand::QueryAgentBoard` / `UiCommand::QueryAgentLifecycle` / `UiTaskSnapshotProjection` | `crates/freehand-ui-protocol/src/lib.rs` | define Phase 1 board and lifecycle query DTOs without owning task/lifecycle truth; TaskBoard task snapshots expose `created_at` from task owner truth for UI receipt correlation | board or lifecycle query filters | runtime-backed UI-safe board/lifecycle projections | ADP query transport | runtime query port | bound |
 | 24 | `UiCommand::ApplyExecutionFact` / `UiCommand::RunSchedulerTick` | `crates/freehand-ui-protocol/src/lib.rs` | define Phase 1 execution fact and scheduler tick mutation DTOs routed to task.orchestration | execution fact or scheduler tick command | validated mutation intent routed to task.orchestration | ADP command transport | runtime.ui-command-dispatch | bound |
 | 25 | `UiTaskAgentCreateCommand` / `UiTaskAssignCommand` / `UiTaskClaimCommand` / `UiTaskReviewRejectionCommand` / `UiTaskDispatchCommand` | `crates/freehand-ui-protocol/src/lib.rs` | define Phase 2A worker agent, assignment, claim, review rejection, and dispatch-mode DTOs routed to task.orchestration | worker/task mutation intent | validated mutation intent routed to task.orchestration or protocol rejection | ADP command transport | runtime.ui-command-dispatch | bound |
 | 26 | `UiCommand::QueryEventInbox` / `UiQueryResult::EventInbox` | `crates/freehand-ui-protocol/src/lib.rs` | define Phase 2B EventInbox query DTOs without owning task event truth or cursor truth | event inbox query cursor | runtime-backed UI-safe event inbox projection | ADP query transport | runtime.ui-command-dispatch | bound |
@@ -279,6 +292,7 @@
 - client-specific projection gating is now also bound in code
 - `UiProtocolState` now owns a continuous subscription channel plus incremental shared-contract turn projection updates
 - `UiProtocolState` now projects provider-request-sent, schema-retry, and tool-result-continuation waiting states into typed `UiTurnProjection.model_request.kind` and clears it on response/tool/usage/terminal/error projection
+- `UiProtocolState::replace_session_turn_projections` now preserves same-turn nonterminal provider retry/model waiting and tool activity cards across selected-session refresh, while terminal refresh drops stale live waiting state; covered by `session_refresh_preserves_active_model_request_activity`, `session_refresh_preserves_active_tool_activity_cards`, and `terminal_session_refresh_drops_stale_live_activity`
 - debug-state projection consumes `freehand-debug::DebugStateSnapshot` instead of a UI-owned duplicate DTO
 - UI ingress versus truth-writer separation is now locked in the function map
 - minimal per-turn debug-state query/subscribe plus receiver-drain bridge are now bound in `UiProtocolState`
@@ -286,6 +300,8 @@
 - tool activities now carry structured `display` projection from `tool.display`; public tool cards expose semantic action/target/parameter/diff summaries instead of making UI infer categories from raw tool detail or echo success/failure result text as primary content
 - public tool summaries now preserve `tool_call_id`, expose semantic tool display body, and duplicate tool-call projections upsert into one activity before public rendering
 - ADP request/response frames are now protocol-owned and JSON roundtrip tested for UI-less automation clients
+- `UiTurnProjection.created_at` is landed from `TurnProjectionInput.created_at`
+  and covered by `command_to_projection_smoke`
 - session cwd projection is landed for `UiTurnProjection`, `UiSessionSummary`, and `UiSessionTranscriptProjection`
 - session CRUD protocol routing is bound for create, rename, archive, restore, and delete-as-archive commands through `runtime.ui-command-dispatch` into `reason.persistence`
 - rollback latest session turn protocol routing is bound through `RollbackLatestSessionTurn` into `reason.persistence`, and `UiProtocolState::replace_session_turn_projections` lets runtime refresh effective transcript projection without UI-local deletion
@@ -294,8 +310,9 @@
 - Phase 1 ApplyExecutionFact and RunSchedulerTick command DTOs are protocol-bound and route only through runtime-backed task.orchestration dispatch
 - task list subscription projection is protocol-bound; runtime owner code publishes task list projection events into `UiProtocolState`
 - error-center query/subscription DTOs and runtime query-port routing are protocol-bound; runtime owner code supplies metadata-backed read projections
-- config status query/result DTO is protocol-bound; runtime owner code supplies selected config projection and protocol state rejects local handling
-- provider/model update command DTO is protocol-bound, owner-routed to `config.core`, rejects invalid/empty fields, and serializes without credential/API-key values
+- config status query/result DTO is protocol-bound; runtime owner code supplies complete provider registry plus selected primary/fallback projection and protocol state rejects local handling
+- provider definition upsert and legacy provider/model update command DTOs are protocol-bound, owner-routed to `config.core`, reject invalid/empty fields, and serialize without credential/API-key values
+- active provider selection command DTO is protocol-bound, owner-routed to `config.core`, rejects empty provider ids, and serializes without credential/API-key values
 - Agent resource-count update command DTO is protocol-bound, owner-routed to `config.core`, rejects out-of-range counts, and serializes without provider credentials or live-process state
 - task mutation command DTOs are protocol-bound, owner-routed to `task.orchestration`, and rejected at the protocol boundary when required task, worker, execution, or review fields are empty
 - Phase 2A worker agent, assignment, claim, review rejection, and dispatch-mode DTOs are landed and locked by protocol owner tests

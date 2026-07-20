@@ -24,12 +24,14 @@ import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.ProgressBar
 import android.widget.TextView
+import androidx.activity.OnBackPressedCallback
 import androidx.activity.result.ActivityResultLauncher
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
 import com.freehand.android.data.ClientConfig
+import com.freehand.android.data.DaemonConnectionConfigException
 import org.json.JSONArray
 import org.json.JSONObject
 
@@ -51,7 +53,7 @@ class MainActivity : AppCompatActivity() {
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        val host = ClientConfig.load(applicationContext).activeHostConfig()
+        val host = loadHostConfigFromStartupIntent()
 
         fileChooserLauncher = registerForActivityResult(
             ActivityResultContracts.StartActivityForResult(),
@@ -121,7 +123,50 @@ class MainActivity : AppCompatActivity() {
         )
         applyInsets(root)
         setContentView(root)
+        onBackPressedDispatcher.addCallback(this, object : OnBackPressedCallback(true) {
+            override fun handleOnBackPressed() {
+                handleAndroidBackPressed()
+            }
+        })
+        AndroidApkUpdater(applicationContext, host).checkForUpdateAsync()
         webView.loadUrl(host.webUiUrl)
+    }
+
+    private fun loadHostConfigFromStartupIntent() =
+        try {
+            val store = ClientConfig.store(applicationContext)
+            val importLink = intent?.takeIf { it.action == Intent.ACTION_VIEW }?.data?.toString()
+            val config = if (!importLink.isNullOrBlank()) {
+                store.importBootstrapLink(importLink)
+            } else {
+                store.load()
+            }
+            config.activeHostConfig()
+        } catch (error: DaemonConnectionConfigException) {
+            throw error
+        }
+
+    private fun handleAndroidBackPressed() {
+        if (!::webView.isInitialized || isFinishing) {
+            finish()
+            return
+        }
+        webView.evaluateJavascript(
+            "(" +
+                "function(){" +
+                "try{" +
+                "return !!(window.__freehandHandleAndroidBack&&window.__freehandHandleAndroidBack());" +
+                "}catch(error){return false;}" +
+                "}" +
+                ")()",
+        ) { handled ->
+            if (handled == "true") return@evaluateJavascript
+            if (::webView.isInitialized && webView.canGoBack()) {
+                webView.goBack()
+            } else {
+                finish()
+            }
+        }
     }
 
     private inner class AndroidWebChromeClient : WebChromeClient() {

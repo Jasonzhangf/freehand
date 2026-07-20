@@ -6,6 +6,13 @@ import path from 'node:path';
 const chromePath = process.env.FREEHAND_WEBUI_CHROME || '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
 const debugPort = Number.parseInt(process.env.FREEHAND_WORKER_SUBTASKS_WEBUI_DEBUG_PORT || '9237', 10);
 const baseUrl = process.env.FREEHAND_WORKER_SUBTASKS_WEBUI_BASE_URL || 'http://127.0.0.1:4042/?verify=worker-subtasks';
+const requiredParentSession = process.env.FREEHAND_WORKER_SUBTASKS_PARENT_SESSION || '';
+const expectedTaskCount = process.env.FREEHAND_WORKER_SUBTASKS_EXPECTED_COUNT
+  ? Number.parseInt(process.env.FREEHAND_WORKER_SUBTASKS_EXPECTED_COUNT, 10)
+  : null;
+const maxWorkerLabel = process.env.FREEHAND_WORKER_SUBTASKS_MAX_WORKER_LABEL
+  ? Number.parseInt(process.env.FREEHAND_WORKER_SUBTASKS_MAX_WORKER_LABEL, 10)
+  : null;
 const artifactRoot = process.env.FREEHAND_WORKER_SUBTASKS_WEBUI_ARTIFACT_DIR ||
   path.join(process.cwd(), 'artifacts', 'webui-online', `worker-subtasks-${Date.now()}`);
 
@@ -40,6 +47,11 @@ try {
   cdp = await createCdpClient(target.webSocketDebuggerUrl);
   await cdp.send('Page.enable');
   await cdp.send('Runtime.enable');
+  if (requiredParentSession) {
+    await cdp.send('Page.addScriptToEvaluateOnNewDocument', {
+      source: `try { window.localStorage.setItem("freehand-webui-selected-session", ${JSON.stringify(requiredParentSession)}); } catch (_) {}`,
+    });
+  }
   await cdp.send('Emulation.setDeviceMetricsOverride', {
     width: 390,
     height: 844,
@@ -63,11 +75,24 @@ try {
     cdp,
     () => {
       const title = document.getElementById('mobile-agent-summary-title')?.textContent || '';
-      return /delegated task/.test(title) && !/unavailable/i.test(title);
+      const copy = document.getElementById('mobile-agent-summary-copy')?.textContent || '';
+      return /task/i.test(`${title} ${copy}`) && !/unavailable/i.test(title);
     },
     20_000,
     'mobile agent summary loaded',
   );
+  if (expectedTaskCount !== null) {
+    await waitForFunction(
+      cdp,
+      () => {
+        const title = document.getElementById('mobile-agent-summary-title')?.textContent || '';
+        const copy = document.getElementById('mobile-agent-summary-copy')?.textContent || '';
+        return /task/i.test(`${title} ${copy}`) && !/unavailable/i.test(title);
+      },
+      30_000,
+      'mobile agent projected task summary before exact card-count check',
+    );
+  }
 
   const parentState = await evalInPage(cdp, () => {
     const shell = document.querySelector('[data-webui-shell="true"]');
@@ -78,6 +103,9 @@ try {
       summaryCopy: document.getElementById('mobile-agent-summary-copy')?.textContent || '',
     };
   });
+  if (requiredParentSession && parentState.selectedSession !== requiredParentSession) {
+    throw new Error(`expected selected parent session ${requiredParentSession}, got ${parentState.selectedSession}`);
+  }
 
   await evalInPage(cdp, () => {
     document.getElementById('open-mobile-agent-sheet-button')?.click();
@@ -118,81 +146,124 @@ try {
   });
 
   if (sheetState.cardCount < 1) {
-    throw new Error('expected at least one delegated task card in current session');
+    throw new Error('expected at least one Worker task card in current session');
+  }
+  if (expectedTaskCount !== null && sheetState.cardCount !== expectedTaskCount) {
+    throw new Error(`expected ${expectedTaskCount} Worker task card(s), got ${sheetState.cardCount}`);
   }
   const missingIdentity = sheetState.cards.filter((card) => !card.taskId || !card.workerSessionId);
   if (missingIdentity.length > 0) {
-    throw new Error(`delegated task cards missing identity fields: ${JSON.stringify(missingIdentity)}`);
+    throw new Error(`Worker task cards missing TaskBoard identity fields: ${JSON.stringify(missingIdentity)}`);
+  }
+  const outOfRangeWorkerLabels = maxWorkerLabel === null
+    ? []
+    : sheetState.cards.filter((card) => {
+      const match = `${card.meta || ''}`.match(/\bWorker\s+(\d+)\b/i);
+      return match && Number.parseInt(match[1], 10) > maxWorkerLabel;
+    });
+  if (outOfRangeWorkerLabels.length > 0) {
+    throw new Error(`Worker task cards rendered Worker labels above configured range ${maxWorkerLabel}: ${JSON.stringify(outOfRangeWorkerLabels)}`);
   }
 
-  await evalInPage(cdp, () => {
-    document.querySelector('#mobile-agent-task-list .mobile-agent-card')?.click();
-  });
-  await waitForFunction(
-    cdp,
-    () => {
-      const shell = document.querySelector('[data-webui-shell="true"]');
-      const selected = shell?.dataset.selectedSession || '';
-      const workerNavHidden = document.getElementById('worker-session-nav')?.hidden;
-      const text = document.getElementById('message-list')?.innerText || '';
-      const loading = text.includes('Loading conversation');
-      const sheet = document.getElementById('mobile-agent-sheet');
-      const sheetRect = sheet?.getBoundingClientRect();
-      const sheetClosed = document.body.dataset.mobileAgentSheet !== 'open' &&
-        sheet?.getAttribute('aria-hidden') === 'true' &&
-        !!sheetRect &&
-        sheetRect.top >= window.innerHeight - 10;
-      return selected.startsWith('worker-task-') &&
-        workerNavHidden === false &&
-        sheetClosed &&
-        (loading || text.length > 0);
-    },
-    20_000,
-    'worker transcript selected and Agent sheet closed',
-  );
-  await waitForFunction(
-    cdp,
-    () => {
-      const text = document.getElementById('message-list')?.innerText || '';
-      return !text.includes('Loading conversation');
-    },
-    30_000,
-    'worker transcript loaded',
-  );
-  await screenshot(cdp, path.join(artifactRoot, '02-worker-transcript.png'));
+  const workerStates = [];
+  for (const [index, card] of sheetState.cards.entries()) {
+    await openWorkerCard(cdp, card);
+    await waitForFunction(
+      cdp,
+      (workerSessionId) => {
+        const shell = document.querySelector('[data-webui-shell="true"]');
+        const selected = shell?.dataset.selectedSession || '';
+        const workerNavHidden = document.getElementById('worker-session-nav')?.hidden;
+        const text = document.getElementById('message-list')?.innerText || '';
+        const loading = text.includes('Loading conversation');
+        const sheet = document.getElementById('mobile-agent-sheet');
+        const sheetRect = sheet?.getBoundingClientRect();
+        const sheetClosed = document.body.dataset.mobileAgentSheet !== 'open' &&
+          sheet?.getAttribute('aria-hidden') === 'true' &&
+          !!sheetRect &&
+          sheetRect.top >= window.innerHeight - 10;
+        return selected === workerSessionId &&
+          workerNavHidden === false &&
+          sheetClosed &&
+          (loading || text.length > 0);
+      },
+      20_000,
+      `worker transcript selected for ${card.taskId}`,
+      card.workerSessionId,
+    );
+    await waitForFunction(
+      cdp,
+      () => {
+        const text = document.getElementById('message-list')?.innerText || '';
+        return !text.includes('Loading conversation') && text.length > 0;
+      },
+      30_000,
+      `worker transcript loaded for ${card.taskId}`,
+    );
+    const screenshotPath = path.join(artifactRoot, `02-worker-${String(index + 1).padStart(2, '0')}-${safeFilename(card.taskId)}.png`);
+    await screenshot(cdp, screenshotPath);
 
-  const workerState = await evalInPage(cdp, () => {
-    const shell = document.querySelector('[data-webui-shell="true"]');
-    const text = document.getElementById('message-list')?.innerText || '';
-    return {
-      selectedSession: shell?.dataset.selectedSession || '',
-      workerNavHidden: document.getElementById('worker-session-nav')?.hidden ?? true,
-      userMessageCount: document.querySelectorAll('.message.user').length,
-      messageText: text,
-      fakePromptVisible:
-        text.includes('Execute the assigned Task Center task') ||
-        text.includes('The tool result has been returned') ||
-        text.includes('Task ID:'),
-    };
-  });
-  if (workerState.fakePromptVisible) {
-    throw new Error('worker transcript exposes internal task/continuation prompt text');
+    const workerState = await evalInPage(cdp, () => {
+      const shell = document.querySelector('[data-webui-shell="true"]');
+      const text = document.getElementById('message-list')?.innerText || '';
+      return {
+        selectedSession: shell?.dataset.selectedSession || '',
+        workerNavHidden: document.getElementById('worker-session-nav')?.hidden ?? true,
+        userMessageCount: document.querySelectorAll('.message.user').length,
+        messageText: text,
+        fakePromptVisible:
+          text.includes('Execute the assigned Task Center task') ||
+          text.includes('The tool result has been returned') ||
+          text.includes('You are the production Master starting a new follow-up turn injected by a due timer') ||
+          text.includes('Task ID:'),
+      };
+    });
+    if (workerState.selectedSession !== card.workerSessionId) {
+      throw new Error(`worker selection mismatch for ${card.taskId}: expected ${card.workerSessionId}, got ${workerState.selectedSession}`);
+    }
+    if (workerState.fakePromptVisible) {
+      throw new Error(`worker transcript exposes internal task/continuation prompt text for ${card.taskId}`);
+    }
+    if (workerState.userMessageCount !== 0) {
+      throw new Error(`worker transcript rendered ${workerState.userMessageCount} user message(s) for ${card.taskId}`);
+    }
+    workerStates.push({
+      taskId: card.taskId,
+      workerSessionId: card.workerSessionId,
+      selectedSession: workerState.selectedSession,
+      workerNavHidden: workerState.workerNavHidden,
+      userMessageCount: workerState.userMessageCount,
+      fakePromptVisible: workerState.fakePromptVisible,
+      screenshot: screenshotPath,
+    });
+
+    await evalInPage(cdp, () => {
+      document.getElementById('worker-session-back-button')?.click();
+    });
+    await waitForFunction(
+      cdp,
+      (parentSessionId) => {
+        const shell = document.querySelector('[data-webui-shell="true"]');
+        return (shell?.dataset.selectedSession || '') === parentSessionId &&
+          document.getElementById('worker-session-nav')?.hidden === true;
+      },
+      20_000,
+      `returned to parent session after ${card.taskId}`,
+      parentState.selectedSession,
+    );
+    if (index + 1 < sheetState.cards.length) {
+      await evalInPage(cdp, () => {
+        document.getElementById('open-mobile-agent-sheet-button')?.click();
+      });
+      await waitForFunction(
+        cdp,
+        () => document.body.dataset.mobileAgentSheet === 'open' &&
+          document.querySelectorAll('#mobile-agent-task-list .mobile-agent-card').length > 0,
+        10_000,
+        `reopened mobile agent sheet after ${card.taskId}`,
+      );
+    }
   }
-
-  await evalInPage(cdp, () => {
-    document.getElementById('worker-session-back-button')?.click();
-  });
-  await waitForFunction(
-    cdp,
-    (parentSessionId) => {
-      const shell = document.querySelector('[data-webui-shell="true"]');
-      return (shell?.dataset.selectedSession || '') === parentSessionId &&
-        document.getElementById('worker-session-nav')?.hidden === true;
-    },
-    20_000,
-    'returned to parent session',
-    parentState.selectedSession,
-  );
   await screenshot(cdp, path.join(artifactRoot, '03-returned-parent.png'));
 
   const result = {
@@ -201,15 +272,10 @@ try {
     artifactRoot,
     parentState,
     sheetState,
-    workerState: {
-      selectedSession: workerState.selectedSession,
-      workerNavHidden: workerState.workerNavHidden,
-      userMessageCount: workerState.userMessageCount,
-      fakePromptVisible: workerState.fakePromptVisible,
-    },
+    workerStates,
     screenshots: [
       path.join(artifactRoot, '01-mobile-agent-sheet.png'),
-      path.join(artifactRoot, '02-worker-transcript.png'),
+      ...workerStates.map((worker) => worker.screenshot),
       path.join(artifactRoot, '03-returned-parent.png'),
     ],
   };
@@ -301,6 +367,18 @@ function createCdpClient(webSocketUrl) {
     });
     socket.addEventListener('error', () => reject(new Error('CDP socket error')));
   });
+}
+
+async function openWorkerCard(cdp, card) {
+  await evalInPage(cdp, (taskId) => {
+    const cards = Array.from(document.querySelectorAll('#mobile-agent-task-list .mobile-agent-card'));
+    const target = cards.find((candidate) => candidate.dataset.taskId === taskId);
+    target?.click();
+  }, card.taskId);
+}
+
+function safeFilename(value) {
+  return `${value || 'worker'}`.replace(/[^a-zA-Z0-9._-]+/g, '-').slice(0, 120);
 }
 
 async function waitForLoad(client) {

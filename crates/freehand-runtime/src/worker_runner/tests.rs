@@ -1161,6 +1161,50 @@ fn production_worker_runner_missing_workspace_under_existing_parent_explains_tar
 }
 
 #[test]
+fn production_worker_runner_missing_symlink_leaf_reports_path_diagnostic() {
+    let runtime_home = temp_path("missing-symlink-leaf-runtime");
+    let base = temp_path("missing-symlink-leaf-base");
+    let canonical_parent = base.join("Documents").join("workspace-parent");
+    let symlink_parent = base.join("workspace-link");
+    fs::create_dir_all(&canonical_parent).expect("canonical parent");
+    let canonical_parent_resolved =
+        fs::canonicalize(&canonical_parent).expect("canonical parent resolved");
+    create_dir_symlink(&canonical_parent, &symlink_parent);
+    let missing_workspace = symlink_parent.join("missing-workspace");
+    let executor = Arc::new(StubExecutor::new(Err("must not execute".to_owned())));
+    let runner = test_runner(runtime_home.clone(), executor.clone());
+    let expected_task_id = seed_assigned_task_with_target(
+        &runtime_home,
+        Some(missing_workspace.display().to_string()),
+    );
+
+    let outcome = runner.run_once().expect("worker tick");
+
+    assert!(matches!(
+        outcome,
+        ProductionWorkerTickOutcome::Blocked { ref task_id, ref reason, .. }
+            if task_id == &expected_task_id
+                && reason.contains("target_cwd_path_diagnostic")
+                && reason.contains("exists=false")
+                && reason.contains(&format!("nearest_existing=`{}`", symlink_parent.display()))
+                && reason.contains(&format!("nearest_existing_canonical=`{}`", canonical_parent_resolved.display()))
+                && reason.contains("missing_suffix=`missing-workspace`")
+                && reason.contains(&format!("`{}` -> `{}`", symlink_parent.display(), canonical_parent.display()))
+    ));
+    assert_eq!(executor.calls.load(Ordering::Relaxed), 0);
+
+    let task_runtime =
+        TaskRuntime::boot(&runtime_home, AgentId::new("master")).expect("task runtime");
+    let task = task_runtime
+        .query_task(&expected_task_id)
+        .expect("query task");
+    assert_eq!(task.status, TaskStatus::Blocked);
+
+    fs::remove_dir_all(runtime_home).expect("cleanup runtime");
+    fs::remove_dir_all(base).expect("cleanup base");
+}
+
+#[test]
 fn production_worker_runner_rejects_master_mode() {
     let runtime_home = temp_path("master-rejected");
     let mut selected = selected_worker();

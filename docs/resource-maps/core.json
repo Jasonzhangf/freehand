@@ -8,8 +8,44 @@
       "owner_crate": "crates/freehand-config",
       "identity": "agent profile plus config source path",
       "truth_store": "~/.freehand/config.toml",
-      "operations": ["load", "validate", "compile_agent_topology", "project_safe_config", "mutate_provider_config", "mutate_agent_resource_topology", "bootstrap_node_pairing", "compile_instruction_capability"],
+      "operations": ["load", "validate", "compile_agent_topology", "compile_remote_daemon_registry", "project_safe_config", "mutate_provider_config", "mutate_agent_resource_topology", "bootstrap_node_pairing", "compile_instruction_capability"],
       "projections": ["runtime bootstrap config", "ordered configured peer topology", "safe CLI/ADP config query"]
+    },
+    {
+      "resource_type": "remote_daemon_registry",
+      "owner_feature_id": "config.core",
+      "owner_crate": "crates/freehand-config",
+      "identity": "account id plus daemon id plus endpoint id",
+      "truth_store": "~/.freehand/config.toml remote_daemon_accounts and remote_daemons tables plus QR bootstrap bundle payloads",
+      "operations": ["validate", "select_daemon", "build_route_plan", "select_route", "build_bootstrap_bundle", "parse_bootstrap_bundle", "project_safe_config", "project_directory"],
+      "projections": ["safe remote daemon registry projection", "versioned QR/deep-link bootstrap bundle", "selected remote daemon endpoint candidates", "route selection diagnostics"]
+    },
+    {
+      "resource_type": "remote_daemon_directory",
+      "owner_feature_id": "node.master-slave",
+      "owner_crate": "crates/freehand-node",
+      "identity": "account id plus daemon id plus current endpoint resolution",
+      "truth_store": "node-owned in-memory directory snapshot and route-resolution state compiled from config registry truth",
+      "operations": ["publish_registry", "resolve_route", "query_snapshot"],
+      "projections": ["account-scoped daemon directory snapshot", "per-daemon selected route", "route health diagnostics"]
+    },
+    {
+      "resource_type": "remote_relay_transport",
+      "owner_feature_id": "app.runtime-daemon",
+      "owner_crate": "apps/freehand-daemon",
+      "identity": "relay_host_id plus upstream daemon base URL",
+      "truth_store": "relay service in-memory host registry populated by explicit host registration",
+      "operations": ["register_host", "query_account_directory", "proxy_http", "proxy_adp"],
+      "projections": ["account-scoped relay directory snapshot", "proxied daemon WebUI HTTP response", "proxied daemon health response", "proxied daemon ADP WebSocket frames", "explicit relay host errors"]
+    },
+    {
+      "resource_type": "android_apk_update",
+      "owner_feature_id": "app.android-client",
+      "owner_crate": "apps/freehand-android",
+      "identity": "installed Android package versionCode plus daemon update manifest URL",
+      "truth_store": "daemon-hosted /android/update.json plus Android app cache apk-updates/ for downloaded installer artifacts",
+      "operations": ["check_manifest", "download_apk", "request_install"],
+      "projections": ["FreehandApkUpdate logcat rows", "Android system package installer intent", "downloaded APK cache file"]
     },
     {
       "resource_type": "session",
@@ -329,12 +365,102 @@
       "binding_status": "bound"
     },
     {
+      "operation_id": "config.mutate_provider_config",
+      "owner_feature_id": "config.core",
+      "source_resource": "config",
+      "target_resource": "config",
+      "effect": "mutate provider definitions and agent primary/fallback provider selection through config-owner validation and atomic persistence",
+      "mainline_call_doc": "docs/mainline-calls/config.core.json",
+      "binding_status": "bound"
+    },
+    {
+      "operation_id": "config.compile_remote_daemon_registry",
+      "owner_feature_id": "config.core",
+      "source_resource": "config",
+      "target_resource": "remote_daemon_registry",
+      "effect": "compile account-scoped remote daemon registry, endpoint candidates, route selection diagnostics, and QR bootstrap bundle contract from config owner truth",
+      "mainline_call_doc": "docs/mainline-calls/config.core.json",
+      "binding_status": "bound"
+    },
+    {
       "operation_id": "config.bootstrap_node_pairing",
       "owner_feature_id": "node.master-slave",
       "source_resource": "config",
       "target_resource": "node_pairing",
       "effect": "materialize one config-approved relation from the compiled reciprocal Master/Worker peer topology into node runtime state",
       "mainline_call_doc": "docs/mainline-calls/node.master-slave.json",
+      "binding_status": "bound"
+    },
+    {
+      "operation_id": "remote_daemon_registry.project_directory",
+      "owner_feature_id": "node.master-slave",
+      "source_resource": "remote_daemon_registry",
+      "target_resource": "remote_daemon_directory",
+      "effect": "materialize account-scoped daemon directory and per-daemon direct-first route resolution without leaking credentials or claiming relay tunnel success",
+      "mainline_call_doc": "docs/mainline-calls/node.master-slave.json",
+      "binding_status": "bound"
+    },
+    {
+      "operation_id": "remote_relay_transport.register_host",
+      "owner_feature_id": "app.runtime-daemon",
+      "source_resource": "remote_relay_transport",
+      "target_resource": "remote_relay_transport",
+      "effect": "publish one relay host registration with account, daemon, upstream base URL, endpoint candidates, and last-seen evidence",
+      "mainline_call_doc": "docs/mainline-calls/app.runtime-daemon.json",
+      "binding_status": "bound"
+    },
+    {
+      "operation_id": "remote_relay_transport.query_account_directory",
+      "owner_feature_id": "app.runtime-daemon",
+      "source_resource": "remote_relay_transport",
+      "target_resource": "remote_relay_transport",
+      "effect": "return the relay-owned account directory snapshot for registered daemon hosts without credential leakage",
+      "mainline_call_doc": "docs/mainline-calls/app.runtime-daemon.json",
+      "binding_status": "bound"
+    },
+    {
+      "operation_id": "remote_relay_transport.proxy_http",
+      "owner_feature_id": "app.runtime-daemon",
+      "source_resource": "remote_relay_transport",
+      "target_resource": "remote_relay_transport",
+      "effect": "proxy relay daemon WebUI root/assets/query/health HTTP requests to the registered upstream daemon base URL under the relay host namespace",
+      "mainline_call_doc": "docs/mainline-calls/app.runtime-daemon.json",
+      "binding_status": "bound"
+    },
+    {
+      "operation_id": "remote_relay_transport.proxy_adp",
+      "owner_feature_id": "app.runtime-daemon",
+      "source_resource": "remote_relay_transport",
+      "target_resource": "remote_relay_transport",
+      "effect": "proxy relay daemon ADP WebSocket frames bidirectionally to the registered upstream daemon ADP endpoint",
+      "mainline_call_doc": "docs/mainline-calls/app.runtime-daemon.json",
+      "binding_status": "bound"
+    },
+    {
+      "operation_id": "android_apk_update.check_manifest",
+      "owner_feature_id": "app.android-client",
+      "source_resource": "android_apk_update",
+      "target_resource": "android_apk_update",
+      "effect": "compare installed Android package versionCode with the selected daemon endpoint's update manifest without adding a native product UI",
+      "mainline_call_doc": "docs/mainline-calls/app.android-client.json",
+      "binding_status": "bound"
+    },
+    {
+      "operation_id": "android_apk_update.download_apk",
+      "owner_feature_id": "app.android-client",
+      "source_resource": "android_apk_update",
+      "target_resource": "android_apk_update",
+      "effect": "download the manifest-selected APK into the app cache only after a higher versionCode is declared",
+      "mainline_call_doc": "docs/mainline-calls/app.android-client.json",
+      "binding_status": "bound"
+    },
+    {
+      "operation_id": "android_apk_update.request_install",
+      "owner_feature_id": "app.android-client",
+      "source_resource": "android_apk_update",
+      "target_resource": "android_apk_update",
+      "effect": "handoff the cached APK to Android's system package installer through a FileProvider URI and user-confirmed install flow",
+      "mainline_call_doc": "docs/mainline-calls/app.android-client.json",
       "binding_status": "bound"
     },
     {
@@ -527,7 +653,7 @@
       "target_resource": "checkpoint",
       "mainline_call_doc": "docs/mainline-calls/runtime.checkpoint-rewind.json",
       "call_table_step": "03",
-      "file_path": "crates/freehand-runtime/src/lib.rs",
+      "file_path": "crates/freehand-runtime/src/checkpoint_store.rs",
       "symbol_path": "RuntimeCheckpointStore::create_from_preview",
       "binding_status": "bound"
     },
@@ -538,8 +664,52 @@
       "target_resource": "checkpoint",
       "mainline_call_doc": "docs/mainline-calls/runtime.checkpoint-rewind.json",
       "call_table_step": "05",
-      "file_path": "crates/freehand-runtime/src/lib.rs",
+      "file_path": "crates/freehand-runtime/src/checkpoint_store.rs",
       "symbol_path": "rewind_checkpoint",
+      "binding_status": "bound"
+    },
+    {
+      "edge_id": "config.core#10",
+      "operation_id": "config.mutate_provider_config",
+      "source_resource": "config",
+      "target_resource": "config",
+      "mainline_call_doc": "docs/mainline-calls/config.core.json",
+      "call_table_step": "10",
+      "file_path": "crates/freehand-config/src/lib.rs",
+      "symbol_path": "update_provider_config_in_path",
+      "binding_status": "bound"
+    },
+    {
+      "edge_id": "config.core#10a",
+      "operation_id": "config.mutate_provider_config",
+      "source_resource": "config",
+      "target_resource": "config",
+      "mainline_call_doc": "docs/mainline-calls/config.core.json",
+      "call_table_step": "10a",
+      "file_path": "crates/freehand-config/src/lib.rs",
+      "symbol_path": "upsert_provider_config_in_path",
+      "binding_status": "bound"
+    },
+    {
+      "edge_id": "config.core#10b",
+      "operation_id": "config.mutate_provider_config",
+      "source_resource": "config",
+      "target_resource": "config",
+      "mainline_call_doc": "docs/mainline-calls/config.core.json",
+      "call_table_step": "10b",
+      "file_path": "crates/freehand-config/src/lib.rs",
+      "symbol_path": "switch_agent_provider_in_path",
+      "binding_status": "bound"
+    },
+    {
+      "edge_id": "config.core#15",
+      "operation_id": "config.compile_remote_daemon_registry",
+      "source_resource": "config",
+      "target_resource": "remote_daemon_registry",
+      "mainline_call_doc": "docs/mainline-calls/config.core.json",
+      "call_table_step": "15",
+      "file_path": "crates/freehand-config/src/lib.rs",
+      "symbol_path": "validate_remote_daemon_registry",
       "binding_status": "bound"
     },
     {
@@ -551,6 +721,94 @@
       "call_table_step": "01",
       "file_path": "crates/freehand-node/src/lib.rs",
       "symbol_path": "LocalNodeRuntime::new",
+      "binding_status": "bound"
+    },
+    {
+      "edge_id": "node.master-slave#10",
+      "operation_id": "remote_daemon_registry.project_directory",
+      "source_resource": "remote_daemon_registry",
+      "target_resource": "remote_daemon_directory",
+      "mainline_call_doc": "docs/mainline-calls/node.master-slave.json",
+      "call_table_step": "10",
+      "file_path": "crates/freehand-node/src/lib.rs",
+      "symbol_path": "RemoteDaemonDirectory::publish_registry",
+      "binding_status": "bound"
+    },
+    {
+      "edge_id": "app.runtime-daemon#15",
+      "operation_id": "remote_relay_transport.register_host",
+      "source_resource": "remote_relay_transport",
+      "target_resource": "remote_relay_transport",
+      "mainline_call_doc": "docs/mainline-calls/app.runtime-daemon.json",
+      "call_table_step": "15",
+      "file_path": "apps/freehand-server/src/remote_relay.rs",
+      "symbol_path": "RemoteRelayDirectory::publish_host",
+      "binding_status": "bound"
+    },
+    {
+      "edge_id": "app.runtime-daemon#16",
+      "operation_id": "remote_relay_transport.query_account_directory",
+      "source_resource": "remote_relay_transport",
+      "target_resource": "remote_relay_transport",
+      "mainline_call_doc": "docs/mainline-calls/app.runtime-daemon.json",
+      "call_table_step": "16",
+      "file_path": "apps/freehand-server/src/remote_relay.rs",
+      "symbol_path": "RemoteRelayDirectory::account_directory",
+      "binding_status": "bound"
+    },
+    {
+      "edge_id": "app.runtime-daemon#17",
+      "operation_id": "remote_relay_transport.proxy_http",
+      "source_resource": "remote_relay_transport",
+      "target_resource": "remote_relay_transport",
+      "mainline_call_doc": "docs/mainline-calls/app.runtime-daemon.json",
+      "call_table_step": "17",
+      "file_path": "apps/freehand-server/src/remote_relay.rs",
+      "symbol_path": "proxy_relay_daemon_http",
+      "binding_status": "bound"
+    },
+    {
+      "edge_id": "app.runtime-daemon#18",
+      "operation_id": "remote_relay_transport.proxy_adp",
+      "source_resource": "remote_relay_transport",
+      "target_resource": "remote_relay_transport",
+      "mainline_call_doc": "docs/mainline-calls/app.runtime-daemon.json",
+      "call_table_step": "18",
+      "file_path": "apps/freehand-server/src/remote_relay.rs",
+      "symbol_path": "handle_relay_daemon_adp",
+      "binding_status": "bound"
+    },
+    {
+      "edge_id": "app.android-client#12",
+      "operation_id": "android_apk_update.check_manifest",
+      "source_resource": "android_apk_update",
+      "target_resource": "android_apk_update",
+      "mainline_call_doc": "docs/mainline-calls/app.android-client.json",
+      "call_table_step": "12",
+      "file_path": "apps/freehand-android/app/src/main/java/com/freehand/android/ui/AndroidApkUpdater.kt",
+      "symbol_path": "com.freehand.android.ui.AndroidApkUpdater::checkForUpdateAsync",
+      "binding_status": "bound"
+    },
+    {
+      "edge_id": "app.android-client#13",
+      "operation_id": "android_apk_update.download_apk",
+      "source_resource": "android_apk_update",
+      "target_resource": "android_apk_update",
+      "mainline_call_doc": "docs/mainline-calls/app.android-client.json",
+      "call_table_step": "13",
+      "file_path": "apps/freehand-android/app/src/main/java/com/freehand/android/ui/AndroidApkUpdater.kt",
+      "symbol_path": "com.freehand.android.ui.AndroidApkUpdater::downloadApk",
+      "binding_status": "bound"
+    },
+    {
+      "edge_id": "app.android-client#14",
+      "operation_id": "android_apk_update.request_install",
+      "source_resource": "android_apk_update",
+      "target_resource": "android_apk_update",
+      "mainline_call_doc": "docs/mainline-calls/app.android-client.json",
+      "call_table_step": "14",
+      "file_path": "apps/freehand-android/app/src/main/java/com/freehand/android/ui/AndroidApkUpdater.kt",
+      "symbol_path": "com.freehand.android.ui.AndroidApkUpdater::buildInstallIntent",
       "binding_status": "bound"
     },
     {
@@ -582,7 +840,7 @@
       "target_resource": "request_context",
       "mainline_call_doc": "docs/mainline-calls/instruction.capability-loader.json",
       "call_table_step": "07",
-      "file_path": "crates/freehand-runtime/src/lib.rs",
+      "file_path": "crates/freehand-runtime/src/live_context.rs",
       "symbol_path": "instruction_capability_segment",
       "binding_status": "bound"
     }
@@ -717,12 +975,52 @@
       "reason": "Runtime rewind commands route to checkpoint owner instead of mutating workspace paths directly."
     },
     {
+      "rule_id": "config-mutates-provider-config-direct",
+      "source_resource": "config",
+      "target_resource": "config",
+      "allowed_direct": true,
+      "via_resources": [],
+      "reason": "Config owner may validate and atomically replace its own provider registry and agent provider selection truth without routing through another resource."
+    },
+    {
+      "rule_id": "config-compiles-remote-daemon-registry-direct",
+      "source_resource": "config",
+      "target_resource": "remote_daemon_registry",
+      "allowed_direct": true,
+      "via_resources": [],
+      "reason": "Config owner compiles account-scoped remote daemon, endpoint candidate, route selection, and bootstrap truth before node or client surfaces consume it."
+    },
+    {
       "rule_id": "config-bootstraps-node-pairing-direct",
       "source_resource": "config",
       "target_resource": "node_pairing",
       "allowed_direct": true,
       "via_resources": [],
       "reason": "Config truth compiles the reciprocal Master/Worker peer topology; node pairing may materialize only relations present in that compiled topology."
+    },
+    {
+      "rule_id": "remote-daemon-registry-projects-directory-direct",
+      "source_resource": "remote_daemon_registry",
+      "target_resource": "remote_daemon_directory",
+      "allowed_direct": true,
+      "via_resources": [],
+      "reason": "Node owner may consume config-compiled account and endpoint truth to publish one account-scoped multi-daemon directory and route resolution without owning configuration or credential truth."
+    },
+    {
+      "rule_id": "remote-relay-transport-self-owned-direct",
+      "source_resource": "remote_relay_transport",
+      "target_resource": "remote_relay_transport",
+      "allowed_direct": true,
+      "via_resources": [],
+      "reason": "Runtime daemon relay transport owns its host registry and pass-through IO; it may update and query only its own transport resource without becoming config, node, task, or Android truth."
+    },
+    {
+      "rule_id": "android-apk-update-self-owned-direct",
+      "source_resource": "android_apk_update",
+      "target_resource": "android_apk_update",
+      "allowed_direct": true,
+      "via_resources": [],
+      "reason": "Android owns only package update checking, APK cache download, and system-installer handoff for its installed package; daemon release distribution remains served by the selected endpoint."
     },
     {
       "rule_id": "node-pairing-through-ui-projection",
@@ -859,7 +1157,7 @@
       "target_resource": "workspace_path",
       "required_via": ["checkpoint", "workspace_path"],
       "source_gate_status": "precise_checked",
-      "source_gate_reason": "precise_source_edge_gates checks rewind_checkpoint so runtime command admission enters RuntimeCheckpointStore::rewind and does not mutate workspace paths directly",
+      "source_gate_reason": "precise_source_edge_gates checks dispatch_rewind_checkpoint so runtime command admission enters the checkpoint owner and does not mutate workspace paths directly",
       "reason": "Runtime commands must not mutate workspace paths directly without checkpoint owner admission."
     },
     {
@@ -960,8 +1258,8 @@
       "source_resource": "runtime_command",
       "target_resource": "workspace_path",
       "file_path": "crates/freehand-runtime/src/lib.rs",
-      "symbol_path": "rewind_checkpoint",
-      "required_tokens": ["RuntimeCheckpointStore::new", "store.rewind"],
+      "symbol_path": "dispatch_rewind_checkpoint",
+      "required_tokens": ["rewind_checkpoint", "refresh_checkpoint_projection_from_config"],
       "forbidden_tokens": [
         "fs::",
         "write_text_atomic",

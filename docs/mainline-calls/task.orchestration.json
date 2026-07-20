@@ -30,6 +30,7 @@
     "`TaskRuntime::heartbeat_task` refreshes the lease for the assigned running agent",
     "`TaskRuntime` mutation, heartbeat, and execution-fact writes re-read persisted task truth before appending ledger or snapshot state",
     "Phase 1 TaskBoard query reads task snapshots, agent registry state, blocked items, review queue, and current skeleton stale projection",
+    "`TaskRuntime::query_task_space_snapshot` builds a bounded read-only prompt snapshot from task snapshots, AgentLifecycle projection, and recent master-visible ledger events without running boot lease recovery, scheduler fact replay, or EventInbox cursor pagination",
     "Phase 1 ExecutionFact sync admits typed running/recovering/blocked/interrupted/review_ready facts into Task Center truth without parsing raw prose",
     "Phase 1 SchedulerTick computes elapsed/stale/soft-timeout/hard-timeout facts without making business decisions",
     "Phase 2A worker loop keeps execution_id attached to claim/start, progress, blocked, recovering, review, reject, retry, approve, and close evidence",
@@ -52,8 +53,9 @@
     "claim_next returns either the claimed running task plus execution_id or an explicit no-task result",
     "record_execution returns an event-backed worker progress mutation summary",
     "create_agent and close_agent return persisted agent snapshot summaries",
-    "task tool result returns semantic task ids, status, event names, sequence numbers, or JSON snapshots",
+    "task tool create result returns semantic task ids, status, event names, sequence numbers, and target_cwd path diagnostics when present; query/list/history still return JSON snapshots",
     "Phase 1 TaskBoard query returns board-level task, blocker, review, stale, and agent binding summaries",
+    "TaskSpaceSnapshot query returns a bounded prompt projection with actionable tasks first, bounded blocked and review-ready ids, AgentLifecycle health, and newest recent events while leaving full TaskBoard/EventInbox semantics unchanged",
     "Phase 1 ExecutionFact sync returns event-backed Task Center updates while preserving recovering as non-terminal",
     "Phase 1 SchedulerTick returns durable/replayable fact events and recommendations only",
     "review rejection remains non-terminal task lifecycle truth; a later execution fact may resume the rejected task into running retry and submit review again",
@@ -230,6 +232,19 @@
       "why_shared": "keeps TaskBoard truth in Task Center instead of UI-local state"
     },
     {
+      "symbol": "TaskRuntime::query_task_space_snapshot",
+      "owner": "crates/freehand-task/src/lib.rs",
+      "purpose": "build the bounded read-only TaskSpaceSnapshot projection used by provider prompt context without invoking boot recovery, scheduler fact replay, or EventInbox cursor pagination",
+      "allowed_callers": [
+        "provider.reason-live-bridge live context builder",
+        "tests"
+      ],
+      "related_tests": [
+        "task_space_snapshot_is_bounded_and_does_not_replay_scheduler_facts"
+      ],
+      "why_shared": "keeps prompt task-space projection in Task Center owner truth instead of rebuilding full task runtime state from the live bridge"
+    },
+    {
       "symbol": "TaskRuntime::apply_execution_fact",
       "owner": "crates/freehand-task/src/lib.rs",
       "purpose": "admit typed execution facts into Task Center transition/event truth after persisted task truth refresh",
@@ -334,11 +349,11 @@
       "step": "02",
       "symbol_path": "execute_task_tool",
       "file_path": "crates/freehand-runtime/src/lib.rs",
-      "responsibility": "route task tool calls into task owner with runtime home, session, turn, and trace context",
+      "responsibility": "route task tool calls into task owner with runtime home, session, turn, and trace context, and append target_cwd path diagnostics to create results",
       "input_semantic": "task tool call",
-      "output_semantic": "tool result text",
+      "output_semantic": "tool result text with task truth and optional path diagnostic",
       "caller": "runtime live bridge",
-      "callee": "task runtime",
+      "callee": "task runtime plus path diagnostic helper",
       "binding_status": "bound"
     },
     {
@@ -634,6 +649,17 @@
       "source_resource": "task",
       "target_resource": "session",
       "resource_operation": "task.attach_session",
+      "binding_status": "bound"
+    },
+    {
+      "step": "28",
+      "symbol_path": "TaskRuntime::query_task_space_snapshot",
+      "file_path": "crates/freehand-task/src/lib.rs",
+      "responsibility": "project a bounded read-only task-space snapshot for provider prompt context without boot recovery, scheduler fact replay, or EventInbox cursor pagination",
+      "input_semantic": "runtime home plus owner agent plus task/event limits",
+      "output_semantic": "bounded TaskSpaceSnapshotProjection with tasks, blocked/review-ready queues, AgentLifecycle health, and newest master-visible events",
+      "caller": "provider.reason-live-bridge live context builder",
+      "callee": "task owner",
       "binding_status": "bound"
     }
   ],

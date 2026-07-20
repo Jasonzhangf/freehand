@@ -14,6 +14,8 @@
     "caller supplies Freehand runtime home and current working directory",
     "loader resolves global instruction authoring inputs from `~/.freehand/AGENTS.md` and `~/.freehand/skills`",
     "loader resolves local instruction authoring inputs from every directory between project root and cwd using `AGENTS.md` and `.agents/skills`",
+    "cwd and project root are normalized before local directory traversal so symlink aliases cannot add alias-parent instruction roots outside the canonical project path",
+    "skill roots are scanned with deterministic max depth, visited canonical directories, hidden-entry skip, and symlink traversal only when the target stays inside the same skill root",
     "discovered authoring files are validated and normalized into typed manifest entries"
   ],
   "response_mainline": [
@@ -27,6 +29,7 @@
   "error_mainline": [
     "cwd that is not a directory is rejected",
     "unreadable AGENTS or skill files become explicit read errors",
+    "symlinked skill entries that resolve outside the current skill root become explicit manifest errors and are not traversed",
     "malformed skill frontmatter becomes an explicit manifest error while valid capability entries remain visible",
     "manifest write failure returns an explicit error"
   ],
@@ -101,6 +104,17 @@
       "binding_status": "bound"
     },
     {
+      "step": "02a",
+      "symbol_path": "dirs_between / normalize_path",
+      "file_path": "crates/freehand-instructions/src/lib.rs",
+      "responsibility": "normalize cwd and project root before deriving local instruction directories so symlink aliases do not add parent instruction roots",
+      "input_semantic": "project root plus cwd, possibly through symlink alias",
+      "output_semantic": "canonical local directory chain from project root to cwd only",
+      "caller": "compile_instruction_capability_manifest",
+      "callee": "path normalizer",
+      "binding_status": "bound"
+    },
+    {
       "step": "03",
       "symbol_path": "agents_md_capability",
       "file_path": "crates/freehand-instructions/src/lib.rs",
@@ -115,7 +129,7 @@
       "step": "04",
       "symbol_path": "collect_skills",
       "file_path": "crates/freehand-instructions/src/lib.rs",
-      "responsibility": "scan a skill root deterministically",
+      "responsibility": "scan a skill root deterministically with bounded symlink-safe traversal",
       "input_semantic": "skill root plus scope plus precedence",
       "output_semantic": "skill entries and error records",
       "caller": "manifest compiler",
@@ -147,7 +161,7 @@
     {
       "step": "07",
       "symbol_path": "instruction_capability_segment",
-      "file_path": "crates/freehand-runtime/src/lib.rs",
+      "file_path": "crates/freehand-runtime/src/live_context.rs",
       "responsibility": "compile and render instruction capability truth, then admit it as a typed context-planner segment",
       "input_semantic": "runtime home plus cwd plus compiled instruction capability manifest",
       "output_semantic": "ContextSegmentKind::InstructionCapability request-context segment",

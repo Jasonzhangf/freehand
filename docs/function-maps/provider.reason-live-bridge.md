@@ -31,14 +31,31 @@
 - when restoring an existing session, live bridge rebuilds future prompt context from effective persisted turns and keeps only the latest round for each repaired logical turn, so superseded failed repair attempts stay in ledgers/UI truth but do not enter the next default prompt context
 - the original operator task enters the planner as an `original-task` `TaskContract` segment with a budget derived from actual content size plus margin; runtime must not use a fixed tiny prompt cap that rejects ordinary multi-step master instructions before provider execution
 - every Master live round includes a volatile `TaskSpaceSnapshot` segment before
-  the original task, sourced from TaskBoard, AgentBoard, and EventInbox owner
-  truth, so the model can see known tasks, configured Worker, valid status
-  filters, blocked/review-ready ids, and recent framework events before it
-  calls task query/list/history tools
+  the original task, sourced from task owner `TaskRuntime::query_task_space_snapshot`
+  as a bounded read-only projection over task snapshots, AgentLifecycle, and
+  newest master-visible events, so the model can see known tasks, configured
+  Worker, valid status filters, blocked/review-ready ids, and recent framework
+  events before it calls task query/list/history tools
 - multi-round carryover retains completion contract, control status contract, runtime tool guidance, and `TaskContract` before volatile `previous-visible-output` or schema feedback; runtime must not impose arbitrary small input caps such as 512 tokens on model-visible context, while the planner remains responsible for rejecting context that truly exceeds the model/context policy
+- live context segment construction is owned by
+  `crates/freehand-runtime/src/live_context.rs`; `src/lib.rs` remains the live
+  bridge orchestrator and consumes `base_live_context_segments` /
+  `base_live_context_segments_with_observer` instead of owning the segment
+  builders inline
+- path and symlink diagnostics are owned by
+  `crates/freehand-runtime/src/path_diagnostics.rs`; the live bridge and Worker
+  runner consume the same diagnostic text instead of duplicating path-expansion
+  logic inline
 - Anthropic request rendering uses the provider adapter default output budget `DEFAULT_ANTHROPIC_MAX_TOKENS=8192`; runtime must not add a smaller ad hoc output cap in the live bridge
 - master task creation/dispatch is model-decided from the runtime prompt contract, the exposed `task` tool schema, tool field descriptions, dispatch/no-dispatch conditions, workspace-boundary rule, concurrency/flow-control guidance, and model-visible samples for cross-workspace dispatch, success, execution error, and rejected-review retry; runtime must not infer task creation from prose outside the tool call path
 - runtime emits restore lifecycle debug snapshots through `debug.core` without request text
+- runtime emits context-planning started/completed lifecycle observations before
+  the first provider round starts, without request text or provider payload
+  content; first-round live context construction also emits segment-level
+  started/completed/failed observations for completion, control, tool guidance,
+  instruction capability, task-space snapshot, and original-task segments, so
+  UI/debug clients can identify the exact pre-provider segment instead of a
+  silent pending submit
 - bridge derives provider descriptor and executor config from the active primary/fallback route without exposing provider wire DTOs
 - `reason.turn` may start multiple rounds under one logical live request when completion schema says `continue` or when schema rejection requires same-task retry
 - provider semantic request is built from each round's turn-owned provider payload
@@ -160,6 +177,9 @@
 | 03 | `MetadataCenter::with_ledger_path` | `crates/freehand-metadata/src/lib.rs` | bootstrap shared runtime metadata ledger before live rounds start | runtime home + agent + session id | metadata center with replay-safe prior records or explicit metadata error | live bridge | metadata owner | bound |
 | 04 | `write_live_bridge_metadata` | `crates/freehand-runtime/src/lib.rs` | write runtime-owned restore lifecycle metadata without request text | restore outcome + stream/provider facts | durable runtime metadata record | live bridge | metadata owner | bound |
 | 05 | `emit_live_bridge_debug` | `crates/freehand-runtime/src/lib.rs` | emit runtime-owned restore lifecycle debug snapshot without request text | restore outcome + stream/provider facts | runtime-owned debug event | live bridge | `debug.core` | bound |
+| 05a | `write_live_bridge_metadata` | `crates/freehand-runtime/src/lib.rs` | write runtime-owned context-planning and context-segment lifecycle metadata without request text | role, stream mode, cwd binding, configured-worker count, context segment id/status/inclusion/elapsed facts, segment count, estimated token budget | durable runtime metadata record | live bridge | metadata owner | bound |
+| 05b | `emit_live_bridge_debug` | `crates/freehand-runtime/src/lib.rs` | emit runtime-owned context-planning and context-segment lifecycle debug snapshots without request text | context planning started/completed facts plus segment started/completed/failed facts | runtime-owned debug event consumable as model-waiting UI activity | live bridge | `debug.core` | bound |
+| 05c | `live_context::base_live_context_segments` / `live_context::base_live_context_segments_with_observer` | `crates/freehand-runtime/src/live_context.rs` | build the typed completion, control, tool-guidance, instruction-capability, bounded task-space, and original-task context segments outside the live bridge orchestrator, optionally emitting owner-safe segment build events | original prompt + role + configured Worker set + runtime home + cwd + agent id | ordered base live context segments plus optional started/completed/failed segment observations, or explicit owner error | `run_live_provider_reason_turn` / `next_round_segments` | context, instruction, and task owners | bound |
 | 06 | `ReasonTurnEngine::start_turn` | `crates/freehand-reason/src/lib.rs` | create one round turn and provider payload | session history + prompt | initialized turn record | live bridge | reason owner | bound |
 | 07 | `ReasonPersistence::record_turn_started` | `crates/freehand-reason/src/persistence.rs` | persist live round start | session history + active turn | reason ledger row + active-turn snapshot | live bridge | persistence owner | bound |
 | 08 | `build_semantic_request` | `crates/freehand-provider-core/src/lib.rs` | build provider-neutral request | provider descriptor + provider payload | provider semantic request | live bridge | provider semantic owner | bound |
@@ -181,19 +201,19 @@
 | 24 | `write_live_bridge_metadata` | `crates/freehand-runtime/src/lib.rs` | write runtime-owned terminal lifecycle metadata before terminal persistence | round/tool/schema-rejection counters + final terminal status | durable runtime metadata record | live bridge | metadata owner | bound |
 | 25 | `emit_live_bridge_debug` | `crates/freehand-runtime/src/lib.rs` | emit runtime-owned terminal lifecycle debug snapshot before terminal persistence | round/tool/schema-rejection counters + final terminal status | runtime-owned debug event | live bridge | `debug.core` | bound |
 | 26 | `ReasonPersistence::record_turn_closed` | `crates/freehand-reason/src/persistence.rs` | materialize terminal live turn | terminal turn truth | closed turn snapshot + sidecars/index | live bridge | persistence owner | bound |
-| 27 | `run_live_provider_reason_turn` / `record_provider_error_metadata` / `provider_executor_retry_plan` / `materialize_provider_executor_failure` | `crates/freehand-runtime/src/lib.rs` | classify provider executor/transport failures, retry recoverable non-stream primary attempts up to ten times, switch once to a configured fallback at the provider-neutral request boundary after eligible primary exhaustion, and materialize failed truth only when no fallback applies or the fallback fails | provider executor error + active route + optional fallback + active turn | retry metadata, explicit route-switch metadata plus fallback semantic request, or persisted failed closed turn | live bridge executor error path | config/error/reason/persistence owners | bound |
+| 27 | `run_live_provider_reason_turn` / `record_provider_error_metadata` / `provider_executor_retry_plan` / `sleep_provider_retry` / `materialize_provider_executor_failure` | `crates/freehand-runtime/src/lib.rs` | classify provider executor/transport failures, retry recoverable non-stream primary attempts up to ten times, wait between retries through cancel-token-aware backoff, switch once to a configured fallback at the provider-neutral request boundary after eligible primary exhaustion, and materialize failed truth only when no fallback applies or the fallback fails | provider executor error + active route + optional fallback + active turn + cancel token | retry metadata, interruptible retry wait, explicit route-switch metadata plus fallback semantic request, or persisted failed/cancelled closed turn | live bridge executor error path | config/error/reason/persistence owners | bound |
 | 28 | `rebuild_session_history_from_effective_turns` / `effective_turn_context_segments` | `crates/freehand-runtime/src/lib.rs` | convert effective persisted same-session turns into session-memory base context before the next restored live request starts, keeping only the latest round for each repaired logical turn | restored session history + effective persisted turns | resume-rebuild session history with prior user/assistant turn memory and without superseded failed repair attempts in prompt context | live bridge restore path | `reason.session-history` | bound |
 
 ## Sync Status Against Code
 
 - current live path supports Anthropic `messages`, OpenAI-compatible `responses`, and OpenAI-compatible `chat_completions` through a provider-neutral runtime driver abstraction
-- runtime owner path preserves incremental stream apply, completion schema loop, persistence, registry-backed tool loop, tool-schema fingerprint wiring, shared metadata-ledger producer wiring, runtime-owned debug snapshot emission, and checkpoint gating without duplicating adapter semantics
+- runtime owner path preserves incremental stream apply, completion schema loop, persistence, registry-backed tool loop, tool-schema fingerprint wiring, shared metadata-ledger producer wiring, runtime-owned debug snapshot emission, checkpoint gating, and shared path/symlink diagnostics without duplicating adapter or path semantics
 - runtime live bridge now bootstraps one shared metadata ledger and writes restore/request/tool/terminal lifecycle metadata without request-text leakage
 - runtime live bridge now emits restore/request/tool/terminal lifecycle debug snapshots through `debug.core` without prompt, provider-payload, or tool-result leakage
 - runtime live bridge now retains Anthropic raw response/error/event bodies through `ReasonPersistence::record_provider_raw_event` without promoting them into authoritative turn/session truth
 - restored same-session follow-up requests now rebuild `reason.session-history` base context from effective persisted turns before the next round starts, so the next provider request includes prior user/assistant turn truth
 - repaired multi-round logical turns keep raw failed attempts in persisted turn/UI truth but admit only the latest repaired round into future prompt context by default
-- runtime live bridge cancellation checkpoints now have positive and negative coverage before tool execution and before terminal persistence
+- runtime live bridge cancellation checkpoints now have positive and negative coverage before tool execution, before terminal persistence, and during provider retry backoff sleep
 - tool execution result failures, including missing-file read failures and unknown tool names, are expected to surface as `ToolResultStatus::Failed` tool-result re-entry truth, be sent to the next Anthropic request with `is_error=true`, and must not materialize runtime error or failed terminal truth by themselves
 - provider executor/transport failures are distinct from tool execution result failures and schema mismatch polishing: recoverable non-stream primary errors retry up to ten attempts and then switch once to the configured fallback; fallback exhaustion materializes one failed terminal turn with a concrete code and no active turn before dispatch error return
 - OpenAI 402 and other failover-eligible non-retryable HTTP status errors switch immediately to fallback without hiding the primary error; primary success and adapter/callback/content failures never activate fallback

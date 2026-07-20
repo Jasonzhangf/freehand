@@ -1,4 +1,4 @@
-import { initializeThemeToggle } from "/assets/theme.js?v=20260715-agent-dashboard-2";
+import { initializeThemeToggle } from "/assets/theme.js?v=20260719-request-cycle-cards";
 
 initializeThemeToggle(document);
 
@@ -85,6 +85,10 @@ const openMobileAgentSheetButton = document.getElementById("open-mobile-agent-sh
 const closeMobileAgentSheetButton = document.getElementById("close-mobile-agent-sheet-button");
 const mobileAgentSheet = document.getElementById("mobile-agent-sheet");
 const mobileAgentTaskList = document.getElementById("mobile-agent-task-list");
+const sessionRelationHeader = document.getElementById("session-relation-header");
+const sessionRelationToggleButton = document.getElementById("session-relation-toggle-button");
+const sessionTreeDropdown = document.getElementById("session-tree-dropdown");
+const sessionTree = document.getElementById("session-tree");
 const workerSessionNav = document.getElementById("worker-session-nav");
 const workerSessionBackButton = document.getElementById("worker-session-back-button");
 const settingsAgentResourceDecrement = document.getElementById("settings-agent-resource-decrement");
@@ -107,6 +111,10 @@ const workerControlStatus = document.getElementById("worker-control-status");
 const workerControlList = document.getElementById("worker-control-list");
 const settingsShell = document.getElementById("settings-shell");
 const settingsProviderForm = document.getElementById("settings-provider-form");
+const settingsProviderRegistryList = document.getElementById("settings-provider-registry-list");
+const settingsProviderCurrentSelect = document.getElementById("settings-provider-current-select");
+const settingsProviderFallbackSelect = document.getElementById("settings-provider-fallback-select");
+const settingsProviderSwitchButton = document.getElementById("settings-provider-switch-button");
 const settingsProviderIdInput = document.getElementById("settings-provider-id-input");
 const settingsProviderTypeInput = document.getElementById("settings-provider-type-input");
 const settingsProviderProtocolInput = document.getElementById("settings-provider-protocol-input");
@@ -158,6 +166,10 @@ const selectedCwdStorageKey = "freehand-webui-selected-cwd";
 const attachmentDraftStorageKey = "freehand-webui-attachment-drafts-v1";
 const layoutWidthsStorageKey = "freehand-webui-layout-widths-v1";
 const adpRequestTimeoutMs = 45000;
+const foregroundRefreshMinIntervalMs = 1500;
+const adpReconnectBaseDelayMs = 1000;
+const adpReconnectMaxDelayMs = 10000;
+const liveTruthWatchdogIntervalMs = 10000;
 const shortcutHelp =
   "Shortcuts: Cmd/Ctrl+Enter send · Esc cancel · Cmd/Ctrl+R refresh · Cmd/Ctrl+K focus · Cmd/Ctrl+1 success · Cmd/Ctrl+2 failure. Slash: /help /new /task /settings /cwd /sessions /reload /success /failure /cancel /clear /attachments /model";
 const initialSelectedSessionId = window.localStorage.getItem(selectedSessionStorageKey) || null;
@@ -209,16 +221,22 @@ const state = {
   configStatus: null,
   configStatusError: null,
   configSaveInFlight: false,
+  providerSelectionInFlight: false,
+  providerSelectionDraft: null,
   agentResourceDraftCount: null,
   agentResourceSaveInFlight: false,
   agentResourceSaveMessage: null,
   agentResourceSaveError: null,
+  sessionTreeOpen: false,
   toolTimings: new Map(),
   lifecycleClocks: new Map(),
   pendingUserInput: null,
   pendingSubmitId: null,
   pendingSubmitSessionId: null,
   pendingSubmitError: null,
+  acceptedSubmitReceipt: null,
+  ambiguousSubmitRecoveryTimer: null,
+  ambiguousSubmitRecoveryStartedAt: null,
   sessionRefreshInFlight: null,
   sessionRefreshError: null,
   pendingAttachments: [],
@@ -237,6 +255,8 @@ const state = {
   adpOpened: null,
   adpRequests: new Map(),
   adpSubscriptions: new Set(),
+  adpReconnectTimer: null,
+  adpReconnectAttempt: 0,
   sseTurnStream: null,
   requestSequence: 0,
   attachmentDrafts: loadAttachmentDrafts(),
@@ -248,6 +268,9 @@ const state = {
   composerFocused: false,
   newSessionKind: "conversation",
   layoutResize: null,
+  renderedCycleSessionId: null,
+  foregroundRefreshInFlight: false,
+  foregroundRefreshLastAt: 0,
 };
 
 function shellConfig() {
@@ -363,6 +386,51 @@ function closeMobileOverlays() {
   applyMobileDrawerState();
   applyMobileAgentSheetState();
 }
+
+function focusedEditableElement() {
+  const active = document.activeElement;
+  if (!active || active === document.body || active === document.documentElement) {
+    return null;
+  }
+  if (active.isContentEditable) {
+    return active;
+  }
+  const tag = `${active.tagName || ""}`.toLowerCase();
+  return ["input", "select", "textarea"].includes(tag) ? active : null;
+}
+
+function closeVisibleNavigationSurface() {
+  if (newSessionDialog && newSessionDialog.open) {
+    closeNewSessionDialog();
+    return true;
+  }
+  if (state.sessionTreeOpen) {
+    state.sessionTreeOpen = false;
+    renderSessionRelationHeader();
+    return true;
+  }
+  if (state.mobileAgentSheetOpen) {
+    setMobileAgentSheetOpen(false);
+    return true;
+  }
+  if (state.mobileDrawer) {
+    closeMobileDrawer();
+    return true;
+  }
+  return false;
+}
+
+function handleBackNavigationIntent() {
+  const focused = focusedEditableElement();
+  if (focused) {
+    focused.blur();
+    setCommandStatus("input focus cleared", { stickyMs: 2000 });
+    return true;
+  }
+  return closeVisibleNavigationSurface();
+}
+
+window.__freehandHandleAndroidBack = handleBackNavigationIntent;
 
 function syncMobileDrawerForLayout() {
   if (!isMobileDrawerLayout(document.body.dataset.layoutShape || applyLayoutShape())) {
@@ -596,6 +664,59 @@ function adpClientKind() {
   return "WebUi";
 }
 
+function clearAdpReconnectTimer() {
+  if (state.adpReconnectTimer) {
+    window.clearTimeout(state.adpReconnectTimer);
+  }
+  state.adpReconnectTimer = null;
+}
+
+function hasRecoverableProtocolState() {
+  return !!(
+    state.selectedSessionId ||
+    state.pendingUserInput ||
+    state.turn ||
+    state.sessionTurns.length > 0 ||
+    state.sessionListLoaded
+  );
+}
+
+function protocolConnectionCanRenderLive() {
+  return state.adpStatus === "connected";
+}
+
+function scheduleAdpReconnect(reason) {
+  if (document.visibilityState === "hidden" || state.adpReconnectTimer) {
+    return;
+  }
+  if (!hasRecoverableProtocolState() && state.adpStatus !== "closed" && state.adpStatus !== "error") {
+    return;
+  }
+  const delay = Math.min(
+    adpReconnectMaxDelayMs,
+    adpReconnectBaseDelayMs * (2 ** Math.min(state.adpReconnectAttempt, 4)),
+  );
+  state.adpReconnectAttempt += 1;
+  setBackgroundCommandStatus(`connection closed; reconnecting after ${reason}...`);
+  state.adpReconnectTimer = window.setTimeout(() => {
+    state.adpReconnectTimer = null;
+    refreshAllProtocolStateAfterReconnect(reason).catch((error) => {
+      setCommandStatus(`service reconnect failed: ${error.message}`, { stickyMs: 5000 });
+      scheduleAdpReconnect("retry failure");
+    });
+  }, delay);
+}
+
+async function refreshAllProtocolStateAfterReconnect(reason) {
+  await ensureAdpSocket();
+  ensureTurnSubscription();
+  await refreshAllProtocolState();
+  state.adpReconnectAttempt = 0;
+  clearPendingUserInputIfMaterialized();
+  renderAll();
+  setBackgroundCommandStatus(`service truth refreshed after ${reason}`);
+}
+
 function ensureAdpSocket() {
   if (state.adpSocket && state.adpSocket.readyState === WebSocket.OPEN) {
     return Promise.resolve(state.adpSocket);
@@ -612,6 +733,9 @@ function ensureAdpSocket() {
   state.adpOpened = new Promise((resolve, reject) => {
     socket.addEventListener("open", () => {
       state.adpStatus = "connected";
+      state.adpFailure = null;
+      state.adpReconnectAttempt = 0;
+      clearAdpReconnectTimer();
       setCommandStatus("connected; waiting for updates...");
       renderAll();
       resolve(socket);
@@ -645,6 +769,7 @@ function ensureAdpSocket() {
       }
       state.adpRequests.clear();
       renderAll();
+      scheduleAdpReconnect("transport close");
     });
   });
 
@@ -706,10 +831,24 @@ function providerConfigReceiptStatus(receipt) {
   throw new Error("Config save returned an unexpected service status.");
 }
 
+function providerConfigUpsertReceiptStatus(receipt) {
+  if (receipt && receipt.dispatch_status === "provider_config_upserted_restart_required") {
+    return "Provider definition saved. Restart required.";
+  }
+  throw new Error("Provider definition save returned an unexpected service status.");
+}
+
+function providerSelectionReceiptStatus(receipt) {
+  if (receipt && receipt.dispatch_status === "agent_provider_selection_saved_restart_required") {
+    return "Provider selection saved. Restart required.";
+  }
+  throw new Error("Provider selection save returned an unexpected service status.");
+}
+
 function agentResourceConfigReceiptStatus(receipt, expectedCount) {
   const expected = `agent_resource_config_saved_restart_required:count=${expectedCount}`;
   if (receipt && receipt.dispatch_status === expected) {
-    return `Agent resources saved: ${expectedCount}. Restart required.`;
+    return `Worker limit saved: ${expectedCount}. Restart required.`;
   }
   throw new Error("Agent resource save returned an unexpected service status.");
 }
@@ -765,7 +904,7 @@ function handleAdpFrame(frame) {
       setCommandStatus(`request failed: ${frame.failure.code}`);
       return;
     default:
-      setCommandStatus(`unknown service message: ${frame.kind}`);
+      setCommandStatus(`unsupported service message: ${frame.kind}`);
   }
 }
 
@@ -1068,6 +1207,27 @@ function turnLifecycleForRender(turn) {
   if (!turn) {
     return { phase: "neutral", className: "pending", label: "idle", isLive: false, elapsed: "" };
   }
+  if (turn.terminal_text || isTerminalStatus(turn.terminal_status) || isToolPendingStatus(turn.terminal_status)) {
+    const terminal = `${turn.terminal_status || "success"}`.toLowerCase();
+    const phase = terminal === "success" ? "completed" : terminal;
+    if (terminal === "running" || isToolPendingStatus(terminal)) {
+      return {
+        phase: "waiting_lifecycle",
+        className: "running",
+        label: "waiting lifecycle",
+        isLive: false,
+        elapsed: "",
+      };
+    }
+    const label = terminalTurnStatusLabel(terminal);
+    return {
+      phase,
+      className: label === "completed" ? "success" : "failed",
+      label,
+      isLive: false,
+      elapsed: "",
+    };
+  }
   const isCurrentLiveTurn = turnIsCurrentLiveTurn(turn);
   const waitingTools = (turn.tool_activities || []).filter(
     (tool) => tool.status === "Waiting" || tool.status === "waiting",
@@ -1099,26 +1259,6 @@ function turnLifecycleForRender(turn) {
   const inactiveToolLifecycle = inactiveToolLifecycleForRender(turn);
   if (inactiveToolLifecycle) {
     return inactiveToolLifecycle;
-  }
-  if (turn.terminal_text || isTerminalStatus(turn.terminal_status)) {
-    const terminal = `${turn.terminal_status || "success"}`.toLowerCase();
-    const phase = terminal === "success" ? "completed" : terminal;
-    if (terminal === "running") {
-      return {
-        phase: "waiting_lifecycle",
-        className: "running",
-        label: "waiting lifecycle",
-        isLive: false,
-        elapsed: "",
-      };
-    }
-    return {
-      phase,
-      className: terminal === "failed" || terminal === "cancelled" ? "failed" : "success",
-      label: terminal === "failed" ? "failed" : "completed",
-      isLive: false,
-      elapsed: "",
-    };
   }
   return { phase: "neutral", className: "pending", label: "waiting", isLive: false, neutral: true, elapsed: "" };
 }
@@ -1188,22 +1328,55 @@ function pendingChatCards(renderPending) {
     title: "Client",
     body: renderPending.error
       ? [
-          "Dispatch status is unknown. The service may still finish this request.",
-          "Refresh service state before sending a duplicate.",
+          "Submit receipt is being verified against service truth.",
+          "Do not send a duplicate until the service refresh finishes.",
         ]
       : ["Request accepted. Waiting for service dispatch."],
-    status: renderPending.error ? "refresh needed" : elapsed || "0s",
+    status: renderPending.error ? "checking service truth" : elapsed || "0s",
   }];
   const renderTurn = {
     turnId: "pending-submit",
+    createdAt: renderPending.startedAt || Date.now(),
     lifecycle: {
-      className: renderPending.error ? "failed" : renderPending.isLive ? "running" : "pending",
+      className: renderPending.error ? "running" : renderPending.isLive ? "running" : "pending",
       label: renderPending.error
-        ? "dispatch status unknown"
+        ? "checking service truth"
         : elapsed
           ? `dispatching... ${elapsed}`
           : "dispatching",
-      isLive: renderPending.isLive && !renderPending.error,
+      isLive: renderPending.isLive || !!renderPending.error,
+    },
+  };
+  return [userChatBubble(renderTurn, userRow), assistantChatBubble(renderTurn, assistantRows)];
+}
+
+function acceptedSubmitReceiptChatCards(receipt) {
+  const text = receipt && receipt.text ? receipt.text : "";
+  const taskLine = [receipt.taskId, receipt.status, receipt.title]
+    .filter(Boolean)
+    .join(" · ");
+  const userRow = {
+    kind: "user",
+    title: "User",
+    body: [text],
+    status: "submitted",
+  };
+  const assistantRows = [{
+    kind: "system",
+    title: "Service",
+    body: [
+      "Service accepted this request through TaskBoard truth.",
+      taskLine ? `Worker task: ${taskLine}` : "Worker lifecycle is visible in the Agent task list.",
+    ],
+    status: "accepted",
+  }];
+  const renderTurn = {
+    turnId: "accepted-submit",
+    createdAt: receipt.createdAt || receipt.created_at || Date.now(),
+    lifecycle: {
+      className: "running",
+      label: "service accepted",
+      isLive: true,
     },
   };
   return [userChatBubble(renderTurn, userRow), assistantChatBubble(renderTurn, assistantRows)];
@@ -1305,12 +1478,14 @@ function userChatBubble(renderTurn, row) {
   status.className = "chat-row-status";
   status.textContent = row.status || "";
   meta.append(label, status);
+  appendChatMessageTime(meta, renderTurn);
 
   const body = document.createElement("div");
   body.className = "chat-message-body";
   renderTextLines(body, row.body || []);
 
   article.append(meta, body);
+  appendTurnActionBar(article, renderTurn, row);
   return article;
 }
 
@@ -1333,12 +1508,184 @@ function assistantChatBubble(renderTurn, rows) {
   status.className = `chat-state-pill ${className}`;
   status.textContent = chatAssistantStatusLabel(lifecycle, rows);
   meta.append(label, status);
+  appendChatMessageTime(meta, renderTurn);
   article.appendChild(meta);
 
   rows.forEach((row) => {
     article.appendChild(chatAssistantSection(row));
   });
+  appendTurnActionBar(article, renderTurn, rows);
   return article;
+}
+
+function appendTurnActionBar(article, renderTurn, rows) {
+  const bar = document.createElement("div");
+  bar.className = "turn-action-bar";
+  bar.dataset.turnId = renderTurn.turnId || "";
+  const copyButton = turnActionButton("Copy");
+  copyButton.addEventListener("click", () => {
+    copyTurnActionText(renderTurn, rows).catch((error) => {
+      setCommandStatus(`copy failed: ${error.message}`, { stickyMs: 6000 });
+    });
+  });
+  const editButton = turnActionButton("Edit from here");
+  editButton.addEventListener("click", () => {
+    editAndRerunFromTurn(renderTurn).catch((error) => {
+      setCommandStatus(`edit from here failed: ${error.message}`, { stickyMs: 9000 });
+    });
+  });
+  const newSessionButton = turnActionButton("New session");
+  newSessionButton.addEventListener("click", () => {
+    newSessionFromTurn(renderTurn, rows).catch((error) => {
+      setCommandStatus(`new session from here failed: ${error.message}`, { stickyMs: 9000 });
+    });
+  });
+  bar.append(copyButton, editButton, newSessionButton);
+  article.appendChild(bar);
+}
+
+function turnActionButton(label) {
+  const button = document.createElement("button");
+  button.className = "turn-action-button";
+  button.type = "button";
+  button.textContent = label;
+  return button;
+}
+
+async function copyTurnActionText(renderTurn, rows) {
+  const text = turnActionText(renderTurn, rows);
+  if (!text) {
+    setCommandStatus("nothing to copy", { stickyMs: 4000 });
+    return;
+  }
+  await copyTextToClipboard(text);
+  setCommandStatus("copied turn text", { stickyMs: 3000 });
+}
+
+async function editAndRerunFromTurn(renderTurn) {
+  if (!renderTurn || !renderTurn.turnId) {
+    setCommandStatus("selected turn has no durable id", { stickyMs: 6000 });
+    return;
+  }
+  if (!state.selectedSessionId || isDraftSessionId(state.selectedSessionId)) {
+    setCommandStatus("edit from here requires a persisted selected session", { stickyMs: 6000 });
+    return;
+  }
+  const userText = turnUserTextForAction(renderTurn.turnId);
+  if (!userText) {
+    setCommandStatus("selected turn has no editable user prompt", { stickyMs: 6000 });
+    return;
+  }
+  await rollbackEffectiveTranscriptThroughTurn(renderTurn.turnId);
+  composerInput.value = userText;
+  composerInput.focus();
+  setCommandStatus("rolled back to this turn; edit and send replacement", { stickyMs: 8000 });
+}
+
+async function newSessionFromTurn(renderTurn, rows) {
+  const text = turnUserTextForAction(renderTurn && renderTurn.turnId) || turnActionText(renderTurn, rows);
+  await startNewConversationFromText(text);
+}
+
+function turnActionText(renderTurn, rows) {
+  const userText = turnUserTextForAction(renderTurn && renderTurn.turnId);
+  if (userText) {
+    return userText;
+  }
+  const rowList = Array.isArray(rows) ? rows : [rows];
+  return rowList
+    .flatMap((row) => (row && Array.isArray(row.body) ? row.body : []))
+    .map((line) => `${line || ""}`.trim())
+    .filter(Boolean)
+    .join("\n\n");
+}
+
+function turnUserTextForAction(turnId) {
+  const targetBase = baseTurnId(turnId);
+  const turn = conversationTurnsForRender().find((candidate) => baseTurnId(candidate && candidate.turn_id) === targetBase);
+  return `${(turn && turn.user_text) || ""}`.trim();
+}
+
+async function rollbackEffectiveTranscriptThroughTurn(turnId) {
+  const targetBase = baseTurnId(turnId);
+  for (let guard = 0; guard < 50; guard += 1) {
+    const turns = conversationTurnsForRender();
+    const hasTarget = turns.some((turn) => baseTurnId(turn && turn.turn_id) === targetBase);
+    if (!hasTarget) {
+      return;
+    }
+    await adpCommand({ RollbackLatestSessionTurn: { session_id: state.selectedSessionId } });
+    await refreshSessions();
+    await refreshSelectedSession();
+  }
+  throw new Error("rollback guard reached before selected turn was removed");
+}
+
+async function startNewConversationFromText(text) {
+  const draftText = `${text || ""}`.trim();
+  if (!draftText) {
+    setCommandStatus("selected turn has no text for a new session", { stickyMs: 6000 });
+    return;
+  }
+  await startNewConversation();
+  composerInput.value = draftText;
+  composerInput.focus();
+  setCommandStatus("new session ready; edit and send from copied turn", { stickyMs: 7000 });
+}
+
+async function copyTextToClipboard(text) {
+  if (navigator.clipboard && typeof navigator.clipboard.writeText === "function") {
+    await navigator.clipboard.writeText(text);
+    return;
+  }
+  const textarea = document.createElement("textarea");
+  textarea.value = text;
+  textarea.setAttribute("readonly", "true");
+  textarea.style.position = "fixed";
+  textarea.style.opacity = "0";
+  document.body.appendChild(textarea);
+  textarea.select();
+  const copied = document.execCommand("copy");
+  textarea.remove();
+  if (!copied) {
+    throw new Error("clipboard unavailable");
+  }
+}
+
+function appendChatMessageTime(meta, renderTurn) {
+  const ms = timestampToMilliseconds(renderTurn && renderTurn.createdAt);
+  if (!ms) {
+    return;
+  }
+  const time = document.createElement("time");
+  time.className = "chat-message-time";
+  time.dateTime = new Date(ms).toISOString();
+  time.textContent = localChatTimeLabel(ms);
+  meta.appendChild(time);
+}
+
+function timestampToMilliseconds(timestamp) {
+  const value = Number(timestamp || 0);
+  if (!Number.isFinite(value) || value <= 0) {
+    return null;
+  }
+  return value > 10_000_000_000 ? value : value * 1000;
+}
+
+function localChatTimeLabel(ms) {
+  const date = new Date(ms);
+  if (!Number.isFinite(date.getTime())) {
+    return "";
+  }
+  const now = new Date();
+  const sameDay =
+    date.getFullYear() === now.getFullYear() &&
+    date.getMonth() === now.getMonth() &&
+    date.getDate() === now.getDate();
+  const options = sameDay
+    ? { hour: "2-digit", minute: "2-digit" }
+    : { month: "2-digit", day: "2-digit", hour: "2-digit", minute: "2-digit" };
+  return new Intl.DateTimeFormat(undefined, options).format(date);
 }
 
 function chatAssistantStateClass(lifecycle, rows) {
@@ -1371,8 +1718,9 @@ function chatAssistantStatusLabel(lifecycle, rows) {
   if (rows.some((row) => row.kind === "final" && `${row.status || ""}`.toLowerCase() === "running")) {
     return "waiting lifecycle";
   }
-  if (rows.some((row) => row.kind === "final")) {
-    return "completed";
+  const finalRow = rows.find((row) => row.kind === "final");
+  if (finalRow) {
+    return finalRow.status || lifecycle.label || "completed";
   }
   return lifecycle.label || "received";
 }
@@ -1527,30 +1875,40 @@ function parseFinalSummaryLine(line) {
 }
 
 function renderToolSection(section, row) {
-  section.classList.add(toolStateClass(row.status));
+  const stateClass = toolStateClass(row.status);
+  section.classList.add(stateClass);
   const display = row.display || null;
+  if (display && display.kind) {
+    section.dataset.toolKind = toolKindLabel(display.kind);
+  }
   const head = document.createElement("div");
   head.className = "tool-chat-head";
+  const titleWrap = document.createElement("span");
+  titleWrap.className = "tool-chat-title-wrap";
   const title = document.createElement("span");
   title.className = "tool-chat-title";
-  title.textContent = row.title || (display && display.action) || "Tool";
+  title.textContent = (display && display.action) || row.title || "Tool";
+  const kind = document.createElement("span");
+  kind.className = "tool-chat-kind";
+  kind.textContent = toolKindLabel(display && display.kind);
+  titleWrap.append(title, kind);
   const state = document.createElement("span");
-  state.className = `tool-chat-state ${toolStateClass(row.status)}`;
+  state.className = `tool-chat-state ${stateClass}`;
   state.textContent = row.status || "";
-  head.append(title, state);
+  head.append(titleWrap, state);
 
   const body = document.createElement("div");
   body.className = "tool-chat-body";
-  const semanticLines = toolSemanticLines(row);
-  semanticLines.forEach((line, index) => {
-    const item = document.createElement("div");
-    item.className = [
-      line.kind === "command" ? "tool-command-line" : "tool-chat-line",
-      index === 0 ? "tool-chat-line-primary" : "tool-chat-line-secondary",
-    ].join(" ");
-    item.textContent = line.text;
-    item.title = line.fullText || line.text;
-    body.appendChild(item);
+  const primary = toolPrimaryLine(row);
+  if (primary) {
+    const primaryNode = document.createElement("div");
+    primaryNode.className = "tool-chat-line tool-chat-line-primary";
+    primaryNode.textContent = primary;
+    primaryNode.title = primary;
+    body.appendChild(primaryNode);
+  }
+  toolSemanticLines(row).forEach((line) => {
+    body.appendChild(toolSemanticLineNode(line));
   });
   section.append(head, body);
 }
@@ -1567,96 +1925,41 @@ function toolStateClass(status) {
 }
 
 function toolSemanticLines(row) {
+  const lines = Array.isArray(row.body) ? row.body : [];
+  const rendered = lines
+    .map((line) => `${line || ""}`.trim())
+    .filter(Boolean)
+    .map((line) => ({
+      text: line,
+      tone: /^result:/i.test(line) ? toolStateClass(row.status) : "",
+    }));
+  return rendered.length > 0 ? rendered : [{ text: row.status || "tool activity" }];
+}
+
+function toolPrimaryLine(row) {
   const display = row.display || null;
-  const lines = [];
   const action = `${(display && display.action) || row.title || "Tool"}`.trim();
   const target = display && display.target ? `${display.target}`.trim() : "";
   const parameterSummary = display && display.parameter_summary ? `${display.parameter_summary}`.trim() : "";
-  const resultSummary = display && display.result ? `${display.result}`.trim() : "";
-  const command = toolDisplayField(display, "command");
-
   if (target) {
-    lines.push({ text: `${action} · ${target}` });
-  } else if (parameterSummary) {
-    lines.push({ text: `${action} · ${parameterSummary}` });
-  } else {
-    lines.push({ text: action });
+    return `${action} -> ${target}`;
   }
-
-  if (command) {
-    lines.push({
-      kind: "command",
-      text: truncateForChat(command, 180),
-      fullText: command,
-    });
+  if (parameterSummary) {
+    return `${action} -> ${parameterSummary}`;
   }
-
-  if (!command && resultSummary && !isGenericToolResult(resultSummary)) {
-    lines.push({ text: resultSummary });
-  }
-
-  if (!command && !resultSummary && parameterSummary && target && shouldShowToolParameterSummary(parameterSummary, target)) {
-    lines.push({ text: parameterSummary });
-  }
-
-  compactToolBodyLines(row, command).forEach((bodyLine) => {
-    if (bodyLine && !lines.some((line) => line.text === bodyLine)) {
-      lines.push({ text: bodyLine });
-    }
-  });
-
-  return lines.length > 0 ? lines : [{ text: row.status || "tool activity" }];
+  return action;
 }
 
-function compactToolBodyLines(row, command) {
-  const rawLines = Array.isArray(row.body) ? row.body : [];
-  return rawLines
-    .map((bodyLine) => `${bodyLine || ""}`.trim())
-    .filter(Boolean)
-    .filter((bodyLine) => {
-      if (command && (bodyLine.startsWith("command=") || bodyLine === command)) {
-        return false;
-      }
-      if (/^(type|target|path|command)\s*[:=]/i.test(bodyLine)) {
-        return false;
-      }
-      return true;
-    })
-    .slice(0, 2);
-}
-
-function isGenericToolResult(text) {
-  const normalized = `${text || ""}`.trim().toLowerCase();
-  return (
-    normalized === "" ||
-    normalized === "success" ||
-    normalized === "completed" ||
-    normalized === "result returned" ||
-    normalized === "succeeded: result returned"
-  );
-}
-
-function shouldShowToolParameterSummary(summary, target) {
-  const normalized = `${summary || ""}`.trim();
-  const normalizedTarget = `${target || ""}`.trim();
-  if (!normalized || normalized === normalizedTarget) {
-    return false;
-  }
-  if (/^(type|target|path|command)\s*[:=]/i.test(normalized)) {
-    return false;
-  }
-  if (normalizedTarget && normalized.includes(normalizedTarget) && normalized.split(/[,\n;]/).length <= 2) {
-    return false;
-  }
-  return true;
-}
-
-function toolDisplayField(display, label) {
-  if (!display || !Array.isArray(display.fields)) {
-    return "";
-  }
-  const field = display.fields.find((candidate) => candidate.label === label);
-  return field ? `${field.value || ""}` : "";
+function toolSemanticLineNode(line) {
+  const item = document.createElement("div");
+  item.className = [
+    "tool-chat-line",
+    "tool-chat-line-secondary",
+    line.tone ? `tool-chat-line-${line.tone}` : "",
+  ].filter(Boolean).join(" ");
+  item.textContent = line.text;
+  item.title = line.fullText || line.text;
+  return item;
 }
 
 function toolKindLabel(kind) {
@@ -1695,6 +1998,8 @@ function commandReceiptStatus(receipt) {
     case "reason_live_turn_completed":
       return "request completed";
     case "provider_config_saved_restart_required":
+    case "provider_config_upserted_restart_required":
+    case "agent_provider_selection_saved_restart_required":
     case "agent_resource_config_saved_restart_required":
       return "settings saved";
     case "node_direct_message_dispatched":
@@ -1809,26 +2114,7 @@ function renderToolBody(container, body) {
 }
 
 function normalizePublicConversation(items) {
-  const normalized = [];
-  const toolIndex = new Map();
-
-  items.forEach((item) => {
-    if (item.kind !== "ToolSummary" || !item.tool_call_id) {
-      normalized.push(item);
-      return;
-    }
-
-    const existingIndex = toolIndex.get(item.tool_call_id);
-    if (existingIndex === undefined) {
-      toolIndex.set(item.tool_call_id, normalized.length);
-      normalized.push(item);
-      return;
-    }
-
-    normalized[existingIndex] = item;
-  });
-
-  return normalized;
+  return Array.isArray(items) ? items.filter(Boolean) : [];
 }
 
 function buildConversationRenderModel() {
@@ -1837,27 +2123,42 @@ function buildConversationRenderModel() {
     conversationTurns.length === 0 && state.turn
       ? [state.turn]
       : conversationTurns;
-  const successorBaseTurns = successorBaseTurnIds(turnsForRender);
+  const pendingStartedAt =
+    state.submitStartedAt || state.ambiguousSubmitRecoveryStartedAt || Date.now();
   return {
     selectedSessionId: state.selectedSessionId,
-    turns: turnsForRender.map((turn) =>
-      buildRenderTurn(turn, {
-        hideUser: turnOrderKey(turn.turn_id).round > 1,
-        hideTerminal: successorBaseTurns.has(turn.turn_id || ""),
-      }),
-    ),
+    turns: turnsForRender.map((turn) => buildRenderTurn(turn)),
     pendingSubmit: state.pendingUserInput
       ? {
           text: state.pendingUserInput,
           attachments: state.pendingAttachments,
           isLive: state.submitInFlight,
           elapsed: elapsedSince(state.submitStartedAt),
+          startedAt: pendingStartedAt,
+          sessionId: state.pendingSubmitSessionId || state.selectedSessionId || "",
+          submitId: state.pendingSubmitId || "",
           error: state.pendingSubmitError,
         }
       : null,
+    acceptedSubmitReceipt: acceptedSubmitReceiptForRender(),
     sessionLoading: selectedSessionIsLoading(),
     adpFailure: state.adpFailure ? { message: state.adpFailure } : null,
   };
+}
+
+function acceptedSubmitReceiptForRender() {
+  const receipt = state.acceptedSubmitReceipt;
+  if (!receipt || !receipt.sessionId || receipt.sessionId !== state.selectedSessionId) {
+    return null;
+  }
+  const expected = normalizeVisibleText(receipt.text);
+  if (
+    expected &&
+    conversationTurnsForRender().some((turn) => turnContainsVisibleUserText(turn, expected))
+  ) {
+    return null;
+  }
+  return receipt;
 }
 
 function selectedSessionIsLoading() {
@@ -1865,20 +2166,6 @@ function selectedSessionIsLoading() {
     state.selectedSessionId &&
       state.sessionRefreshInFlight === state.selectedSessionId &&
       (!state.sessionRefreshError || state.sessionRefreshError.session_id !== state.selectedSessionId),
-  );
-}
-
-function successorBaseTurnIds(turns) {
-  const baseIds = new Set(
-    turns
-      .filter((turn) => turnOrderKey(turn && turn.turn_id).round > 1)
-      .map((turn) => baseTurnId(turn.turn_id))
-      .filter(Boolean),
-  );
-  return new Set(
-    turns
-      .filter((turn) => baseIds.has(turn && turn.turn_id))
-      .map((turn) => turn.turn_id),
   );
 }
 
@@ -1890,21 +2177,23 @@ function baseTurnId(turnId) {
   return `${parsed.prefix}${parsed.ordinal}`;
 }
 
-function buildRenderTurn(turn, options = {}) {
+function buildRenderTurn(turn) {
   const lifecycle = turnLifecycleForRender(turn);
   return {
     turnId: turn.turn_id || "",
     sessionId: turn.session_id || "",
+    submitId: turn.submit_id || "",
+    createdAt: turn.created_at || null,
     orderKey: turnOrderKey(turn.turn_id),
     lifecycle,
-    rows: buildRenderRows(turn, lifecycle, options),
+    rows: buildRenderRows(turn, lifecycle),
   };
 }
 
-function buildRenderRows(turn, lifecycle, options = {}) {
-  const rows = conversationItemsForTurn(turn, { hideUser: !!options.hideUser }).map((item) =>
+function buildRenderRows(turn, lifecycle) {
+  const rows = conversationItemsForTurn(turn).map((item) =>
     buildRenderRowFromConversationItem(turn, item),
-  ).filter((row) => !(options.hideTerminal && row.kind === "final"));
+  );
   const modelRow = buildModelRequestRenderRow(turn, lifecycle);
   if (modelRow) {
     rows.push(modelRow);
@@ -1967,7 +2256,7 @@ function buildToolActivityRenderRow(turn, item) {
 }
 
 function buildModelRequestRenderRow(turn, lifecycle) {
-  if (!lifecycle.isLive || !turnIsWaitingForModelResponse(turn) || !turn.model_request) {
+  if (!turnIsWaitingForModelResponse(turn) || !turn.model_request) {
     return null;
   }
   const label = modelRequestLabel(turn);
@@ -1979,9 +2268,20 @@ function buildModelRequestRenderRow(turn, lifecycle) {
         ? "Schema"
         : "Model",
     body: [turn.model_request.detail || "Waiting for model response."],
-    status: lifecycle.elapsed || "0s",
+    status: lifecycle.isLive ? lifecycle.elapsed || "0s" : modelRequestStaticStatus(turn),
     identity: { turnId: turn.turn_id },
   };
+}
+
+function modelRequestStaticStatus(turn) {
+  const phase = modelRequestPhase(turn);
+  if (phase === "provider_retry") {
+    return "retrying";
+  }
+  if (phase === "provider_failover") {
+    return "switching";
+  }
+  return "waiting";
 }
 
 function buildObservableLiveTurnRenderRow(turn, lifecycle) {
@@ -2006,8 +2306,11 @@ function buildTerminalRenderRow(turn, item) {
 }
 
 function assistantRowStatus(turn, status) {
+  if (isToolPendingStatus(turn.terminal_status)) {
+    return "running";
+  }
   if (turn.terminal_text || isTerminalStatus(turn.terminal_status)) {
-    return "completed";
+    return terminalTurnStatusLabel(turn.terminal_status);
   }
   if (turnIsCurrentLiveTurn(turn)) {
     return status || "streaming";
@@ -2031,6 +2334,31 @@ function toolStatusLabel(status) {
 function isTerminalStatus(status) {
   const normalized = `${status || ""}`.toLowerCase();
   return ["success", "failed", "blocked", "interrupted", "cancelled"].includes(normalized);
+}
+
+function isToolPendingStatus(status) {
+  const normalized = `${status || ""}`.toLowerCase().replace(/[_-]/g, "");
+  return normalized === "toolpending";
+}
+
+function terminalTurnStatusLabel(status) {
+  const normalized = `${status || ""}`.toLowerCase().replace(/[_-]/g, "");
+  if (normalized === "toolpending" || normalized === "running") {
+    return "waiting lifecycle";
+  }
+  if (normalized === "failed") {
+    return "failed";
+  }
+  if (normalized === "blocked") {
+    return "blocked";
+  }
+  if (normalized === "interrupted") {
+    return "interrupted";
+  }
+  if (normalized === "cancelled") {
+    return "cancelled";
+  }
+  return "completed";
 }
 
 function formatDuration(ms) {
@@ -2059,17 +2387,25 @@ function elapsedSince(startedAt) {
 }
 
 function turnIsWaitingForModelResponse(turn) {
-  return !!(turn && turn.model_request && !turn.terminal_text && !isTerminalStatus(turn.terminal_status));
+  return !!(
+    turn &&
+    turn.model_request &&
+    !turn.terminal_text &&
+    !isTerminalStatus(turn.terminal_status) &&
+    !isToolPendingStatus(turn.terminal_status)
+  );
 }
 
 function turnIsCurrentLiveTurn(turn) {
   return !!(
     turn &&
+    protocolConnectionCanRenderLive() &&
     state.turn &&
     turn.turn_id === state.turn.turn_id &&
     turn.session_id === state.turn.session_id &&
     !turn.terminal_text &&
-    !isTerminalStatus(turn.terminal_status)
+    !isTerminalStatus(turn.terminal_status) &&
+    !isToolPendingStatus(turn.terminal_status)
   );
 }
 
@@ -2193,22 +2529,32 @@ function toolSummaryBodyLines(item) {
   const display = item.display || null;
   const lines = [];
   if (display && display.diff) {
-    lines.push(`diff: ${display.diff.target}`);
-    lines.push(`- ${display.diff.before}`);
-    lines.push(`+ ${display.diff.after}`);
-  } else if (display && display.parameter_summary) {
-    pushCompactToolLine(lines, display.parameter_summary, item.title);
-  } else if (display && display.summary) {
-    pushCompactToolLine(lines, display.summary, item.title);
-  } else if (display && Array.isArray(display.fields) && display.fields.length > 0) {
-    const compactFields = display.fields
-      .slice(0, 4)
-      .map((field) => `${field.label}: ${field.value}`)
-      .join(" · ");
-    pushCompactToolLine(lines, compactFields, item.title);
-  } else if (item.body && item.body !== item.status && `${item.status || ""}`.toLowerCase() !== "waiting") {
-    pushCompactToolLine(lines, item.body, item.title);
+    pushToolLine(lines, `diff target: ${display.diff.target || ""}`);
+    pushToolLine(lines, `diff before: ${display.diff.before || ""}`);
+    pushToolLine(lines, `diff after: ${display.diff.after || ""}`);
   }
+  if (display && display.target) {
+    pushToolLine(lines, `target: ${display.target}`);
+  }
+  if (display && display.parameter_summary) {
+    pushToolLine(lines, `parameters: ${display.parameter_summary}`);
+  }
+  if (display && display.summary) {
+    pushToolLine(lines, `summary: ${display.summary}`);
+  }
+  if (display && display.result_summary) {
+    pushToolLine(lines, `result: ${display.result_summary}`);
+  }
+  if (display && Array.isArray(display.fields)) {
+    display.fields.forEach((field) => {
+      const label = `${field && field.label ? field.label : "field"}`.trim();
+      const value = `${field && field.value ? field.value : ""}`.trim();
+      if (label && value) {
+        pushToolLine(lines, `${label}: ${value}`);
+      }
+    });
+  }
+  splitToolDetailLines(item.body).forEach((line) => pushToolLine(lines, line));
   return lines.filter(Boolean);
 }
 
@@ -2223,35 +2569,18 @@ function toolTimelineLine(item, timing) {
   return elapsed ? `${label} · ${elapsed}` : label;
 }
 
-function pushCompactToolLine(lines, value, title = "") {
-  const line = compactToolResultLine(value, title);
-  if (!line) {
-    return;
-  }
-  if (!lines.some((existing) => existing.toLowerCase() === line.toLowerCase())) {
+function pushToolLine(lines, value) {
+  const line = `${value || ""}`.trim();
+  if (line) {
     lines.push(line);
   }
 }
 
-function compactToolResultLine(value, title = "") {
-  const text = `${value || ""}`.trim();
-  if (!text) {
-    return "";
-  }
-  const lower = text.toLowerCase();
-  if (lower === "succeeded: result returned" || lower === "succeeded: shell command") {
-    return "";
-  }
-  return text
-    .replace(/^result:\s*/i, "")
-    .replace(/^succeeded:\s*/i, "")
-    .replace(/^failure:\s*/i, "")
-    .replace(new RegExp(`^${escapeRegExp(title)}:\\s*`, "i"), "")
-    .trim();
-}
-
-function escapeRegExp(value) {
-  return `${value || ""}`.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+function splitToolDetailLines(value) {
+  return `${value || ""}`
+    .split(/\r?\n/)
+    .map((line) => line.trim())
+    .filter(Boolean);
 }
 
 function waitingToolStatus(tools, turn = state.turn) {
@@ -2319,8 +2648,11 @@ function derivePublicConversation(turn) {
   });
   if (turn.terminal_text) {
     const terminalStatus = `${turn.terminal_status || "Success"}`.toLowerCase();
+    const isToolPending = isToolPendingStatus(terminalStatus);
     const status =
-      terminalStatus === "failed"
+      isToolPending
+        ? "running"
+        : terminalStatus === "failed"
         ? "failed"
         : terminalStatus === "cancelled"
           ? "cancelled"
@@ -2331,7 +2663,7 @@ function derivePublicConversation(turn) {
               : "completed";
     items.push({
       kind: "Terminal",
-      title: "Final",
+      title: isToolPending ? "Lifecycle" : "Final",
       body: terminalBodyForDisplay(turn.terminal_text),
       status,
     });
@@ -2391,11 +2723,8 @@ function stripFreehandCompletionBlock(text) {
   return stripped;
 }
 
-function conversationItemsForTurn(turn, options = {}) {
+function conversationItemsForTurn(turn) {
   const items = normalizePublicConversation(derivePublicConversation(turn));
-  if (options.hideUser) {
-    return items.filter((item) => item.kind !== "UserText");
-  }
   return items;
 }
 
@@ -2463,19 +2792,60 @@ function pendingUserInputIsMaterialized() {
   });
 }
 
+function pendingSubmitAcceptedTaskByTaskTruth(startedAtMs = state.ambiguousSubmitRecoveryStartedAt || state.submitStartedAt) {
+  if (!state.pendingUserInput || !state.pendingSubmitSessionId || !state.taskBoard) {
+    return null;
+  }
+  const startedAtUnix = startedAtMs ? Math.floor(startedAtMs / 1000) - 5 : 0;
+  return ((state.taskBoard && state.taskBoard.tasks) || []).find((task) => {
+    if (!taskVisibleInSession(task, state.pendingSubmitSessionId)) {
+      return false;
+    }
+    const taskCreatedAt = Number(task.created_at);
+    if (!Number.isFinite(taskCreatedAt) || taskCreatedAt <= 0) {
+      return false;
+    }
+    if (startedAtUnix > 0 && taskCreatedAt < startedAtUnix) {
+      return false;
+    }
+    return true;
+  }) || null;
+}
+
+function pendingSubmitAcceptedByTaskTruth(startedAtMs = state.ambiguousSubmitRecoveryStartedAt || state.submitStartedAt) {
+  return !!pendingSubmitAcceptedTaskByTaskTruth(startedAtMs);
+}
+
 function clearPendingUserInputIfMaterialized() {
-  if (!pendingUserInputIsMaterialized()) {
+  const materializedInTranscript = pendingUserInputIsMaterialized();
+  const acceptedTask = pendingSubmitAcceptedTaskByTaskTruth();
+  if (!materializedInTranscript && !acceptedTask) {
     return;
   }
+  state.acceptedSubmitReceipt = materializedInTranscript
+    ? null
+    : {
+        text: state.pendingUserInput,
+        sessionId: state.pendingSubmitSessionId,
+        taskId: acceptedTask.task_id || "",
+        status: acceptedTask.status || "",
+        title: acceptedTask.title || acceptedTask.goal || "",
+        createdAt: acceptedTask.created_at || Math.floor(Date.now() / 1000),
+      };
   state.pendingUserInput = null;
   state.pendingSubmitId = null;
   state.pendingSubmitSessionId = null;
   state.pendingSubmitError = null;
   state.pendingAttachments = [];
+  state.ambiguousSubmitRecoveryStartedAt = null;
+  stopAmbiguousSubmitRecoveryPolling();
 }
 
 function sameRenderableTurn(left, right) {
   if (!left || !right || left.turn_id !== right.turn_id) {
+    return false;
+  }
+  if (left.session_id && right.session_id && left.session_id !== right.session_id) {
     return false;
   }
   const leftInternal = isInternalRuntimePrompt(left);
@@ -2545,6 +2915,7 @@ function switchConversationSession(sessionId) {
     return;
   }
   const requestedSessionId = sessionId;
+  state.sessionTreeOpen = false;
   clearConversationForSessionSwitch(sessionId);
   renderAll();
   refreshSelectedSession().catch((error) => {
@@ -2755,6 +3126,7 @@ function resetLocalConversationState(sessionId) {
   state.pendingSubmitSessionId = null;
   state.pendingSubmitError = null;
   state.pendingAttachments = [];
+  state.acceptedSubmitReceipt = null;
   state.lifecycleClocks.clear();
   state.toolTimings.clear();
   state.submitStartedAt = null;
@@ -3092,7 +3464,7 @@ function applyAdpQueryResult(result) {
       renderAll();
       return;
     }
-    if (state.selectedSessionId && turn.session_id !== state.selectedSessionId) {
+    if (turn && state.selectedSessionId && turn.session_id !== state.selectedSessionId) {
       renderAll();
       return;
     }
@@ -3179,7 +3551,7 @@ function applyAdpSubscriptionEvent(event) {
 
 function liveTurnStatus() {
   if (state.pendingSubmitError) {
-    return "dispatch status unknown · refresh needed";
+    return "checking service truth · submit receipt not verified";
   }
   if (state.submitInFlight && !state.turn) {
     const elapsed = elapsedSince(state.submitStartedAt);
@@ -3190,14 +3562,24 @@ function liveTurnStatus() {
     return null;
   }
 
+  if (turn.terminal_text || isTerminalStatus(turn.terminal_status) || isToolPendingStatus(turn.terminal_status)) {
+    return terminalTurnStatusLabel(turn.terminal_status);
+  }
+
   const waitingTools = (turn.tool_activities || []).filter(
     (tool) => tool.status === "Waiting" || tool.status === "waiting",
   );
   if (waitingTools.length > 0) {
+    if (!protocolConnectionCanRenderLive()) {
+      return "connection closed; refreshing service truth";
+    }
     return waitingToolStatus(waitingTools);
   }
 
   if (turnIsWaitingForModelResponse(turn)) {
+    if (!protocolConnectionCanRenderLive()) {
+      return "connection closed; refreshing service truth";
+    }
     const elapsed = elapsedSince(lifecycleClockStartedAt(modelRequestTimingKey(turn)));
     const label = modelRequestLabel(turn);
     return elapsed ? `${label}... ${elapsed}` : `${label}...`;
@@ -3206,10 +3588,6 @@ function liveTurnStatus() {
   if (state.submitInFlight) {
     const elapsed = elapsedSince(state.submitStartedAt);
     return elapsed ? `dispatching... ${elapsed}` : "dispatching...";
-  }
-
-  if (turn.terminal_text) {
-    return "turn completed";
   }
 
   return null;
@@ -3240,29 +3618,27 @@ function renderMessages() {
   const shouldStickToBottom =
     state.forceScrollToBottom || (!state.userScrollLocked && wasNearBottom);
   state.forceScrollToBottom = false;
-  messageList.replaceChildren();
   const fragments = [];
   syncToolTimings(conversationTurnsForRender());
   syncRenderLifecycleClocks();
   const renderModel = buildConversationRenderModel();
   const hasSelectedSessionTranscript = renderModel.turns.length > 0;
 
-  if (renderModel.turns.length > 0) {
-    renderModel.turns.forEach((renderTurn) => {
-      fragments.push(...turnChatCards(renderTurn));
-    });
-  }
-
-  if (renderModel.pendingSubmit) {
-    fragments.push(...pendingChatCards(renderModel.pendingSubmit));
-  }
-
-  if (renderModel.adpFailure) {
-    fragments.push(failureChatBubble(renderModel.adpFailure.message));
-  }
+  conversationTimelineItems(renderModel).forEach((item) => {
+    fragments.push(timelineItemCycleCard(item));
+  });
 
   if (fragments.length === 0 && renderModel.sessionLoading) {
-    fragments.push(loadingConversationBubble());
+    fragments.push(cycleCardFromChatCards(
+      {
+        kind: "loading",
+        turnId: "session-refresh-loading",
+        sessionId: state.selectedSessionId || "",
+        lifecycle: { className: "running", label: "loading conversation", isLive: true },
+        terminal: false,
+      },
+      [loadingConversationBubble()],
+    ));
   }
 
   if (fragments.length === 0) {
@@ -3278,33 +3654,301 @@ function renderMessages() {
     fragments.push(empty);
   }
 
-  uniqueChatFragments(fragments).forEach((fragment) => messageList.appendChild(fragment));
+  renderConversationFragments(fragments, renderModel.selectedSessionId);
   if (shouldStickToBottom) {
     scrollMessagesToBottom();
   }
 }
 
-function uniqueChatFragments(fragments) {
-  const seen = new Set();
-  let previousAssistantText = "";
-  return fragments.filter((fragment) => {
-    if (!fragment || !fragment.classList || !fragment.classList.contains("chat-message")) {
-      previousAssistantText = "";
-      return true;
+function renderConversationFragments(fragments, selectedSessionId) {
+  const sessionKey = `${selectedSessionId || ""}`;
+  const cycleOnly = fragments.length > 0 && fragments.every((fragment) =>
+    fragment && fragment.classList && fragment.classList.contains("turn-cycle-card"),
+  );
+  const existingCycleOnly = Array.from(messageList.children).every((child) =>
+    child.classList && child.classList.contains("turn-cycle-card"),
+  );
+  if (!cycleOnly || !existingCycleOnly || state.renderedCycleSessionId !== sessionKey) {
+    messageList.replaceChildren(...fragments);
+    state.renderedCycleSessionId = sessionKey;
+    return;
+  }
+  reconcileCycleCardFragments(fragments);
+  state.renderedCycleSessionId = sessionKey;
+}
+
+function reconcileCycleCardFragments(nextCards) {
+  const existingCards = Array.from(messageList.children).filter((child) =>
+    child.classList && child.classList.contains("turn-cycle-card"),
+  );
+  const existingByKey = new Map();
+  existingCards.forEach((card) => {
+    const key = cycleCardKeyFromNode(card);
+    if (key && !existingByKey.has(key)) {
+      existingByKey.set(key, card);
     }
-    const text = normalizeVisibleText(fragment.innerText);
-    const isAssistant = fragment.classList.contains("chat-message-assistant");
-    if (isAssistant && text && text === previousAssistantText) {
-      return false;
-    }
-    const key = `${fragment.dataset.turnId || ""}:${text}`;
-    if (seen.has(key)) {
-      return false;
-    }
-    seen.add(key);
-    previousAssistantText = isAssistant ? text : "";
-    return true;
   });
+
+  const desiredCards = nextCards.map((nextCard) => {
+    const key = cycleCardKeyFromNode(nextCard);
+    const existing = key ? existingByKey.get(key) : null;
+    if (existing && existing.dataset.frozen === "true") {
+      return existing;
+    }
+    return nextCard;
+  });
+  const desired = new Set(desiredCards);
+
+  desiredCards.forEach((card, index) => {
+    const current = messageList.children[index] || null;
+    if (current === card) {
+      return;
+    }
+    messageList.insertBefore(card, current);
+  });
+
+  Array.from(messageList.children).forEach((child) => {
+    if (!desired.has(child)) {
+      child.remove();
+    }
+  });
+}
+
+function conversationTimelineItems(renderModel) {
+  const items = (renderModel.turns || []).map((renderTurn) => ({
+    kind: "turn",
+    renderTurn,
+  }));
+  if (renderModel.pendingSubmit) {
+    insertTimelineItem(
+      items,
+      { kind: "pending", pendingSubmit: renderModel.pendingSubmit },
+      pendingSubmitTimelineIndex(items, renderModel.pendingSubmit),
+    );
+  }
+  if (renderModel.acceptedSubmitReceipt) {
+    insertTimelineItem(
+      items,
+      { kind: "accepted", acceptedSubmitReceipt: renderModel.acceptedSubmitReceipt },
+      acceptedSubmitReceiptTimelineIndex(items, renderModel.acceptedSubmitReceipt),
+    );
+  }
+  if (renderModel.adpFailure) {
+    items.push({ kind: "failure", failure: renderModel.adpFailure });
+  }
+  return items;
+}
+
+function timelineItemChatCards(item) {
+  if (item.kind === "turn") {
+    return turnChatCards(item.renderTurn);
+  }
+  if (item.kind === "pending") {
+    return pendingChatCards(item.pendingSubmit);
+  }
+  if (item.kind === "accepted") {
+    return acceptedSubmitReceiptChatCards(item.acceptedSubmitReceipt);
+  }
+  if (item.kind === "failure") {
+    return [failureChatBubble(item.failure.message)];
+  }
+  return [];
+}
+
+function timelineItemCycleCard(item) {
+  return cycleCardFromChatCards(cycleCardMetaForTimelineItem(item), timelineItemChatCards(item));
+}
+
+function cycleCardFromChatCards(meta, chatCards) {
+  const kind = `${(meta && meta.kind) || "turn"}`.trim() || "turn";
+  const lifecycle = (meta && meta.lifecycle) || { className: "pending", label: "waiting", isLive: false };
+  const article = document.createElement("article");
+  article.className = `turn-cycle-card ${lifecycle.className || "pending"}-state`;
+  article.dataset.cycleKey = cycleCardKey(meta);
+  article.dataset.cycleKind = kind;
+  article.dataset.turnId = `${(meta && meta.turnId) || ""}`;
+  article.dataset.sessionId = `${(meta && meta.sessionId) || ""}`;
+  article.dataset.submitId = `${(meta && meta.submitId) || ""}`;
+  const createdAt = (meta && meta.createdAt) || "";
+  if (createdAt) {
+    article.dataset.createdAt = `${createdAt}`;
+  }
+  if (lifecycle.isLive) {
+    article.dataset.live = "true";
+  }
+  const terminal = cycleCardIsTerminal(meta);
+  if (terminal) {
+    article.dataset.terminal = "true";
+    article.dataset.frozen = "true";
+  }
+  article.setAttribute("aria-label", `request cycle ${kind} ${lifecycle.label || ""}`.trim());
+  (chatCards || []).forEach((card) => article.appendChild(card));
+  return article;
+}
+
+function cycleCardKey(meta) {
+  const kind = `${(meta && meta.kind) || "turn"}`.trim() || "turn";
+  const sessionId = `${(meta && meta.sessionId) || ""}`.trim();
+  const submitId = `${(meta && meta.submitId) || ""}`.trim();
+  if (submitId) {
+    return `submit:${sessionId}:${submitId}`;
+  }
+  const turnId = `${(meta && meta.turnId) || ""}`.trim();
+  if (turnId) {
+    return `${kind}:${sessionId}:${turnId}`;
+  }
+  const createdAt = `${(meta && meta.createdAt) || ""}`.trim();
+  return `${kind}:${sessionId}:${createdAt}`;
+}
+
+function cycleCardKeyFromNode(node) {
+  return (node && node.dataset && node.dataset.cycleKey) || "";
+}
+
+function cycleCardMetaForTimelineItem(item) {
+  if (!item) {
+    return { kind: "unknown", lifecycle: { className: "pending", label: "waiting", isLive: false } };
+  }
+  if (item.kind === "turn") {
+    const renderTurn = item.renderTurn || {};
+    return {
+      kind: "turn",
+      turnId: renderTurn.turnId || "",
+      sessionId: renderTurn.sessionId || "",
+      submitId: renderTurn.submitId || "",
+      createdAt: renderTurn.createdAt || "",
+      lifecycle: renderTurn.lifecycle,
+      terminal: !((renderTurn.lifecycle && renderTurn.lifecycle.isLive) || false) &&
+        !((renderTurn.lifecycle && renderTurn.lifecycle.neutral) || false),
+    };
+  }
+  if (item.kind === "pending") {
+    const pendingSubmit = item.pendingSubmit || {};
+    const elapsed = pendingSubmit.elapsed;
+    return {
+      kind: "pending",
+      turnId: "pending-submit",
+      sessionId: pendingSubmit.sessionId || "",
+      submitId: pendingSubmit.submitId || "",
+      createdAt: pendingSubmit.startedAt || "",
+      lifecycle: {
+        className: pendingSubmit.error || pendingSubmit.isLive ? "running" : "pending",
+        label: pendingSubmit.error
+          ? "checking service truth"
+          : elapsed
+            ? `dispatching... ${elapsed}`
+            : "dispatching",
+        isLive: pendingSubmit.isLive || !!pendingSubmit.error,
+      },
+      terminal: false,
+    };
+  }
+  if (item.kind === "accepted") {
+    const receipt = item.acceptedSubmitReceipt || {};
+    return {
+      kind: "accepted",
+      turnId: "accepted-submit",
+      sessionId: receipt.sessionId || "",
+      submitId: receipt.submitId || "",
+      createdAt: receipt.createdAt || receipt.created_at || "",
+      lifecycle: { className: "running", label: "service accepted", isLive: true },
+      terminal: false,
+    };
+  }
+  if (item.kind === "failure") {
+    return {
+      kind: "failure",
+      turnId: "adp-failure",
+      sessionId: state.selectedSessionId || "",
+      lifecycle: { className: "failed", label: "failed", isLive: false },
+      terminal: true,
+    };
+  }
+  return { kind: item.kind || "unknown", lifecycle: { className: "pending", label: "waiting", isLive: false } };
+}
+
+function cycleCardIsTerminal(meta) {
+  if (!meta) {
+    return false;
+  }
+  if (meta.terminal) {
+    return true;
+  }
+  const lifecycle = meta.lifecycle || {};
+  if (lifecycle.isLive || lifecycle.neutral) {
+    return false;
+  }
+  return lifecycle.className === "success" || lifecycle.className === "failed";
+}
+
+function insertTimelineItem(items, item, index) {
+  const safeIndex = Number.isFinite(index)
+    ? Math.max(0, Math.min(items.length, index))
+    : items.length;
+  items.splice(safeIndex, 0, item);
+}
+
+function pendingSubmitTimelineIndex(items, pendingSubmit) {
+  const submitId = `${(pendingSubmit && pendingSubmit.submitId) || ""}`.trim();
+  if (submitId) {
+    const exactSubmitIndex = items.findIndex((item) =>
+      item.kind === "turn" && item.renderTurn && item.renderTurn.submitId === submitId,
+    );
+    if (exactSubmitIndex >= 0) {
+      return exactSubmitIndex;
+    }
+  }
+  const startedAt = Number((pendingSubmit && pendingSubmit.startedAt) || 0);
+  return firstCycleTurnIndex(items, {
+    sessionId: pendingSubmit && pendingSubmit.sessionId,
+    startedAt,
+    includeLive: true,
+  });
+}
+
+function acceptedSubmitReceiptTimelineIndex(items, receipt) {
+  return firstCycleTurnIndex(items, {
+    sessionId: receipt && receipt.sessionId,
+    startedAt: timestampToMilliseconds(receipt && receipt.createdAt),
+    includeLive: true,
+  });
+}
+
+function firstCycleTurnIndex(items, options = {}) {
+  const sessionId = `${options.sessionId || ""}`.trim();
+  const startedAt = Number(options.startedAt || 0);
+  const threshold = startedAt > 0 ? startedAt - 2000 : 0;
+  const liveIndex = options.includeLive
+    ? items.findIndex((item) =>
+        item.kind === "turn" &&
+          renderTurnMatchesSession(item.renderTurn, sessionId) &&
+          item.renderTurn.lifecycle &&
+          item.renderTurn.lifecycle.isLive,
+      )
+    : -1;
+  const timeIndex = threshold > 0
+    ? items.findIndex((item) =>
+        item.kind === "turn" &&
+          renderTurnMatchesSession(item.renderTurn, sessionId) &&
+          renderTurnCreatedAtMs(item.renderTurn) >= threshold,
+      )
+    : -1;
+  const candidates = [timeIndex, liveIndex].filter((index) => index >= 0);
+  if (candidates.length > 0) {
+    return Math.min(...candidates);
+  }
+  return items.length;
+}
+
+function renderTurnMatchesSession(renderTurn, sessionId) {
+  if (!sessionId || !renderTurn || !renderTurn.sessionId) {
+    return true;
+  }
+  return renderTurn.sessionId === sessionId;
+}
+
+function renderTurnCreatedAtMs(renderTurn) {
+  return timestampToMilliseconds(renderTurn && renderTurn.createdAt) || 0;
 }
 
 function messageListIsNearBottom() {
@@ -3421,6 +4065,22 @@ function workerChildSessionForSessionId(sessionId) {
   return null;
 }
 
+function selectedParentSessionSummary() {
+  const selectedWorkerSession = workerChildSessionForSessionId(state.selectedSessionId);
+  const parentSessionId = selectedWorkerSession
+    ? selectedWorkerSession.parent_session_id
+    : state.selectedSessionId;
+  if (!parentSessionId) {
+    return null;
+  }
+  return (
+    state.sessions.find((session) => session.session_id === parentSessionId) ||
+    (state.draftSessionId === parentSessionId
+      ? { session_id: parentSessionId, title: "Draft session", temporary: false }
+      : null)
+  );
+}
+
 function currentTaskParentSessionId() {
   const selectedWorkerSession = workerChildSessionForSessionId(state.selectedSessionId);
   if (selectedWorkerSession) {
@@ -3454,21 +4114,23 @@ function currentSessionTaskCounts(tasks = currentSessionTasks()) {
       .map((task) => task && task.task_id)
       .filter(Boolean)
   );
+  const activeCount = tasks.filter((task) => taskLifecycleBucket(task.status) === "active").length;
+  const blockedCount = tasks.filter((task) => taskLifecycleBucket(task.status) === "blocked").length;
+  const reviewCount = tasks.filter((task) => taskLifecycleBucket(task.status) === "review").length;
+  const closedCount = tasks.filter((task) => taskLifecycleBucket(task.status) === "closed").length;
   return {
     taskCount: tasks.length,
-    blockedCount: tasks.filter((task) =>
-      ["blocked", "failed", "cancelled"].includes(`${task.status || ""}`.toLowerCase())
-    ).length,
-    reviewCount: tasks.filter((task) =>
-      ["review_ready", "review_submitted"].includes(`${task.status || ""}`.toLowerCase())
-    ).length,
+    activeCount,
+    blockedCount,
+    reviewCount,
+    closedCount,
     staleCount: Array.from(taskIds).filter((taskId) => staleTaskIds.has(taskId)).length,
   };
 }
 
 function currentSessionTaskStatusLabel(tasks = currentSessionTasks()) {
   const counts = currentSessionTaskCounts(tasks);
-  return `${counts.taskCount} current task(s) · ${counts.blockedCount} blocked · ${counts.reviewCount} review · ${counts.staleCount} stale`;
+  return `${counts.activeCount} active · ${counts.reviewCount} review · ${counts.blockedCount} blocked · ${counts.closedCount} closed · ${counts.staleCount} stale`;
 }
 
 function currentSessionAgents() {
@@ -3750,6 +4412,7 @@ function buildMobileAgentDashboardModel() {
   const taskBoard = state.taskBoard;
   const tasks = currentSessionTasks();
   const agents = currentSessionAgents();
+  const counts = currentSessionTaskCounts(tasks);
   const selectedTurns = logicalSessionTurns(state.sessionTurns || []).filter((turn) =>
     !state.selectedSessionId || turn.session_id === state.selectedSessionId
   );
@@ -3776,6 +4439,7 @@ function buildMobileAgentDashboardModel() {
       : state.phase2StatusError
         ? `status unavailable: ${state.phase2StatusError}`
         : "waiting",
+    counts,
     tasks,
     agents,
   };
@@ -3787,19 +4451,26 @@ function renderMobileAgentSummaryStrip(model = buildMobileAgentDashboardModel())
   }
   mobileAgentSummaryStrip.dataset.tone = model.tone;
   const runningAgents = model.agents.filter((agent) => agentIsActive(agent));
-  const delegatedTasks = model.tasks.length;
-  const configuredResources = Number(state.configStatus?.agent_resource_count);
-  const resourceSummary = Number.isFinite(configuredResources) && configuredResources > 0
-    ? ` · ${configuredResources} configured`
+  const counts = model.counts || currentSessionTaskCounts(model.tasks);
+  const lifecycleSummary = mobileAgentLifecycleSummary(counts);
+  const workerLimit = Number(state.configStatus?.agent_resource_count);
+  const resourceSummary = Number.isFinite(workerLimit) && workerLimit > 0
+    ? ` · limit ${workerLimit}`
     : "";
   setText(
     "mobile-agent-summary-title",
-    `${runningAgents.length} running agent${runningAgents.length === 1 ? "" : "s"} · ${delegatedTasks} delegated task${delegatedTasks === 1 ? "" : "s"}${resourceSummary}`,
+    `${runningAgents.length} running · ${lifecycleSummary}${resourceSummary}`,
   );
-  const activeTask = model.tasks.find((task) => !terminalTaskStatus(task.status)) || model.tasks[0];
+  const activeTask =
+    model.tasks.find((task) => taskLifecycleBucket(task.status) === "active") ||
+    model.tasks.find((task) => taskLifecycleBucket(task.status) === "review") ||
+    model.tasks.find((task) => taskLifecycleBucket(task.status) === "blocked") ||
+    model.tasks[0];
   setText(
     "mobile-agent-summary-copy",
-    activeTask ? compactSentence(taskTitle(activeTask), 72) : "No delegated task in this session",
+    activeTask
+      ? compactSentence(`${statusLabel(activeTask.status)}: ${taskTitle(activeTask)}`, 72)
+      : "No Worker task in this session",
   );
   setText("mobile-agent-summary-dot", "");
   if (shell) {
@@ -3821,27 +4492,27 @@ function renderMobileAgentSheet(model = buildMobileAgentDashboardModel()) {
 function renderSystemAgentResourceConfig() {
   const status = state.configStatus;
   const isMaster = status?.agent_mode === "master";
-  const count = Number(state.agentResourceDraftCount ?? status?.agent_resource_count ?? 1);
-  const limit = Number(status?.agent_resource_limit || 5);
+  const workerLimit = Number(state.agentResourceDraftCount ?? status?.agent_resource_count ?? 1);
+  const systemMax = Number(status?.agent_resource_limit || 5);
   const providerMode = status?.agent_resource_provider_mode || "unavailable";
   const providerId = status?.agent_resource_provider_id || "unavailable";
-  setText("settings-agent-resource-count", `${count}`);
-  setText("settings-agent-resource-limit", `${limit}`);
-  setText("settings-agent-resource-summary", status ? `${count} of ${limit}` : "loading");
+  setText("settings-agent-resource-count", `${workerLimit}`);
+  setText("settings-agent-resource-limit", `${systemMax}`);
+  setText("settings-agent-resource-summary", status ? `limit ${workerLimit} · max ${systemMax}` : "loading");
   setText(
     "settings-agent-resource-provider",
     providerMode === "shared" ? `shared · ${providerId}` : providerMode.replaceAll("_", " "),
   );
   const disabled = !status || !isMaster || state.agentResourceSaveInFlight;
   if (settingsAgentResourceDecrement) {
-    settingsAgentResourceDecrement.disabled = disabled || count <= 1;
+    settingsAgentResourceDecrement.disabled = disabled || workerLimit <= 1;
   }
   if (settingsAgentResourceIncrement) {
-    settingsAgentResourceIncrement.disabled = disabled || count >= limit;
+    settingsAgentResourceIncrement.disabled = disabled || workerLimit >= systemMax;
   }
   if (settingsAgentResourceSave) {
-    settingsAgentResourceSave.disabled = disabled || count === Number(status?.agent_resource_count);
-    settingsAgentResourceSave.textContent = state.agentResourceSaveInFlight ? "Saving..." : "Save Worker capacity";
+    settingsAgentResourceSave.disabled = disabled || workerLimit === Number(status?.agent_resource_count);
+    settingsAgentResourceSave.textContent = state.agentResourceSaveInFlight ? "Saving..." : "Save Worker limit";
   }
   const statusText = state.agentResourceSaveError
     ? `Save failed: ${state.agentResourceSaveError}`
@@ -3850,8 +4521,8 @@ function renderSystemAgentResourceConfig() {
       : !status
         ? "Waiting for config truth."
         : !isMaster
-          ? "Worker capacity is configurable only from the active Master."
-          : "1–5 Worker resources · restart and Worker process startup required.";
+          ? "Worker limit is configurable only from the active Master."
+          : "Worker limit 1-5 · restart and Worker process startup required.";
   setText("settings-agent-resource-status", statusText);
 }
 
@@ -3860,9 +4531,9 @@ function adjustAgentResourceDraft(delta) {
   if (!status || status.agent_mode !== "master" || state.agentResourceSaveInFlight) {
     return;
   }
-  const limit = Number(status.agent_resource_limit || 5);
+  const systemMax = Number(status.agent_resource_limit || 5);
   const current = Number(state.agentResourceDraftCount ?? status.agent_resource_count ?? 1);
-  state.agentResourceDraftCount = Math.min(limit, Math.max(1, current + delta));
+  state.agentResourceDraftCount = Math.min(systemMax, Math.max(1, current + delta));
   state.agentResourceSaveMessage = null;
   state.agentResourceSaveError = null;
   renderSettingsShell();
@@ -3891,7 +4562,7 @@ async function submitAgentResourceConfigUpdate() {
     });
     setCommandStatus(agentResourceConfigReceiptStatus(receipt, resourceCount), { stickyMs: 5000 });
     await refreshConfigStatus();
-    state.agentResourceSaveMessage = "Saved. Restart and start the configured Worker processes to activate.";
+    state.agentResourceSaveMessage = "Saved. Restart and start Worker processes up to this limit.";
   } catch (error) {
     state.agentResourceSaveError = error.message;
   } finally {
@@ -3930,6 +4601,23 @@ function renderMobileAgentTaskList(model) {
   });
 }
 
+function mobileAgentLifecycleSummary(counts) {
+  const pieces = [];
+  if (counts.activeCount > 0) {
+    pieces.push(`${counts.activeCount} running task${counts.activeCount === 1 ? "" : "s"}`);
+  }
+  if (counts.reviewCount > 0) {
+    pieces.push(`${counts.reviewCount} review task${counts.reviewCount === 1 ? "" : "s"}`);
+  }
+  if (counts.blockedCount > 0) {
+    pieces.push(`${counts.blockedCount} blocked task${counts.blockedCount === 1 ? "" : "s"}`);
+  }
+  if (pieces.length === 0 && counts.closedCount > 0) {
+    pieces.push(`${counts.closedCount} closed task${counts.closedCount === 1 ? "" : "s"}`);
+  }
+  return pieces.length > 0 ? pieces.join(" · ") : "0 tasks";
+}
+
 function mobileAgentCard({ title, meta, copy, tone = "phase2-muted", interactive = false }) {
   const card = document.createElement(interactive ? "button" : "section");
   card.className = `mobile-agent-card ${tone}`;
@@ -3964,6 +4652,7 @@ function renderPhase2Dashboard() {
   renderTaskHistoryProjection();
   renderWorkerControlProjection();
   const mobileModel = buildMobileAgentDashboardModel();
+  renderSessionRelationHeader(mobileModel);
   renderMobileAgentSummaryStrip(mobileModel);
   renderMobileAgentSheet(mobileModel);
 }
@@ -4345,17 +5034,172 @@ function returnToParentSession() {
   switchConversationSession(parentSessionId);
 }
 
-function renderWorkerSessionNavigation() {
+function renderWorkerSessionNavigation(selectedWorkerSession = workerChildSessionForSessionId(state.selectedSessionId)) {
   if (!workerSessionNav) {
     return;
   }
-  const selectedWorkerSession = workerChildSessionForSessionId(state.selectedSessionId);
   if (!selectedWorkerSession) {
     workerSessionNav.hidden = true;
     return;
   }
   workerSessionNav.hidden = false;
   setText("worker-session-nav-title", selectedWorkerSession.title || selectedWorkerSession.session_id);
+}
+
+function renderSessionRelationHeader(model = buildMobileAgentDashboardModel()) {
+  if (!sessionRelationHeader) {
+    return;
+  }
+  const selectedWorkerSession = workerChildSessionForSessionId(state.selectedSessionId);
+  const parentSession = selectedParentSessionSummary();
+  const parentSessionId = parentSession && parentSession.session_id;
+  const tasks = parentSessionId ? workerChildSessionsForParent(parentSessionId) : [];
+  const counts = currentSessionTaskCounts(model.tasks || []);
+  const runningAgents = (model.agents || []).filter((agent) => agentIsActive(agent)).length;
+  const workerLimit = Number(state.configStatus?.agent_resource_count);
+  const workerLimitText = Number.isFinite(workerLimit) && workerLimit > 0 ? ` · limit ${workerLimit}` : "";
+  const title = selectedWorkerSession
+    ? selectedWorkerSession.title || selectedWorkerSession.session_id
+    : parentSession
+      ? parentSession.title || parentSession.session_id
+      : state.selectedSessionId || "No session selected";
+  const activeTask =
+    (model.tasks || []).find((task) => taskLifecycleBucket(task.status) === "active") ||
+    (model.tasks || []).find((task) => taskLifecycleBucket(task.status) === "review") ||
+    (model.tasks || []).find((task) => taskLifecycleBucket(task.status) === "blocked") ||
+    (model.tasks || [])[0];
+  const copy = selectedWorkerSession
+    ? `Parent Master: ${parentSession ? parentSession.title || parentSession.session_id : selectedWorkerSession.parent_session_id || "unavailable"}`
+    : activeTask
+      ? `${statusLabel(activeTask.status)}: ${taskTitle(activeTask)}`
+      : "Click to open session tree";
+
+  sessionRelationHeader.dataset.open = state.sessionTreeOpen ? "true" : "false";
+  sessionRelationHeader.dataset.selectedKind = selectedWorkerSession ? "worker" : "master";
+  setText("session-relation-kicker", selectedWorkerSession ? "Worker session" : "Master session");
+  setText("session-relation-title", compactSentence(title, 96));
+  setText(
+    "session-relation-metrics",
+    `${counts.activeCount} running · ${counts.reviewCount} review · ${counts.blockedCount} blocked · ${counts.closedCount} closed · ${runningAgents} agents${workerLimitText}`,
+  );
+  setText("session-relation-copy", compactSentence(copy, 132));
+  if (sessionRelationToggleButton) {
+    sessionRelationToggleButton.setAttribute("aria-expanded", state.sessionTreeOpen ? "true" : "false");
+  }
+  if (sessionTreeDropdown) {
+    sessionTreeDropdown.hidden = !state.sessionTreeOpen;
+  }
+  renderWorkerSessionNavigation(selectedWorkerSession);
+  renderSessionTree(parentSession, tasks, selectedWorkerSession);
+}
+
+function renderSessionTree(parentSession, workerSessions, selectedWorkerSession) {
+  if (!sessionTree) {
+    return;
+  }
+  sessionTree.replaceChildren();
+  if (!parentSession) {
+    const empty = document.createElement("section");
+    empty.className = "session-tree-node";
+    empty.append(
+      sessionTreeBranch(""),
+      sessionTreeText("No persisted Master session selected", "Create or select a session to inspect Worker relationships."),
+      sessionTreeStatus("waiting", "phase2-muted"),
+    );
+    sessionTree.appendChild(empty);
+    return;
+  }
+  sessionTree.appendChild(
+    sessionTreeNode({
+      kind: "master",
+      sessionId: parentSession.session_id,
+      title: parentSession.title || parentSession.session_id,
+      meta: [parentSession.session_id, normalizeCwd(parentSession.cwd)].filter(Boolean).join(" · "),
+      status: selectedWorkerSession ? "Back" : "Selected",
+      selected: state.selectedSessionId === parentSession.session_id,
+      onClick: () => switchConversationSession(parentSession.session_id),
+    }),
+  );
+  if (workerSessions.length === 0) {
+    const empty = document.createElement("section");
+    empty.className = "session-tree-node is-worker";
+    empty.append(
+      sessionTreeBranch("worker"),
+      sessionTreeText("No Worker child session", "TaskBoard has no current child tasks for this Master session."),
+      sessionTreeStatus("0 tasks", "phase2-muted"),
+    );
+    sessionTree.appendChild(empty);
+    return;
+  }
+  workerSessions.forEach((workerSession) => {
+    sessionTree.appendChild(
+      sessionTreeNode({
+        kind: "worker",
+        sessionId: workerSession.session_id,
+        taskId: workerSession.task_id,
+        title: workerSession.title || workerSession.session_id,
+        meta: [
+          assigneeLabel(workerSession.assignee_agent_id),
+          statusLabel(workerSession.latest_status),
+          workerSession.session_id,
+        ].filter(Boolean).join(" · "),
+        status: statusLabel(workerSession.latest_status),
+        statusClass: phase2StatusClass(workerSession.latest_status),
+        selected: state.selectedSessionId === workerSession.session_id,
+        onClick: () => switchConversationSession(workerSession.session_id),
+      }),
+    );
+  });
+}
+
+function sessionTreeNode({ kind, sessionId = "", taskId = "", title, meta, status, statusClass = "phase2-muted", selected = false, onClick }) {
+  const node = document.createElement(onClick ? "button" : "section");
+  node.className = [
+    "session-tree-node",
+    kind === "worker" ? "is-worker" : "is-master",
+    selected ? "is-selected" : "",
+  ].filter(Boolean).join(" ");
+  node.dataset.relationSchema = kind === "worker" ? "UiTaskSnapshotProjection" : "UiSessionMetadataProjection";
+  node.dataset.relationSource = kind === "worker" ? "TaskBoard.worker_session_id" : "SessionMetadata.session_id";
+  if (sessionId) {
+    node.dataset.sessionId = sessionId;
+  }
+  if (taskId) {
+    node.dataset.taskId = taskId;
+  }
+  if (onClick) {
+    node.type = "button";
+    node.addEventListener("click", onClick);
+  }
+  node.append(sessionTreeBranch(kind), sessionTreeText(title, meta), sessionTreeStatus(status, statusClass));
+  return node;
+}
+
+function sessionTreeBranch(kind) {
+  const branch = document.createElement("span");
+  branch.className = "session-tree-branch";
+  branch.dataset.kind = kind || "";
+  return branch;
+}
+
+function sessionTreeText(title, meta) {
+  const copy = document.createElement("span");
+  copy.className = "session-tree-node-copy";
+  const titleNode = document.createElement("span");
+  titleNode.className = "session-tree-node-title";
+  titleNode.textContent = compactSentence(title || "Session", 110);
+  const metaNode = document.createElement("span");
+  metaNode.className = "session-tree-node-meta";
+  metaNode.textContent = compactSentence(meta || "relationship truth unavailable", 150);
+  copy.append(titleNode, metaNode);
+  return copy;
+}
+
+function sessionTreeStatus(status, statusClass) {
+  const node = document.createElement("span");
+  node.className = ["session-tree-node-status", statusClass || "phase2-muted"].join(" ");
+  node.textContent = status || "status";
+  return node;
 }
 
 function currentWorkerControlTarget() {
@@ -4448,16 +5292,45 @@ function terminalTaskStatus(status) {
   return ["approved", "closed", "cancelled", "failed"].includes(`${status || ""}`.toLowerCase());
 }
 
+function taskLifecycleBucket(status) {
+  const normalized = `${status || ""}`.toLowerCase();
+  if (["blocked", "failed", "cancelled"].includes(normalized)) {
+    return "blocked";
+  }
+  if (["review_ready", "review_submitted", "approved"].includes(normalized)) {
+    return "review";
+  }
+  if (["closed", "completed"].includes(normalized)) {
+    return "closed";
+  }
+  if (normalized === "") {
+    return "unknown";
+  }
+  return terminalTaskStatus(normalized) ? "closed" : "active";
+}
+
 function phase2AgentLabel(agentId, explicitIndex = null) {
   const normalized = normalizeAgentId(agentId);
   if (normalized === "master") {
     return "Master";
   }
-  const agents = (state.agentBoard && state.agentBoard.agents) || [];
+  const agents = ((state.agentBoard && state.agentBoard.agents) || []).filter(
+    (agent) => normalizeAgentId(agent.agent_id) !== "master",
+  );
   const index = explicitIndex === null
     ? agents.findIndex((agent) => normalizeAgentId(agent.agent_id) === normalized)
     : explicitIndex;
-  return `Worker ${index >= 0 ? index + 1 : ""}`.trim();
+  const ordinal = index >= 0 ? index + 1 : workerOrdinalFromAgentId(normalized);
+  return `Worker ${ordinal || ""}`.trim();
+}
+
+function workerOrdinalFromAgentId(agentId) {
+  const normalized = `${agentId || ""}`.trim();
+  if (normalized === "worker") {
+    return 1;
+  }
+  const match = normalized.match(/^worker-(\d+)$/);
+  return match ? Number.parseInt(match[1], 10) : null;
 }
 
 function assigneeLabel(agentId) {
@@ -4479,11 +5352,10 @@ function lifecycleActivityLabel(agent) {
 }
 
 function freshnessLabel(timestamp) {
-  const value = Number(timestamp || 0);
-  if (!value) {
+  const ms = timestampToMilliseconds(timestamp);
+  if (!ms) {
     return null;
   }
-  const ms = value > 10_000_000_000 ? value : value * 1000;
   const elapsed = Date.now() - ms;
   if (!Number.isFinite(elapsed) || elapsed < 0) {
     return "just now";
@@ -4664,7 +5536,9 @@ function renderSettingsShell() {
   setText("settings-provider-auth", state.configStatus ? `${settingsAuthTypeLabel(state.configStatus.provider_auth_type)} · ${state.configStatus.provider_auth_source}` : "loading");
   setText("settings-restart-required", state.configStatus?.restart_required_on_change ? "restart required after changes" : "no restart flag");
   setText("settings-config-error", state.configStatusError || "none");
+  syncProviderSelectionControls();
   syncSettingsProviderForm();
+  renderSettingsProviderRegistry();
   renderSystemAgentResourceConfig();
   showInspectorPanel(state.inspectorPanel);
 }
@@ -4673,15 +5547,203 @@ function settingsAuthTypeLabel(authType) {
   return authType === "apikey" ? "credential" : (authType || "credential");
 }
 
+function configProviderRegistry() {
+  const registry = Array.isArray(state.configStatus?.provider_registry)
+    ? state.configStatus.provider_registry
+    : [];
+  if (registry.length > 0) {
+    return registry;
+  }
+  if (!state.configStatus?.provider_id) {
+    return [];
+  }
+  return [{
+    provider_id: state.configStatus.provider_id,
+    enabled: true,
+    provider_type: state.configStatus.provider_type,
+    provider_protocol: state.configStatus.provider_protocol,
+    provider_base_url: state.configStatus.provider_base_url || "",
+    provider_base_url_host: state.configStatus.provider_base_url_host,
+    default_model: state.configStatus.default_model,
+    provider_auth_type: state.configStatus.provider_auth_type,
+    provider_auth_source: state.configStatus.provider_auth_source,
+  }];
+}
+
+function configProviderById(providerId) {
+  return configProviderRegistry().find((provider) => provider.provider_id === providerId) || null;
+}
+
+function providerOptionLabel(provider) {
+  const stateLabel = provider.enabled === false ? "disabled" : "enabled";
+  return `${provider.provider_id} · ${provider.provider_protocol} · ${provider.default_model} · ${stateLabel}`;
+}
+
+function replaceSelectOptions(select, providers, value, options = {}) {
+  if (!select) {
+    return;
+  }
+  const previous = select.value;
+  const hasExplicitValue = value !== undefined && value !== null;
+  select.replaceChildren();
+  if (options.includeNone) {
+    const none = document.createElement("option");
+    none.value = "";
+    none.textContent = "No fallback";
+    select.append(none);
+  }
+  providers.forEach((provider) => {
+    if (options.excludeProviderId && provider.provider_id === options.excludeProviderId) {
+      return;
+    }
+    const option = document.createElement("option");
+    option.value = provider.provider_id;
+    option.disabled = provider.enabled === false;
+    option.textContent = providerOptionLabel(provider);
+    select.append(option);
+  });
+  if (hasExplicitValue) {
+    select.value = value;
+  }
+  if (!hasExplicitValue && !select.value && previous && [...select.options].some((option) => option.value === previous)) {
+    select.value = previous;
+  }
+  select.dataset.optionsInitialized = "true";
+}
+
+function syncProviderSelectionControls() {
+  const status = state.configStatus;
+  const providers = configProviderRegistry();
+  const primaryId = state.providerSelectionDraft?.providerId || status?.provider_id || "";
+  replaceSelectOptions(settingsProviderCurrentSelect, providers, primaryId);
+  const selectedPrimary = settingsProviderCurrentSelect?.value || status?.provider_id || "";
+  const fallbackDraft = state.providerSelectionDraft
+    ? state.providerSelectionDraft.fallbackProviderId || ""
+    : status?.fallback_provider_id || "";
+  replaceSelectOptions(settingsProviderFallbackSelect, providers, fallbackDraft, {
+    includeNone: true,
+    excludeProviderId: selectedPrimary,
+  });
+  const currentFallback = settingsProviderFallbackSelect?.value || "";
+  if (state.providerSelectionDraft) {
+    state.providerSelectionDraft = {
+      providerId: selectedPrimary,
+      fallbackProviderId: currentFallback,
+    };
+  }
+  const selectionChanged =
+    Boolean(status) &&
+    (selectedPrimary !== (status.provider_id || "") ||
+      currentFallback !== (status.fallback_provider_id || ""));
+  if (settingsProviderSwitchButton) {
+    settingsProviderSwitchButton.disabled =
+      state.providerSelectionInFlight || !status || !selectedPrimary || !selectionChanged;
+    settingsProviderSwitchButton.textContent = state.providerSelectionInFlight
+      ? "Saving..."
+      : "Switch provider";
+  }
+}
+
+function updateProviderSelectionDraftFromControls() {
+  state.providerSelectionDraft = {
+    providerId: settingsProviderCurrentSelect?.value || "",
+    fallbackProviderId: settingsProviderFallbackSelect?.value || "",
+  };
+}
+
+function fillSettingsProviderFormFromProvider(provider) {
+  if (!provider) {
+    return;
+  }
+  if (settingsProviderIdInput) {
+    settingsProviderIdInput.value = provider.provider_id || "";
+  }
+  if (settingsProviderTypeInput) {
+    settingsProviderTypeInput.value = provider.provider_type || "openai";
+  }
+  if (settingsProviderProtocolInput) {
+    settingsProviderProtocolInput.value = provider.provider_protocol || "responses";
+  }
+  if (settingsProviderUrlInput) {
+    settingsProviderUrlInput.value = provider.provider_base_url || "";
+  }
+  if (settingsProviderModelInput) {
+    settingsProviderModelInput.value = provider.default_model || "";
+  }
+  if (settingsProviderEnvInput && document.activeElement !== settingsProviderEnvInput) {
+    settingsProviderEnvInput.value = "";
+  }
+  setText(
+    "settings-provider-save-status",
+    provider.provider_auth_source === "inline"
+      ? "This provider uses inline auth in config. Saving from UI will rewrite it to env-var auth."
+      : "Loaded safe provider fields. Enter the credential env var before saving.",
+  );
+}
+
+function renderSettingsProviderRegistry() {
+  if (!settingsProviderRegistryList) {
+    return;
+  }
+  const providers = configProviderRegistry();
+  if (!state.configStatus) {
+    settingsProviderRegistryList.textContent = state.configStatusError || "loading provider registry";
+    return;
+  }
+  if (providers.length === 0) {
+    settingsProviderRegistryList.textContent = "No providers configured.";
+    return;
+  }
+  const cards = providers.map((provider) => {
+    const card = document.createElement("article");
+    card.className = "settings-provider-card";
+    card.classList.toggle("is-active", provider.provider_id === state.configStatus.provider_id);
+    card.classList.toggle("is-disabled", provider.enabled === false);
+    card.dataset.providerId = provider.provider_id || "";
+    const title = document.createElement("div");
+    title.className = "settings-provider-card-title";
+    const name = document.createElement("span");
+    name.textContent = provider.provider_id || "unknown";
+    const badge = document.createElement("span");
+    badge.textContent = provider.provider_id === state.configStatus.provider_id
+      ? "current"
+      : provider.enabled === false
+        ? "disabled"
+        : "available";
+    title.append(name, badge);
+    const meta = document.createElement("div");
+    meta.className = "settings-provider-card-meta";
+    meta.textContent = [
+      `${provider.provider_type}/${provider.provider_protocol}`,
+      provider.default_model,
+      provider.provider_base_url_host || provider.provider_base_url,
+      `${settingsAuthTypeLabel(provider.provider_auth_type)} ${provider.provider_auth_source}`,
+    ].filter(Boolean).join(" · ");
+    const action = document.createElement("button");
+    action.className = "settings-secondary-action";
+    action.type = "button";
+    action.textContent = "Load into form";
+    action.addEventListener("click", () => fillSettingsProviderFormFromProvider(provider));
+    card.append(title, meta, action);
+    return card;
+  });
+  settingsProviderRegistryList.replaceChildren(...cards);
+}
+
 function syncSettingsProviderForm() {
   const status = state.configStatus;
-  setInputValueIfNotFocused(settingsProviderIdInput, status?.provider_id || "");
-  setInputValueIfNotFocused(settingsProviderTypeInput, status?.provider_type || "openai");
-  setInputValueIfNotFocused(settingsProviderProtocolInput, status?.provider_protocol || "responses");
-  setInputValueIfNotFocused(settingsProviderModelInput, status?.default_model || "");
+  const provider = configProviderById(status?.provider_id) || null;
+  setInputValueIfNotFocused(settingsProviderIdInput, provider?.provider_id || status?.provider_id || "");
+  setInputValueIfNotFocused(settingsProviderTypeInput, provider?.provider_type || status?.provider_type || "openai");
+  setInputValueIfNotFocused(settingsProviderProtocolInput, provider?.provider_protocol || status?.provider_protocol || "responses");
+  setInputValueIfNotFocused(settingsProviderUrlInput, provider?.provider_base_url || status?.provider_base_url || "");
+  setInputValueIfNotFocused(settingsProviderModelInput, provider?.default_model || status?.default_model || "");
+  if (settingsProviderEnvInput && document.activeElement !== settingsProviderEnvInput && !settingsProviderEnvInput.value) {
+    settingsProviderEnvInput.value = "";
+  }
   if (settingsProviderSaveButton) {
     settingsProviderSaveButton.disabled = state.configSaveInFlight;
-    settingsProviderSaveButton.textContent = state.configSaveInFlight ? "Saving..." : "Save provider config";
+    settingsProviderSaveButton.textContent = state.configSaveInFlight ? "Saving..." : "Add/update provider";
   }
 }
 
@@ -4711,10 +5773,10 @@ async function submitProviderConfigUpdate(event) {
   setText("settings-provider-save-status", "Saving config...");
   renderSettingsShell();
   try {
-    const receipt = await adpCommand({ UpdateProviderConfig: { update } });
-    setCommandStatus(providerConfigReceiptStatus(receipt), { stickyMs: 5000 });
+    const receipt = await adpCommand({ UpsertProviderConfig: { update } });
+    setCommandStatus(providerConfigUpsertReceiptStatus(receipt), { stickyMs: 5000 });
     await refreshConfigStatus();
-    setText("settings-provider-save-status", "Saved. Restart required before active runtime changes.");
+    setText("settings-provider-save-status", "Provider definition saved. Restart required before active runtime changes.");
   } catch (error) {
     state.configStatusError = error.message;
     setText("settings-provider-save-status", `Save failed: ${error.message}`);
@@ -4725,9 +5787,40 @@ async function submitProviderConfigUpdate(event) {
   }
 }
 
+async function submitProviderSelectionUpdate() {
+  if (!state.configStatus) {
+    setText("settings-provider-switch-status", "Config status is not loaded yet.");
+    return;
+  }
+  const providerId = settingsProviderCurrentSelect?.value.trim() || "";
+  const fallbackProviderId = settingsProviderFallbackSelect?.value.trim() || "";
+  const selection = {
+    agent_name: state.configStatus.agent_name,
+    provider_id: providerId,
+    fallback_provider_id: fallbackProviderId || null,
+  };
+  state.providerSelectionInFlight = true;
+  setText("settings-provider-switch-status", "Saving provider selection...");
+  renderSettingsShell();
+  try {
+    const receipt = await adpCommand({ UpdateAgentProviderSelection: { selection } });
+    setCommandStatus(providerSelectionReceiptStatus(receipt), { stickyMs: 5000 });
+    await refreshConfigStatus();
+    state.providerSelectionDraft = null;
+    setText("settings-provider-switch-status", "Provider selection saved. Restart required before active runtime changes.");
+  } catch (error) {
+    state.configStatusError = error.message;
+    setText("settings-provider-switch-status", `Switch failed: ${error.message}`);
+    renderSettingsShell();
+  } finally {
+    state.providerSelectionInFlight = false;
+    renderSettingsShell();
+  }
+}
+
 function renderTurnMeta() {
   if (state.pendingSubmitError) {
-    setText("turn-status", "dispatch status unknown · refresh needed");
+    setText("turn-status", "checking service truth · submit receipt not verified");
   }
   const turn = activeTurnForSelectedSession();
   if (!turn) {
@@ -4748,8 +5841,8 @@ function renderTurnMeta() {
   setShellDataset("selectedTurn", turn.turn_id || "");
   setShellDataset("selectedCwd", turn.cwd || state.selectedCwd || "");
   const runningTools = (turn.tool_activities || []).filter((tool) => tool.status === "Waiting" || tool.status === "waiting");
-  const turnStatus = turn.terminal_text
-    ? "completed"
+  const turnStatus = turn.terminal_text || isTerminalStatus(turn.terminal_status) || isToolPendingStatus(turn.terminal_status)
+    ? terminalTurnStatusLabel(turn.terminal_status)
     : runningTools.length > 0
       ? waitingToolStatus(runningTools).replace("tool executing", "tool running")
       : turnIsWaitingForModelResponse(turn)
@@ -4770,6 +5863,13 @@ setInterval(() => {
   }
 }, 1000);
 
+setInterval(() => {
+  if (document.visibilityState === "hidden" || !hasNonTerminalProtocolActivity()) {
+    return;
+  }
+  refreshProtocolStateAfterForeground("live truth watchdog");
+}, liveTruthWatchdogIntervalMs);
+
 function renderModelHasLiveLifecycle() {
   if (state.submitInFlight || !!state.pendingUserInput) {
     return true;
@@ -4777,12 +5877,27 @@ function renderModelHasLiveLifecycle() {
   return buildConversationRenderModel().turns.some((turn) => turn.lifecycle.isLive);
 }
 
+function hasNonTerminalProtocolActivity() {
+  if (state.submitInFlight || !!state.pendingUserInput) {
+    return true;
+  }
+  return conversationTurnsForRender().some((turn) => {
+    if (!turn || turn.terminal_text || isTerminalStatus(turn.terminal_status) || isToolPendingStatus(turn.terminal_status)) {
+      return false;
+    }
+    const waitingTools = (turn.tool_activities || []).some(
+      (tool) => tool.status === "Waiting" || tool.status === "waiting",
+    );
+    return waitingTools || !!turn.model_request;
+  });
+}
+
 function renderAll() {
   setText("workspace-status", state.adpStatus);
   renderDebugDetailsToggle();
   renderSessions();
   renderTurnMeta();
-  renderWorkerSessionNavigation();
+  renderSessionRelationHeader();
   renderMessages();
   renderAttachmentTray();
   renderDebug();
@@ -4865,6 +5980,110 @@ async function refreshAllProtocolState() {
   await refreshCheckpoints();
   await refreshConfigStatus();
   await refreshPhase2Status();
+}
+
+function shouldRefreshAfterForeground() {
+  if (document.visibilityState === "hidden") {
+    return false;
+  }
+  if (state.foregroundRefreshInFlight) {
+    return false;
+  }
+  if (!hasRecoverableProtocolState()) {
+    return false;
+  }
+  const now = Date.now();
+  if (now - state.foregroundRefreshLastAt < foregroundRefreshMinIntervalMs) {
+    return false;
+  }
+  state.foregroundRefreshLastAt = now;
+  return true;
+}
+
+function refreshProtocolStateAfterForeground(reason) {
+  if (!shouldRefreshAfterForeground()) {
+    return;
+  }
+  state.foregroundRefreshInFlight = true;
+  setBackgroundCommandStatus(`checking service truth after ${reason}...`);
+  refreshAllProtocolState()
+    .then(() => {
+      clearPendingUserInputIfMaterialized();
+      renderAll();
+      setBackgroundCommandStatus(`service truth refreshed after ${reason}`);
+    })
+    .catch((error) => {
+      setCommandStatus(`service refresh after ${reason} failed: ${error.message}`, { stickyMs: 8000 });
+      scheduleAdpReconnect(reason);
+    })
+    .finally(() => {
+      state.foregroundRefreshInFlight = false;
+    });
+}
+
+async function refreshAfterAmbiguousSubmitFailure(error) {
+  const refreshErrors = [];
+  const captureRefresh = async (refresh) => {
+    try {
+      await refresh();
+    } catch (refreshError) {
+      refreshErrors.push(refreshError && refreshError.message ? refreshError.message : `${refreshError}`);
+    }
+  };
+  await captureRefresh(refreshSessions);
+  await captureRefresh(refreshSelectedSession);
+  if (!pendingUserInputIsMaterialized()) {
+    await captureRefresh(refreshTurn);
+  }
+  await captureRefresh(refreshPhase2Status);
+  clearPendingUserInputIfMaterialized();
+  const materialized = !state.pendingUserInput;
+  const baseMessage = error && error.message ? error.message : `${error}`;
+  return {
+    materialized,
+    message: refreshErrors.length > 0
+      ? `${baseMessage}; refresh also failed: ${refreshErrors.join("; ")}`
+      : baseMessage,
+  };
+}
+
+function stopAmbiguousSubmitRecoveryPolling() {
+  if (state.ambiguousSubmitRecoveryTimer) {
+    window.clearInterval(state.ambiguousSubmitRecoveryTimer);
+  }
+  state.ambiguousSubmitRecoveryTimer = null;
+}
+
+function startAmbiguousSubmitRecoveryPolling(startedAtMs) {
+  stopAmbiguousSubmitRecoveryPolling();
+  state.ambiguousSubmitRecoveryStartedAt = startedAtMs || Date.now();
+  let attempts = 0;
+  state.ambiguousSubmitRecoveryTimer = window.setInterval(async () => {
+    if (!state.pendingUserInput) {
+      stopAmbiguousSubmitRecoveryPolling();
+      return;
+    }
+    attempts += 1;
+    try {
+      const recovery = await refreshAfterAmbiguousSubmitFailure(new Error("service truth refresh pending"));
+      if (recovery.materialized) {
+        state.pendingSubmitError = null;
+        state.pendingAttachments = [];
+        renderAll();
+        setCommandStatus("request accepted by service truth; lifecycle is visible", { stickyMs: 5000 });
+        stopAmbiguousSubmitRecoveryPolling();
+      } else {
+        renderAll();
+      }
+    } catch (error) {
+      state.pendingSubmitError = error.message;
+      renderAll();
+    }
+    if (attempts >= 20) {
+      setCommandStatus("submit receipt still not verified after service checks; refresh before retry", { stickyMs: 8000 });
+      stopAmbiguousSubmitRecoveryPolling();
+    }
+  }, 2000);
 }
 
 function ensureTurnSubscription() {
@@ -4959,7 +6178,20 @@ async function submitUserInput(text) {
 }
 
 function activeTurnId() {
+  if (!turnCanBeCancelled(state.turn)) {
+    return null;
+  }
   return state.turn && state.turn.turn_id ? state.turn.turn_id : null;
+}
+
+function turnCanBeCancelled(turn) {
+  return !!(
+    turn &&
+    turn.turn_id &&
+    !turn.terminal_text &&
+    !isTerminalStatus(turn.terminal_status) &&
+    !isToolPendingStatus(turn.terminal_status)
+  );
 }
 
 async function cancelActiveTurn() {
@@ -4971,6 +6203,7 @@ async function cancelActiveTurn() {
     state.pendingSubmitSessionId = null;
     state.pendingSubmitError = null;
     state.pendingAttachments = [];
+    state.acceptedSubmitReceipt = null;
     state.lifecycleClocks.clear();
     state.submitStartedAt = null;
     setCommandStatus("no active turn; input cleared", { stickyMs: 3000 });
@@ -4993,6 +6226,7 @@ async function cancelActiveTurn() {
   state.pendingSubmitSessionId = null;
   state.pendingSubmitError = null;
   state.pendingAttachments = [];
+  state.acceptedSubmitReceipt = null;
   state.lifecycleClocks.clear();
   state.submitStartedAt = null;
   state.submitInFlight = false;
@@ -5044,6 +6278,7 @@ async function runSlashCommand(rawText) {
     state.pendingSubmitSessionId = null;
     state.pendingSubmitError = null;
     state.pendingAttachments = [];
+    state.acceptedSubmitReceipt = null;
     state.lifecycleClocks.clear();
     state.submitStartedAt = null;
   }
@@ -5098,6 +6333,7 @@ async function runSlashCommand(rawText) {
       state.pendingSubmitSessionId = null;
       state.pendingSubmitError = null;
       state.pendingAttachments = [];
+      state.acceptedSubmitReceipt = null;
       state.lifecycleClocks.clear();
       state.submitStartedAt = null;
       state.submitInFlight = false;
@@ -5185,7 +6421,10 @@ composerForm.addEventListener("submit", async (event) => {
   state.pendingSubmitSessionId = state.selectedSessionId;
   state.pendingSubmitError = null;
   state.pendingAttachments = attachments;
+  state.acceptedSubmitReceipt = null;
   state.submitStartedAt = Date.now();
+  state.ambiguousSubmitRecoveryStartedAt = state.submitStartedAt;
+  stopAmbiguousSubmitRecoveryPolling();
   state.submitInFlight = true;
   composerInput.value = "";
   state.forceScrollToBottom = true;
@@ -5198,6 +6437,7 @@ composerForm.addEventListener("submit", async (event) => {
     state.submitStartedAt = null;
     state.pendingSubmitError = null;
     state.pendingAttachments = [];
+    state.acceptedSubmitReceipt = null;
     try {
       await refreshAllProtocolState();
       renderCommandStatus();
@@ -5205,14 +6445,25 @@ composerForm.addEventListener("submit", async (event) => {
       setCommandStatus(`${commandReceiptStatus(receipt)} (refresh failed: ${error.message})`);
     }
   } catch (error) {
+    const submittedAt = state.submitStartedAt || state.ambiguousSubmitRecoveryStartedAt || Date.now();
     state.submitInFlight = false;
     state.submitStartedAt = null;
-    state.pendingSubmitError = error.message;
     composerInput.value = "";
     state.forceScrollToBottom = true;
+    const recovery = await refreshAfterAmbiguousSubmitFailure(error);
+    if (recovery.materialized) {
+      clearCurrentAttachments();
+      state.pendingSubmitError = null;
+      state.pendingAttachments = [];
+      renderAll();
+      setCommandStatus("request is visible after service refresh; continue from current conversation state", { stickyMs: 5000 });
+      return;
+    }
+    state.pendingSubmitError = recovery.message;
+    startAmbiguousSubmitRecoveryPolling(submittedAt);
     renderMessages();
     renderTurnMeta();
-    setCommandStatus(`dispatch status unknown; refresh before duplicate send. Use ↑ to recall input. Draft attachments retained: ${error.message}`);
+    setCommandStatus(`submit receipt not verified after service refresh; checking service truth before duplicate send. Use ↑ to recall input. Draft attachments retained: ${recovery.message}`);
   }
 });
 
@@ -5298,6 +6549,13 @@ if (closeMobileAgentSheetButton) {
 if (workerSessionBackButton) {
   workerSessionBackButton.addEventListener("click", returnToParentSession);
 }
+
+if (sessionRelationToggleButton) {
+  sessionRelationToggleButton.addEventListener("click", () => {
+    state.sessionTreeOpen = !state.sessionTreeOpen;
+    renderSessionRelationHeader();
+  });
+}
 if (settingsAgentResourceDecrement) {
   settingsAgentResourceDecrement.addEventListener("click", () => adjustAgentResourceDraft(-1));
 }
@@ -5333,6 +6591,27 @@ if (settingsProviderForm) {
     submitProviderConfigUpdate(event).catch((error) => {
       state.configSaveInFlight = false;
       setText("settings-provider-save-status", `Save failed: ${error.message}`);
+      renderSettingsShell();
+    });
+  });
+}
+if (settingsProviderCurrentSelect) {
+  settingsProviderCurrentSelect.addEventListener("change", () => {
+    updateProviderSelectionDraftFromControls();
+    syncProviderSelectionControls();
+  });
+}
+if (settingsProviderFallbackSelect) {
+  settingsProviderFallbackSelect.addEventListener("change", () => {
+    updateProviderSelectionDraftFromControls();
+    syncProviderSelectionControls();
+  });
+}
+if (settingsProviderSwitchButton) {
+  settingsProviderSwitchButton.addEventListener("click", () => {
+    submitProviderSelectionUpdate().catch((error) => {
+      state.providerSelectionInFlight = false;
+      setText("settings-provider-switch-status", `Switch failed: ${error.message}`);
       renderSettingsShell();
     });
   });
@@ -5509,6 +6788,20 @@ if (streamStageForScrollLock) {
   streamStageForScrollLock.addEventListener("scroll", syncUserScrollLock, { passive: true });
 }
 window.addEventListener("scroll", syncUserScrollLock, { passive: true });
+window.addEventListener("pageshow", () => {
+  refreshProtocolStateAfterForeground("page restore");
+});
+window.addEventListener("focus", () => {
+  refreshProtocolStateAfterForeground("app focus");
+});
+window.addEventListener("online", () => {
+  refreshProtocolStateAfterForeground("network restore");
+});
+document.addEventListener("visibilitychange", () => {
+  if (document.visibilityState === "visible") {
+    refreshProtocolStateAfterForeground("app resume");
+  }
+});
 if (window.ResizeObserver) {
   const composerResizeObserver = new ResizeObserver(updateComposerClearance);
   const composerCard = document.querySelector(".composer-card");
@@ -5562,12 +6855,7 @@ document.addEventListener("keydown", (event) => {
     return;
   }
   event.preventDefault();
-  if (state.mobileAgentSheetOpen) {
-    setMobileAgentSheetOpen(false);
-    return;
-  }
-  if (state.mobileDrawer) {
-    closeMobileDrawer();
+  if (closeVisibleNavigationSurface()) {
     return;
   }
   const hasLiveTurn = state.submitInFlight || (state.turn && turnIsCurrentLiveTurn(state.turn));
@@ -5594,6 +6882,76 @@ document.addEventListener("keydown", (event) => {
   setCommandStatus("press Esc again to rollback latest session turn", { stickyMs: 1200 });
 });
 
+function installWebUiTestHooks() {
+  if (!globalThis.__freehandEnableTestHooks) {
+    return;
+  }
+  globalThis.__freehandWebUiTest = {
+    resetAmbiguousSubmitState(sessionId, prompt) {
+      state.sessions = [];
+      state.sessionListLoaded = false;
+      state.sessionTurns = [];
+      state.turn = null;
+      state.publicConversation = [];
+      state.debug = null;
+      state.taskBoard = null;
+      state.agentBoard = null;
+      state.eventInbox = null;
+      state.taskHistory = null;
+      state.workerControl = null;
+      state.draftSessionId = sessionId;
+      state.pendingUserInput = prompt;
+      state.pendingSubmitId = null;
+      state.pendingSubmitSessionId = sessionId;
+      state.pendingSubmitError = null;
+      state.pendingAttachments = [];
+      state.acceptedSubmitReceipt = null;
+      state.submitInFlight = false;
+      state.submitStartedAt = Date.now();
+      state.ambiguousSubmitRecoveryStartedAt = state.submitStartedAt;
+      setSelectedSessionId(sessionId);
+      renderAll();
+    },
+    setAdpQueryForTest(handler) {
+      adpQuery = handler;
+    },
+    refreshAfterAmbiguousSubmitFailure(message) {
+      return refreshAfterAmbiguousSubmitFailure(new Error(message || "simulated submit failure"));
+    },
+    markPendingSubmitError(message) {
+      state.pendingSubmitError = message;
+      renderMessages();
+      renderTurnMeta();
+    },
+    renderAll() {
+      renderAll();
+    },
+    captureAmbiguousSubmitState() {
+      const shell = document.querySelector('[data-webui-shell="true"]');
+      const messageText = document.getElementById("message-list")?.innerText || "";
+      return {
+        selectedSession: shell?.dataset.selectedSession || "",
+        turnStatus: document.getElementById("turn-status")?.textContent?.trim() || "",
+        commandStatus: document.getElementById("command-status")?.textContent?.trim() || "",
+        pendingSubmitCardCount: document.querySelectorAll('[data-turn-id="pending-submit"]').length,
+        messageText,
+        pendingUserInput: state.pendingUserInput,
+        pendingSubmitError: state.pendingSubmitError,
+        pendingSubmitAcceptedByTaskTruth: pendingSubmitAcceptedByTaskTruth(),
+        acceptedSubmitReceipt: state.acceptedSubmitReceipt,
+        sessionTurns: state.sessionTurns.length,
+        foregroundRefreshInFlight: state.foregroundRefreshInFlight,
+        foregroundRefreshLastAt: state.foregroundRefreshLastAt,
+      };
+    },
+    refreshProtocolStateAfterForeground(reason) {
+      refreshProtocolStateAfterForeground(reason || "test resume");
+    },
+  };
+}
+
+installWebUiTestHooks();
+
 ensureAdpSocket()
   .then(async () => {
     ensureTurnSubscription();
@@ -5603,4 +6961,5 @@ ensureAdpSocket()
   .catch((error) => {
     setCommandStatus(`startup connection failed: ${error.message}`);
     renderAll();
+    scheduleAdpReconnect("startup failure");
   });

@@ -23,10 +23,14 @@
 - white-box plan:
   - global `~/.freehand/AGENTS.md` creates a global AGENTS manifest entry
   - local `AGENTS.md` files from project root through nested cwd create ordered local entries
-  - global `~/.freehand/skills/**/SKILL.md` creates global skill entries
-  - local `.agents/skills/**/SKILL.md` creates local skill entries
-  - malformed skill frontmatter creates an explicit error record while valid skills remain indexed
-  - stable input order produces stable manifest fingerprint
+- symlinked cwd aliases are normalized before local directory traversal and do not scan alias-parent `.agents/skills`
+- global `~/.freehand/skills/**/SKILL.md` creates global skill entries
+- local `.agents/skills/**/SKILL.md` creates local skill entries
+- symlink cycles under `.agents/skills` terminate through visited canonical
+  directory tracking, while symlinks pointing outside the skill root create
+  explicit manifest errors and do not import external skills
+- malformed skill frontmatter creates an explicit error record while valid skills remain indexed
+- stable input order produces stable manifest fingerprint
 - module black-box plan:
   - fixture tree compile returns a manifest with expected scope and precedence
   - manifest writer creates `state/instructions/capability-manifest.json`
@@ -42,4 +46,7 @@
   - UI/CLI diagnostics for manifest errors are pending
 - sync status between design and implementation:
   - white-box and module black-box tests are implemented in `crates/freehand-instructions`, `crates/freehand-blocks`, and `crates/freehand-runtime`
+  - `cargo test -p freehand-instructions --lib -- --nocapture` includes
+    `skill_scan_stays_inside_root_and_does_not_follow_symlink_cycles`
+    and `symlink_cwd_does_not_scan_alias_parent_instruction_roots`
   - function map and mainline call map bind the manifest compiler, context renderer, and runtime typed context admission symbols

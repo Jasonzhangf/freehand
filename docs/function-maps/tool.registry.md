@@ -48,17 +48,19 @@
   names; task-management behavior enters through `task` with typed `op`
 - registry schema guidance must be concise but complete enough to prevent
   model trial calls: `glob` declares workspace-scoped patterns, prefers
-  relative patterns, accepts absolute patterns only inside the locked workspace,
-  and rejects `~`, `..`, or external absolute discovery attempts; known paths
-  should use `ls` for existence/type checks and `read_file` for files
+  relative patterns, expands leading `~`, accepts absolute patterns only inside
+  the locked workspace, and rejects `..` or external absolute discovery
+  attempts; known paths should use `ls` for existence/type checks and
+  `read_file` for files
 - `task` schema points Master to the injected `TaskSpaceSnapshot` before
   exploratory query/list/history calls, says `status` is omitted for all
   visible tasks instead of `status="all"`, requires every task call to include
   top-level `op`, and documents the production create/assign pattern with
   `{"op":"create",...,"dispatch":{"mode":"none"}}` plus the configured Worker
-- `task` schema tells the Master to expand `~/...` into an absolute existing
-  repository/workspace path before writing `target_cwd`; `target_cwd` must not
-  be `~`, a glob, or a not-yet-created output directory
+- `task` schema tells the Master to prefer an expanded absolute existing
+  repository/workspace path for `target_cwd`, while treating leading-~/symlink
+  aliases as valid only when they resolve to an existing workspace; it forbids
+  glob patterns, broad search paths, and not-yet-created output directories
 - registry exposes `timer` as a standard internal framework tool for durable
   wakeups; timer semantics must not be encoded as task lifecycle operations
 - timer schema tells the Master to schedule instead of dead-waiting when the
@@ -77,8 +79,10 @@
 - relative path-based tools resolve from one owner-supplied current workspace root
 - `glob` is workspace-scoped: it accepts relative patterns and absolute
   patterns only when they remain under the locked workspace root, including
-  symlink aliases that canonicalize back into that root
-- read-only path tools may inspect readable external absolute or parent paths
+  leading-`~` and symlink aliases that canonicalize back into that root
+- read-only path tools remain locked to the current workspace root after
+  canonical/symlink resolution; external absolute paths are explicit
+  workspace-boundary violations
 - file-mutation tools remain locked to the current workspace root
 - writable live exposure additionally depends on `tool.preview` and `runtime.checkpoint-rewind`
 - provider adapters render schemas; they do not own tool registry truth
@@ -93,11 +97,15 @@
   routing examples so the model does not need failed calls to infer framework
   behavior
 - `glob` tool definitions carry the workspace-scoped path contract and examples
-  of valid relative or in-workspace absolute patterns, plus invalid `~`, `..`,
-  and external absolute patterns
+  of valid relative, leading-`~`, or in-workspace absolute patterns, plus
+  invalid `..` and external absolute patterns
 - path tools canonicalize symlink aliases before boundary decisions so
-  user-facing paths such as `~/github/repo` can resolve to canonical task cwd
-  paths such as `/Users/name/Documents/github/repo` without false denial
+  user-facing workspace aliases can resolve to canonical task cwd paths without
+  false denial
+- path tools absolute-normalize relative inputs against the locked workspace and
+  include `path_diagnostic` on resolution failures with requested path,
+  absolute path, nearest existing parent, nearest existing canonical parent,
+  missing suffix, and symlink ancestors
 - `ls` reports directory entries or one file entry, so existence checks on
   generated files do not require a failing `glob` call
 - `read_file` guidance tells the model to use `ls` first when the target may be
@@ -136,7 +144,7 @@
   - owner: `crates/freehand-tools/src/lib.rs`
   - purpose: derive the canonical current workspace root for relative path resolution and writable path locking, respecting the explicit per-call workspace context installed by `with_workspace_root`
   - allowed callers: `read_file`, `glob`, `grep`, `ls`
-  - related tests: read-file external-read test, runtime live tool loop test
+  - related tests: read-file workspace-boundary test, runtime live tool loop test
   - why shared: keeps current-cwd truth in one owner helper instead of per-tool duplication
 - `with_workspace_root`
   - owner: `crates/freehand-tools/src/lib.rs`
@@ -146,10 +154,16 @@
   - why shared: keeps session workspace execution in the tool owner instead of process-global env switching in runtime
 - `resolve_read_path`
   - owner: `crates/freehand-tools/src/lib.rs`
-  - purpose: resolve read-only path arguments from current cwd for relative paths while allowing readable absolute or parent paths
+  - purpose: resolve read-only path arguments from current cwd for relative paths, expand leading `~`, canonicalize symlink aliases, reject paths outside the locked workspace, and return owner path diagnostics on failures
   - allowed callers: `read_file`, `grep`, `ls`
-  - related tests: read-file, grep, and ls external-read tests
-  - why shared: keeps read path resolution single-sourced without confusing read access with write permission
+  - related tests: read-file, grep, ls external absolute rejection tests, symlink-alias tests, and missing relative path diagnostic test
+  - why shared: keeps read path resolution single-sourced without treating readable external files as workspace truth
+- `PathResolutionDiagnostic`
+  - owner: `crates/freehand-tools/src/lib.rs`
+  - purpose: render model-visible path failure truth from the tool owner instead of relying on model guesses
+  - allowed callers: `resolve_read_path`, `resolve_locked_path`, `resolve_locked_write_path`
+  - related tests: missing relative path diagnostic test and missing symlink leaf diagnostic test
+  - why shared: keeps absolute path conversion, nearest-existing parent, canonical parent, missing suffix, and symlink ancestor reporting consistent across path tools
 - `resolve_locked_write_path`
   - owner: `crates/freehand-tools/src/lib.rs`
   - purpose: resolve writable path targets inside the locked workspace root even when the target file does not yet exist
@@ -204,13 +218,13 @@
 | 05 | `BuiltinToolRegistry::execute` | `crates/freehand-tools/src/lib.rs` | dispatch completed tool calls into the single owner implementation set | `ReasonReq04ToolCall` | tool execution output | runtime live bridge | tool owner | bound |
 | 05a | `with_workspace_root` | `crates/freehand-tools/src/lib.rs` | bind one explicit workspace root around a single registry tool execution | canonical session cwd + tool execution closure | tool execution output with workspace lock applied | runtime live bridge | tool owner | bound |
 | 06 | `execute_bash` | `crates/freehand-tools/src/lib.rs` | run one foreground shell command from the locked workspace root with timeout and explicit failure reporting | `command` + optional `timeout_seconds` | combined stdout/stderr text | registry execute | command tool owner | bound |
-| 07 | `execute_read_file` | `crates/freehand-tools/src/lib.rs` | read UTF-8 text from one readable file, resolving relative paths from cwd and permitting external readable paths | `path` + optional `offset` + optional `limit` | numbered text window | registry execute | read-only file tool owner | bound |
+| 07 | `execute_read_file` | `crates/freehand-tools/src/lib.rs` | read UTF-8 text from one file inside the locked workspace after canonical/symlink path resolution | `path` + optional `offset` + optional `limit` | numbered text window | registry execute | read-only file tool owner | bound |
 | 08 | `execute_write_file` | `crates/freehand-tools/src/lib.rs` | create or overwrite one UTF-8 text file inside the locked root | `path` + `content` | write summary | registry execute | file-mutation tool owner | bound |
 | 09 | `execute_edit_file` | `crates/freehand-tools/src/lib.rs` | replace one exact text occurrence in one locked in-root file | `path` + `old_string` + `new_string` | edit summary | registry execute | file-mutation tool owner | bound |
 | 10 | `execute_multi_edit` | `crates/freehand-tools/src/lib.rs` | apply ordered exact text edits and write once at the end | `path` + ordered `edits` | edit summary | registry execute | file-mutation tool owner | bound |
 | 11 | `execute_glob` | `crates/freehand-tools/src/lib.rs` | match locked-workspace files by relative or in-workspace absolute glob pattern with recursive filename fallback | `pattern` | newline-separated match list | registry execute | read-only search tool owner | bound |
-| 12 | `execute_grep` | `crates/freehand-tools/src/lib.rs` | search readable UTF-8 text files by regex, resolving relative paths from cwd and permitting external readable paths | `pattern` + optional `path` | `path:line:text` matches | registry execute | read-only search tool owner | bound |
-| 13 | `execute_ls` | `crates/freehand-tools/src/lib.rs` | list readable directory entries/recursive tree or report one file entry, resolving relative paths from cwd and permitting external readable paths | optional `path` + optional `recursive` | newline-separated directory listing or one file entry | registry execute | read-only file tool owner | bound |
+| 12 | `execute_grep` | `crates/freehand-tools/src/lib.rs` | search UTF-8 text files by regex inside the locked workspace after canonical/symlink path resolution | `pattern` + optional `path` | `path:line:text` matches | registry execute | read-only search tool owner | bound |
+| 13 | `execute_ls` | `crates/freehand-tools/src/lib.rs` | list locked-workspace directory entries/recursive tree or report one file entry after canonical/symlink path resolution | optional `path` + optional `recursive` | newline-separated directory listing or one file entry | registry execute | read-only file tool owner | bound |
 
 ## Sync Status Against Code
 
@@ -233,7 +247,9 @@
   a future owner-approved small tool surface
 - generic and master-safe implemented tool schema fingerprints are bound in `freehand-tools`; the runtime master bridge consumes only the framework-only master-safe fingerprint
 - tool execution scopes are bound in the registry owner; master runtime exposure excludes all non-framework tools, including file/search/write, shell, `todo_write`, and `complete_step`
-- read-only path tools use the owner-supplied workspace root only as current cwd for relative paths and may read/query external readable paths
+- read-only path tools use the owner-supplied workspace root as the locked
+  boundary for relative, absolute, and leading-`~` paths after
+  canonical/symlink resolution
 - file-mutation tools are locked to the owner-supplied workspace root and return typed workspace-boundary violations on write escape
 - first-version `bash` is foreground-only, starts in the locked workspace root, defaults to a 900-second timeout, and does not claim filesystem/network sandboxing
 - first-version file-mutation tools are text-only, workspace-locked, require existing parent directories, and write through one atomic owner path
@@ -243,9 +259,12 @@
   exposure, while `freehand-runtime` owns durable schedule execution and Master
   wakeup routing
 - `glob` schema describes workspace-scoped matching from the current workspace,
-  tells the model to prefer relative paths, accepts absolute patterns only under
-  the locked workspace after canonical/symlink resolution, and rejects `~`,
-  `..`, and external absolute discovery attempts
+  tells the model to prefer relative paths, expands leading `~`, accepts
+  absolute patterns only under the locked workspace after canonical/symlink
+  resolution, and rejects `..` and external absolute discovery attempts
+- path resolution failures include owner-rendered `path_diagnostic` evidence so
+  missing leaf paths under symlink parents are not misreported as unexpanded
+  symlink failures
 - `ls` reports one file entry as well as directories, so models can verify
   generated output existence without using failing exact-file glob patterns
 - `task` schema describes TaskSpaceSnapshot-first orchestration, legal

@@ -23,7 +23,7 @@
   - query returns snapshot truth
   - ADP query frames return the same snapshot truth without requiring WebUI DOM
   - task list/history ADP query frames use protocol-owned commands and UI-safe DTOs while runtime owner code supplies persisted task truth
-  - Phase 1 TaskBoard/AgentBoard/AgentLifecycle ADP query frames use protocol-owned commands and UI-safe DTOs while runtime owner code supplies owner truth; task DTOs carry parent/observing session scope plus canonical Worker session id
+  - Phase 1 TaskBoard/AgentBoard/AgentLifecycle ADP query frames use protocol-owned commands and UI-safe DTOs while runtime owner code supplies owner truth; task DTOs carry parent/observing session scope, canonical Worker session id, and task-owner `created_at`
   - task mutation ADP command frames use protocol-owned command DTOs while runtime/task owners perform create/create_agent/assign/claim/review/reject/approve/close mutation and persistence
   - Phase 1 ApplyExecutionFact/RunSchedulerTick ADP command frames use protocol-owned command DTOs while runtime/task owners perform execution-fact sync and scheduler fact emission
   - Phase 2B QueryEventInbox/RunMasterPoll ADP frames use protocol-owned DTOs
@@ -37,8 +37,9 @@
     truth and Task Center consequence evidence
   - task list ADP subscribe frames use protocol-owned subscription shape and receive runtime-supplied task list projections without making protocol state the task truth owner
   - error-center ADP query/subscribe frames use protocol-owned commands and UI-safe DTOs while runtime owner code supplies metadata-backed truth
-  - config status ADP query frames use protocol-owned command/result DTOs while runtime owner code supplies config.core-backed truth
-  - provider/model update ADP command frames use protocol-owned DTOs while runtime/config owners perform validation, persistence, and restart-required projection
+  - config status ADP query frames use protocol-owned command/result DTOs for complete safe provider registry plus current primary/fallback selection while runtime owner code supplies config.core-backed truth
+  - provider definition upsert ADP command frames use protocol-owned DTOs while runtime/config owners perform validation, persistence, and restart-required projection without switching active selection
+  - provider selection ADP command frames use protocol-owned DTOs while runtime/config owners validate primary/fallback ids and persist only agent selection
   - Agent resource-count ADP command frames carry only non-empty `agent_name` plus `resource_count`; protocol rejects values outside `1..=5` before dispatch
   - debug query returns per-turn read-only debug snapshot truth
   - checkpoint query returns read-only runtime-owned checkpoint summary projections
@@ -46,9 +47,13 @@
   - ADP subscribe frames return an explicit accepted/waiting frame and then stream matching subscription events
   - debug subscribe returns per-turn read-only debug projections
   - shared semantic/tool/usage/terminal/error contracts can incrementally update one queryable turn projection inside protocol state
+  - turn projections preserve owner-created turn time as optional
+    `UiTurnProjection.created_at`; UI clients may format it, but must not
+    invent persisted message time when runtime/reason did not supply it
   - provider-request-sent lifecycle projection marks a turn as `Thinking` until response/tool/usage/terminal/error projection arrives
   - completion-schema rejection retry projection marks a turn as `SchemaRetry` and carries only compact retry count plus field issue detail for UI rendering
   - tool-result continuation projection marks a turn as `ToolResultContinuation` so UI clients do not infer continuation waits from completed/failed tool cards
+  - selected-session transcript refresh preserves same-turn nonterminal live-only provider/model waiting and tool activity projections already present in protocol state, while terminal refresh clears stale live waiting truth
   - tool-call projection stays lifecycle-aware: requested tool calls remain `waiting` until a matching `ReasonReq05ToolResultReentry` marks the activity `completed`, or failed terminal truth marks still-waiting activities `failed`
   - tool display projection is attached to `UiToolActivity` from the `tool.display` parser owner and is preserved in public conversation tool summaries
   - terminal events preserve both terminal text and terminal status in UI projection
@@ -77,7 +82,10 @@
   - debug-state query and subscription routing
   - protocol-owned subscription channel fanout
   - incremental turn projection updates from shared contracts
+  - turn created-time projection through `TurnProjectionInput.created_at` into
+    `UiTurnProjection.created_at`
   - model request waiting projection, typed phase kind, timing-key stability, and response-clear behavior, including transient provider retry/failover activity that never becomes a permanent conversation error after recovery
+  - session transcript replacement preservation coverage for active provider retry/model waiting, active tool cards, and terminal refresh clearing stale live state
   - completion-schema mismatch waiting projection with `kind=SchemaRetry` and compact `schema polishing #N: issue` detail
   - tool activity projection from `ReasonReq04ToolCall` plus matching `ReasonReq05ToolResultReentry`
   - structured tool display projection from read/search/write/plan/shell/generic parser output
@@ -100,9 +108,10 @@
   - task list subscription selector and matcher cover accepted task list projections and rejection of task query/history misuse on subscribe route
   - error-center query command validation covers empty session id and command-ingress rejection for query-route misuse
   - config status query covers command-ingress rejection, runtime-owned
-    protocol-state rejection, ordered multi-peer JSON roundtrip, and no-secret
-    DTO serialization
-  - provider/model update covers owner routing to `config.core`, empty-field rejection, unsupported-protocol rejection, JSON roundtrip, and no credential/API-key value field in serialization
+    protocol-state rejection, ordered multi-peer/provider-registry JSON
+    roundtrip, and no-secret DTO serialization
+  - provider definition upsert and legacy provider/model update cover owner routing to `config.core`, empty-field rejection, unsupported-protocol rejection, JSON roundtrip, and no credential/API-key value field in serialization
+  - provider selection update covers owner routing to `config.core`, empty provider/fallback rejection, JSON roundtrip, and no credential/API-key value field in serialization
   - Agent resource-count update covers owner routing to `config.core`, zero/six rejection, JSON roundtrip, and safe status projection of configured count/max/shared provider
   - error-center subscription selector and matcher cover accepted error-center projections
 - module black-box plan:
@@ -136,6 +145,8 @@
   - ADP Phase 2C WorkerControl smoke proves protocol frames can carry
     owner-routed safe-point control events without protocol-owned control
     ledger storage
+  - `command_to_projection_smoke` asserts turn `created_at` survives protocol
+    projection
   - ADP task list subscription smoke proves initial task list projection and subsequent runtime-published task changes use the same subscription channel
   - ADP error-center query smoke proves the protocol frame can carry metadata read models supplied by runtime
   - ADP config status query smoke proves the protocol frame can carry safe config read models supplied by runtime
@@ -174,6 +185,7 @@
   - protocol-owned continuous subscription channel landed
   - incremental turn projection update methods from shared contracts landed
   - typed model request waiting projection is landed and regression-locked for normal thinking, schema retry, provider retry, and provider failover; tool-result continuation uses the same typed activity surface
+  - selected-session transcript refresh preserves active provider retry/model waiting and active tool activity cards through `replace_session_turn_projections`, and terminal refresh clearing stale live state is regression-locked
   - minimal per-turn debug-state query/subscribe baseline landed
   - debug receiver-drain bridge from `debug.core` into protocol state landed
   - debug-state snapshot shape now comes from `freehand-debug`

@@ -30,6 +30,7 @@ Generated from `docs/mainline-calls/foundation.workspace.json`. Do not edit by h
 - launchd install and restart run scripts/freehand-file-permission-preflight.sh before bootstrapping the user service; on macOS it checks runtime/workdir plus standard protected user folders and opens Full Disk Access settings on denial instead of letting Worker execution discover permission failure later
 - launchd install script supports a coexisting symlink profile through installS and restartS with a separate label, env file, bind, binary, and logs; restartS refreshes the debug daemon binary copy, rewrites the plist, reloads only the service-scoped launchd label, sources the env file at daemon start, and health-checks the env-backed bind so Tailscale defaults cannot move the S profile off loopback
 - launchd install script supports release and S Worker services with separate labels, env files, and logs; Worker services source the matching Master pair token, omit `--bind`, use RunAtLoad plus KeepAlive, and require a stable running PID before install or restart succeeds
+- launchd Worker env generation copies provider credential-style env keys from the matching Master profile so Worker provider requests remain credentialed after service-scoped restart
 - gate runner verifies static data/control boundary rules on source-owned request and metadata types
 - mainline generator loads machine-readable feature sources from `docs/mainline-calls/*.json`
 - framework loop governance starts in L1 report-only under docs/loops/freehand-framework-loop and must not automate code/config changes until signal quality and checker gates are proven
@@ -50,6 +51,7 @@ Generated from `docs/mainline-calls/foundation.workspace.json`. Do not edit by h
 - launchd install exposes com.freehand.daemon as a user LaunchAgent with RunAtLoad, KeepAlive, explicit FREEHAND_DAEMON_BIN, fixed 127.0.0.1:4041 WebUI, and logs under ~/.freehand/logs
 - launchd symlink install exposes com.freehand.daemonS as a separate user LaunchAgent with explicit FREEHAND_DAEMON_BIN, fixed 127.0.0.1:4042 WebUI, and daemonS logs under ~/.freehand/logs; symlink profile restart refreshes the debug daemon binary copy and health-checks the existing env bind before restarting
 - launchd Worker install exposes com.freehand.worker and com.freehand.workerS as separate RunAtLoad plus KeepAlive services with no UI bind and pair-token identity shared from the matching Master profile
+- launchd Worker restart preserves provider credential-style Freehand env keys copied from the matching Master profile env
 - release and S launchd profiles default `FREEHAND_DAEMON_WORKDIR` to `$HOME/.freehand`, never the repository root
 - gate returns success when request-node contracts remain free of metadata/debug/control types and metadata owner types remain free of request/control payload fields
 - gate returns explicit failure with missing path, missing policy snippet, or stale generated wiki
@@ -66,6 +68,7 @@ Generated from `docs/mainline-calls/foundation.workspace.json`. Do not edit by h
 - missing source file or missing source symbol in a migrated `bound` call-table row surfaces as gate failure
 - missing `mainlines check` in `make ci` or CI/CD full-gate wiring surfaces as gate failure
 - missing launchd runtime-home workdir initialization or a repository-root default surfaces as gate failure
+- missing launchd Worker provider credential env propagation surfaces as gate failure before Worker services can be claimed provider-ready
 - missing source-only search exclusions, missing unsafe-argument guards, or missing `scripts/source-search.sh` policy snippets surface as gate failure
 - missing fixed-port daemon health, Chrome/CDP availability, WebUI browser failures, or ADP mismatch surfaces as online verification failure before alpha success is claimed
 - launchd bootstrap, kickstart, env-backed health endpoint, or daemon binary prefix mismatch failure surfaces as script failure before background service success is claimed

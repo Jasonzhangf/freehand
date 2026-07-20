@@ -1,5 +1,6 @@
 mod assets;
 mod page;
+mod remote_relay;
 
 use std::collections::HashMap;
 use std::convert::Infallible;
@@ -37,6 +38,12 @@ use futures_util::{SinkExt, StreamExt};
 use tokio::net::TcpListener;
 use tokio::sync::broadcast;
 use tokio::sync::mpsc;
+
+pub use remote_relay::{
+    RemoteRelayAccountDirectory, RemoteRelayDirectory, RemoteRelayEndpointCandidate,
+    RemoteRelayHostRecord, RemoteRelayHostRegistration, build_remote_relay_router,
+    serve_remote_relay_listener,
+};
 
 #[derive(Clone)]
 struct WebUiState {
@@ -815,6 +822,7 @@ fn sample_slave_turn_projection() -> UiTurnProjection {
         source_node_id: "slave-node".to_owned(),
         session_id: SessionId::new("session-webui-smoke"),
         turn_id: TurnId::new("turn-webui-smoke"),
+        created_at: Some(10),
         cwd: None,
         user_text: Some("inspect slave status".to_owned()),
         semantic_events: vec![
@@ -906,13 +914,16 @@ mod tests {
         ToolResultContract,
     };
     use freehand_ui_protocol::{
-        StaticUiCommandDispatchPort, UiCommand, UiCommandDispatchEnvelope,
-        UiCommandDispatchPortError,
+        StaticUiCommandDispatchPort, UiAdpRequest, UiAdpResponse, UiCommand,
+        UiCommandDispatchEnvelope, UiCommandDispatchPortError, UiQueryResult,
     };
+    use futures_util::{SinkExt, StreamExt};
     use reqwest::Client;
     use std::time::Duration;
     use tokio::sync::oneshot;
     use tokio::time::timeout;
+    use tokio_tungstenite::connect_async;
+    use tokio_tungstenite::tungstenite::Message as WsMessage;
 
     struct TestServer {
         base_url: String,
@@ -978,6 +989,46 @@ mod tests {
         }
     }
 
+    struct RelayTestServer {
+        base_url: String,
+        shutdown: Option<oneshot::Sender<()>>,
+        task: tokio::task::JoinHandle<()>,
+    }
+
+    impl RelayTestServer {
+        async fn spawn() -> Self {
+            let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind relay");
+            let addr = listener.local_addr().expect("relay local addr");
+            let directory = Arc::new(Mutex::new(RemoteRelayDirectory::default()));
+            let (shutdown_tx, shutdown_rx) = oneshot::channel();
+            let task = tokio::spawn(async move {
+                let shutdown = async move {
+                    let _ = shutdown_rx.await;
+                };
+                serve_remote_relay_listener(listener, directory, shutdown)
+                    .await
+                    .expect("serve relay");
+            });
+            Self {
+                base_url: format!("http://{addr}"),
+                shutdown: Some(shutdown_tx),
+                task,
+            }
+        }
+
+        fn ws_url(&self, path: &str) -> String {
+            let ws_base = self.base_url.replacen("http://", "ws://", 1);
+            format!("{ws_base}{path}")
+        }
+
+        async fn stop(mut self) {
+            if let Some(shutdown) = self.shutdown.take() {
+                let _ = shutdown.send(());
+            }
+            self.task.await.expect("join relay");
+        }
+    }
+
     struct FailingUiCommandDispatchPort;
 
     impl UiCommandDispatchPort for FailingUiCommandDispatchPort {
@@ -1019,6 +1070,191 @@ mod tests {
         }
     }
 
+    #[tokio::test]
+    async fn remote_relay_registers_directory_and_proxies_http_and_adp() {
+        let upstream = TestServer::spawn().await;
+        let relay = RelayTestServer::spawn().await;
+        let client = Client::builder().build().expect("client");
+
+        let registration = serde_json::json!({
+            "accountId": "jason",
+            "daemonId": "studio",
+            "relayHostId": "studio-host",
+            "upstreamBaseUrl": upstream.base_url,
+            "endpoints": [
+                {
+                    "id": "relay:studio-host",
+                    "kind": "relay",
+                    "webUrl": "/relay/daemon/studio-host/",
+                    "adpUrl": "/relay/daemon/studio-host/adp",
+                    "relayHostId": "studio-host",
+                    "authRequired": true,
+                    "lastSeenUnix": 10
+                }
+            ]
+        });
+        let published = client
+            .post(format!("{}/relay/hosts", relay.base_url))
+            .json(&registration)
+            .send()
+            .await
+            .expect("publish relay host");
+        assert_eq!(published.status(), StatusCode::ACCEPTED);
+        let published: RemoteRelayHostRecord = published.json().await.expect("published host");
+        assert_eq!(published.account_id, "jason");
+        assert_eq!(published.daemon_id, "studio");
+        assert_eq!(published.relay_host_id, "studio-host");
+
+        let directory = client
+            .get(format!("{}/relay/directory/jason", relay.base_url))
+            .send()
+            .await
+            .expect("relay directory");
+        assert_eq!(directory.status(), StatusCode::OK);
+        let directory: RemoteRelayAccountDirectory =
+            directory.json().await.expect("directory json");
+        assert_eq!(directory.schema_version, 1);
+        assert_eq!(directory.account_id, "jason");
+        assert_eq!(directory.daemons.len(), 1);
+        assert_eq!(directory.daemons[0].relay_host_id, "studio-host");
+
+        let health = client
+            .get(format!(
+                "{}/relay/daemon/studio-host/health",
+                relay.base_url
+            ))
+            .send()
+            .await
+            .expect("relay health proxy");
+        assert_eq!(health.status(), StatusCode::OK);
+        assert_eq!(health.text().await.expect("health body"), "ok");
+
+        let root = client
+            .get(format!(
+                "{}/relay/daemon/studio-host/?client=android-webview",
+                relay.base_url
+            ))
+            .send()
+            .await
+            .expect("relay root proxy");
+        assert_eq!(root.status(), StatusCode::OK);
+        let root_body = root.text().await.expect("relay root body");
+        assert!(root_body.contains("data-webui-shell=\"true\""));
+        assert!(
+            root_body.contains("href=\"/relay/daemon/studio-host/assets/theme.css?v="),
+            "{root_body}"
+        );
+        assert!(
+            root_body.contains("src=\"/relay/daemon/studio-host/assets/webui.js?v="),
+            "{root_body}"
+        );
+        assert!(root_body.contains("data-adp-endpoint=\"/relay/daemon/studio-host/adp\""));
+        assert!(root_body.contains(
+            "data-turn-subscribe=\"/relay/daemon/studio-host/ui/subscribe/turn/latest\""
+        ));
+        assert!(!root_body.contains("href=\"/assets/theme.css"));
+        assert!(!root_body.contains("data-adp-endpoint=\"/adp\""));
+
+        let webui_css = client
+            .get(format!(
+                "{}/relay/daemon/studio-host/assets/webui.css?v=relay-test",
+                relay.base_url
+            ))
+            .send()
+            .await
+            .expect("relay webui css proxy");
+        assert_eq!(webui_css.status(), StatusCode::OK);
+        assert!(
+            webui_css
+                .text()
+                .await
+                .expect("webui css body")
+                .contains(".app-shell")
+        );
+
+        let webui_js = client
+            .get(format!(
+                "{}/relay/daemon/studio-host/assets/webui.js?v=relay-test",
+                relay.base_url
+            ))
+            .send()
+            .await
+            .expect("relay webui js proxy");
+        assert_eq!(webui_js.status(), StatusCode::OK);
+        let webui_js_body = webui_js.text().await.expect("webui js body");
+        assert!(webui_js_body.contains("from \"/relay/daemon/studio-host/assets/theme.js?v="));
+        assert!(!webui_js_body.contains("from \"/assets/theme.js"));
+
+        let turn_query = client
+            .get(format!(
+                "{}/relay/daemon/studio-host/ui/query/latest-active-turn",
+                relay.base_url
+            ))
+            .send()
+            .await
+            .expect("relay latest-turn query proxy");
+        assert_eq!(turn_query.status(), StatusCode::OK);
+        let turn_query_body = turn_query.text().await.expect("turn query body");
+        assert!(turn_query_body.contains("\"turn_id\":\"turn-webui-smoke\""));
+
+        let (mut socket, _) = connect_async(relay.ws_url("/relay/daemon/studio-host/adp"))
+            .await
+            .expect("relay adp connect");
+        socket
+            .send(WsMessage::Text(
+                serde_json::to_string(&UiAdpRequest::Query {
+                    request_id: "relay-q".to_owned(),
+                    query: UiCommand::QueryLatestActiveTurn,
+                })
+                .expect("request json")
+                .into(),
+            ))
+            .await
+            .expect("send relay adp query");
+        let message = timeout(Duration::from_secs(10), socket.next())
+            .await
+            .expect("relay adp response timeout")
+            .expect("relay adp response")
+            .expect("relay adp message");
+        let WsMessage::Text(text) = message else {
+            panic!("unexpected relay ADP message: {message:?}");
+        };
+        let response: UiAdpResponse = serde_json::from_str(&text).expect("adp response");
+        match response {
+            UiAdpResponse::QueryResult {
+                request_id,
+                result: UiQueryResult::Turn(Some(turn)),
+            } => {
+                assert_eq!(request_id, "relay-q");
+                assert_eq!(turn.turn_id, TurnId::new("turn-webui-smoke"));
+            }
+            other => panic!("unexpected relay ADP response: {other:?}"),
+        }
+
+        relay.stop().await;
+        upstream.stop().await;
+    }
+
+    #[tokio::test]
+    async fn remote_relay_rejects_unregistered_host_explicitly() {
+        let relay = RelayTestServer::spawn().await;
+        let client = Client::builder().build().expect("client");
+
+        let response = client
+            .get(format!(
+                "{}/relay/daemon/missing-host/health",
+                relay.base_url
+            ))
+            .send()
+            .await
+            .expect("missing relay host response");
+        assert_eq!(response.status(), StatusCode::NOT_FOUND);
+        let body: serde_json::Value = response.json().await.expect("error body");
+        assert_eq!(body["code"], "relay_host_not_found");
+
+        relay.stop().await;
+    }
+
     #[test]
     fn webui_smoke_renders_shell_and_asset_routes() {
         let html = render_webui_smoke();
@@ -1039,7 +1275,11 @@ mod tests {
         assert!(html.contains("id=\"open-settings-drawer-button\""));
         assert!(html.contains("id=\"settings-shell\""));
         assert!(html.contains("id=\"settings-provider-form\""));
-        assert!(html.contains("Save provider config"));
+        assert!(html.contains("id=\"settings-provider-current-select\""));
+        assert!(html.contains("id=\"settings-provider-fallback-select\""));
+        assert!(html.contains("id=\"settings-provider-switch-button\""));
+        assert!(html.contains("id=\"settings-provider-registry-list\""));
+        assert!(html.contains("Add/update provider"));
         assert!(!html.contains("Skill settings pending"));
         assert!(!html.contains("Task settings pending"));
         assert!(!html.contains("Active agent"));
@@ -1207,6 +1447,10 @@ mod tests {
         assert!(root_body.contains("id=\"settings-provider-host\""));
         assert!(root_body.contains("id=\"settings-provider-auth\""));
         assert!(root_body.contains("id=\"settings-config-error\""));
+        assert!(root_body.contains("id=\"settings-provider-current-select\""));
+        assert!(root_body.contains("id=\"settings-provider-fallback-select\""));
+        assert!(root_body.contains("id=\"settings-provider-switch-button\""));
+        assert!(root_body.contains("id=\"settings-provider-registry-list\""));
         assert!(root_body.contains("id=\"settings-provider-form\""));
         assert!(root_body.contains("id=\"task-board-status\""));
         assert!(root_body.contains("id=\"task-board-list\""));
@@ -1222,16 +1466,20 @@ mod tests {
         assert!(root_body.contains("id=\"open-mobile-agent-sheet-button\""));
         assert!(root_body.contains("id=\"mobile-agent-sheet\""));
         assert!(root_body.contains("id=\"close-mobile-agent-sheet-button\""));
+        assert!(root_body.contains("id=\"session-relation-header\""));
+        assert!(root_body.contains("id=\"session-relation-toggle-button\""));
+        assert!(root_body.contains("id=\"session-tree-dropdown\""));
+        assert!(root_body.contains("id=\"session-tree\""));
         assert!(root_body.contains("id=\"worker-session-nav\""));
         assert!(root_body.contains("Back to Master"));
         assert!(root_body.contains("id=\"settings-agent-resource-count\""));
         assert!(root_body.contains("id=\"settings-agent-resource-increment\""));
         assert!(root_body.contains("id=\"settings-agent-resource-decrement\""));
         assert!(root_body.contains("id=\"settings-agent-resource-save\""));
-        assert!(root_body.contains("Worker capacity"));
+        assert!(root_body.contains("Worker limit"));
         assert!(!root_body.contains("id=\"mobile-agent-resource-save\""));
         assert!(!root_body.contains("Agent resources"));
-        assert!(root_body.contains("Delegated tasks"));
+        assert!(root_body.contains("Worker tasks"));
         assert!(root_body.contains("Tap a task to open its Worker conversation"));
         assert!(!root_body.contains("id=\"mobile-agent-master-card\""));
         assert!(!root_body.contains("id=\"mobile-agent-agent-list\""));
@@ -1241,7 +1489,7 @@ mod tests {
         assert!(root_body.contains("aria-modal=\"true\""));
         assert!(root_body.contains("Task and Agent Lifecycle"));
         assert!(root_body.contains("lifecycle observer"));
-        assert!(root_body.contains("Save provider config"));
+        assert!(root_body.contains("Add/update provider"));
         assert!(!root_body.contains("id=\"settings-agent-value\""));
         assert!(!root_body.contains("Task settings pending"));
         assert!(!root_body.contains("Active agent"));
@@ -1296,6 +1544,8 @@ mod tests {
         assert!(webui_css_body.contains("@keyframes waitingDot"));
         assert!(webui_css_body.contains("@keyframes toolPulse"));
         assert!(webui_css_body.contains(".chat-empty-title"));
+        assert!(webui_css_body.contains(".turn-cycle-card"));
+        assert!(webui_css_body.contains(".turn-cycle-card[data-live=\"true\"]"));
         assert!(webui_css_body.contains(".chat-message-user"));
         assert!(webui_css_body.contains(".chat-message-assistant"));
         assert!(webui_css_body.contains(".final-summary"));
@@ -1322,11 +1572,17 @@ mod tests {
         assert!(webui_css_body.contains("body[data-layout-shape=\"desktop_large\"]"));
         assert!(webui_css_body.contains("body[data-mobile-drawer=\"sessions\"] .sidebar"));
         assert!(webui_css_body.contains("body[data-mobile-drawer=\"settings\"] .inspector"));
+        assert!(webui_css_body.contains(".inspector > .drawer-panel-head"));
+        assert!(webui_css_body.contains("position: sticky"));
+        assert!(webui_css_body.contains("top: calc(-14px - env(safe-area-inset-top))"));
         assert!(webui_css_body.contains(".mobile-drawer-scrim"));
         assert!(webui_css_body.contains(".settings-shell"));
         assert!(webui_css_body.contains(".settings-shell[hidden]"));
         assert!(webui_css_body.contains(".inspector-debug-panel[hidden]"));
         assert!(webui_css_body.contains(".settings-card"));
+        assert!(webui_css_body.contains(".settings-provider-switch"));
+        assert!(webui_css_body.contains(".settings-provider-registry"));
+        assert!(webui_css_body.contains(".settings-provider-card"));
         assert!(webui_css_body.contains(".phase2-board-block"));
         assert!(webui_css_body.contains(".phase2-list"));
         assert!(webui_css_body.contains(".phase2-card"));
@@ -1338,6 +1594,15 @@ mod tests {
         assert!(webui_css_body.contains(".mobile-agent-summary-strip"));
         assert!(webui_css_body.contains(".mobile-agent-sheet"));
         assert!(webui_css_body.contains(".mobile-agent-sheet-handle"));
+        assert!(webui_css_body.contains(".session-relation-header"));
+        assert!(webui_css_body.contains(".session-dashbar"));
+        assert!(webui_css_body.contains(".session-tree-dropdown"));
+        assert!(webui_css_body.contains("max-height: min(50vh, 440px)"));
+        assert!(webui_css_body.contains(".session-tree-node.is-worker"));
+        assert!(webui_css_body.contains(".turn-action-bar"));
+        assert!(webui_css_body.contains(".turn-action-button"));
+        assert!(webui_css_body.contains(".tool-field-grid"));
+        assert!(webui_css_body.contains(".tool-raw-details"));
         assert!(
             webui_css_body.contains("body[data-mobile-agent-sheet=\"open\"] .mobile-agent-sheet")
         );
@@ -1411,6 +1676,11 @@ mod tests {
         assert!(js_body.contains("webuiJsReady"));
         assert!(js_body.contains("function viewportDimensionsForLayout"));
         assert!(js_body.contains("function setMobileDrawer"));
+        assert!(js_body.contains("function handleBackNavigationIntent"));
+        assert!(
+            js_body.contains("window.__freehandHandleAndroidBack = handleBackNavigationIntent")
+        );
+        assert!(js_body.contains("function closeVisibleNavigationSurface"));
         assert!(js_body.contains("function showInspectorPanel"));
         assert!(js_body.contains("function renderSettingsShell"));
         assert!(js_body.contains("QueryConfigStatus"));
@@ -1452,6 +1722,8 @@ mod tests {
         assert!(js_body.contains("function currentSessionEvents"));
         assert!(js_body.contains("function currentSessionTaskStatusLabel"));
         assert!(js_body.contains("function taskVisibleInSession"));
+        assert!(js_body.contains("function workerOrdinalFromAgentId"));
+        assert!(js_body.contains("normalizeAgentId(agent.agent_id) !== \"master\""));
         assert!(js_body.contains("task.parent_session_id === sessionId"));
         assert!(js_body.contains("task.attached_session_ids.includes(sessionId)"));
         assert!(js_body.contains("currentSessionTaskStatusLabel(tasks)"));
@@ -1465,19 +1737,30 @@ mod tests {
         assert!(js_body.contains("function renderMobileAgentSummaryStrip"));
         assert!(js_body.contains("function renderMobileAgentSheet"));
         assert!(js_body.contains("function setMobileAgentSheetOpen"));
+        assert!(js_body.contains("function renderSessionRelationHeader"));
+        assert!(js_body.contains("function renderSessionTree"));
+        assert!(js_body.contains("state.sessionTreeOpen"));
+        assert!(js_body.contains("sessionTreeDropdown.hidden = !state.sessionTreeOpen"));
+        assert!(js_body.contains("node.dataset.relationSchema"));
+        assert!(js_body.contains("TaskBoard.worker_session_id"));
+        assert!(js_body.contains("node.dataset.sessionId"));
+        assert!(js_body.contains("node.dataset.taskId"));
         assert!(js_body.contains("state.mobileAgentSheetOpen"));
-        assert!(js_body.contains("running agent"));
-        assert!(js_body.contains("delegated task"));
-        assert!(js_body.contains("configured"));
+        assert!(js_body.contains("runningAgents.length"));
+        assert!(js_body.contains("mobileAgentLifecycleSummary(counts)"));
+        assert!(js_body.contains("running task"));
+        assert!(js_body.contains("blocked task"));
+        assert!(!js_body.contains("delegated task"));
+        assert!(js_body.contains("limit ${workerLimit}"));
         assert!(js_body.contains("UpdateAgentResourceConfig"));
         assert!(js_body.contains("function submitAgentResourceConfigUpdate"));
         assert!(js_body.contains("function renderSystemAgentResourceConfig"));
-        assert!(js_body.contains("Save Worker capacity"));
+        assert!(js_body.contains("Save Worker limit"));
         assert!(js_body.contains("agent_resource_config_saved_restart_required:count="));
         assert!(js_body.contains("restart and Worker process startup required"));
         assert!(!js_body.contains("freehand-webui-agent-resource-count"));
         assert!(!js_body.contains("mobileAgentResourceSave"));
-        assert!(js_body.contains("No delegated task in this session"));
+        assert!(js_body.contains("No Worker task in this session"));
         assert!(!js_body.contains("Awaiting Master evaluation"));
         assert!(!js_body.contains("Master evaluating"));
         assert!(!js_body.contains("Rework required"));
@@ -1507,10 +1790,22 @@ mod tests {
         assert!(js_body.contains("state.configStatus"));
         assert!(js_body.contains("settings-provider-host"));
         assert!(js_body.contains("settings-provider-auth"));
+        assert!(js_body.contains("settings-provider-current-select"));
+        assert!(js_body.contains("settings-provider-fallback-select"));
+        assert!(js_body.contains("settings-provider-registry-list"));
+        assert!(js_body.contains("providerSelectionDraft"));
+        assert!(js_body.contains("function updateProviderSelectionDraftFromControls"));
+        assert!(!js_body.contains("settingsProviderFallbackSelect?.dataset.optionsInitialized"));
         assert!(js_body.contains("settings-config-error"));
-        assert!(js_body.contains("UpdateProviderConfig"));
+        assert!(js_body.contains("UpsertProviderConfig"));
+        assert!(js_body.contains("UpdateAgentProviderSelection"));
         assert!(js_body.contains("function submitProviderConfigUpdate"));
+        assert!(js_body.contains("function submitProviderSelectionUpdate"));
         assert!(js_body.contains("function providerConfigReceiptStatus"));
+        assert!(js_body.contains("function providerConfigUpsertReceiptStatus"));
+        assert!(js_body.contains("function providerSelectionReceiptStatus"));
+        assert!(js_body.contains("provider_config_upserted_restart_required"));
+        assert!(js_body.contains("agent_provider_selection_saved_restart_required"));
         assert!(js_body.contains("Provider config saved. Restart required."));
         assert!(js_body.contains("Config save returned an unexpected service status."));
         assert!(!js_body.contains("return \"Provider config saved.\""));
@@ -1621,6 +1916,10 @@ mod tests {
         assert!(js_body.contains("function turnChatCards"));
         assert!(js_body.contains("function userChatBubble"));
         assert!(js_body.contains("function assistantChatBubble"));
+        assert!(js_body.contains("function appendTurnActionBar"));
+        assert!(js_body.contains("function editAndRerunFromTurn"));
+        assert!(js_body.contains("function rollbackEffectiveTranscriptThroughTurn"));
+        assert!(js_body.contains("function startNewConversationFromText"));
         assert!(js_body.contains("function renderToolSection"));
         assert!(js_body.contains("function renderFinalSummary"));
         assert!(js_body.contains("function finalSummaryBlocks"));
@@ -1634,8 +1933,35 @@ mod tests {
         assert!(js_body.contains("function buildRenderRows"));
         assert!(js_body.contains("function buildToolActivityRenderRow"));
         assert!(js_body.contains("function buildModelRequestRenderRow"));
+        assert!(js_body.contains("function conversationTimelineItems"));
+        assert!(js_body.contains("function timelineItemChatCards"));
+        assert!(js_body.contains("function timelineItemCycleCard"));
+        assert!(js_body.contains("function renderConversationFragments"));
+        assert!(js_body.contains("function reconcileCycleCardFragments"));
+        assert!(js_body.contains("function cycleCardFromChatCards"));
+        assert!(js_body.contains("function cycleCardKey"));
+        assert!(js_body.contains("function cycleCardKeyFromNode"));
+        assert!(js_body.contains("function cycleCardMetaForTimelineItem"));
+        assert!(js_body.contains("function cycleCardIsTerminal"));
+        assert!(js_body.contains("function pendingSubmitTimelineIndex"));
+        assert!(js_body.contains("function acceptedSubmitReceiptTimelineIndex"));
+        assert!(js_body.contains("function firstCycleTurnIndex"));
+        assert!(js_body.contains("function renderTurnCreatedAtMs"));
+        assert!(js_body.contains("submitId: turn.submit_id || \"\""));
+        assert!(js_body.contains("startedAt: pendingStartedAt"));
+        assert!(js_body.contains(
+            "sessionId: state.pendingSubmitSessionId || state.selectedSessionId || \"\""
+        ));
+        assert!(js_body.contains("submitId: state.pendingSubmitId || \"\""));
+        assert!(js_body.contains("function modelRequestStaticStatus"));
         assert!(js_body.contains("function buildObservableLiveTurnRenderRow"));
         assert!(js_body.contains("function inactiveToolLifecycleForRender"));
+        assert!(js_body.contains("function isToolPendingStatus"));
+        assert!(js_body.contains("function terminalTurnStatusLabel"));
+        assert!(js_body.contains("isToolPendingStatus(turn.terminal_status)"));
+        assert!(js_body.contains("title: isToolPending ? \"Lifecycle\" : \"Final\""));
+        assert!(js_body.contains("? terminalTurnStatusLabel(turn.terminal_status)"));
+        assert!(!js_body.contains("turn.terminal_text\n    ? \"completed\""));
         assert!(js_body.contains("phase: \"tool_failed\""));
         assert!(js_body.contains("phase: \"tool_completed\""));
         assert!(
@@ -1644,7 +1970,18 @@ mod tests {
         assert!(js_body.contains("request accepted; waiting for protocol-visible turn details"));
         assert!(js_body.contains("function pendingUserInputIsMaterialized"));
         assert!(js_body.contains("function clearPendingUserInputIfMaterialized"));
+        assert!(js_body.contains("function acceptedSubmitReceiptChatCards"));
+        assert!(js_body.contains("function acceptedSubmitReceiptForRender"));
+        assert!(js_body.contains("Service accepted this request through TaskBoard truth."));
         assert!(js_body.contains("clearPendingUserInputIfMaterialized();"));
+        assert!(js_body.contains("async function refreshAfterAmbiguousSubmitFailure"));
+        assert!(js_body.contains("await refreshAfterAmbiguousSubmitFailure(error)"));
+        assert!(js_body.contains("request is visible after service refresh"));
+        assert!(js_body.contains("submit receipt not verified after service refresh"));
+        assert!(js_body.contains("function installWebUiTestHooks"));
+        assert!(js_body.contains("__freehandEnableTestHooks"));
+        assert!(js_body.contains("captureAmbiguousSubmitState"));
+        assert!(js_body.contains("renderAll()"));
         assert!(js_body.contains("function activeTurnForSelectedSession"));
         assert!(js_body.contains(
             "state.selectedSessionId && state.turn.session_id !== state.selectedSessionId"
@@ -1663,18 +2000,28 @@ mod tests {
             !js_body
                 .contains("conversationTurns.length === 0 && turnIsCurrentLiveTurn(state.turn)")
         );
-        assert!(js_body.contains("fragments.push(...turnChatCards(renderTurn))"));
-        assert!(js_body.contains("function uniqueChatFragments"));
-        assert!(js_body.contains("uniqueChatFragments(fragments).forEach"));
-        assert!(js_body.contains("fragment.dataset.turnId"));
-        assert!(js_body.contains("previousAssistantText"));
+        assert!(js_body.contains("conversationTimelineItems(renderModel).forEach"));
+        assert!(js_body.contains("fragments.push(timelineItemCycleCard(item))"));
+        assert!(!js_body.contains("fragments.push(...timelineItemChatCards(item))"));
+        assert!(js_body.contains("return turnChatCards(item.renderTurn);"));
+        assert!(js_body.contains("return pendingChatCards(item.pendingSubmit);"));
+        assert!(js_body.contains("article.className = `turn-cycle-card"));
+        assert!(js_body.contains("article.dataset.cycleKey = cycleCardKey(meta)"));
+        assert!(js_body.contains("article.dataset.cycleKind = kind"));
+        assert!(js_body.contains("article.dataset.sessionId"));
+        assert!(js_body.contains("article.dataset.submitId"));
+        assert!(js_body.contains("article.dataset.terminal = \"true\""));
+        assert!(js_body.contains("article.dataset.frozen = \"true\""));
+        assert!(js_body.contains("if (existing && existing.dataset.frozen === \"true\")"));
+        assert!(js_body.contains("return `submit:${sessionId}:${submitId}`"));
+        assert!(js_body.contains("state.renderedCycleSessionId"));
+        assert!(!js_body.contains("messageList.replaceChildren();"));
+        assert!(!js_body.contains("function uniqueChatFragments"));
+        assert!(!js_body.contains("uniqueChatFragments(fragments).forEach"));
+        assert!(js_body.contains("article.dataset.turnId"));
+        assert!(!js_body.contains("previousAssistantText"));
         assert!(
-            js_body
-                .find("fragments.push(...turnChatCards(renderTurn))")
-                .expect("turn chat render push")
-                < js_body
-                    .find("fragments.push(...pendingChatCards(renderModel.pendingSubmit))")
-                    .expect("pending chat render push")
+            !js_body.contains("fragments.push(...pendingChatCards(renderModel.pendingSubmit))")
         );
         assert!(js_body.contains("deleteSelectedSessions"));
         assert!(js_body.contains("RollbackLatestSessionTurn"));
@@ -1734,8 +2081,10 @@ mod tests {
         assert!(!js_body.contains("function compareTurnIds"));
         assert!(js_body.contains("latestTurn.session_id !== state.selectedSessionId"));
         assert!(js_body.contains("const renderModel = buildConversationRenderModel();"));
-        assert!(js_body.contains("function successorBaseTurnIds"));
-        assert!(js_body.contains("hideTerminal: successorBaseTurns.has"));
+        assert!(!js_body.contains("function successorBaseTurnIds"));
+        assert!(!js_body.contains("successorBaseTurns"));
+        assert!(!js_body.contains("hideTerminal"));
+        assert!(!js_body.contains("hideUser"));
         assert!(js_body.contains("case \"/new\""));
         assert!(js_body.contains("case \"/task\""));
         assert!(js_body.contains("case \"/cwd\""));
@@ -1745,6 +2094,12 @@ mod tests {
         assert!(js_body.contains("event.key !== \"Escape\""));
         assert!(js_body.contains("cancelActiveTurn"));
         assert!(js_body.contains("normalizePublicConversation"));
+        assert!(!js_body.contains("const toolIndex = new Map()"));
+        assert!(!js_body.contains("normalized[existingIndex] = item"));
+        assert!(!js_body.contains("function compactToolBodyLines"));
+        assert!(!js_body.contains("function isGenericToolResult"));
+        assert!(!js_body.contains("function shouldShowToolParameterSummary"));
+        assert!(!js_body.contains("function compactToolDisplayFields"));
         assert!(js_body.contains("isInternalRuntimePrompt"));
         assert!(!js_body.contains("__hideUserRow"));
         assert!(!js_body.contains("logicalExecutionKey"));
@@ -1757,10 +2112,10 @@ mod tests {
         assert!(js_body.contains("stripFreehandCompletionBlock"));
         assert!(js_body.contains("stripped.includes(\"</freehand_completion>\")"));
         assert!(js_body.contains("const leftInternal = isInternalRuntimePrompt(left);"));
-        assert!(js_body.contains("return leftInternal && rightInternal;"));
-        assert!(!js_body.contains(
-            "left.session_id &&\n    right.session_id &&\n    left.session_id === right.session_id"
+        assert!(js_body.contains(
+            "left.session_id && right.session_id && left.session_id !== right.session_id"
         ));
+        assert!(js_body.contains("return leftInternal && rightInternal;"));
         assert!(js_body.contains("terminalBodyForDisplay"));
         assert!(js_body.contains("terminalSummaryBlock"));
         assert!(!js_body.contains("function terminalSummaryLine"));
@@ -1771,9 +2126,10 @@ mod tests {
         assert!(js_body.contains("<freehand_completion>"));
         assert!(js_body.contains("toolSummaryBody"));
         assert!(js_body.contains("renderToolBody"));
-        assert!(js_body.contains("pushCompactToolLine"));
-        assert!(js_body.contains("escapeRegExp"));
+        assert!(js_body.contains("pushToolLine"));
+        assert!(js_body.contains("splitToolDetailLines"));
         assert!(js_body.contains("display.parameter_summary"));
+        assert!(js_body.contains("display.result_summary"));
         assert!(js_body.contains("elapsedSince"));
         assert!(js_body.contains("submitStartedAt"));
         assert!(js_body.contains("pendingSubmitId"));
@@ -1806,9 +2162,9 @@ mod tests {
         assert!(!js_body.contains("modelRequestBody"));
         assert!(!js_body.contains("modelWaitBody"));
         assert!(!js_body.contains("shouldRenderLiveWaitForTurn"));
-        assert!(js_body.contains("compactToolResultLine"));
-        assert!(js_body.contains("succeeded: result returned"));
-        assert!(js_body.contains("succeeded: shell command"));
+        assert!(!js_body.contains("compactToolResultLine"));
+        assert!(!js_body.contains("succeeded: result returned"));
+        assert!(!js_body.contains("succeeded: shell command"));
         assert!(js_body.contains("buildConversationRenderModel()"));
         assert!(js_body.contains("renderModelHasLiveLifecycle()"));
         assert!(!js_body.contains("hasPendingSubmit"));
@@ -1817,7 +2173,7 @@ mod tests {
         assert!(js_body.contains("waitingToolStatus"));
         assert!(js_body.contains("tool.display || null"));
         assert!(js_body.contains("display.diff"));
-        assert!(!js_body.contains("display.result_summary"));
+        assert!(js_body.contains("display.result_summary"));
         assert!(js_body.contains("compact-tool-state"));
         assert!(js_body.contains("display.fields"));
         assert!(js_body.contains("function assistantSectionHeadingLabel"));
@@ -1848,12 +2204,11 @@ mod tests {
         assert!(js_body.contains("renderAttachmentTray"));
         assert!(js_body.contains("textWithAttachmentPlaceholders"));
         assert!(js_body.contains("clearCurrentAttachments"));
-        assert!(js_body.contains("dispatch status unknown; refresh before duplicate send"));
-        assert!(
-            js_body
-                .contains("Dispatch status is unknown. The service may still finish this request.")
-        );
-        assert!(js_body.contains("Refresh service state before sending a duplicate."));
+        assert!(js_body.contains(
+            "submit receipt not verified after service refresh; checking service truth before duplicate send"
+        ));
+        assert!(js_body.contains("Submit receipt is being verified against service truth."));
+        assert!(js_body.contains("Do not send a duplicate until the service refresh finishes."));
         assert!(js_body.contains("if (!state.selectedSessionId)"));
         assert!(js_body.contains("state.draftSessionId = sessionId"));
         assert!(js_body.contains("case \"/attachments\""));
@@ -1868,6 +2223,17 @@ mod tests {
         assert!(js_body.contains("Cmd/Ctrl+Enter"));
         assert!(js_body.contains("requestSubmit()"));
         assert!(js_body.contains("refreshAllProtocolState"));
+        assert!(js_body.contains("foregroundRefreshMinIntervalMs"));
+        assert!(js_body.contains("function refreshProtocolStateAfterForeground"));
+        assert!(js_body.contains("function shouldRefreshAfterForeground"));
+        assert!(js_body.contains("window.addEventListener(\"pageshow\""));
+        assert!(js_body.contains("window.addEventListener(\"focus\""));
+        assert!(js_body.contains("window.addEventListener(\"online\""));
+        assert!(js_body.contains("document.addEventListener(\"visibilitychange\""));
+        assert!(js_body.contains("refreshProtocolStateAfterForeground(\"app resume\")"));
+        assert!(js_body.contains("checking service truth after"));
+        assert!(js_body.contains("foregroundRefreshInFlight"));
+        assert!(js_body.contains("foregroundRefreshLastAt"));
         assert!(js_body.contains("if (command.startsWith(\"/\")"));
         assert!(js_body.contains("composerInput.value = \"\";"));
         assert!(js_body.contains("case \"/help\""));
@@ -1983,6 +2349,7 @@ mod tests {
                 source_node_id: "slave-node".to_owned(),
                 session_id: SessionId::new("session-webui-smoke"),
                 turn_id: TurnId::new("turn-webui-smoke-2"),
+                created_at: Some(20),
                 cwd: None,
                 user_text: Some("second prompt".to_owned()),
                 semantic_events: vec![ReasonResp01SemanticEvent {
@@ -2081,6 +2448,7 @@ mod tests {
                 source_node_id: "slave-node".to_owned(),
                 session_id: SessionId::new("session-webui-smoke"),
                 turn_id: TurnId::new("turn-webui-first"),
+                created_at: Some(30),
                 cwd: None,
                 user_text: Some("first prompt".to_owned()),
                 semantic_events: vec![ReasonResp01SemanticEvent {
@@ -2125,6 +2493,7 @@ mod tests {
                 source_node_id: "slave-node".to_owned(),
                 session_id: SessionId::new("session-webui-smoke"),
                 turn_id: TurnId::new("turn-debug-late"),
+                created_at: Some(40),
                 cwd: None,
                 user_text: Some("debug should arrive later".to_owned()),
                 semantic_events: vec![ReasonResp01SemanticEvent {

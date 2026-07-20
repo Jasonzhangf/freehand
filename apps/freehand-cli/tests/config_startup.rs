@@ -9,6 +9,7 @@ use std::thread;
 use std::time::Duration;
 use std::time::{SystemTime, UNIX_EPOCH};
 
+use freehand_config::parse_remote_daemon_bootstrap_link;
 use freehand_contracts::{AgentId, SessionId, TerminalStatus, TurnId};
 use freehand_ui_protocol::{
     SubscriptionSelector, UiAdpFailure, UiAdpRequest, UiAdpResponse, UiAgentBoardProjection,
@@ -807,6 +808,7 @@ fn spawn_adp_task_lifecycle_mock_server() -> (String, thread::JoinHandle<()>) {
                                             )),
                                             assignee_agent_id: Some(AgentId::new("cli-agent")),
                                             active_execution_id: None,
+                                            created_at: 1,
                                             updated_at: 1,
                                             last_progress_at: Some(1),
                                             last_event_seq: 4,
@@ -2393,6 +2395,7 @@ fn phase2a_task(
         worker_session_id: Some(SessionId::new(format!("worker-task-{task_id}"))),
         assignee_agent_id: Some(AgentId::new(agent_id.to_owned())),
         active_execution_id: Some(execution_id.to_owned()),
+        created_at: 1,
         updated_at: 1,
         last_progress_at: Some(1),
         last_event_seq: 12,
@@ -2482,6 +2485,7 @@ fn phase2b_task(
         worker_session_id: Some(SessionId::new(format!("worker-task-{task_id}"))),
         assignee_agent_id: Some(AgentId::new(agent_id.to_owned())),
         active_execution_id: Some(execution_id.to_owned()),
+        created_at: 1,
         updated_at: 1,
         last_progress_at: Some(1),
         last_event_seq: 8,
@@ -2687,6 +2691,7 @@ fn phase2c_task(
         worker_session_id: Some(SessionId::new(format!("worker-task-{task_id}"))),
         assignee_agent_id: Some(AgentId::new(agent_id.to_owned())),
         active_execution_id: Some(execution_id.to_owned()),
+        created_at: 1,
         updated_at: 1,
         last_progress_at: Some(1),
         last_event_seq: 7,
@@ -2979,6 +2984,7 @@ fn phase1_task(task_id: &str, status: &str) -> UiTaskSnapshotProjection {
         worker_session_id: Some(SessionId::new(format!("worker-task-{task_id}"))),
         assignee_agent_id: Some(AgentId::new("cli-agent")),
         active_execution_id: None,
+        created_at: 1,
         updated_at: 1,
         last_progress_at: Some(1),
         last_event_seq: 4,
@@ -3296,6 +3302,105 @@ provider = "mini27"
     assert!(stdout.contains("provider_auth_source=inline"));
     assert!(stdout.contains("restart_required_on_change=true"));
     assert!(!stdout.contains("sk-inline"));
+
+    fs::remove_dir_all(home).expect("cleanup");
+}
+
+#[test]
+fn cli_generates_remote_daemon_bootstrap_link_from_config_registry() {
+    let home = unique_home_dir();
+    let freehand_dir = home.join(".freehand");
+    fs::create_dir_all(&freehand_dir).expect("create runtime home");
+    fs::write(
+        freehand_dir.join("config.toml"),
+        r#"
+[providers.mini27]
+id = "mini27"
+enabled = true
+type = "openai"
+protocol = "responses"
+base_url = "http://127.0.0.1:1"
+default_model = "MiniMax-M2.7"
+
+[providers.mini27.auth]
+type = "apikey"
+api_key = "sk-inline"
+
+[agents.master]
+name = "master"
+mode = "master"
+node_id = "master-node"
+paired_agents = ["worker"]
+pair_token = "FREEHAND_CLI_TOKEN"
+provider = "mini27"
+
+[agents.worker]
+name = "worker"
+mode = "slave"
+node_id = "worker-node"
+paired_agents = ["master"]
+pair_token = "FREEHAND_WORKER_TOKEN"
+provider = "mini27"
+
+[remote_daemon_accounts.jason]
+id = "jason"
+label = "Jason"
+relay_url = "https://relay.freehand.local/relay/"
+
+[remote_daemons.studio]
+id = "studio"
+account = "jason"
+label = "Mac Studio"
+node_id = "studio-node"
+active_endpoint = "relay-web"
+
+[[remote_daemons.studio.endpoints]]
+id = "tailscale-main"
+kind = "tailscale"
+host = "100.66.1.82"
+port = 4042
+
+[[remote_daemons.studio.endpoints]]
+id = "relay-web"
+kind = "relay"
+web_url = "https://relay.freehand.local/daemon/studio/web"
+relay_host_id = "studio-host"
+"#,
+    )
+    .expect("write config");
+
+    let output = Command::new(env!("CARGO_BIN_EXE_freehand-cli"))
+        .env("HOME", &home)
+        .env("FREEHAND_REMOTE_ONCE", "one-time-secret")
+        .arg("remote-daemon-bootstrap-link")
+        .arg("--daemon")
+        .arg("studio")
+        .arg("--credential-env")
+        .arg("FREEHAND_REMOTE_ONCE")
+        .arg("--ttl-seconds")
+        .arg("600")
+        .output()
+        .expect("run cli");
+
+    assert!(
+        output.status.success(),
+        "stderr: {}",
+        String::from_utf8_lossy(&output.stderr)
+    );
+    let stdout = String::from_utf8(output.stdout).expect("stdout utf8");
+    assert!(stdout.contains("remote_daemon_bootstrap_link_ok"));
+    assert!(stdout.contains("daemon=studio"));
+    assert!(stdout.contains("account=jason"));
+    assert!(stdout.contains("active_endpoint=tailscale-main"));
+    let link = stdout
+        .split_whitespace()
+        .find_map(|part| part.strip_prefix("link="))
+        .expect("link output");
+    let bundle = parse_remote_daemon_bootstrap_link(link, 0).expect("parse bootstrap link");
+    assert_eq!(bundle.account.id, "jason");
+    assert_eq!(bundle.daemon.id, "studio");
+    assert_eq!(bundle.daemon.active_endpoint_id, "tailscale-main");
+    assert_eq!(bundle.credential.value, "one-time-secret");
 
     fs::remove_dir_all(home).expect("cleanup");
 }

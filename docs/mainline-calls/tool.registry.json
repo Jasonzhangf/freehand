@@ -18,8 +18,8 @@
     "registry classifies registered tools as framework, workspace, shell, or network execution scope",
     "the master-safe export excludes unrestricted shell scope while retaining framework and workspace-scoped tools",
     "relative path-based tools resolve from one owner-supplied current workspace root",
-    "`glob` accepts relative patterns and absolute patterns only when they remain under the locked workspace root after canonical/symlink resolution; it rejects `~`, `..`, and external absolute patterns",
-    "read-only path tools may inspect readable external absolute or parent paths",
+    "`glob` accepts relative patterns, expands leading `~`, and accepts absolute patterns only when they remain under the locked workspace root after canonical/symlink resolution; it rejects `..` and external absolute patterns",
+    "read-only path tools remain locked to the current workspace root after canonical/symlink resolution and reject existing external absolute paths",
     "file-mutation tools remain locked to the current workspace root",
     "writable live exposure additionally depends on `tool.preview` and `runtime.checkpoint-rewind`",
     "provider adapters render schemas; they do not own tool registry truth"
@@ -55,7 +55,7 @@
         "execute_ls"
       ],
       "related_tests": [
-        "read-file external-read test",
+        "read-file workspace-boundary test",
         "runtime live tool loop test"
       ],
       "why_shared": "keeps current-cwd truth in one owner helper instead of per-tool duplication"
@@ -75,28 +75,46 @@
     {
       "symbol": "resolve_read_path",
       "owner": "crates/freehand-tools/src/lib.rs",
-      "purpose": "resolve read-only path arguments from current cwd for relative paths while allowing readable absolute or parent paths",
+      "purpose": "resolve read-only path arguments from current cwd for relative paths, expand leading `~`, canonicalize symlink aliases, reject paths outside the locked workspace, and return owner path diagnostics on failures",
       "allowed_callers": [
         "execute_read_file",
         "execute_grep",
         "execute_ls"
       ],
       "related_tests": [
-        "read-file, grep, and ls external-read tests"
+        "read-file, grep, and ls external absolute rejection tests",
+        "path-tool symlink-alias positive test",
+        "missing relative path diagnostic test"
       ],
-      "why_shared": "keeps read path resolution single-sourced without confusing read access with write permission"
+      "why_shared": "keeps read path resolution single-sourced without treating readable external files as workspace truth"
+    },
+    {
+      "symbol": "PathResolutionDiagnostic",
+      "owner": "crates/freehand-tools/src/lib.rs",
+      "purpose": "render model-visible path failure truth from the tool owner instead of relying on model guesses",
+      "allowed_callers": [
+        "resolve_read_path",
+        "resolve_locked_path",
+        "resolve_locked_write_path"
+      ],
+      "related_tests": [
+        "missing relative path diagnostic test",
+        "missing symlink leaf diagnostic test"
+      ],
+      "why_shared": "keeps absolute path conversion, nearest-existing parent, canonical parent, missing suffix, and symlink ancestor reporting consistent across path tools"
     },
     {
       "symbol": "resolve_glob_pattern",
       "owner": "crates/freehand-tools/src/lib.rs",
-      "purpose": "resolve a workspace-scoped glob pattern, accepting relative patterns and absolute patterns only under the locked workspace root after canonical/symlink resolution",
+      "purpose": "resolve a workspace-scoped glob pattern, accepting relative patterns, expanding leading `~`, and accepting absolute patterns only under the locked workspace root after canonical/symlink resolution",
       "allowed_callers": [
         "execute_glob"
       ],
       "related_tests": [
         "glob in-workspace absolute pattern test",
-        "glob external absolute and tilde rejection tests",
-        "path-tool symlink-alias positive test"
+        "glob external absolute rejection test",
+        "path-tool symlink-alias positive test",
+        "missing symlink leaf diagnostic test"
       ],
       "why_shared": "keeps glob boundary semantics single-sourced instead of scattering path checks across schema guidance and execution"
     },
@@ -288,7 +306,7 @@
       "step": "07",
       "symbol_path": "execute_read_file",
       "file_path": "crates/freehand-tools/src/lib.rs",
-      "responsibility": "read UTF-8 text from one readable file, resolving relative paths from cwd and permitting external readable paths",
+      "responsibility": "read UTF-8 text from one file inside the locked workspace after canonical/symlink path resolution",
       "input_semantic": "path plus optional offset plus optional limit",
       "output_semantic": "numbered text window",
       "caller": "registry execute",
@@ -343,7 +361,7 @@
       "step": "12",
       "symbol_path": "execute_grep",
       "file_path": "crates/freehand-tools/src/lib.rs",
-      "responsibility": "search readable UTF-8 text files by regex, resolving relative paths from cwd and permitting external readable paths",
+      "responsibility": "search UTF-8 text files by regex inside the locked workspace after canonical/symlink path resolution",
       "input_semantic": "pattern plus optional path",
       "output_semantic": "path:line:text matches",
       "caller": "registry execute",
@@ -354,7 +372,7 @@
       "step": "13",
       "symbol_path": "execute_ls",
       "file_path": "crates/freehand-tools/src/lib.rs",
-      "responsibility": "list readable directory entries/recursive tree or report one file entry, resolving relative paths from cwd and permitting external readable paths",
+      "responsibility": "list locked-workspace directory entries/recursive tree or report one file entry after canonical/symlink path resolution",
       "input_semantic": "optional path plus optional recursive",
       "output_semantic": "newline-separated directory listing or one file entry",
       "caller": "registry execute",
@@ -378,7 +396,7 @@
     "current implemented tool set is: `bash`, `read_file`, `write_file`, `edit_file`, `multi_edit`, `glob`, `grep`, `ls`, `todo_write`, `complete_step`, `timer`",
     "generic and master-safe implemented tool schema fingerprints are bound in `freehand-tools`; the runtime master bridge consumes only the master-safe fingerprint",
     "tool execution scopes are bound in the registry owner and master exposure excludes shell scope",
-    "read-only path tools use the owner-supplied workspace root only as current cwd for relative paths and may read/query external readable paths",
+    "read-only path tools use the owner-supplied workspace root as the locked boundary for relative, absolute, and leading-`~` paths after canonical/symlink resolution, and report owner path diagnostics on resolution failures",
     "file-mutation tools are locked to the owner-supplied workspace root and return typed workspace-boundary violations on write escape",
     "first-version `bash` is foreground-only, starts in the locked workspace root, defaults to a 900-second timeout, and does not claim filesystem/network sandboxing",
     "first-version file-mutation tools are text-only, workspace-locked, require existing parent directories, and write through one atomic owner path",

@@ -16,8 +16,14 @@ case "$command" in
   uninstallWorkerS)
     default_label="com.freehand.workerS"
     ;;
+  uninstallRelay)
+    default_label="com.freehand.relay"
+    ;;
+  uninstallRelayS)
+    default_label="com.freehand.relayS"
+    ;;
   *)
-    echo "usage: $0 [uninstall|uninstallS|uninstallWorker|uninstallWorkerS]" >&2
+    echo "usage: $0 [uninstall|uninstallS|uninstallWorker|uninstallWorkerS|uninstallRelay|uninstallRelayS]" >&2
     exit 2
     ;;
 esac

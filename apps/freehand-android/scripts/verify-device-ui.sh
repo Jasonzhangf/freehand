@@ -58,7 +58,15 @@ verify_apk_contains_activity() {
 
   local activity_class
   activity_class="$(launcher_activity_class)"
-  if ! "$apkanalyzer" dex packages "$apk_path" | grep -Fq "$activity_class"; then
+  local apkanalyzer_output
+  if ! apkanalyzer_output="$("$apkanalyzer" dex packages "$apk_path" 2>&1)"; then
+    printf '%s\n' "$apkanalyzer_output" >"$artifact_dir/apkanalyzer-failed.txt"
+    write_summary "blocked" "apkanalyzer_failed"
+    echo "[freehand-android-device] blocked: apkanalyzer failed; set JAVA_HOME or FREEHAND_ANDROID_SKIP_INSTALL=1; see $artifact_dir" >&2
+    exit 2
+  fi
+  printf '%s\n' "$apkanalyzer_output" >"$artifact_dir/apkanalyzer-packages.txt"
+  if ! grep -Fq "$activity_class" <<<"$apkanalyzer_output"; then
     write_summary "failed" "apk_missing_launcher_activity_class"
     echo "[freehand-android-device] failed: APK missing $activity_class; see $artifact_dir" >&2
     exit 1

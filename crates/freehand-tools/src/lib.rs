@@ -80,6 +80,94 @@ struct MultiEditStep {
     replace_all: bool,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct PathSymlinkDiagnostic {
+    path: PathBuf,
+    target: PathBuf,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct PathResolutionDiagnostic {
+    requested: String,
+    locked_workspace: PathBuf,
+    absolute: PathBuf,
+    exists: bool,
+    is_dir: Option<bool>,
+    canonical: Option<PathBuf>,
+    nearest_existing: Option<PathBuf>,
+    nearest_existing_canonical: Option<PathBuf>,
+    missing_suffix: Option<PathBuf>,
+    symlink_ancestors: Vec<PathSymlinkDiagnostic>,
+}
+
+impl PathResolutionDiagnostic {
+    fn inspect(root: &Path, requested: &str) -> Self {
+        let absolute = absolutize_tool_path(root, requested);
+        let metadata = fs::metadata(&absolute).ok();
+        let exists = fs::symlink_metadata(&absolute).is_ok();
+        let nearest_existing = nearest_existing_path(&absolute);
+        let nearest_existing_canonical = nearest_existing
+            .as_ref()
+            .and_then(|path| fs::canonicalize(path).ok());
+        let missing_suffix = nearest_existing
+            .as_ref()
+            .and_then(|path| absolute.strip_prefix(path).ok())
+            .filter(|suffix| !suffix.as_os_str().is_empty())
+            .map(Path::to_path_buf);
+        Self {
+            requested: requested.to_owned(),
+            locked_workspace: root.to_path_buf(),
+            canonical: fs::canonicalize(&absolute).ok(),
+            symlink_ancestors: symlink_ancestors(&absolute),
+            absolute,
+            exists,
+            is_dir: metadata.map(|metadata| metadata.is_dir()),
+            nearest_existing,
+            nearest_existing_canonical,
+            missing_suffix,
+        }
+    }
+
+    fn render(&self, field: &str) -> String {
+        let mut fields = vec![
+            format!("field={field}"),
+            format!("requested=`{}`", self.requested),
+            format!("locked_workspace=`{}`", self.locked_workspace.display()),
+            format!("absolute=`{}`", self.absolute.display()),
+            format!("exists={}", self.exists),
+        ];
+        if let Some(is_dir) = self.is_dir {
+            fields.push(format!("is_dir={is_dir}"));
+        }
+        if let Some(canonical) = &self.canonical {
+            fields.push(format!("canonical=`{}`", canonical.display()));
+        }
+        if let Some(nearest_existing) = &self.nearest_existing {
+            fields.push(format!("nearest_existing=`{}`", nearest_existing.display()));
+        }
+        if let Some(nearest_existing_canonical) = &self.nearest_existing_canonical {
+            fields.push(format!(
+                "nearest_existing_canonical=`{}`",
+                nearest_existing_canonical.display()
+            ));
+        }
+        if let Some(missing_suffix) = &self.missing_suffix {
+            fields.push(format!("missing_suffix=`{}`", missing_suffix.display()));
+        }
+        let symlinks = if self.symlink_ancestors.is_empty() {
+            "[]".to_owned()
+        } else {
+            self.symlink_ancestors
+                .iter()
+                .map(|entry| format!("`{}` -> `{}`", entry.path.display(), entry.target.display()))
+                .collect::<Vec<_>>()
+                .join(", ")
+        };
+        fields.push(format!("symlink_ancestors=[{symlinks}]"));
+        format!("path_diagnostic {}", fields.join(" "))
+    }
+}
+
 #[derive(Debug, Error, PartialEq, Eq)]
 pub enum ToolRegistryError {
     #[error("unknown tool `{0}`")]
@@ -321,11 +409,11 @@ pub fn reasonix_aligned_builtin_specs() -> Vec<BuiltinToolSpec> {
             "read_file",
             true,
             true,
-            "Read one UTF-8 text file with optional line offset/limit. Use `ls` first when the path might be a directory. Do not pass directories, generated output paths that do not exist yet, or guessed files.",
+            "Read one UTF-8 text file with optional line offset/limit. Relative paths are resolved from the locked workspace; leading `~` or absolute paths are valid only when canonical/symlink resolution stays inside that locked workspace. Use `ls` first when the path might be a directory. Do not pass directories, generated output paths that do not exist yet, external absolute paths, or guessed files.",
             json!({
                 "type": "object",
                 "properties": {
-                    "path": {"type": "string", "description": "Existing file path. Absolute readable paths are allowed; directories must use `ls`, not `read_file`."},
+                    "path": {"type": "string", "description": "Existing file path inside the locked workspace. Prefer a relative path. Leading `~` or absolute paths are accepted only if canonical/symlink resolution stays under the locked workspace. Directories must use `ls`, not `read_file`."},
                     "offset": {"type": "integer", "minimum": 0},
                     "limit": {"type": "integer", "minimum": 1}
                 },
@@ -336,11 +424,11 @@ pub fn reasonix_aligned_builtin_specs() -> Vec<BuiltinToolSpec> {
             "write_file",
             false,
             true,
-            "Write content to a file, overwriting existing content.",
+            "Write content to a file under the locked workspace, overwriting existing content. Prefer relative paths; absolute or leading-`~` paths are valid only when canonical/symlink resolution stays inside the locked workspace.",
             json!({
                 "type": "object",
                 "properties": {
-                    "path": {"type": "string"},
+                    "path": {"type": "string", "description": "Target file path inside the locked workspace. Prefer relative paths; absolute or leading-~ aliases must resolve under the locked workspace."},
                     "content": {"type": "string"}
                 },
                 "required": ["path", "content"]
@@ -350,11 +438,11 @@ pub fn reasonix_aligned_builtin_specs() -> Vec<BuiltinToolSpec> {
             "edit_file",
             false,
             true,
-            "Replace an exact string in a file with another.",
+            "Replace an exact string in a file under the locked workspace. Prefer relative paths; absolute or leading-`~` paths are valid only when canonical/symlink resolution stays inside the locked workspace.",
             json!({
                 "type": "object",
                 "properties": {
-                    "path": {"type": "string"},
+                    "path": {"type": "string", "description": "Existing file path inside the locked workspace. Prefer relative paths; absolute or leading-~ aliases must resolve under the locked workspace."},
                     "old_string": {"type": "string"},
                     "new_string": {"type": "string"}
                 },
@@ -365,11 +453,11 @@ pub fn reasonix_aligned_builtin_specs() -> Vec<BuiltinToolSpec> {
             "multi_edit",
             false,
             true,
-            "Apply a list of edits to a single file atomically.",
+            "Apply a list of edits atomically to one file under the locked workspace. Prefer relative paths; absolute or leading-`~` paths are valid only when canonical/symlink resolution stays inside the locked workspace.",
             json!({
                 "type": "object",
                 "properties": {
-                    "path": {"type": "string"},
+                    "path": {"type": "string", "description": "Existing file path inside the locked workspace. Prefer relative paths; absolute or leading-~ aliases must resolve under the locked workspace."},
                     "edits": {
                         "type": "array",
                         "minItems": 1,
@@ -391,11 +479,11 @@ pub fn reasonix_aligned_builtin_specs() -> Vec<BuiltinToolSpec> {
             "delete_range",
             false,
             true,
-            "Delete a contiguous text range from a file using exact start/end text anchors.",
+            "Delete a contiguous text range from a file under the locked workspace using exact start/end text anchors. Prefer relative paths; absolute or leading-`~` paths are valid only when canonical/symlink resolution stays inside the locked workspace.",
             json!({
                 "type": "object",
                 "properties": {
-                    "path": {"type": "string"},
+                    "path": {"type": "string", "description": "Existing file path inside the locked workspace. Prefer relative paths; absolute or leading-~ aliases must resolve under the locked workspace."},
                     "start_anchor": {"type": "string"},
                     "end_anchor": {"type": "string"},
                     "inclusive": {"type": "boolean"}
@@ -423,13 +511,13 @@ pub fn reasonix_aligned_builtin_specs() -> Vec<BuiltinToolSpec> {
             "glob",
             true,
             true,
-            "Find files matching a glob pattern inside the current locked workspace. Prefer relative patterns such as `main/**/*.cc`; an absolute pattern is valid only when it is inside the locked workspace. Do not pass `~`, parent traversal, broad external roots, or exact known file paths; use `ls` for directories/existence checks and `read_file` for known files.",
+            "Find files matching a glob pattern inside the current locked workspace. Prefer relative patterns such as `main/**/*.cc`; relative paths are resolved from the locked workspace, leading `~` is expanded, and an absolute pattern is valid only when it resolves inside the locked workspace. Do not pass parent traversal, broad external roots, or exact known file paths; use `ls` for directories/existence checks and `read_file` for known files.",
             json!({
                 "type": "object",
                 "properties": {
                     "pattern": {
                         "type": "string",
-                        "description": "Workspace-scoped glob. Preferred: relative patterns like \"src/**/*.rs\". Also accepted: absolute patterns under the locked workspace root. Invalid: \"~/**\", \"../**\", or absolute paths outside the locked workspace."
+                        "description": "Workspace-scoped glob. Preferred: relative patterns like \"src/**/*.rs\". Also accepted: absolute or leading-~ patterns that resolve under the locked workspace root after symlink/canonical path handling. Invalid: \"../**\" or absolute paths outside the locked workspace."
                     }
                 },
                 "required": ["pattern"]
@@ -439,12 +527,12 @@ pub fn reasonix_aligned_builtin_specs() -> Vec<BuiltinToolSpec> {
             "grep",
             true,
             true,
-            "Search for a regular expression in files.",
+            "Search for a regular expression in files under the locked workspace. Omit `path` for the workspace root; relative paths are resolved from the locked workspace; absolute or leading-`~` paths are valid only when canonical/symlink resolution stays inside the locked workspace.",
             json!({
                 "type": "object",
                 "properties": {
                     "pattern": {"type": "string"},
-                    "path": {"type": "string"}
+                    "path": {"type": "string", "description": "Optional existing file or directory inside the locked workspace. Prefer relative paths; absolute or leading-~ aliases must resolve under the locked workspace."}
                 },
                 "required": ["pattern"]
             }),
@@ -453,11 +541,11 @@ pub fn reasonix_aligned_builtin_specs() -> Vec<BuiltinToolSpec> {
             "ls",
             true,
             true,
-            "List directory entries or report one file entry. Use this before `read_file` when you are unsure whether a path is a file or directory, and to verify whether a generated output file exists.",
+            "List directory entries or report one file entry under the locked workspace. Omit `path` for the workspace root. Relative paths are resolved from the locked workspace; absolute or leading-`~` paths are valid only when canonical/symlink resolution stays inside the locked workspace. Use this before `read_file` when you are unsure whether a path is a file or directory, and to verify whether a generated output file exists.",
             json!({
                 "type": "object",
                 "properties": {
-                    "path": {"type": "string", "description": "Existing file or directory path. Absolute readable paths are allowed."},
+                    "path": {"type": "string", "description": "Existing file or directory path inside the locked workspace. Omit for current workspace. Prefer relative paths; absolute or leading-~ aliases must resolve under the locked workspace."},
                     "recursive": {"type": "boolean"}
                 }
             }),
@@ -579,7 +667,7 @@ pub fn reasonix_aligned_builtin_specs() -> Vec<BuiltinToolSpec> {
                     "priority": {"type": "integer"},
                     "target_cwd": {
                         "type": "string",
-                        "description": "Existing Worker repository/workspace cwd. Use an expanded absolute path such as /Users/name/Documents/github/repo; do not pass ~, glob patterns, or a not-yet-created output directory."
+                        "description": "Existing Worker repository/workspace cwd. Prefer an expanded absolute path such as /absolute/existing/workspace. Leading-~/symlink aliases are valid only when they resolve to an existing workspace; preserve the user-facing path in task content/acceptance and require canonical-path evidence. Do not pass glob patterns, broad search paths, or a not-yet-created output directory."
                     },
                     "dispatch": {
                         "type": "object",
@@ -1627,15 +1715,14 @@ fn resolve_locked_path(
     tool: &str,
     field: &str,
 ) -> Result<PathBuf, ToolRegistryError> {
-    let candidate = if Path::new(raw).is_absolute() {
-        PathBuf::from(raw)
-    } else {
-        root.join(raw)
-    };
+    let candidate = absolutize_tool_path(root, raw);
     let canonical =
         fs::canonicalize(&candidate).map_err(|err| ToolRegistryError::ExecutionFailed {
             tool: tool.to_owned(),
-            message: format!("cannot resolve `{field}` `{raw}`: {err}"),
+            message: format!(
+                "cannot resolve `{field}` `{raw}`: {err}\n{}",
+                path_resolution_diagnostic(root, field, raw)
+            ),
         })?;
     if !canonical.starts_with(root) {
         return Err(ToolRegistryError::WorkspaceBoundaryViolation {
@@ -1654,15 +1741,24 @@ fn resolve_read_path(
     tool: &str,
     field: &str,
 ) -> Result<PathBuf, ToolRegistryError> {
-    let candidate = if Path::new(raw).is_absolute() {
-        PathBuf::from(raw)
-    } else {
-        root.join(raw)
-    };
-    fs::canonicalize(&candidate).map_err(|err| ToolRegistryError::ExecutionFailed {
-        tool: tool.to_owned(),
-        message: format!("cannot resolve `{field}` `{raw}`: {err}"),
-    })
+    let candidate = absolutize_tool_path(root, raw);
+    let canonical =
+        fs::canonicalize(&candidate).map_err(|err| ToolRegistryError::ExecutionFailed {
+            tool: tool.to_owned(),
+            message: format!(
+                "cannot resolve `{field}` `{raw}`: {err}\n{}",
+                path_resolution_diagnostic(root, field, raw)
+            ),
+        })?;
+    if !canonical.starts_with(root) {
+        return Err(ToolRegistryError::WorkspaceBoundaryViolation {
+            tool: tool.to_owned(),
+            field: field.to_owned(),
+            root: root.to_string_lossy().into_owned(),
+            target: canonical.to_string_lossy().into_owned(),
+        });
+    }
+    Ok(canonical)
 }
 
 fn resolve_locked_write_path(
@@ -1671,11 +1767,7 @@ fn resolve_locked_write_path(
     tool: &str,
     field: &str,
 ) -> Result<PathBuf, ToolRegistryError> {
-    let candidate = if Path::new(raw).is_absolute() {
-        PathBuf::from(raw)
-    } else {
-        root.join(raw)
-    };
+    let candidate = absolutize_tool_path(root, raw);
     let file_name = candidate
         .file_name()
         .ok_or_else(|| ToolRegistryError::InvalidArguments {
@@ -1686,7 +1778,10 @@ fn resolve_locked_write_path(
     let canonical_parent =
         fs::canonicalize(parent).map_err(|err| ToolRegistryError::ExecutionFailed {
             tool: tool.to_owned(),
-            message: format!("cannot resolve parent directory for `{field}` `{raw}`: {err}"),
+            message: format!(
+                "cannot resolve parent directory for `{field}` `{raw}`: {err}\n{}",
+                path_resolution_diagnostic(root, field, raw)
+            ),
         })?;
     if !canonical_parent.starts_with(root) {
         return Err(ToolRegistryError::WorkspaceBoundaryViolation {
@@ -1700,15 +1795,7 @@ fn resolve_locked_write_path(
 }
 
 fn resolve_glob_pattern(root: &Path, pattern: &str) -> Result<PathBuf, ToolRegistryError> {
-    let path = Path::new(pattern);
-    if pattern.starts_with('~') {
-        return Err(ToolRegistryError::InvalidArguments {
-            tool: "glob".to_owned(),
-            message:
-                "tilde patterns are not supported; use a path relative to the locked workspace"
-                    .to_owned(),
-        });
-    }
+    let path = expand_leading_tilde_path(pattern);
     if path
         .components()
         .any(|component| matches!(component, Component::ParentDir))
@@ -1720,7 +1807,7 @@ fn resolve_glob_pattern(root: &Path, pattern: &str) -> Result<PathBuf, ToolRegis
     }
     if path.is_absolute() {
         let resolved =
-            canonicalize_absolute_glob_pattern(path).unwrap_or_else(|| path.to_path_buf());
+            canonicalize_absolute_glob_pattern(&path).unwrap_or_else(|| path.to_path_buf());
         if !resolved.starts_with(root) {
             return Err(ToolRegistryError::WorkspaceBoundaryViolation {
                 tool: "glob".to_owned(),
@@ -1731,7 +1818,7 @@ fn resolve_glob_pattern(root: &Path, pattern: &str) -> Result<PathBuf, ToolRegis
         }
         return Ok(resolved);
     }
-    Ok(root.join(pattern))
+    Ok(root.join(path))
 }
 
 fn canonicalize_absolute_glob_pattern(pattern: &Path) -> Option<PathBuf> {
@@ -1747,13 +1834,90 @@ fn canonicalize_absolute_glob_pattern(pattern: &Path) -> Option<PathBuf> {
     if prefix.is_empty() {
         return None;
     }
-    let canonical_prefix = fs::canonicalize(prefix).ok()?;
+    let prefix_path = PathBuf::from(prefix);
+    let canonical_prefix = fs::canonicalize(&prefix_path).ok().or_else(|| {
+        let nearest_existing = nearest_existing_path(&prefix_path)?;
+        let nearest_existing_canonical = fs::canonicalize(&nearest_existing).ok()?;
+        let missing_suffix = prefix_path.strip_prefix(&nearest_existing).ok()?;
+        Some(nearest_existing_canonical.join(missing_suffix))
+    })?;
     let suffix = &pattern_text[prefix_end..];
     if suffix.is_empty() {
         Some(canonical_prefix)
     } else {
         Some(canonical_prefix.join(suffix))
     }
+}
+
+fn absolutize_tool_path(root: &Path, raw: &str) -> PathBuf {
+    let expanded = expand_leading_tilde_path(raw);
+    if expanded.is_absolute() {
+        expanded
+    } else {
+        root.join(expanded)
+    }
+}
+
+fn expand_leading_tilde_path(path: &str) -> PathBuf {
+    if path == "~" {
+        return home_dir().unwrap_or_else(|| PathBuf::from(path));
+    }
+    if let Some(rest) = path.strip_prefix("~/")
+        && let Some(home) = home_dir()
+    {
+        return home.join(rest);
+    }
+    PathBuf::from(path)
+}
+
+fn home_dir() -> Option<PathBuf> {
+    env::var_os("HOME")
+        .filter(|home| !home.is_empty())
+        .map(PathBuf::from)
+}
+
+fn nearest_existing_path(path: &Path) -> Option<PathBuf> {
+    let mut candidate = path.to_path_buf();
+    loop {
+        if candidate.exists() {
+            return Some(candidate);
+        }
+        if !candidate.pop() {
+            return None;
+        }
+    }
+}
+
+fn symlink_ancestors(path: &Path) -> Vec<PathSymlinkDiagnostic> {
+    let mut current = PathBuf::new();
+    let mut symlinks = Vec::new();
+    for component in path.components() {
+        match component {
+            Component::Prefix(prefix) => current.push(prefix.as_os_str()),
+            Component::RootDir => current.push(component.as_os_str()),
+            Component::CurDir => current.push(component.as_os_str()),
+            Component::ParentDir | Component::Normal(_) => current.push(component.as_os_str()),
+        }
+        if current.as_os_str().is_empty() {
+            continue;
+        }
+        let Ok(metadata) = fs::symlink_metadata(&current) else {
+            continue;
+        };
+        if metadata.file_type().is_symlink()
+            && let Ok(target) = fs::read_link(&current)
+        {
+            symlinks.push(PathSymlinkDiagnostic {
+                path: current.clone(),
+                target,
+            });
+        }
+    }
+    symlinks
+}
+
+fn path_resolution_diagnostic(root: &Path, field: &str, raw: &str) -> String {
+    PathResolutionDiagnostic::inspect(root, raw).render(field)
 }
 
 fn contains_path_separator(pattern: &str) -> bool {
@@ -2150,7 +2314,7 @@ mod tests {
     }
 
     #[test]
-    fn glob_tool_schema_prevents_absolute_or_tilde_trial_calls() {
+    fn glob_tool_schema_guides_workspace_scoped_paths_without_trial_calls() {
         let registry = BuiltinToolRegistry::reasonix_aligned();
         let glob = registry
             .definitions()
@@ -2167,16 +2331,15 @@ mod tests {
             .expect("glob pattern description");
 
         assert!(glob.description.contains("locked workspace"));
+        assert!(glob.description.contains("leading `~` is expanded"));
         assert!(
             glob.description
-                .contains("absolute pattern is valid only when it is inside")
+                .contains("resolves inside the locked workspace")
         );
-        assert!(glob.description.contains("Do not pass `~`"));
         assert!(glob.description.contains("use `ls`"));
         assert!(glob.description.contains("read_file"));
         assert!(pattern_description.contains("Workspace-scoped glob"));
-        assert!(pattern_description.contains("absolute patterns under the locked workspace"));
-        assert!(pattern_description.contains("\"~/**\""));
+        assert!(pattern_description.contains("leading-~ patterns"));
         assert!(pattern_description.contains("\"../**\""));
         assert!(pattern_description.contains("outside the locked workspace"));
     }
@@ -2193,23 +2356,59 @@ mod tests {
             .iter()
             .find(|definition| definition.name == "ls")
             .expect("ls definition");
+        let grep = definitions
+            .iter()
+            .find(|definition| definition.name == "grep")
+            .expect("grep definition");
+        let write_file = definitions
+            .iter()
+            .find(|definition| definition.name == "write_file")
+            .expect("write_file definition");
 
         assert!(read_file.description.contains("Use `ls` first"));
+        assert!(
+            read_file
+                .description
+                .contains("Relative paths are resolved")
+        );
+        assert!(read_file.description.contains("external absolute paths"));
+        assert!(read_file.description.contains("locked workspace"));
         assert!(read_file.description.contains("Do not pass directories"));
         assert!(read_file.description.contains("guessed files"));
         assert!(
             read_file
                 .input_schema
                 .to_string()
-                .contains("Existing file path")
+                .contains("Existing file path inside the locked workspace")
+        );
+        assert!(
+            read_file
+                .input_schema
+                .to_string()
+                .contains("canonical/symlink resolution stays under the locked workspace")
         );
         assert!(ls.description.contains("report one file entry"));
+        assert!(ls.description.contains("Relative paths are resolved"));
+        assert!(ls.description.contains("locked workspace"));
         assert!(ls.description.contains("generated output file exists"));
         assert!(
             ls.input_schema
                 .to_string()
-                .contains("Existing file or directory")
+                .contains("Existing file or directory path inside the locked workspace")
         );
+        assert!(grep.description.contains("locked workspace"));
+        assert!(
+            grep.input_schema
+                .to_string()
+                .contains("inside the locked workspace")
+        );
+        assert!(write_file.description.contains("locked workspace"));
+        let combined_schema = definitions
+            .iter()
+            .map(|definition| format!("{}\n{}", definition.description, definition.input_schema))
+            .collect::<Vec<_>>()
+            .join("\n");
+        assert!(!combined_schema.contains("absolute readable paths are allowed"));
     }
 
     #[test]
@@ -2979,23 +3178,54 @@ beta
     }
 
     #[test]
-    fn read_file_allows_reading_outside_workspace_root() {
+    fn read_file_rejects_parent_escape_outside_workspace_root() {
         with_temp_workspace(|root| {
             let parent = root.parent().expect("parent");
             let outside = parent.join("outside.txt");
             fs::write(&outside, "outside-readable\n").expect("write outside");
             let registry = BuiltinToolRegistry::reasonix_aligned();
-            let output = registry
-                .execute(&tool_call(
-                    "read_file",
-                    vec![ToolArgument {
-                        name: "path".to_owned(),
-                        value: json!("../outside.txt"),
-                    }],
-                ))
-                .expect("read outside workspace");
-            assert!(output.text.contains("outside-readable"));
-            assert!(output.text.contains(&outside.to_string_lossy().to_string()));
+            let output = registry.execute(&tool_call(
+                "read_file",
+                vec![ToolArgument {
+                    name: "path".to_owned(),
+                    value: json!("../outside.txt"),
+                }],
+            ));
+            assert!(matches!(
+                output,
+                Err(ToolRegistryError::WorkspaceBoundaryViolation { tool, field, .. })
+                    if tool == "read_file" && field == "path"
+            ));
+            fs::remove_file(outside).expect("cleanup outside file");
+        });
+    }
+
+    #[test]
+    fn missing_relative_path_error_reports_absolute_workspace_diagnostic() {
+        with_temp_workspace(|root| {
+            let registry = BuiltinToolRegistry::reasonix_aligned();
+            let result = registry.execute(&tool_call(
+                "ls",
+                vec![ToolArgument {
+                    name: "path".to_owned(),
+                    value: json!("missing/codex"),
+                }],
+            ));
+
+            let Err(ToolRegistryError::ExecutionFailed { tool, message }) = result else {
+                panic!("expected ls execution failure with path diagnostic");
+            };
+            let canonical_root = fs::canonicalize(root).expect("canonical root");
+            assert_eq!(tool, "ls");
+            assert!(message.contains("path_diagnostic"));
+            assert!(message.contains("requested=`missing/codex`"));
+            assert!(message.contains(&format!("locked_workspace=`{}`", canonical_root.display())));
+            assert!(message.contains(&format!(
+                "absolute=`{}`",
+                canonical_root.join("missing/codex").display()
+            )));
+            assert!(message.contains(&format!("nearest_existing=`{}`", canonical_root.display())));
+            assert!(message.contains("missing_suffix=`missing/codex`"));
         });
     }
 
@@ -3049,19 +3279,6 @@ beta
                 .expect("absolute in-workspace glob executes");
             assert!(in_workspace_absolute.text.contains("main/audio/codec.cc"));
 
-            let tilde = registry.execute(&tool_call(
-                "glob",
-                vec![ToolArgument {
-                    name: "pattern".to_owned(),
-                    value: json!("~/**/*.cc"),
-                }],
-            ));
-            assert!(matches!(
-                tilde,
-                Err(ToolRegistryError::InvalidArguments { tool, message })
-                    if tool == "glob" && message.contains("tilde patterns are not supported")
-            ));
-
             let outside = registry.execute(&tool_call(
                 "glob",
                 vec![ToolArgument {
@@ -3074,6 +3291,67 @@ beta
                 Err(ToolRegistryError::WorkspaceBoundaryViolation { tool, field, .. })
                     if tool == "glob" && field == "pattern"
             ));
+        });
+    }
+
+    #[test]
+    fn read_path_tools_reject_existing_absolute_paths_outside_locked_workspace() {
+        with_temp_workspace(|root| {
+            let outside = root.parent().expect("temp parent").join(format!(
+                "{}-outside",
+                root.file_name().unwrap().to_string_lossy()
+            ));
+            fs::create_dir_all(&outside).expect("create outside directory");
+            let outside_file = outside.join("outside.txt");
+            fs::write(&outside_file, "outside\n").expect("write outside file");
+            let registry = BuiltinToolRegistry::reasonix_aligned();
+
+            let read = registry.execute(&tool_call(
+                "read_file",
+                vec![ToolArgument {
+                    name: "path".to_owned(),
+                    value: json!(outside_file.to_string_lossy().to_string()),
+                }],
+            ));
+            assert!(matches!(
+                read,
+                Err(ToolRegistryError::WorkspaceBoundaryViolation { tool, field, .. })
+                    if tool == "read_file" && field == "path"
+            ));
+
+            let list = registry.execute(&tool_call(
+                "ls",
+                vec![ToolArgument {
+                    name: "path".to_owned(),
+                    value: json!(outside.to_string_lossy().to_string()),
+                }],
+            ));
+            assert!(matches!(
+                list,
+                Err(ToolRegistryError::WorkspaceBoundaryViolation { tool, field, .. })
+                    if tool == "ls" && field == "path"
+            ));
+
+            let search = registry.execute(&tool_call(
+                "grep",
+                vec![
+                    ToolArgument {
+                        name: "pattern".to_owned(),
+                        value: json!("outside"),
+                    },
+                    ToolArgument {
+                        name: "path".to_owned(),
+                        value: json!(outside.to_string_lossy().to_string()),
+                    },
+                ],
+            ));
+            assert!(matches!(
+                search,
+                Err(ToolRegistryError::WorkspaceBoundaryViolation { tool, field, .. })
+                    if tool == "grep" && field == "path"
+            ));
+
+            fs::remove_dir_all(outside).expect("cleanup outside directory");
         });
     }
 
@@ -3175,6 +3453,62 @@ beta
     }
 
     #[test]
+    fn path_tools_report_symlink_parent_when_absolute_leaf_is_missing() {
+        with_temp_workspace(|root| {
+            let real_parent = root.join("Documents").join("github");
+            fs::create_dir_all(&real_parent).expect("create real parent");
+            let alias_parent = root.join("github");
+            std::os::unix::fs::symlink(&real_parent, &alias_parent).expect("create parent symlink");
+            let requested = alias_parent.join("codex");
+            let registry = BuiltinToolRegistry::reasonix_aligned();
+
+            let result = registry.execute(&tool_call(
+                "ls",
+                vec![ToolArgument {
+                    name: "path".to_owned(),
+                    value: json!(requested.to_string_lossy().to_string()),
+                }],
+            ));
+            let Err(ToolRegistryError::ExecutionFailed { tool, message }) = result else {
+                panic!("expected missing leaf diagnostic");
+            };
+            assert_eq!(tool, "ls");
+            assert!(message.contains("path_diagnostic"));
+            assert!(message.contains(&format!("requested=`{}`", requested.display())));
+            assert!(message.contains(&format!("absolute=`{}`", requested.display())));
+            assert!(message.contains(&format!("nearest_existing=`{}`", alias_parent.display())));
+            assert!(message.contains(&format!(
+                "nearest_existing_canonical=`{}`",
+                fs::canonicalize(&real_parent)
+                    .expect("canonical real parent")
+                    .display()
+            )));
+            assert!(message.contains("missing_suffix=`codex`"));
+            assert!(message.contains(&format!(
+                "`{}` -> `{}`",
+                alias_parent.display(),
+                real_parent.display()
+            )));
+
+            let glob_result = registry
+                .execute(&tool_call(
+                    "glob",
+                    vec![ToolArgument {
+                        name: "pattern".to_owned(),
+                        value: json!(
+                            alias_parent
+                                .join("codex/**/*.rs")
+                                .to_string_lossy()
+                                .to_string()
+                        ),
+                    }],
+                ))
+                .expect("glob canonicalizes symlink parent before workspace boundary");
+            assert_eq!(glob_result.text, "(no matches)");
+        });
+    }
+
+    #[test]
     fn grep_searches_recursive_tree() {
         with_temp_workspace(|root| {
             fs::create_dir_all(root.join("src")).expect("create src");
@@ -3200,28 +3534,31 @@ beta
     }
 
     #[test]
-    fn grep_allows_reading_outside_workspace_root() {
+    fn grep_rejects_absolute_path_outside_workspace_root() {
         with_temp_workspace(|root| {
             let parent = root.parent().expect("parent");
             let outside = parent.join("outside-grep.txt");
             fs::write(&outside, "needle outside\n").expect("write outside");
             let registry = BuiltinToolRegistry::reasonix_aligned();
-            let output = registry
-                .execute(&tool_call(
-                    "grep",
-                    vec![
-                        ToolArgument {
-                            name: "pattern".to_owned(),
-                            value: json!("needle"),
-                        },
-                        ToolArgument {
-                            name: "path".to_owned(),
-                            value: json!(outside.to_string_lossy().to_string()),
-                        },
-                    ],
-                ))
-                .expect("grep outside workspace");
-            assert!(output.text.contains("outside-grep.txt:1:needle outside"));
+            let output = registry.execute(&tool_call(
+                "grep",
+                vec![
+                    ToolArgument {
+                        name: "pattern".to_owned(),
+                        value: json!("needle"),
+                    },
+                    ToolArgument {
+                        name: "path".to_owned(),
+                        value: json!(outside.to_string_lossy().to_string()),
+                    },
+                ],
+            ));
+            assert!(matches!(
+                output,
+                Err(ToolRegistryError::WorkspaceBoundaryViolation { tool, field, .. })
+                    if tool == "grep" && field == "path"
+            ));
+            fs::remove_file(outside).expect("cleanup outside file");
         });
     }
 
@@ -3278,23 +3615,26 @@ beta
     }
 
     #[test]
-    fn ls_allows_reading_outside_workspace_root() {
+    fn ls_rejects_absolute_path_outside_workspace_root() {
         with_temp_workspace(|root| {
             let parent = root.parent().expect("parent");
             let outside_dir = parent.join("outside-list");
             fs::create_dir_all(&outside_dir).expect("create outside dir");
             fs::write(outside_dir.join("visible.txt"), "visible\n").expect("write outside file");
             let registry = BuiltinToolRegistry::reasonix_aligned();
-            let output = registry
-                .execute(&tool_call(
-                    "ls",
-                    vec![ToolArgument {
-                        name: "path".to_owned(),
-                        value: json!(outside_dir.to_string_lossy().to_string()),
-                    }],
-                ))
-                .expect("ls outside workspace");
-            assert!(output.text.contains("visible.txt"));
+            let output = registry.execute(&tool_call(
+                "ls",
+                vec![ToolArgument {
+                    name: "path".to_owned(),
+                    value: json!(outside_dir.to_string_lossy().to_string()),
+                }],
+            ));
+            assert!(matches!(
+                output,
+                Err(ToolRegistryError::WorkspaceBoundaryViolation { tool, field, .. })
+                    if tool == "ls" && field == "path"
+            ));
+            fs::remove_dir_all(outside_dir).expect("cleanup outside directory");
         });
     }
 
@@ -3471,7 +3811,14 @@ beta
                 .get("description")
                 .and_then(serde_json::Value::as_str)
                 .expect("target_cwd description")
-                .contains("do not pass ~")
+                .contains("Leading-~/symlink aliases are valid")
+        );
+        assert!(
+            target_cwd_schema
+                .get("description")
+                .and_then(serde_json::Value::as_str)
+                .expect("target_cwd description")
+                .contains("canonical-path evidence")
         );
         assert!(
             execution_id_schema

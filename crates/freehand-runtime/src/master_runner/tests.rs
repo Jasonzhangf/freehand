@@ -1458,6 +1458,60 @@ fn production_master_attention_cannot_restore_without_checkpoint() {
 }
 
 #[test]
+fn production_master_recovery_candidates_require_resolved_legacy_attention() {
+    let runtime_home = temp_path("legacy-suspended-active-work-recovery");
+    bootstrap_runner(&runtime_home);
+    let task_id = seed_blocked_task(&runtime_home);
+    let task_runtime = TaskRuntime::boot(&runtime_home, AgentId::new("master")).expect("runtime");
+    let blocked_event = task_runtime
+        .task_history(&task_id)
+        .expect("history")
+        .into_iter()
+        .find(|event| event.event_type == "TaskBlocked")
+        .expect("blocked event");
+    register_test_active_master_work(&runtime_home, "legacy-busy-parent", "runtime-turn-60");
+    let master_agent_id = AgentId::new("master");
+    let mut active = load_master_active_work(&runtime_home, &master_agent_id)
+        .expect("load active")
+        .expect("active work");
+    active.owner_process_id = None;
+    active.state = MasterActiveWorkState::SuspendedByAttention;
+    active.safe_point = MasterWorkSafePoint::BeforeProviderRequest;
+    active.suspend_requested_by = Some(MasterAttentionReference {
+        event_id: blocked_event.event_id,
+        task_id: task_id.clone(),
+        kind: "execution_blocked".to_owned(),
+        severity_rank: 96,
+        task_priority: 99,
+    });
+    write_master_active_work_unlocked(&runtime_home, &active).expect("write legacy suspension");
+
+    assert!(
+        recoverable_stale_master_active_work(&runtime_home, &master_agent_id, &task_runtime)
+            .expect("recovery query before decision")
+            .is_none(),
+        "legacy suspension must not recover before the attention decision is persisted"
+    );
+
+    task_runtime
+        .append_task(TaskAppendRequest {
+            task_id: task_id.clone(),
+            note: "blocked_decision: path evidence requires external action".to_owned(),
+            actor: test_actor("master"),
+            watermark: test_watermark("legacy-recovery-blocked-decision"),
+        })
+        .expect("append decision");
+    let candidate =
+        recoverable_stale_master_active_work(&runtime_home, &master_agent_id, &task_runtime)
+            .expect("recovery query after decision")
+            .expect("recoverable checkpoint");
+    assert_eq!(candidate.work_id, active.work_id);
+    assert_eq!(candidate.logical_turn_id, active.logical_turn_id);
+
+    fs::remove_dir_all(runtime_home).expect("cleanup");
+}
+
+#[test]
 fn production_master_resume_rejects_raw_worker_or_control_transcript() {
     let resolution = MasterAttentionResolution {
         attention_event_id: "attention-1".to_owned(),
@@ -2273,15 +2327,218 @@ fn production_master_runner_rejects_parent_evaluation_without_persisted_goal_tru
     }));
     let runner = test_runner(runtime_home.clone(), executor.clone());
 
-    let error = runner
-        .run_once()
-        .expect_err("missing parent goal truth must fail explicitly");
     assert!(matches!(
-        error,
-        ProductionMasterRunnerError::State(ref message)
-            if message.contains("has no persisted user objective truth")
+        runner
+            .run_once()
+            .expect("missing parent goal truth is a skipped attention"),
+        ProductionMasterTickOutcome::ParentEvaluationSkipped { ref reason, .. }
+            if reason.contains("has no persisted user objective truth")
+                && reason.contains("without finalizing")
     ));
     assert_eq!(executor.calls.load(Ordering::Relaxed), 0);
+    assert_eq!(
+        runner.run_once().expect("skipped evaluation stays skipped"),
+        ProductionMasterTickOutcome::Idle
+    );
+
+    fs::remove_dir_all(runtime_home).expect("cleanup");
+}
+
+#[test]
+fn production_master_runner_recovers_closed_parent_workset_after_cursor_advanced() {
+    let runtime_home = temp_path("parent-evaluation-stale-waiting-workset");
+    bootstrap_runner(&runtime_home);
+    let parent_session_id = SessionId::new("parent-session-stale-waiting-workset");
+    persist_parent_user_objective_with_turn_id(
+        &runtime_home,
+        &parent_session_id,
+        &TurnId::new("runtime-turn-399"),
+        "Use the corrected path and produce the final audit.",
+        TerminalStatus::ToolPending,
+        "Waiting for lifecycle: check the corrected child task.",
+    );
+    seed_parent_blocked_child_for_turn(
+        &runtime_home,
+        &parent_session_id,
+        &TurnId::new("runtime-turn-391"),
+        "old-wrong-path",
+    );
+    let child_ids = seed_parent_children_for_turn(
+        &runtime_home,
+        &parent_session_id,
+        &TurnId::new("runtime-turn-399"),
+        &[("corrected-path", true)],
+    );
+    let captured = Arc::new(Mutex::new(None));
+    let captured_out = Arc::clone(&captured);
+    let executor = Arc::new(StubMasterExecutor::new(move |request| {
+        assert!(request.prompt.contains("Use the corrected path"));
+        assert!(request.prompt.contains("corrected-path child"));
+        assert!(!request.prompt.contains("old-wrong-path child"));
+        *captured_out.lock().expect("capture request") = Some(request.clone());
+        Ok("recovered stale waiting parent workset".to_owned())
+    }));
+    let runner = test_runner(runtime_home.clone(), executor.clone());
+    let runtime = TaskRuntime::boot(&runtime_home, AgentId::new("master")).expect("task runtime");
+    let inbox = runtime
+        .query_event_inbox(TaskEventInboxQuery {
+            after_cursor: None,
+            limit: usize::MAX,
+        })
+        .expect("event inbox");
+    let state_path = runner.state_path();
+    let mut state: MasterLoopState =
+        serde_json::from_str(&fs::read_to_string(&state_path).expect("read state"))
+            .expect("parse state");
+    state.cursor = inbox.next_cursor;
+    state.pending_attention.clear();
+    state.completed_parent_evaluations.clear();
+    state.skipped_parent_evaluations.clear();
+    fs::write(
+        &state_path,
+        serde_json::to_string_pretty(&state).expect("render state"),
+    )
+    .expect("write advanced cursor state");
+
+    let outcome = runner
+        .run_once()
+        .expect("stale waiting parent workset recovery");
+    assert!(matches!(
+        outcome,
+        ProductionMasterTickOutcome::ParentEvaluated {
+            ref parent_session_id,
+            ref evaluated_child_task_ids,
+            ref summary,
+        } if parent_session_id.as_str() == "parent-session-stale-waiting-workset"
+            && evaluated_child_task_ids == &child_ids
+            && summary == "recovered stale waiting parent workset"
+    ));
+    assert_eq!(executor.calls.load(Ordering::Relaxed), 1);
+    assert!(
+        captured
+            .lock()
+            .expect("captured request")
+            .as_ref()
+            .is_some_and(|request| request.session_id == parent_session_id)
+    );
+
+    fs::remove_dir_all(runtime_home).expect("cleanup");
+}
+
+#[test]
+fn production_master_runner_repairs_stale_event_inbox_cursor_from_loop_state() {
+    let runtime_home = temp_path("loop-stale-cursor-repair");
+    bootstrap_runner(&runtime_home);
+    let task_id = seed_review_ready_task(&runtime_home);
+    let action_task_id = task_id.clone();
+    let executor = Arc::new(StubMasterExecutor::new(move |request| {
+        let runtime =
+            TaskRuntime::boot(&request.runtime_home, AgentId::new("master")).map_err(to_string)?;
+        runtime
+            .approve_review(TaskMutationRequest {
+                task_id: action_task_id.clone(),
+                actor: test_actor("master"),
+                watermark: test_watermark("stale-cursor-approve"),
+            })
+            .map_err(to_string)?;
+        runtime
+            .close_task(TaskMutationRequest {
+                task_id: action_task_id.clone(),
+                actor: test_actor("master"),
+                watermark: test_watermark("stale-cursor-close"),
+            })
+            .map_err(to_string)?;
+        Ok("closed after stale cursor repair".to_owned())
+    }));
+    let runner = test_runner(runtime_home.clone(), executor.clone());
+    let state_path = runner.state_path();
+    let mut state: MasterLoopState =
+        serde_json::from_str(&fs::read_to_string(&state_path).expect("read state"))
+            .expect("parse state");
+    state.cursor = Some("cursor-does-not-exist".to_owned());
+    fs::write(
+        &state_path,
+        serde_json::to_string_pretty(&state).expect("render state"),
+    )
+    .expect("write stale cursor state");
+
+    assert!(matches!(
+        runner.run_once().expect("stale cursor must replay current ledger"),
+        ProductionMasterTickOutcome::TaskAdvanced {
+            task_id: ref outcome_task_id,
+            to: TaskStatus::Closed,
+            ..
+        } if outcome_task_id == &task_id
+    ));
+    assert_eq!(executor.calls.load(Ordering::Relaxed), 1);
+
+    fs::remove_dir_all(runtime_home).expect("cleanup");
+}
+
+#[test]
+fn production_master_runner_drops_stale_pending_attention_and_continues() {
+    let runtime_home = temp_path("loop-stale-pending-attention");
+    bootstrap_runner(&runtime_home);
+    let task_id = seed_review_ready_task(&runtime_home);
+    let action_task_id = task_id.clone();
+    let executor = Arc::new(StubMasterExecutor::new(move |request| {
+        let runtime =
+            TaskRuntime::boot(&request.runtime_home, AgentId::new("master")).map_err(to_string)?;
+        runtime
+            .approve_review(TaskMutationRequest {
+                task_id: action_task_id.clone(),
+                actor: test_actor("master"),
+                watermark: test_watermark("stale-attention-approve"),
+            })
+            .map_err(to_string)?;
+        runtime
+            .close_task(TaskMutationRequest {
+                task_id: action_task_id.clone(),
+                actor: test_actor("master"),
+                watermark: test_watermark("stale-attention-close"),
+            })
+            .map_err(to_string)?;
+        Ok("closed after stale attention".to_owned())
+    }));
+    let runner = test_runner(runtime_home.clone(), executor.clone());
+    let state_path = runner.state_path();
+    let mut state: MasterLoopState =
+        serde_json::from_str(&fs::read_to_string(&state_path).expect("read state"))
+            .expect("parse state");
+    state.pending_attention.push(MasterAttentionItem {
+        event: TaskEventInboxEntry {
+            schema_version: 1,
+            cursor: "stale-missing-task-cursor".to_owned(),
+            event_id: "event-stale-missing-task".to_owned(),
+            kind: "execution_attention_required".to_owned(),
+            task_id: TaskId::new("task-missing-from-current-board"),
+            execution_id: Some("exec-missing".to_owned()),
+            agent_id: Some(AgentId::new("worker")),
+            created_at: now_unix_seconds(),
+            payload: serde_json::json!({"severity": "critical"}),
+        },
+        severity_rank: 100,
+        task_priority: 100,
+        admitted_sequence: 0,
+    });
+    state.next_attention_sequence = state.next_attention_sequence.max(1);
+    fs::write(
+        &state_path,
+        serde_json::to_string_pretty(&state).expect("render state"),
+    )
+    .expect("write stale attention state");
+
+    assert!(matches!(
+        runner
+            .run_once()
+            .expect("stale pending attention must not block next event"),
+        ProductionMasterTickOutcome::TaskAdvanced {
+            task_id: ref outcome_task_id,
+            to: TaskStatus::Closed,
+            ..
+        } if outcome_task_id == &task_id
+    ));
+    assert_eq!(executor.calls.load(Ordering::Relaxed), 1);
 
     fs::remove_dir_all(runtime_home).expect("cleanup");
 }
@@ -2355,6 +2612,63 @@ fn production_master_runner_parent_evaluation_is_idempotent_on_event_replay() {
         } if summary == "persisted parent evaluation created next work"
     ));
     assert_eq!(executor.calls.load(Ordering::Relaxed), 1);
+
+    fs::remove_dir_all(runtime_home).expect("cleanup");
+}
+
+#[test]
+fn production_master_runner_parent_reconciliation_uses_authoritative_snapshots_not_ui_ledger() {
+    let runtime_home = temp_path("parent-evaluation-authoritative-only");
+    bootstrap_runner(&runtime_home);
+    let parent_session_id = SessionId::new("parent-session-authoritative-only");
+    persist_parent_user_objective(
+        &runtime_home,
+        &parent_session_id,
+        "Overall goal may require authoritative-only reconciliation.",
+    );
+    seed_parent_children(
+        &runtime_home,
+        &parent_session_id,
+        &[("alpha", true), ("beta", true)],
+    );
+    let task_runtime =
+        TaskRuntime::boot(&runtime_home, AgentId::new("master")).expect("task runtime");
+    let mut children = task_runtime
+        .query_task_board(TaskBoardQuery {
+            status: None,
+            assignee: None,
+            include_terminal: true,
+        })
+        .expect("task board")
+        .tasks
+        .into_iter()
+        .filter(|task| task.parent.session_id.as_ref() == Some(&parent_session_id))
+        .collect::<Vec<_>>();
+    children.sort_by(|left, right| left.task_id.cmp(&right.task_id));
+    let evaluation_key = parent_evaluation_key(&parent_session_id, &children);
+    let evaluation_marker = parent_evaluation_marker(&evaluation_key);
+    persist_parent_evaluation_turn(
+        &runtime_home,
+        &parent_session_id,
+        &TurnId::new("runtime-turn-2"),
+        &evaluation_marker,
+        TerminalStatus::ToolPending,
+        "persisted parent evaluation created follow-up work",
+    );
+    poison_parent_reason_ledger(&runtime_home, &parent_session_id);
+    let executor = Arc::new(StubMasterExecutor::new(|_| {
+        Err("authoritative replay must not execute".to_owned())
+    }));
+    let runner = test_runner(runtime_home.clone(), executor.clone());
+
+    assert!(matches!(
+        runner.run_once().expect("authoritative replay tick"),
+        ProductionMasterTickOutcome::ParentEvaluated {
+            ref summary,
+            ..
+        } if summary == "persisted parent evaluation created follow-up work"
+    ));
+    assert_eq!(executor.calls.load(Ordering::Relaxed), 0);
 
     fs::remove_dir_all(runtime_home).expect("cleanup");
 }
@@ -2543,15 +2857,22 @@ fn seed_parent_children(
     parent_session_id: &SessionId,
     children: &[(&str, bool)],
 ) -> Vec<TaskId> {
+    seed_parent_children_for_turn(
+        runtime_home,
+        parent_session_id,
+        &TurnId::new("runtime-turn-parent"),
+        children,
+    )
+}
+
+fn seed_parent_children_for_turn(
+    runtime_home: &Path,
+    parent_session_id: &SessionId,
+    parent_turn_id: &TurnId,
+    children: &[(&str, bool)],
+) -> Vec<TaskId> {
     let runtime = TaskRuntime::boot(runtime_home, AgentId::new("master")).expect("runtime");
-    runtime
-        .create_agent(AgentCreateRequest {
-            agent_id: AgentId::new("worker"),
-            capabilities: vec!["workspace".to_owned()],
-            actor: test_actor("master"),
-            watermark: test_watermark("parent-create-worker"),
-        })
-        .expect("create worker");
+    ensure_test_worker(&runtime);
     let mut task_ids = Vec::new();
     for (index, (name, close)) in children.iter().enumerate() {
         let task_id = TaskId::new(format!(
@@ -2573,7 +2894,7 @@ fn seed_parent_children(
                 },
                 parent: TaskParentRef {
                     session_id: Some(parent_session_id.clone()),
-                    turn_id: Some(TurnId::new("runtime-turn-parent")),
+                    turn_id: Some(parent_turn_id.clone()),
                     trace_id: None,
                 },
                 actor: test_actor("master"),
@@ -2627,6 +2948,81 @@ fn seed_parent_children(
     task_ids
 }
 
+fn seed_parent_blocked_child_for_turn(
+    runtime_home: &Path,
+    parent_session_id: &SessionId,
+    parent_turn_id: &TurnId,
+    name: &str,
+) -> TaskId {
+    let runtime = TaskRuntime::boot(runtime_home, AgentId::new("master")).expect("runtime");
+    ensure_test_worker(&runtime);
+    let task_id = TaskId::new(format!(
+        "task-parent-{}-{name}",
+        sanitize_identifier(parent_session_id.as_str())
+    ));
+    runtime
+        .create_task(TaskCreateRequest {
+            task_id: Some(task_id.clone()),
+            title: format!("{name} child"),
+            content: format!("produce {name} result"),
+            goal: format!("complete {name} child"),
+            deliverables: vec![format!("{name}.md")],
+            acceptance: vec![format!("{name} evidence")],
+            priority: 80,
+            target_cwd: Some(runtime_home.display().to_string()),
+            dispatch: TaskDispatchRequest::Agent {
+                agent_id: AgentId::new("worker"),
+            },
+            parent: TaskParentRef {
+                session_id: Some(parent_session_id.clone()),
+                turn_id: Some(parent_turn_id.clone()),
+                trace_id: None,
+            },
+            actor: test_actor("master"),
+            watermark: test_watermark("parent-create-blocked-task"),
+        })
+        .expect("create blocked child task");
+    let execution_id = format!("exec-parent-blocked-{name}-{}", now_unix_nanos());
+    runtime
+        .claim_next_task(TaskClaimRequest {
+            agent_id: AgentId::new("worker"),
+            execution_id: execution_id.clone(),
+            ttl_seconds: 300,
+            actor: test_actor("worker"),
+            watermark: test_watermark("parent-blocked-claim"),
+        })
+        .expect("claim blocked child");
+    runtime
+        .apply_execution_fact(ExecutionFact {
+            execution_id,
+            task_id: task_id.clone(),
+            agent_id: AgentId::new("worker"),
+            turn_id: Some(TurnId::new(format!("worker-turn-blocked-{name}"))),
+            occurred_at: now_unix_seconds(),
+            kind: ExecutionFactKind::Blocked {
+                reason: "old wrong path is blocked".to_owned(),
+                evidence: vec!["path missing".to_owned()],
+            },
+            watermark: test_watermark("parent-blocked-fact"),
+        })
+        .expect("block child");
+    task_id
+}
+
+fn ensure_test_worker(runtime: &TaskRuntime) {
+    if runtime.query_agent(&AgentId::new("worker")).is_ok() {
+        return;
+    }
+    runtime
+        .create_agent(AgentCreateRequest {
+            agent_id: AgentId::new("worker"),
+            capabilities: vec!["workspace".to_owned()],
+            actor: test_actor("master"),
+            watermark: test_watermark("parent-create-worker"),
+        })
+        .expect("create worker");
+}
+
 fn persist_parent_evaluation_turn(
     runtime_home: &Path,
     parent_session_id: &SessionId,
@@ -2674,10 +3070,37 @@ fn persist_parent_evaluation_turn(
         .expect("persist turn close");
 }
 
+fn poison_parent_reason_ledger(runtime_home: &Path, parent_session_id: &SessionId) {
+    let path = runtime_home
+        .join("ledgers")
+        .join("reason")
+        .join("master")
+        .join(format!("{}.jsonl", parent_session_id.as_str()));
+    fs::write(&path, "{not valid reason ledger json}\n").expect("poison ledger");
+}
+
 fn persist_parent_user_objective(
     runtime_home: &Path,
     parent_session_id: &SessionId,
     objective: &str,
+) {
+    persist_parent_user_objective_with_turn_id(
+        runtime_home,
+        parent_session_id,
+        &TurnId::new("runtime-turn-1"),
+        objective,
+        TerminalStatus::Blocked,
+        "waiting for delegated child work",
+    );
+}
+
+fn persist_parent_user_objective_with_turn_id(
+    runtime_home: &Path,
+    parent_session_id: &SessionId,
+    turn_id: &TurnId,
+    objective: &str,
+    terminal_status: TerminalStatus,
+    terminal_summary: &str,
 ) {
     let mut history =
         SessionHistory::new(parent_session_id.clone(), Vec::new()).expect("session history");
@@ -2687,7 +3110,7 @@ fn persist_parent_user_objective(
             &mut history,
             TurnStartInput {
                 session_id: parent_session_id.clone(),
-                turn_id: TurnId::new("runtime-turn-1"),
+                turn_id: turn_id.clone(),
                 trace_id: TraceId::new("parent-objective-trace"),
                 feature_id: FeatureId::new("reason.turn"),
                 agent_id: AgentId::new("master"),
@@ -2708,8 +3131,8 @@ fn persist_parent_user_objective(
         trace_id: turn.request.trace_id.clone(),
         feature_id: FeatureId::new("reason.turn"),
         agent_id: AgentId::new("master"),
-        status: TerminalStatus::Blocked,
-        summary: "waiting for delegated child work".to_owned(),
+        status: terminal_status,
+        summary: terminal_summary.to_owned(),
     });
     persistence
         .record_turn_closed(&history, &turn, 0)

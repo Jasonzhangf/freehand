@@ -3,7 +3,7 @@
 Generated from `docs/mainline-calls/runtime.checkpoint-rewind.json`. Do not edit by hand.
 
 - owner crate: `crates/freehand-runtime`
-- owner module: `crates/freehand-runtime/src/lib.rs`
+- owner module: `crates/freehand-runtime/src/checkpoint_store.rs`
 - function map: `docs/function-maps/runtime.checkpoint-rewind.md`
 - generated wiki: `docs/wiki/runtime.checkpoint-rewind.md`
 - test design: `docs/testing/runtime.checkpoint-rewind.md`
@@ -42,19 +42,19 @@ Generated from `docs/mainline-calls/runtime.checkpoint-rewind.json`. Do not edit
 ## Shared Multi-Reference Functions
 
 - `RuntimeCheckpointStore::write_manifest`
-  - owner: `crates/freehand-runtime/src/lib.rs`
+  - owner: `crates/freehand-runtime/src/checkpoint_store.rs`
   - purpose: persist one runtime-owned checkpoint manifest and associated path set atomically
   - allowed callers: checkpoint create path, checkpoint restore path, runtime tests
   - related tests: checkpoint manifest round-trip tests
   - why shared: checkpoint metadata write semantics must stay single-sourced
 - `RuntimeCheckpointStore::append_ledger_row`
-  - owner: `crates/freehand-runtime/src/lib.rs`
+  - owner: `crates/freehand-runtime/src/checkpoint_store.rs`
   - purpose: append create / apply / restore / discard lifecycle rows in one owner path
   - allowed callers: checkpoint create path, runtime restore path
   - related tests: checkpoint ledger lifecycle tests
   - why shared: runtime checkpoint audit must not be duplicated across entrypoints
 - `RuntimeCheckpointStore::list_summaries`
-  - owner: `crates/freehand-runtime/src/lib.rs`
+  - owner: `crates/freehand-runtime/src/checkpoint_store.rs`
   - purpose: read runtime-owned checkpoint manifests plus ledger rows into safe summary DTOs
   - allowed callers: runtime dispatcher, runtime tests
   - related tests: checkpoint summary query tests
@@ -64,12 +64,12 @@ Generated from `docs/mainline-calls/runtime.checkpoint-rewind.json`. Do not edit
 
 | step | symbol path | file path | responsibility | input semantic | output semantic | caller | callee | source resource | target resource | resource operation | binding status |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| 01 | `RuntimeCheckpointStore::new` | `crates/freehand-runtime/src/lib.rs` | bind runtime home checkpoint directories and the canonical runtime-home workspace root for one selected master runtime | runtime home plus selected agent and session | checkpoint store | runtime bootstrap and tests | checkpoint owner |  |  |  | bound |
+| 01 | `RuntimeCheckpointStore::new` | `crates/freehand-runtime/src/checkpoint_store.rs` | bind runtime home checkpoint directories and the canonical runtime-home workspace root for one selected master runtime | runtime home plus selected agent and session | checkpoint store | runtime bootstrap and tests | checkpoint owner |  |  |  | bound |
 | 02 | `BuiltinToolRegistry::preview` | `crates/freehand-tools/src/lib.rs` | request writable-tool preview before any side effect | writable tool call | canonical preview truth | live bridge/tool loop | tool preview owner |  |  |  | bound |
-| 03 | `RuntimeCheckpointStore::create_from_preview` | `crates/freehand-runtime/src/lib.rs` | snapshot previewed pre-image set and write checkpoint manifest | preview truth plus turn identity | checkpoint manifest plus created ledger row | tool loop | checkpoint owner | workspace_path | checkpoint | workspace_path.checkpoint_before_write | bound |
+| 03 | `RuntimeCheckpointStore::create_from_preview` | `crates/freehand-runtime/src/checkpoint_store.rs` | snapshot previewed pre-image set and write checkpoint manifest | preview truth plus turn identity | checkpoint manifest plus created ledger row | tool loop | checkpoint owner | workspace_path | checkpoint | workspace_path.checkpoint_before_write | bound |
 | 04 | `execute_registry_tool_call` | `crates/freehand-runtime/src/lib.rs` | call `tool.registry` execute only after checkpoint succeeds for writable tools | checkpoint id plus writable tool call | tool result plus applied ledger row | tool loop | tool registry owner |  |  |  | bound |
-| 05 | `rewind_checkpoint` | `crates/freehand-runtime/src/lib.rs` | restore one checkpoint pre-image set into the locked workspace root | checkpoint id | restored workspace plus restore ledger row | future CLI/UI/runtime command | checkpoint owner | runtime_command | checkpoint | runtime_command.rewind_checkpoint | bound |
-| 06 | `list_checkpoints / RuntimeCheckpointStore::list_summaries` | `crates/freehand-runtime/src/lib.rs` | read manifest plus ledger truth into safe checkpoint summaries | runtime home plus agent/session ids | checkpoint summary list | runtime dispatcher and tests | checkpoint owner |  |  |  | bound |
+| 05 | `rewind_checkpoint` | `crates/freehand-runtime/src/checkpoint_store.rs` | restore one checkpoint pre-image set into the locked workspace root | checkpoint id | restored workspace plus restore ledger row | future CLI/UI/runtime command | checkpoint owner | runtime_command | checkpoint | runtime_command.rewind_checkpoint | bound |
+| 06 | `list_checkpoints / RuntimeCheckpointStore::list_summaries` | `crates/freehand-runtime/src/checkpoint_store.rs` | read manifest plus ledger truth into safe checkpoint summaries | runtime home plus agent/session ids | checkpoint summary list | runtime dispatcher and tests | checkpoint owner |  |  |  | bound |
 
 ## Sync Status Against Mainline Call
 

@@ -17,7 +17,8 @@ use thiserror::Error;
 
 use super::{
     LiveReasonCancelToken, LiveReasonTurnRequest, RuntimeAgentBootstrapError,
-    load_default_runtime_agent, run_worker_live_reason_turn,
+    expand_leading_tilde_path, load_default_runtime_agent, path_resolution_diagnostic_text,
+    run_worker_live_reason_turn,
 };
 
 mod heartbeat;
@@ -854,13 +855,15 @@ impl WorkerWorkspacePreflightError {
             } => {
                 if parent_exists {
                     format!(
-                        "worker task workspace preflight failed: target_cwd `{requested}` expands to `{}` but that workspace path does not exist. This is not a repository-permission denial. It usually means the task used target_cwd for a not-yet-created output directory or the wrong workspace root. target_cwd must point to an existing workspace/repository; create output directories later from inside that workspace.",
-                        expanded.display()
+                        "worker task workspace preflight failed: target_cwd `{requested}` expands to `{}` but that workspace path does not exist. This is not a repository-permission denial. It usually means the task used target_cwd for a not-yet-created output directory or the wrong workspace root. target_cwd must point to an existing workspace/repository; create output directories later from inside that workspace. {}",
+                        expanded.display(),
+                        path_resolution_diagnostic_text("target_cwd", &requested)
                     )
                 } else {
                     format!(
-                        "worker task workspace preflight failed: target_cwd `{requested}` expands to `{}` but the path cannot be resolved because one of its parent directories does not exist. This is not proof that the intended repository is unavailable; it means the assigned workspace path itself is invalid and must be corrected before execution.",
-                        expanded.display()
+                        "worker task workspace preflight failed: target_cwd `{requested}` expands to `{}` but the path cannot be resolved because one of its parent directories does not exist. This is not proof that the intended repository is unavailable; it means the assigned workspace path itself is invalid and must be corrected before execution. {}",
+                        expanded.display(),
+                        path_resolution_diagnostic_text("target_cwd", &requested)
                     )
                 }
             }
@@ -869,16 +872,18 @@ impl WorkerWorkspacePreflightError {
                 expanded,
                 error,
             } => format!(
-                "worker task workspace preflight failed: target_cwd `{requested}` expands to `{}` but access was denied during workspace resolution: {error}. This is a path-access or boundary problem, not evidence that the repository is missing.",
-                expanded.display()
+                "worker task workspace preflight failed: target_cwd `{requested}` expands to `{}` but access was denied during workspace resolution: {error}. This is a path-access or boundary problem, not evidence that the repository is missing. {}",
+                expanded.display(),
+                path_resolution_diagnostic_text("target_cwd", &requested)
             ),
             Self::CanonicalizeFailed {
                 requested,
                 expanded,
                 error,
             } => format!(
-                "worker task workspace preflight failed: target_cwd `{requested}` expands to `{}` but canonical workspace resolution failed: {error}.",
-                expanded.display()
+                "worker task workspace preflight failed: target_cwd `{requested}` expands to `{}` but canonical workspace resolution failed: {error}. {}",
+                expanded.display(),
+                path_resolution_diagnostic_text("target_cwd", &requested)
             ),
             Self::NotDirectory { canonical } => format!(
                 "worker task workspace preflight failed: canonical target_cwd `{}` is not a directory",
@@ -893,7 +898,7 @@ fn canonical_worker_workspace(target_cwd: &str) -> Result<PathBuf, WorkerWorkspa
     if trimmed.is_empty() {
         return Err(WorkerWorkspacePreflightError::Empty);
     }
-    let expanded = expand_leading_tilde(trimmed);
+    let expanded = expand_leading_tilde_path(trimmed);
     let workspace = fs::canonicalize(&expanded).map_err(|error| match error.kind() {
         ErrorKind::NotFound => WorkerWorkspacePreflightError::MissingWorkspace {
             requested: target_cwd.to_owned(),
@@ -917,24 +922,6 @@ fn canonical_worker_workspace(target_cwd: &str) -> Result<PathBuf, WorkerWorkspa
         });
     }
     Ok(workspace)
-}
-
-fn expand_leading_tilde(path: &str) -> PathBuf {
-    if path == "~" {
-        return home_dir().unwrap_or_else(|| PathBuf::from(path));
-    }
-    if let Some(rest) = path.strip_prefix("~/")
-        && let Some(home) = home_dir()
-    {
-        return home.join(rest);
-    }
-    PathBuf::from(path)
-}
-
-fn home_dir() -> Option<PathBuf> {
-    std::env::var_os("HOME")
-        .filter(|home| !home.is_empty())
-        .map(PathBuf::from)
 }
 
 fn next_execution_id(worker_agent_id: &AgentId) -> String {

@@ -34,6 +34,7 @@ Generated from `docs/mainline-calls/task.orchestration.json`. Do not edit by han
 - `TaskRuntime::heartbeat_task` refreshes the lease for the assigned running agent
 - `TaskRuntime` mutation, heartbeat, and execution-fact writes re-read persisted task truth before appending ledger or snapshot state
 - Phase 1 TaskBoard query reads task snapshots, agent registry state, blocked items, review queue, and current skeleton stale projection
+- `TaskRuntime::query_task_space_snapshot` builds a bounded read-only prompt snapshot from task snapshots, AgentLifecycle projection, and recent master-visible ledger events without running boot lease recovery, scheduler fact replay, or EventInbox cursor pagination
 - Phase 1 ExecutionFact sync admits typed running/recovering/blocked/interrupted/review_ready facts into Task Center truth without parsing raw prose
 - Phase 1 SchedulerTick computes elapsed/stale/soft-timeout/hard-timeout facts without making business decisions
 - Phase 2A worker loop keeps execution_id attached to claim/start, progress, blocked, recovering, review, reject, retry, approve, and close evidence
@@ -57,8 +58,9 @@ Generated from `docs/mainline-calls/task.orchestration.json`. Do not edit by han
 - claim_next returns either the claimed running task plus execution_id or an explicit no-task result
 - record_execution returns an event-backed worker progress mutation summary
 - create_agent and close_agent return persisted agent snapshot summaries
-- task tool result returns semantic task ids, status, event names, sequence numbers, or JSON snapshots
+- task tool create result returns semantic task ids, status, event names, sequence numbers, and target_cwd path diagnostics when present; query/list/history still return JSON snapshots
 - Phase 1 TaskBoard query returns board-level task, blocker, review, stale, and agent binding summaries
+- TaskSpaceSnapshot query returns a bounded prompt projection with actionable tasks first, bounded blocked and review-ready ids, AgentLifecycle health, and newest recent events while leaving full TaskBoard/EventInbox semantics unchanged
 - Phase 1 ExecutionFact sync returns event-backed Task Center updates while preserving recovering as non-terminal
 - Phase 1 SchedulerTick returns durable/replayable fact events and recommendations only
 - review rejection remains non-terminal task lifecycle truth; a later execution fact may resume the rejected task into running retry and submit review again
@@ -157,6 +159,12 @@ Generated from `docs/mainline-calls/task.orchestration.json`. Do not edit by han
   - allowed callers: runtime query dispatch, CLI/ADP headless samples, tests
   - related tests: task_board_projects_owner_truth_with_filtered_views
   - why shared: keeps TaskBoard truth in Task Center instead of UI-local state
+- `TaskRuntime::query_task_space_snapshot`
+  - owner: `crates/freehand-task/src/lib.rs`
+  - purpose: build the bounded read-only TaskSpaceSnapshot projection used by provider prompt context without invoking boot recovery, scheduler fact replay, or EventInbox cursor pagination
+  - allowed callers: provider.reason-live-bridge live context builder, tests
+  - related tests: task_space_snapshot_is_bounded_and_does_not_replay_scheduler_facts
+  - why shared: keeps prompt task-space projection in Task Center owner truth instead of rebuilding full task runtime state from the live bridge
 - `TaskRuntime::apply_execution_fact`
   - owner: `crates/freehand-task/src/lib.rs`
   - purpose: admit typed execution facts into Task Center transition/event truth after persisted task truth refresh
@@ -199,7 +207,7 @@ Generated from `docs/mainline-calls/task.orchestration.json`. Do not edit by han
 | step | symbol path | file path | responsibility | input semantic | output semantic | caller | callee | source resource | target resource | resource operation | binding status |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | 01 | `reasonix_aligned_builtin_specs` | `crates/freehand-tools/src/lib.rs` | expose one `task` tool schema with op-dispatched arguments | static registry truth | provider tool definition | runtime live bridge | tool registry |  |  |  | bound |
-| 02 | `execute_task_tool` | `crates/freehand-runtime/src/lib.rs` | route task tool calls into task owner with runtime home, session, turn, and trace context | task tool call | tool result text | runtime live bridge | task runtime |  |  |  | bound |
+| 02 | `execute_task_tool` | `crates/freehand-runtime/src/lib.rs` | route task tool calls into task owner with runtime home, session, turn, and trace context, and append target_cwd path diagnostics to create results | task tool call | tool result text with task truth and optional path diagnostic | runtime live bridge | task runtime plus path diagnostic helper |  |  |  | bound |
 | 03 | `TaskRuntime::boot` | `crates/freehand-task/src/lib.rs` | load task, agent, and lifecycle snapshots into memory | runtime home and owner agent | ready task runtime | runtime task bridge | task owner |  |  |  | bound |
 | 04 | `TaskRuntime::create_task` | `crates/freehand-task/src/lib.rs` | validate, persist, assign/wait, and update memory state | task create request | task snapshot plus ledger events | runtime task bridge | task owner | task | session | task.create | bound |
 | 05 | `TaskRuntime::query_task` | `crates/freehand-task/src/lib.rs` | return one task snapshot truth | task id | task snapshot | runtime task bridge | task owner |  |  |  | bound |
@@ -226,6 +234,7 @@ Generated from `docs/mainline-calls/task.orchestration.json`. Do not edit by han
 | 25 | `write_json_atomic` | `crates/freehand-task/src/lib.rs` | atomically replace JSON persistence files with process/nanos/counter-qualified temp paths | serializable task owner truth | replaced JSON truth without cross-writer temp collisions | TaskStore persistence helpers | filesystem atomic rename |  |  |  | bound |
 | 26 | `TaskStore::with_lease_state_lock` | `crates/freehand-task/src/lib.rs` | serialize shared lease read-modify-write mutation across independent Worker processes | lease create, refresh, or remove mutation | complete leases.json truth without lost updates or stale reintroduction | TaskStore lease helpers | filesystem advisory lock plus atomic rename |  |  |  | bound |
 | 27 | `TaskRuntime::attach_task_to_session` | `crates/freehand-task/src/lib.rs` | persist an idempotent observing-session attachment while preserving the immutable task creation parent, and rehydrate attachment membership from matching TaskSessionAttached ledger rows when later snapshots omit it | existing task id plus visible observing session id | TaskSessionAttached ledger event and hydrated task snapshot attachment projection without status or last-event rewind | runtime task query/history tool owner | TaskStore append_event_and_snapshot | task | session | task.attach_session | bound |
+| 28 | `TaskRuntime::query_task_space_snapshot` | `crates/freehand-task/src/lib.rs` | project a bounded read-only task-space snapshot for provider prompt context without boot recovery, scheduler fact replay, or EventInbox cursor pagination | runtime home plus owner agent plus task/event limits | bounded TaskSpaceSnapshotProjection with tasks, blocked/review-ready queues, AgentLifecycle health, and newest master-visible events | provider.reason-live-bridge live context builder | task owner |  |  |  | bound |
 
 ## Sync Status Against Mainline Call
 

@@ -414,7 +414,8 @@ fn verify_orchestrator_policy_docs(root: &Path) -> Result<(), String> {
             root.join("docs/function-maps/tool.registry.md"),
             &[
                 "the master-safe export excludes unrestricted shell scope",
-                "read-only path tools may inspect readable external absolute or parent paths",
+                "read-only path tools remain locked to the current workspace root",
+                "external absolute paths are explicit",
                 "file-mutation tools remain locked to the current workspace root",
                 "WorkspaceBoundaryViolation",
                 "first real read-only execution set is",
@@ -442,12 +443,12 @@ fn verify_orchestrator_policy_docs(root: &Path) -> Result<(), String> {
         (
             root.join("docs/testing/tool.registry.md"),
             &[
-                "`read_file` line-window and external-read tests",
+                "`read_file` line-window and external absolute rejection tests",
                 "`glob` recursive and simple-filename pattern tests",
-                "`grep` recursive match and external-read tests",
-                "`ls` flat, recursive listing, and external-read tests",
-                "read-only path tools may inspect readable external paths",
-                "file-mutation tools remain locked to the current agent cwd",
+                "`grep` recursive match and external absolute rejection tests",
+                "`ls` flat, recursive listing, and external absolute rejection tests",
+                "read-only path tools reject existing external absolute paths",
+                "worker read-only path tools and file-mutation tools remain locked",
                 "wiki generated from mainline call",
             ],
         ),
@@ -456,7 +457,7 @@ fn verify_orchestrator_policy_docs(root: &Path) -> Result<(), String> {
             &[
                 "first real file/search batch is read-only",
                 "Current first implemented set",
-                "readable external absolute or parent paths are allowed",
+                "read-only path tools are locked to the current workspace root",
                 "unrestricted shell is not exposed to Worker provider turns",
             ],
         ),
@@ -2216,6 +2217,16 @@ fn verify_ci_cd_gate_commands(root: &Path) -> Result<(), String> {
     require_contains(
         &install_launchd,
         "worker requires FREEHAND_PAIR_TOKEN_SHARED",
+        "scripts/install-launchd.sh",
+    )?;
+    require_contains(
+        &install_launchd,
+        "copy_worker_provider_env_from_master",
+        "scripts/install-launchd.sh",
+    )?;
+    require_contains(
+        &install_launchd,
+        "_KEY|CREDENTIAL|SECRET",
         "scripts/install-launchd.sh",
     )?;
     require_contains(
@@ -4225,6 +4236,9 @@ bind_addr=\"$default_bind_addr\"\n",
 default_label=\"com.freehand.workerS\"\n\
 exec \"$daemon_bin\" serve --agent \"$agent\"</string>\n\
 echo \"worker requires FREEHAND_PAIR_TOKEN_SHARED\"\n\
+copy_worker_provider_env_from_master() {\n\
+  [[ \"$key\" =~ ^FREEHAND_.*(_KEY|CREDENTIAL|SECRET)$ ]]\n\
+}\n\
 wait_for_worker_service\n\
 kill -0 \"$service_pid\"\n",
                 )
@@ -4262,6 +4276,9 @@ fi\n",
 default_label=\"com.freehand.workerS\"\n\
 exec \"$daemon_bin\" serve --agent \"$agent\"</string>\n\
 echo \"worker requires FREEHAND_PAIR_TOKEN_SHARED\"\n\
+copy_worker_provider_env_from_master() {\n\
+  [[ \"$key\" =~ ^FREEHAND_.*(_KEY|CREDENTIAL|SECRET)$ ]]\n\
+}\n\
 wait_for_worker_service\n\
 kill -0 \"$service_pid\"\n",
                 )
@@ -4301,6 +4318,9 @@ fi\n",
 default_label=\"com.freehand.workerS\"\n\
 exec \"$daemon_bin\" serve --agent \"$agent\"</string>\n\
 echo \"worker requires FREEHAND_PAIR_TOKEN_SHARED\"\n\
+copy_worker_provider_env_from_master() {\n\
+  [[ \"$key\" =~ ^FREEHAND_.*(_KEY|CREDENTIAL|SECRET)$ ]]\n\
+}\n\
 wait_for_worker_service\n\
 kill -0 \"$service_pid\"\n",
                 )

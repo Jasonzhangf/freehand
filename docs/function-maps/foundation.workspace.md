@@ -46,6 +46,10 @@
   Worker services source the matching Master pair token, never pass `--bind`,
   use separate env/log/plist truth, and require a stable running PID before the
   install/restart command succeeds
+- launchd Worker env generation copies provider credential-style env keys
+  (`FREEHAND_*_KEY`, `FREEHAND_*_CREDENTIAL`, `FREEHAND_*_SECRET`) from the
+  matching Master profile env so Worker provider requests do not fail after a
+  service-scoped restart
 - launchd install script keeps daemon workspace env out of the release/global-install regression subprocess so daemon runtime path selection cannot pollute workspace tests
 - gate runner verifies static data/control boundary rules on source-owned request and metadata types
 - mainline generator loads machine-readable feature sources from `docs/mainline-calls/*.json`
@@ -71,6 +75,8 @@
 - launchd Worker install exposes `com.freehand.worker` and
   `com.freehand.workerS` as separate `RunAtLoad` + `KeepAlive` services with no
   UI port and with pair-token identity shared from the matching Master profile
+- launchd Worker restart succeeds with the same provider credential env surface
+  as the matching Master profile for credential-style Freehand env keys
 - release and S launchd profiles default `FREEHAND_DAEMON_WORKDIR` to `$HOME/.freehand`, never the repository root
 - release/global-install regressions run without inherited daemon workspace root overrides while the final LaunchAgent still receives the configured daemon workdir
 - gate returns success when request-node contracts remain free of metadata/debug/control types and metadata owner types remain free of request/control payload fields
@@ -88,6 +94,8 @@
 - resource-map parse errors, missing required core resources, duplicate owners, missing projections, unregistered direct resource edges, missing source-edge registry rows, forbidden/direct relation conflicts, forbidden relations without matching indirect relation rules, no-op source shortcut gates, and deferred source gates surface as gate failures
 - missing `mainlines check` in `make ci` or CI/CD full-gate wiring surfaces as gate failure
 - missing launchd runtime-home workdir initialization or a repository-root default surfaces as gate failure
+- missing launchd Worker provider credential env propagation surfaces as gate
+  failure before Worker services can be claimed provider-ready
 - missing source-only search exclusions, missing unsafe-argument guards, or missing `scripts/source-search.sh` policy snippets surface as gate failure
 - missing release prerequisites such as Java or Cargo surface as script failure before artifacts are claimed
 - missing fixed-port daemon health, Chrome/CDP availability, WebUI browser failures, or ADP mismatch surface as online verification failure before alpha success is claimed

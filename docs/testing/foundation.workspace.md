@@ -85,7 +85,9 @@
   - `scripts/freehand-file-permission-preflight.sh` records macOS runtime/workdir/protected-folder permission preflight status under `~/.freehand/state/file-permission-preflight.json`; denial opens Full Disk Access settings and fails install/restart unless explicitly run with `FREEHAND_FILE_PERMISSION_PREFLIGHT=warn`
   - `scripts/install-launchd.sh installWorkerS` starts
     `com.freehand.workerS` from the same debug binary and pair token without a
-    WebUI bind; `restartWorkerS` preserves the same service contract
+    WebUI bind; `restartWorkerS` preserves the same service contract and copies
+    credential-style `FREEHAND_*_KEY`, `FREEHAND_*_CREDENTIAL`, and
+    `FREEHAND_*_SECRET` provider env keys from the matching Master profile
   - `make verify-webui-online` runs the fixed S-profile `127.0.0.1:4042` real-browser WebUI + ADP proof after symlink install/restartS, injects the verifier-only provider credential env required for Settings valid-save proof, restores S-profile config/env afterward, and saves screenshots plus `summary.json` under `artifacts/webui-online/`; `make verify-webui-release-online` is the explicit release-profile `127.0.0.1:4041` proof
   - `scripts/verify-adp-fixed-session-observability-online.py --url ws://127.0.0.1:4042/adp --session <fixed-id>` proves fixed-session submit observability with pending/final selected-session turns plus TaskBoard/AgentBoard owner truth, without creating random sessions
   - machine-readable mainline truth remains the only source for generated wiki artifacts

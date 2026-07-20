@@ -1,7 +1,7 @@
 {
   "feature_id": "runtime.checkpoint-rewind",
   "owner_crate": "crates/freehand-runtime",
-  "owner_module": "crates/freehand-runtime/src/lib.rs",
+  "owner_module": "crates/freehand-runtime/src/checkpoint_store.rs",
   "function_map_doc": "docs/function-maps/runtime.checkpoint-rewind.md",
   "test_design_doc": "docs/testing/runtime.checkpoint-rewind.md",
   "mainline_call_doc": "docs/mainline-calls/runtime.checkpoint-rewind.json",
@@ -36,7 +36,7 @@
   "shared_functions": [
     {
       "symbol": "RuntimeCheckpointStore::write_manifest",
-      "owner": "crates/freehand-runtime/src/lib.rs",
+      "owner": "crates/freehand-runtime/src/checkpoint_store.rs",
       "purpose": "persist one runtime-owned checkpoint manifest and associated path set atomically",
       "allowed_callers": [
         "checkpoint create path",
@@ -50,7 +50,7 @@
     },
     {
       "symbol": "RuntimeCheckpointStore::append_ledger_row",
-      "owner": "crates/freehand-runtime/src/lib.rs",
+      "owner": "crates/freehand-runtime/src/checkpoint_store.rs",
       "purpose": "append create / apply / restore / discard lifecycle rows in one owner path",
       "allowed_callers": [
         "checkpoint create path",
@@ -63,7 +63,7 @@
     },
     {
       "symbol": "RuntimeCheckpointStore::list_summaries",
-      "owner": "crates/freehand-runtime/src/lib.rs",
+      "owner": "crates/freehand-runtime/src/checkpoint_store.rs",
       "purpose": "read runtime-owned checkpoint manifests plus ledger rows into safe summary DTOs",
       "allowed_callers": [
         "runtime dispatcher",
@@ -79,7 +79,7 @@
     {
       "step": "01",
       "symbol_path": "RuntimeCheckpointStore::new",
-      "file_path": "crates/freehand-runtime/src/lib.rs",
+      "file_path": "crates/freehand-runtime/src/checkpoint_store.rs",
       "responsibility": "bind runtime home checkpoint directories and the canonical runtime-home workspace root for one selected master runtime",
       "input_semantic": "runtime home plus selected agent and session",
       "output_semantic": "checkpoint store",
@@ -101,7 +101,7 @@
     {
       "step": "03",
       "symbol_path": "RuntimeCheckpointStore::create_from_preview",
-      "file_path": "crates/freehand-runtime/src/lib.rs",
+      "file_path": "crates/freehand-runtime/src/checkpoint_store.rs",
       "responsibility": "snapshot previewed pre-image set and write checkpoint manifest",
       "input_semantic": "preview truth plus turn identity",
       "output_semantic": "checkpoint manifest plus created ledger row",
@@ -126,7 +126,7 @@
     {
       "step": "05",
       "symbol_path": "rewind_checkpoint",
-      "file_path": "crates/freehand-runtime/src/lib.rs",
+      "file_path": "crates/freehand-runtime/src/checkpoint_store.rs",
       "responsibility": "restore one checkpoint pre-image set into the locked workspace root",
       "input_semantic": "checkpoint id",
       "output_semantic": "restored workspace plus restore ledger row",
@@ -140,7 +140,7 @@
     {
       "step": "06",
       "symbol_path": "list_checkpoints / RuntimeCheckpointStore::list_summaries",
-      "file_path": "crates/freehand-runtime/src/lib.rs",
+      "file_path": "crates/freehand-runtime/src/checkpoint_store.rs",
       "responsibility": "read manifest plus ledger truth into safe checkpoint summaries",
       "input_semantic": "runtime home plus agent/session ids",
       "output_semantic": "checkpoint summary list",

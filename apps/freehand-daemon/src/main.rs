@@ -3,10 +3,12 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use freehand_runtime::{
-    ProductionMasterRunner, ProductionWorkerRunner, RuntimeAgentBootstrap,
-    RuntimeCommandDispatcher, load_default_runtime_agent,
+    ProductionMasterRunner, ProductionMasterRunnerError, ProductionWorkerRunner,
+    RuntimeAgentBootstrap, RuntimeCommandDispatcher, load_default_runtime_agent,
 };
-use freehand_server::{parse_bind_arg, serve_webui_listener};
+use freehand_server::{
+    RemoteRelayDirectory, parse_bind_arg, serve_remote_relay_listener, serve_webui_listener,
+};
 use tokio::net::TcpListener;
 
 #[tokio::main]
@@ -48,8 +50,30 @@ async fn run() -> Result<String, String> {
             let bind_addr = parse_bind_arg(trailing_args.into_iter())?;
             run_master_mode(agent_name, bootstrap, bind_addr).await
         }
+        "remote-relay" => {
+            let bind_addr = parse_bind_arg(args)?;
+            run_remote_relay_mode(bind_addr).await
+        }
         _ => Err(usage()),
     }
+}
+
+async fn run_remote_relay_mode(bind_addr: std::net::SocketAddr) -> Result<String, String> {
+    let listener = TcpListener::bind(bind_addr)
+        .await
+        .map_err(|err| format!("failed to bind {bind_addr}: {err}"))?;
+    let local_addr = listener
+        .local_addr()
+        .map_err(|err| format!("failed to read local addr: {err}"))?;
+    println!("freehand-daemon remote relay listening on http://{local_addr}");
+    serve_remote_relay_listener(
+        listener,
+        Arc::new(std::sync::Mutex::new(RemoteRelayDirectory::default())),
+        pending::<()>(),
+    )
+    .await
+    .map_err(|err| format!("remote relay server error: {err}"))?;
+    Ok(String::new())
 }
 
 async fn run_master_mode(
@@ -81,8 +105,11 @@ async fn run_master_mode(
     let query_port: Arc<dyn freehand_ui_protocol::UiRuntimeQueryPort> = dispatcher.clone();
     let cancel = Arc::new(AtomicBool::new(false));
     let runner_cancel = Arc::clone(&cancel);
-    let mut runner_task =
-        tokio::task::spawn_blocking(move || master_runner.run_until(runner_cancel));
+    let runner_task = tokio::task::spawn_blocking(move || master_runner.run_until(runner_cancel));
+    tokio::spawn(monitor_master_lifecycle_runner(
+        agent_name.clone(),
+        runner_task,
+    ));
     let server = serve_webui_listener(
         listener,
         ui_state,
@@ -90,22 +117,25 @@ async fn run_master_mode(
         query_port,
         pending::<()>(),
     );
-    tokio::pin!(server);
-    tokio::select! {
-        result = &mut server => {
-            cancel.store(true, Ordering::Release);
-            runner_task
-                .await
-                .map_err(|error| format!("master lifecycle runner task failed: {error}"))?
-                .map_err(|error| format!("master lifecycle runner stopped: {error}"))?;
-            result.map_err(|err| format!("daemon server error: {err}"))?;
-            Ok(String::new())
+    let result = server.await;
+    cancel.store(true, Ordering::Release);
+    result.map_err(|err| format!("daemon server error: {err}"))?;
+    Ok(String::new())
+}
+
+async fn monitor_master_lifecycle_runner(
+    agent_name: String,
+    runner_task: tokio::task::JoinHandle<Result<(), ProductionMasterRunnerError>>,
+) {
+    match runner_task.await {
+        Ok(Ok(())) => {
+            eprintln!("master lifecycle runner stopped for {agent_name}");
         }
-        result = &mut runner_task => {
-            result
-                .map_err(|error| format!("master lifecycle runner task failed: {error}"))?
-                .map_err(|error| format!("master lifecycle runner stopped: {error}"))?;
-            Err(format!("master lifecycle runner stopped unexpectedly for {agent_name}"))
+        Ok(Err(error)) => {
+            eprintln!("master lifecycle runner stopped: {error}");
+        }
+        Err(error) => {
+            eprintln!("master lifecycle runner task failed: {error}");
         }
     }
 }
@@ -135,7 +165,7 @@ where
 }
 
 fn usage() -> String {
-    "usage: freehand-daemon serve --agent <name> [--bind HOST:PORT]".to_owned()
+    "usage: freehand-daemon serve --agent <name> [--bind HOST:PORT] | remote-relay [--bind HOST:PORT]".to_owned()
 }
 
 #[cfg(test)]
@@ -1951,6 +1981,67 @@ mod tests {
         assert!(err.contains("failed to build runtime dispatcher"));
         assert!(err.contains("checkpoint projection bootstrap failed"));
         assert!(err.contains("checkpoint ledger line 1 failed to parse"));
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn master_mode_keeps_host_alive_when_lifecycle_runner_stops() {
+        let (home, bootstrap) = {
+            let _guard = HOME_LOCK.lock().unwrap_or_else(|err| err.into_inner());
+            let home =
+                write_test_home(&master_config_text("https://example.invalid")).expect("test home");
+            let old_home = env::var_os("HOME");
+            let old_pair_token = env::var_os("FREEHAND_PAIR_TOKEN_SHARED");
+            unsafe { env::set_var("HOME", &home) };
+            unsafe { env::set_var("FREEHAND_PAIR_TOKEN_SHARED", "pair-token-shared") };
+            let bootstrap = load_default_runtime_agent("master").expect("bootstrap");
+            restore_env(old_home, "FREEHAND_PAIR_TOKEN_SHARED", old_pair_token);
+            (home, bootstrap)
+        };
+
+        let state_path = bootstrap
+            .runtime_home
+            .join("state")
+            .join("master-loop")
+            .join("master.json");
+        fs::create_dir_all(state_path.parent().expect("state parent")).expect("state directory");
+        fs::write(&state_path, "{not-json").expect("corrupt loop state");
+
+        let socket = StdTcpListener::bind("127.0.0.1:0").expect("test port");
+        let addr = socket.local_addr().expect("addr");
+        drop(socket);
+        let base_url = format!("http://{addr}");
+        let server_task = tokio::spawn(run_master_mode("master".to_owned(), bootstrap, addr));
+        let client = Client::new();
+        let mut saw_health = false;
+        for _ in 0..40 {
+            if client
+                .get(format!("{base_url}/health"))
+                .send()
+                .await
+                .is_ok_and(|response| response.status().is_success())
+            {
+                saw_health = true;
+                break;
+            }
+            tokio::time::sleep(Duration::from_millis(50)).await;
+        }
+        assert!(saw_health, "daemon host did not become healthy");
+        tokio::time::sleep(Duration::from_millis(250)).await;
+        let response = client
+            .get(format!("{base_url}/health"))
+            .send()
+            .await
+            .expect("health after runner stop");
+        assert!(
+            response.status().is_success(),
+            "daemon host stopped with status {}",
+            response.status()
+        );
+
+        server_task.abort();
+        let _ = server_task.await;
+        let _ = fs::remove_dir_all(home);
     }
 
     fn master_config_text(base_url: &str) -> String {

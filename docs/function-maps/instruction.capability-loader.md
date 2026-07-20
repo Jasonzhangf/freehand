@@ -33,6 +33,11 @@
 - caller supplies the Freehand runtime home and current working directory
 - loader resolves global instruction authoring inputs from `~/.freehand/AGENTS.md` and `~/.freehand/skills`
 - loader resolves local instruction authoring inputs from every directory between project root and cwd using `AGENTS.md` and `.agents/skills`
+- cwd and project root are normalized before local directory traversal so a symlinked cwd cannot make the loader scan alias-parent instruction roots outside the canonical project path
+- skill roots are scanned with a deterministic max depth, visited canonical
+  directory set, hidden-entry skip, and symlink handling that only follows
+  targets still inside the same skill root; symlink cycles are skipped and
+  symlinks to outside roots become explicit manifest errors
 - every discovered authoring file is validated and normalized into a typed manifest entry
 - invalid skill frontmatter becomes an explicit manifest error entry instead of being silently ignored
 
@@ -51,6 +56,8 @@
 - missing optional roots are skipped because no authoring input exists
 - cwd that is not a directory is rejected
 - unreadable AGENTS or skill files become explicit read errors
+- symlinked skill roots or files that resolve outside the current skill root
+  become explicit manifest errors and are not traversed
 - malformed skill frontmatter becomes an explicit manifest error while valid capability entries remain visible
 - manifest write failure returns an explicit error
 
@@ -81,11 +88,12 @@
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | 01 | `InstructionCapabilityCompileInput::new` | `crates/freehand-instructions/src/lib.rs` | build compile input with default project-root markers | runtime home + cwd | typed compile input | runtime/CLI/tests | input builder | bound |
 | 02 | `compile_instruction_capability_manifest` | `crates/freehand-instructions/src/lib.rs` | discover global and local AGENTS.md plus skill roots | compile input | manifest candidates | runtime/CLI/tests | discovery planner | bound |
+| 02a | `dirs_between` / `normalize_path` | `crates/freehand-instructions/src/lib.rs` | normalize cwd and project root before deriving local instruction directories so symlink aliases do not add parent instruction roots | project root + cwd, possibly through symlink alias | canonical local directory chain from project root to cwd only | `compile_instruction_capability_manifest` | path normalizer | bound |
 | 03 | `agents_md_capability` | `crates/freehand-instructions/src/lib.rs` | normalize one AGENTS.md source into a manifest entry | AGENTS.md path + scope + precedence | AGENTS manifest entry or error | manifest compiler | AGENTS parser | bound |
 | 04 | `collect_skills` | `crates/freehand-instructions/src/lib.rs` | scan a skill root deterministically | skill root + scope + precedence | skill entries and error records | manifest compiler | skill scanner | bound |
 | 05 | `parse_skill_frontmatter` | `crates/freehand-instructions/src/lib.rs` | validate required skill frontmatter fields | SKILL.md content | skill name and description or manifest error | skill scanner | skill parser | bound |
 | 06 | `write_instruction_capability_manifest` | `crates/freehand-instructions/src/lib.rs` | persist manifest JSON under runtime state | compiled manifest + target path | manifest file or write error | runtime/CLI/tests | manifest writer | bound |
-| 07 | `instruction_capability_segment` | `crates/freehand-runtime/src/lib.rs` | compile/render instruction capability truth and admit it as a typed context-planner segment | runtime home + cwd + compiled manifest | `ContextSegmentKind::InstructionCapability` request-context segment | runtime live bridge | `freehand-instructions::render_instruction_capability_context` | bound |
+| 07 | `instruction_capability_segment` | `crates/freehand-runtime/src/live_context.rs` | compile/render instruction capability truth and admit it as a typed context-planner segment | runtime home + cwd + compiled manifest | `ContextSegmentKind::InstructionCapability` request-context segment | runtime live bridge | `freehand-instructions::render_instruction_capability_context` | bound |
 
 ## Metadata / Request Isolation Notes
 
@@ -98,5 +106,10 @@
 
 - manifest compiler and typed context renderer are implemented in `crates/freehand-instructions`
 - current support covers global `~/.freehand/AGENTS.md`, local `AGENTS.md`, global `~/.freehand/skills`, and local `.agents/skills`
+- skill discovery no longer depends on `walkdir` follow-links recursion; it is
+  owned by bounded scanner code in this crate
+- symlinked cwd aliases no longer cause the local instruction directory chain
+  to include alias-parent `.agents/skills`; local scanning is canonical
+  project-root to canonical cwd only
 - runtime live bridge consumes this owner output through `ContextSegmentKind::InstructionCapability`, not by scanning directories from provider code or patching provider payloads directly
 - migrated mainline-call source lives at `docs/mainline-calls/instruction.capability-loader.json` and generated wiki lives at `docs/wiki/instruction.capability-loader.md`

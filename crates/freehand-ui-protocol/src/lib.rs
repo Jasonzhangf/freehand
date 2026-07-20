@@ -158,6 +158,12 @@ pub enum UiCommand {
     UpdateProviderConfig {
         update: UiProviderConfigUpdate,
     },
+    UpsertProviderConfig {
+        update: UiProviderConfigUpdate,
+    },
+    UpdateAgentProviderSelection {
+        selection: UiAgentProviderSelectionUpdate,
+    },
     UpdateAgentResourceConfig {
         update: UiAgentResourceConfigUpdate,
     },
@@ -242,6 +248,14 @@ pub struct UiProviderConfigUpdate {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct UiAgentProviderSelectionUpdate {
+    pub agent_name: String,
+    pub provider_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fallback_provider_id: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct UiAgentResourceConfigUpdate {
     pub agent_name: String,
     pub resource_count: usize,
@@ -252,6 +266,8 @@ pub struct UiTurnProjection {
     pub source: UiSource,
     pub session_id: SessionId,
     pub turn_id: TurnId,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub created_at: Option<u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cwd: Option<String>,
     pub user_text: Option<String>,
@@ -482,6 +498,7 @@ pub struct UiTaskSnapshotProjection {
     pub assignee_agent_id: Option<AgentId>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub active_execution_id: Option<String>,
+    pub created_at: u64,
     pub updated_at: u64,
     pub last_progress_at: Option<u64>,
     pub last_event_seq: u64,
@@ -686,19 +703,38 @@ pub struct UiConfigStatusProjection {
     pub agent_mode: String,
     pub node_id: String,
     pub paired_agents: Vec<UiConfigPeerProjection>,
+    #[serde(default)]
+    pub provider_registry: Vec<UiProviderConfigSummaryProjection>,
     pub agent_resource_count: usize,
     pub agent_resource_limit: usize,
     pub agent_resource_provider_mode: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub agent_resource_provider_id: Option<String>,
     pub provider_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fallback_provider_id: Option<String>,
     pub provider_type: String,
     pub provider_protocol: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub provider_base_url: String,
     pub provider_base_url_host: String,
     pub default_model: String,
     pub provider_auth_type: String,
     pub provider_auth_source: String,
     pub restart_required_on_change: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct UiProviderConfigSummaryProjection {
+    pub provider_id: String,
+    pub enabled: bool,
+    pub provider_type: String,
+    pub provider_protocol: String,
+    pub provider_base_url: String,
+    pub provider_base_url_host: String,
+    pub default_model: String,
+    pub provider_auth_type: String,
+    pub provider_auth_source: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -896,6 +932,7 @@ pub struct TurnProjectionInput {
     pub source_node_id: String,
     pub session_id: SessionId,
     pub turn_id: TurnId,
+    pub created_at: Option<u64>,
     pub cwd: Option<String>,
     pub user_text: Option<String>,
     pub semantic_events: Vec<ReasonResp01SemanticEvent>,
@@ -1220,10 +1257,19 @@ impl UiProtocolState {
         session_id: &SessionId,
         projections: impl IntoIterator<Item = UiTurnProjection>,
     ) {
+        let existing = self
+            .turns
+            .values()
+            .filter(|projection| &projection.session_id == session_id)
+            .map(|projection| (projection.turn_id.clone(), projection.clone()))
+            .collect::<BTreeMap<_, _>>();
         self.turns
             .retain(|_, projection| &projection.session_id != session_id);
         let mut latest_session_turn_id = None;
-        for projection in projections {
+        for mut projection in projections {
+            if let Some(previous) = existing.get(&projection.turn_id) {
+                preserve_live_activity_on_nonterminal_refresh(&mut projection, previous);
+            }
             latest_session_turn_id = Some(projection.turn_id.clone());
             if let Some(cwd) = projection.cwd.clone() {
                 self.session_cwds.insert(projection.session_id.clone(), cwd);
@@ -1679,6 +1725,7 @@ impl UiProtocolState {
                 },
                 session_id: session_id.clone(),
                 turn_id: turn_id.clone(),
+                created_at: None,
                 cwd: self.session_cwds.get(session_id).cloned(),
                 user_text: None,
                 model_request: None,
@@ -1841,28 +1888,58 @@ pub fn validate_command(command: &UiCommand) -> Result<(), UiProtocolError> {
             Err(UiProtocolError::EmptyTaskId)
         }
         UiCommand::WorkerControl { control } => validate_worker_control_command(control),
-        UiCommand::UpdateProviderConfig { update } if update.agent_name.trim().is_empty() => {
+        UiCommand::UpdateProviderConfig { update } | UiCommand::UpsertProviderConfig { update }
+            if update.agent_name.trim().is_empty() =>
+        {
             Err(UiProtocolError::EmptyConfigAgentName)
         }
-        UiCommand::UpdateProviderConfig { update } if update.provider_id.trim().is_empty() => {
+        UiCommand::UpdateProviderConfig { update } | UiCommand::UpsertProviderConfig { update }
+            if update.provider_id.trim().is_empty() =>
+        {
             Err(UiProtocolError::EmptyProviderId)
         }
-        UiCommand::UpdateProviderConfig { update } if update.provider_type.trim().is_empty() => {
+        UiCommand::UpdateProviderConfig { update } | UiCommand::UpsertProviderConfig { update }
+            if update.provider_type.trim().is_empty() =>
+        {
             Err(UiProtocolError::EmptyProviderType)
         }
-        UiCommand::UpdateProviderConfig { update }
+        UiCommand::UpdateProviderConfig { update } | UiCommand::UpsertProviderConfig { update }
             if update.provider_protocol.trim().is_empty() =>
         {
             Err(UiProtocolError::EmptyProviderProtocol)
         }
-        UiCommand::UpdateProviderConfig { update } if update.base_url.trim().is_empty() => {
+        UiCommand::UpdateProviderConfig { update } | UiCommand::UpsertProviderConfig { update }
+            if update.base_url.trim().is_empty() =>
+        {
             Err(UiProtocolError::EmptyProviderBaseUrl)
         }
-        UiCommand::UpdateProviderConfig { update } if update.default_model.trim().is_empty() => {
+        UiCommand::UpdateProviderConfig { update } | UiCommand::UpsertProviderConfig { update }
+            if update.default_model.trim().is_empty() =>
+        {
             Err(UiProtocolError::EmptyProviderDefaultModel)
         }
-        UiCommand::UpdateProviderConfig { update } if update.api_key_env.trim().is_empty() => {
+        UiCommand::UpdateProviderConfig { update } | UiCommand::UpsertProviderConfig { update }
+            if update.api_key_env.trim().is_empty() =>
+        {
             Err(UiProtocolError::EmptyProviderApiKeyEnv)
+        }
+        UiCommand::UpdateAgentProviderSelection { selection }
+            if selection.agent_name.trim().is_empty() =>
+        {
+            Err(UiProtocolError::EmptyConfigAgentName)
+        }
+        UiCommand::UpdateAgentProviderSelection { selection }
+            if selection.provider_id.trim().is_empty() =>
+        {
+            Err(UiProtocolError::EmptyProviderId)
+        }
+        UiCommand::UpdateAgentProviderSelection { selection }
+            if selection
+                .fallback_provider_id
+                .as_deref()
+                .is_some_and(|value| value.trim().is_empty()) =>
+        {
+            Err(UiProtocolError::EmptyProviderId)
         }
         UiCommand::UpdateAgentResourceConfig { update } if update.agent_name.trim().is_empty() => {
             Err(UiProtocolError::EmptyConfigAgentName)
@@ -2492,6 +2569,60 @@ fn upsert_tool_activity(
     });
 }
 
+fn preserve_live_activity_on_nonterminal_refresh(
+    replacement: &mut UiTurnProjection,
+    previous: &UiTurnProjection,
+) {
+    if replacement.session_id != previous.session_id || replacement.turn_id != previous.turn_id {
+        return;
+    }
+    if replacement.terminal_status.is_some() || replacement.terminal_text.is_some() {
+        return;
+    }
+    if previous.terminal_status.is_some() || previous.terminal_text.is_some() {
+        return;
+    }
+    if replacement.model_request.is_none() {
+        replacement.model_request = previous.model_request.clone();
+    }
+    for previous_activity in &previous.tool_activities {
+        merge_tool_activity(&mut replacement.tool_activities, previous_activity);
+    }
+}
+
+fn merge_tool_activity(activities: &mut Vec<UiToolActivity>, incoming: &UiToolActivity) {
+    if let Some(activity) = activities
+        .iter_mut()
+        .find(|activity| activity.tool_call_id == incoming.tool_call_id)
+    {
+        if tool_activity_rank(incoming.status) > tool_activity_rank(activity.status) {
+            activity.status = incoming.status;
+        }
+        if activity.tool_name == "tool" && incoming.tool_name != "tool" {
+            activity.tool_name = incoming.tool_name.clone();
+        }
+        if activity.detail.is_none() || tool_activity_rank(incoming.status) > 0 {
+            activity.detail = incoming.detail.clone().or_else(|| activity.detail.clone());
+        }
+        if activity.display.is_none() || tool_activity_rank(incoming.status) > 0 {
+            activity.display = incoming
+                .display
+                .clone()
+                .or_else(|| activity.display.clone());
+        }
+        return;
+    }
+    activities.push(incoming.clone());
+}
+
+fn tool_activity_rank(status: UiToolActivityStatus) -> u8 {
+    match status {
+        UiToolActivityStatus::Waiting => 0,
+        UiToolActivityStatus::Completed => 1,
+        UiToolActivityStatus::Failed => 2,
+    }
+}
+
 fn tool_activity_status_from_result(status: ToolResultStatus) -> UiToolActivityStatus {
     match status {
         ToolResultStatus::Success => UiToolActivityStatus::Completed,
@@ -2557,6 +2688,8 @@ fn command_kind(command: &UiCommand) -> &'static str {
         UiCommand::QueryWorkerControl { .. } => "query_worker_control",
         UiCommand::QueryErrorCenterEvents { .. } => "query_error_center_events",
         UiCommand::UpdateProviderConfig { .. } => "update_provider_config",
+        UiCommand::UpsertProviderConfig { .. } => "upsert_provider_config",
+        UiCommand::UpdateAgentProviderSelection { .. } => "update_agent_provider_selection",
         UiCommand::UpdateAgentResourceConfig { .. } => "update_agent_resource_config",
         UiCommand::CreateTask { .. } => "create_task",
         UiCommand::CreateTaskAgent { .. } => "create_task_agent",
@@ -2593,6 +2726,8 @@ fn is_command_ingress_kind(command: &UiCommand) -> bool {
             | UiCommand::RollbackLatestSessionTurn { .. }
             | UiCommand::SubmitUserInput { .. }
             | UiCommand::UpdateProviderConfig { .. }
+            | UiCommand::UpsertProviderConfig { .. }
+            | UiCommand::UpdateAgentProviderSelection { .. }
             | UiCommand::UpdateAgentResourceConfig { .. }
             | UiCommand::CreateTask { .. }
             | UiCommand::CreateTaskAgent { .. }
@@ -2631,9 +2766,10 @@ fn command_dispatch_target(command: &UiCommand) -> (&'static str, &'static str) 
         UiCommand::RewindCheckpoint { .. } => {
             ("runtime.checkpoint-rewind", "crates/freehand-runtime")
         }
-        UiCommand::UpdateProviderConfig { .. } | UiCommand::UpdateAgentResourceConfig { .. } => {
-            ("config.core", "crates/freehand-config")
-        }
+        UiCommand::UpdateProviderConfig { .. }
+        | UiCommand::UpsertProviderConfig { .. }
+        | UiCommand::UpdateAgentProviderSelection { .. }
+        | UiCommand::UpdateAgentResourceConfig { .. } => ("config.core", "crates/freehand-config"),
         UiCommand::CreateTask { .. }
         | UiCommand::CreateTaskAgent { .. }
         | UiCommand::AssignTask { .. }
@@ -2687,6 +2823,7 @@ pub fn turn_projection_from_events(input: TurnProjectionInput) -> UiTurnProjecti
         },
         session_id: input.session_id,
         turn_id: input.turn_id,
+        created_at: input.created_at,
         cwd: input.cwd,
         user_text: input.user_text,
         model_request: None,
@@ -2759,6 +2896,7 @@ mod tests {
             source_node_id: "node-1".to_owned(),
             session_id: SessionId::new("session-1"),
             turn_id: TurnId::new("turn-1"),
+            created_at: Some(10),
             cwd: None,
             user_text: Some("run the task".to_owned()),
             semantic_events: vec![
@@ -2837,6 +2975,72 @@ mod tests {
         })
     }
 
+    fn active_refresh_projection(session_id: &SessionId, turn_id: &TurnId) -> UiTurnProjection {
+        turn_projection_from_events(TurnProjectionInput {
+            source_agent_id: AgentId::new("agent-1"),
+            source_node_id: "node-1".to_owned(),
+            session_id: session_id.clone(),
+            turn_id: turn_id.clone(),
+            created_at: Some(90),
+            cwd: None,
+            user_text: Some("run active work".to_owned()),
+            semantic_events: Vec::new(),
+            tool_calls: Vec::new(),
+            tool_results: Vec::new(),
+            usage_events: Vec::new(),
+            terminal_event: None,
+            error_events: Vec::new(),
+            slave_substream_card: false,
+        })
+    }
+
+    fn terminal_refresh_projection(
+        session_id: &SessionId,
+        turn_id: &TurnId,
+        status: TerminalStatus,
+    ) -> UiTurnProjection {
+        turn_projection_from_events(TurnProjectionInput {
+            source_agent_id: AgentId::new("agent-1"),
+            source_node_id: "node-1".to_owned(),
+            session_id: session_id.clone(),
+            turn_id: turn_id.clone(),
+            created_at: Some(91),
+            cwd: None,
+            user_text: Some("run active work".to_owned()),
+            semantic_events: Vec::new(),
+            tool_calls: Vec::new(),
+            tool_results: Vec::new(),
+            usage_events: Vec::new(),
+            terminal_event: Some(ReasonResp03TerminalEvent {
+                session_id: session_id.clone(),
+                turn_id: turn_id.clone(),
+                trace_id: TraceId::new("trace-refresh-terminal"),
+                feature_id: FeatureId::new("ui.protocol"),
+                agent_id: AgentId::new("agent-1"),
+                status,
+                summary: "terminal refresh truth".to_owned(),
+            }),
+            error_events: Vec::new(),
+            slave_substream_card: false,
+        })
+    }
+
+    fn ui_tool_call(session_id: &SessionId, turn_id: &TurnId) -> ReasonReq04ToolCall {
+        ReasonReq04ToolCall {
+            session_id: session_id.clone(),
+            turn_id: turn_id.clone(),
+            trace_id: TraceId::new("trace-refresh-tool"),
+            feature_id: FeatureId::new("ui.protocol"),
+            agent_id: AgentId::new("agent-1"),
+            tool_call: freehand_contracts::ToolCallContract {
+                tool_call_id: freehand_contracts::ToolCallId::new("tool-refresh-1"),
+                tool_name: "task".to_owned(),
+                arguments: vec![],
+                arguments_complete: true,
+            },
+        }
+    }
+
     fn sample_debug_snapshot() -> DebugStateSnapshot {
         DebugStateSnapshot::new(
             freehand_debug::DebugSemanticPosition {
@@ -2873,6 +3077,7 @@ mod tests {
         .expect("valid");
 
         let projection = sample_turn_projection(false);
+        assert_eq!(projection.created_at, Some(10));
         assert_eq!(projection.reasoning, vec!["thinking"]);
         assert_eq!(projection.text, vec!["answer"]);
         assert_eq!(projection.tool_activities.len(), 1);
@@ -3357,6 +3562,7 @@ mod tests {
             source_node_id: "node-1".to_owned(),
             session_id: session_id.clone(),
             turn_id: TurnId::new("turn-cwd-1"),
+            created_at: Some(11),
             cwd: Some("/tmp/freehand-cwd".to_owned()),
             user_text: Some("run in cwd".to_owned()),
             semantic_events: Vec::new(),
@@ -3409,6 +3615,7 @@ mod tests {
             source_node_id: "node-1".to_owned(),
             session_id: user_session_id.clone(),
             turn_id: TurnId::new("turn-visible-1"),
+            created_at: Some(12),
             cwd: None,
             user_text: Some("visible user turn".to_owned()),
             semantic_events: Vec::new(),
@@ -3424,6 +3631,7 @@ mod tests {
             source_node_id: "node-1".to_owned(),
             session_id: lifecycle_session_id.clone(),
             turn_id: TurnId::new("turn-lifecycle-1"),
+            created_at: Some(13),
             cwd: None,
             user_text: Some("internal lifecycle decision".to_owned()),
             semantic_events: Vec::new(),
@@ -3439,6 +3647,7 @@ mod tests {
             source_node_id: "node-1".to_owned(),
             session_id: timer_session_id.clone(),
             turn_id: TurnId::new("turn-timer-1"),
+            created_at: Some(14),
             cwd: None,
             user_text: Some("internal timer wakeup".to_owned()),
             semantic_events: Vec::new(),
@@ -3454,6 +3663,7 @@ mod tests {
             source_node_id: "node-worker".to_owned(),
             session_id: worker_session_id.clone(),
             turn_id: TurnId::new("turn-worker-1"),
+            created_at: Some(15),
             cwd: None,
             user_text: Some("internal worker execution".to_owned()),
             semantic_events: Vec::new(),
@@ -3524,6 +3734,7 @@ mod tests {
                 source_node_id: "node-1".to_owned(),
                 session_id,
                 turn_id: TurnId::new(format!("turn-metadata-only-{index}")),
+                created_at: Some(20 + index as u64),
                 cwd: None,
                 user_text: Some("turn text".to_owned()),
                 semantic_events: Vec::new(),
@@ -3580,6 +3791,7 @@ mod tests {
             source_node_id: "node-1".to_owned(),
             session_id: SessionId::new("session-1"),
             turn_id: TurnId::new("turn-1"),
+            created_at: Some(30),
             cwd: None,
             user_text: Some("run the task".to_owned()),
             semantic_events: Vec::new(),
@@ -3639,6 +3851,7 @@ mod tests {
             source_node_id: "master-node".to_owned(),
             session_id: SessionId::new("session-framework-tools"),
             turn_id: TurnId::new("runtime-turn-framework-tools"),
+            created_at: Some(40),
             cwd: None,
             user_text: Some("delegate work and schedule a check".to_owned()),
             semantic_events: Vec::new(),
@@ -3771,6 +3984,7 @@ mod tests {
             source_node_id: "node-1".to_owned(),
             session_id: SessionId::new("session-1"),
             turn_id: TurnId::new("turn-1"),
+            created_at: Some(50),
             cwd: None,
             user_text: Some("run the task".to_owned()),
             semantic_events: Vec::new(),
@@ -3838,6 +4052,7 @@ mod tests {
             source_node_id: "node-1".to_owned(),
             session_id: SessionId::new("session-1"),
             turn_id: TurnId::new("turn-1"),
+            created_at: Some(60),
             cwd: None,
             user_text: Some("run the task".to_owned()),
             semantic_events: Vec::new(),
@@ -3888,6 +4103,7 @@ mod tests {
             source: base_source(UiStreamKind::Turn),
             session_id: SessionId::new("session-1"),
             turn_id: TurnId::new("turn-1"),
+            created_at: Some(70),
             cwd: None,
             user_text: Some("run the task".to_owned()),
             model_request: None,
@@ -3925,6 +4141,7 @@ mod tests {
             source_node_id: "node-1".to_owned(),
             session_id: SessionId::new("session-1"),
             turn_id: TurnId::new("turn-1"),
+            created_at: Some(80),
             cwd: None,
             user_text: Some("run the task".to_owned()),
             semantic_events: Vec::new(),
@@ -4069,6 +4286,136 @@ mod tests {
         );
         assert!(recovered.model_request.is_none());
         assert!(recovered.errors.is_empty());
+    }
+
+    #[test]
+    fn session_refresh_preserves_active_model_request_activity() {
+        let mut state = UiProtocolState::default();
+        let session_id = SessionId::new("session-active-refresh");
+        let turn_id = TurnId::new("runtime-turn-1");
+
+        state.apply_model_request_waiting_kind(UiModelRequestWaiting {
+            source_agent_id: AgentId::new("agent-1"),
+            source_node_id: "node-1".to_owned(),
+            session_id: session_id.clone(),
+            turn_id: turn_id.clone(),
+            kind: UiModelRequestKind::ProviderRetry,
+            detail: Some("provider retry 6/10".to_owned()),
+            slave_substream_card: false,
+        });
+        state.replace_session_turn_projections(
+            &session_id,
+            vec![active_refresh_projection(&session_id, &turn_id)],
+        );
+
+        match state
+            .query(&UiCommand::QuerySessionTurns {
+                session_id: session_id.clone(),
+            })
+            .expect("query refreshed transcript")
+        {
+            UiQueryResult::SessionTurns(transcript) => {
+                assert_eq!(transcript.turns.len(), 1);
+                let activity = transcript.turns[0]
+                    .model_request
+                    .as_ref()
+                    .expect("active provider activity must survive refresh");
+                assert_eq!(activity.kind, UiModelRequestKind::ProviderRetry);
+                assert_eq!(activity.detail.as_deref(), Some("provider retry 6/10"));
+            }
+            other => panic!("unexpected transcript query: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn session_refresh_preserves_active_tool_activity_cards() {
+        let mut state = UiProtocolState::default();
+        let session_id = SessionId::new("session-tool-refresh");
+        let turn_id = TurnId::new("runtime-turn-2");
+        let tool_call = ui_tool_call(&session_id, &turn_id);
+
+        state.apply_tool_call(
+            AgentId::new("agent-1"),
+            "node-1".to_owned(),
+            &tool_call,
+            false,
+        );
+        state.replace_session_turn_projections(
+            &session_id,
+            vec![active_refresh_projection(&session_id, &turn_id)],
+        );
+
+        match state
+            .query(&UiCommand::QuerySessionTurns {
+                session_id: session_id.clone(),
+            })
+            .expect("query refreshed transcript")
+        {
+            UiQueryResult::SessionTurns(transcript) => {
+                assert_eq!(transcript.turns.len(), 1);
+                assert_eq!(transcript.turns[0].tool_activities.len(), 1);
+                assert_eq!(
+                    transcript.turns[0].tool_activities[0].status,
+                    UiToolActivityStatus::Waiting
+                );
+                let tool_cards = public_conversation_items(&transcript.turns[0])
+                    .into_iter()
+                    .filter(|item| item.kind == UiConversationItemKind::ToolSummary)
+                    .collect::<Vec<_>>();
+                assert_eq!(tool_cards.len(), 1);
+                assert_eq!(tool_cards[0].title, "Run task operation");
+                assert_eq!(tool_cards[0].status, "waiting");
+            }
+            other => panic!("unexpected transcript query: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn terminal_session_refresh_drops_stale_live_activity() {
+        let mut state = UiProtocolState::default();
+        let session_id = SessionId::new("session-terminal-refresh");
+        let turn_id = TurnId::new("runtime-turn-3");
+
+        state.apply_model_request_waiting_kind(UiModelRequestWaiting {
+            source_agent_id: AgentId::new("agent-1"),
+            source_node_id: "node-1".to_owned(),
+            session_id: session_id.clone(),
+            turn_id: turn_id.clone(),
+            kind: UiModelRequestKind::ProviderRetry,
+            detail: Some("provider retry 9/10".to_owned()),
+            slave_substream_card: false,
+        });
+        state.replace_session_turn_projections(
+            &session_id,
+            vec![terminal_refresh_projection(
+                &session_id,
+                &turn_id,
+                TerminalStatus::Failed,
+            )],
+        );
+
+        match state
+            .query(&UiCommand::QuerySessionTurns {
+                session_id: session_id.clone(),
+            })
+            .expect("query refreshed transcript")
+        {
+            UiQueryResult::SessionTurns(transcript) => {
+                assert_eq!(transcript.turns.len(), 1);
+                assert!(transcript.turns[0].model_request.is_none());
+                assert_eq!(
+                    transcript.turns[0].terminal_status,
+                    Some(TerminalStatus::Failed)
+                );
+                assert!(
+                    transcript.turns[0]
+                        .terminal_text
+                        .as_deref()
+                        .is_some_and(|text| text.contains("terminal refresh truth"))
+                );
+            }
+            other => panic!("unexpected transcript query: {other:?}"),
+        }
     }
 
     #[test]
@@ -4796,13 +5143,26 @@ mod tests {
                 provider_id: "minimonth".to_owned(),
                 fallback_provider_id: None,
             }],
+            provider_registry: vec![UiProviderConfigSummaryProjection {
+                provider_id: "minimonth".to_owned(),
+                enabled: true,
+                provider_type: "anthropic".to_owned(),
+                provider_protocol: "messages".to_owned(),
+                provider_base_url: "https://api.example.test/anthropic".to_owned(),
+                provider_base_url_host: "api.example.test".to_owned(),
+                default_model: "MiniMax-M2".to_owned(),
+                provider_auth_type: "apikey".to_owned(),
+                provider_auth_source: "env".to_owned(),
+            }],
             agent_resource_count: 1,
             agent_resource_limit: 5,
             agent_resource_provider_mode: "shared".to_owned(),
             agent_resource_provider_id: Some("minimonth".to_owned()),
             provider_id: "minimonth".to_owned(),
+            fallback_provider_id: None,
             provider_type: "anthropic".to_owned(),
             provider_protocol: "messages".to_owned(),
+            provider_base_url: "https://api.example.test/anthropic".to_owned(),
             provider_base_url_host: "api.example.test".to_owned(),
             default_model: "MiniMax-M2".to_owned(),
             provider_auth_type: "apikey".to_owned(),
@@ -4812,6 +5172,8 @@ mod tests {
         let encoded = serde_json::to_string(&result).expect("config status json");
         assert!(encoded.contains("ConfigStatus"));
         assert!(encoded.contains("provider_auth_source"));
+        assert!(encoded.contains("provider_registry"));
+        assert!(encoded.contains("provider_base_url"));
         assert!(encoded.contains("agent_resource_count"));
         assert!(encoded.contains("agent_resource_provider_id"));
         assert!(!encoded.contains("api_key"));
@@ -4873,6 +5235,56 @@ mod tests {
         assert!(!encoded.contains("api_key\""));
         assert!(!encoded.contains("secret"));
         assert!(!encoded.contains("sk-"));
+    }
+
+    #[test]
+    fn provider_config_upsert_and_selection_route_to_config_owner() {
+        let upsert = UiCommand::UpsertProviderConfig {
+            update: UiProviderConfigUpdate {
+                agent_name: "master".to_owned(),
+                provider_id: "cc".to_owned(),
+                provider_type: "openai".to_owned(),
+                provider_protocol: "responses".to_owned(),
+                base_url: "https://api.anyint.ai/openai/v1".to_owned(),
+                default_model: "gpt-5.5".to_owned(),
+                api_key_env: "FREEHAND_CC_API_KEY".to_owned(),
+            },
+        };
+        validate_command(&upsert).expect("valid provider upsert");
+        let envelope = build_command_dispatch_envelope(&upsert).expect("upsert envelope");
+        assert_eq!(envelope.target_feature_id, "config.core");
+        assert_eq!(envelope.target_owner_module, "crates/freehand-config");
+        assert_eq!(envelope.ingress.command_kind, "upsert_provider_config");
+
+        let selection = UiCommand::UpdateAgentProviderSelection {
+            selection: UiAgentProviderSelectionUpdate {
+                agent_name: "master".to_owned(),
+                provider_id: "cc".to_owned(),
+                fallback_provider_id: Some("minimax".to_owned()),
+            },
+        };
+        validate_command(&selection).expect("valid provider selection");
+        let envelope = build_command_dispatch_envelope(&selection).expect("selection envelope");
+        assert_eq!(envelope.target_feature_id, "config.core");
+        assert_eq!(envelope.target_owner_module, "crates/freehand-config");
+        assert_eq!(
+            envelope.ingress.command_kind,
+            "update_agent_provider_selection"
+        );
+
+        let empty_selection = validate_command(&UiCommand::UpdateAgentProviderSelection {
+            selection: UiAgentProviderSelectionUpdate {
+                agent_name: "master".to_owned(),
+                provider_id: String::new(),
+                fallback_provider_id: None,
+            },
+        })
+        .expect_err("empty provider rejected");
+        assert_eq!(empty_selection, UiProtocolError::EmptyProviderId);
+        assert_eq!(
+            protocol_rejection(empty_selection).code,
+            "empty_provider_id"
+        );
     }
 
     #[test]

@@ -57,7 +57,7 @@ Related lifecycle owners that must stay separate:
 ## Separation Rules
 
 - `freehand-tools` owns tool registry truth and execution ownership
-- first-version read-only path tools use the canonical current workspace only as the relative-path base and may inspect readable external absolute or parent paths
+- first-version read-only path tools are locked to the current workspace root after canonical/symlink resolution; external absolute or parent-escape paths are explicit workspace-boundary violations
 - first-version `bash` runs with its current working directory locked to that same workspace root
 - first-version file-mutation tools are also workspace-locked and may only target existing parent directories inside that root
 - first-version file-mutation tools must write atomically through the tool owner; no app/runtime/orchestrator may write file content on their behalf
@@ -102,7 +102,7 @@ If any of the above is false, the tool may remain registered only as explicitly 
   - stdout and stderr are captured into one combined result
   - non-zero exit and timeout both fail explicitly and preserve captured output in the error message
   - background jobs remain out of scope until `bg_jobs` / `kill_shell` / `wait_job` lifecycle is designed
-- first real file/search batch is read-only; relative paths resolve from the current workspace, and readable external absolute or parent paths are allowed:
+- first real file/search batch is read-only; relative, absolute, and leading-`~` paths must remain under the current workspace root after canonical/symlink resolution:
   - `read_file`
   - `glob`
   - `grep`

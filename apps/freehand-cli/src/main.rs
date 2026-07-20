@@ -1,5 +1,9 @@
 use freehand_blocks::strip_completion_submission_block;
-use freehand_config::{AgentMode, default_config_path, load_default_config};
+use freehand_config::{
+    AgentMode, RemoteDaemonBootstrapCredential, RemoteDaemonBootstrapCredentialKind,
+    build_remote_daemon_bootstrap_link, build_remote_daemon_bootstrap_web_link,
+    default_config_path, load_default_config,
+};
 use freehand_contracts::{AgentId, SemanticEventKind, SessionId, TerminalStatus, TraceId, TurnId};
 use freehand_runtime::{
     LiveReasonRestoreStatus, LiveReasonTurnRequest, load_default_runtime_agent,
@@ -111,9 +115,12 @@ fn run() -> Result<String, String> {
     if flag == "adp-error-query" {
         return run_adp_error_query(args.collect());
     }
+    if flag == "remote-daemon-bootstrap-link" {
+        return run_remote_daemon_bootstrap_link(args.collect());
+    }
     if flag != "--agent" {
         return Err(
-            "usage: freehand-cli --agent <name>\n   or: freehand-cli reason-e2e --agent <name> --scenario <usage-compaction|recovery-block>\n   or: freehand-cli reason-persist-smoke --agent <name>\n   or: freehand-cli reason-live --agent <name> --prompt <text> [--stream]\n   or: freehand-cli adp-smoke --url ws://127.0.0.1:4041/adp\n   or: freehand-cli adp-turn-sample --url ws://127.0.0.1:4041/adp --sample <success|failure|schema-mismatch|provider-retry>\n   or: freehand-cli session-continue-sample --url ws://127.0.0.1:4041/adp\n   or: freehand-cli task-lifecycle-sample --url ws://127.0.0.1:4041/adp\n   or: freehand-cli task-restart-seed-review --agent master --task <id> --worker <id> --execution <id> --target-cwd <path> --summary <text>\n   or: freehand-cli task-restart-seed-rejected --agent master --task <id> --worker <id> --execution <id> --target-cwd <path> --summary <text>\n   or: freehand-cli task-restart-seed-blocked --agent master --task <id> --worker <id> --execution <id> --target-cwd <path> --summary <text>\n   or: freehand-cli task-restart-seed-running --agent master --task <id> --worker <id> --execution <id> --target-cwd <path> --summary <text>\n   or: freehand-cli phase1-foundation-sample --url ws://127.0.0.1:4041/adp [--verify-task <task_id> --review-task <task_id> --execution <id> --agent <id>]\n   or: freehand-cli master-worker-foundation-sample --url ws://127.0.0.1:4041/adp [--verify-task <task_id> --execution <id> --agent <id>]\n   or: freehand-cli master-worker-autonomy-sample --url ws://127.0.0.1:4041/adp [--scenario <all|success|execution-error|reject-retry>] [--verify-task <task_id> --execution <id> --agent <id>]\n   or: freehand-cli master-poll-foundation-sample --url ws://127.0.0.1:4041/adp [--verify-task <task_id> --execution <id> --agent <id> --cursor <cursor>]\n   or: freehand-cli worker-control-foundation-sample --url ws://127.0.0.1:4041/adp [--verify-task <task_id> --execution <id> --agent <id> --control <control_id>]\n   or: freehand-cli adp-session-query --url ws://127.0.0.1:4041/adp [--session <id>]\n   or: freehand-cli adp-session-manage --url ws://127.0.0.1:4041/adp --action <create|rename|archive|restore|delete> --session <id> [--title <title>] [--cwd <path>]\n   or: freehand-cli adp-config-query --url ws://127.0.0.1:4041/adp\n   or: freehand-cli adp-config-update --url ws://127.0.0.1:4041/adp --agent <name> --provider <id> --type <openai|anthropic> --protocol <responses|chat_completions|messages> --base-url <url> --model <model> --api-key-env <ENV>\n   or: freehand-cli adp-task-query --url ws://127.0.0.1:4041/adp [--status <status>] [--agent <id>] [--history <task_id>]\n   or: freehand-cli adp-task-subscribe --url ws://127.0.0.1:4041/adp [--status <status>] [--agent <id>]\n   or: freehand-cli adp-error-query --url ws://127.0.0.1:4041/adp --session <id> [--trace <id>] [--turn <id>] [--domain <domain>]"
+            "usage: freehand-cli --agent <name>\n   or: freehand-cli reason-e2e --agent <name> --scenario <usage-compaction|recovery-block>\n   or: freehand-cli reason-persist-smoke --agent <name>\n   or: freehand-cli reason-live --agent <name> --prompt <text> [--stream]\n   or: freehand-cli adp-smoke --url ws://127.0.0.1:4041/adp\n   or: freehand-cli adp-turn-sample --url ws://127.0.0.1:4041/adp --sample <success|failure|schema-mismatch|provider-retry>\n   or: freehand-cli session-continue-sample --url ws://127.0.0.1:4041/adp\n   or: freehand-cli task-lifecycle-sample --url ws://127.0.0.1:4041/adp\n   or: freehand-cli task-restart-seed-review --agent master --task <id> --worker <id> --execution <id> --target-cwd <path> --summary <text>\n   or: freehand-cli task-restart-seed-rejected --agent master --task <id> --worker <id> --execution <id> --target-cwd <path> --summary <text>\n   or: freehand-cli task-restart-seed-blocked --agent master --task <id> --worker <id> --execution <id> --target-cwd <path> --summary <text>\n   or: freehand-cli task-restart-seed-running --agent master --task <id> --worker <id> --execution <id> --target-cwd <path> --summary <text>\n   or: freehand-cli phase1-foundation-sample --url ws://127.0.0.1:4041/adp [--verify-task <task_id> --review-task <task_id> --execution <id> --agent <id>]\n   or: freehand-cli master-worker-foundation-sample --url ws://127.0.0.1:4041/adp [--verify-task <task_id> --execution <id> --agent <id>]\n   or: freehand-cli master-worker-autonomy-sample --url ws://127.0.0.1:4041/adp [--scenario <all|success|execution-error|reject-retry>] [--verify-task <task_id> --execution <id> --agent <id>]\n   or: freehand-cli master-poll-foundation-sample --url ws://127.0.0.1:4041/adp [--verify-task <task_id> --execution <id> --agent <id> --cursor <cursor>]\n   or: freehand-cli worker-control-foundation-sample --url ws://127.0.0.1:4041/adp [--verify-task <task_id> --execution <id> --agent <id> --control <control_id>]\n   or: freehand-cli adp-session-query --url ws://127.0.0.1:4041/adp [--session <id>]\n   or: freehand-cli adp-session-manage --url ws://127.0.0.1:4041/adp --action <create|rename|archive|restore|delete> --session <id> [--title <title>] [--cwd <path>]\n   or: freehand-cli adp-config-query --url ws://127.0.0.1:4041/adp\n   or: freehand-cli adp-config-update --url ws://127.0.0.1:4041/adp --agent <name> --provider <id> --type <openai|anthropic> --protocol <responses|chat_completions|messages> --base-url <url> --model <model> --api-key-env <ENV>\n   or: freehand-cli adp-task-query --url ws://127.0.0.1:4041/adp [--status <status>] [--agent <id>] [--history <task_id>]\n   or: freehand-cli adp-task-subscribe --url ws://127.0.0.1:4041/adp [--status <status>] [--agent <id>]\n   or: freehand-cli adp-error-query --url ws://127.0.0.1:4041/adp --session <id> [--trace <id>] [--turn <id>] [--domain <domain>]\n   or: freehand-cli remote-daemon-bootstrap-link --daemon <id> --credential-env <ENV> [--ttl-seconds <seconds>] [--web]"
                 .to_owned(),
         );
     }
@@ -1000,6 +1007,83 @@ fn run_adp_config_update(args: Vec<String>) -> Result<String, String> {
     runtime.block_on(run_adp_config_update_async(url, update))
 }
 
+fn run_remote_daemon_bootstrap_link(args: Vec<String>) -> Result<String, String> {
+    let usage =
+        "usage: freehand-cli remote-daemon-bootstrap-link --daemon <id> --credential-env <ENV> [--ttl-seconds <seconds>] [--web]"
+            .to_owned();
+    let mut daemon_id = None::<String>;
+    let mut credential_env = None::<String>;
+    let mut ttl_seconds = 600_u64;
+    let mut web_link = false;
+    let mut index = 0;
+    while index < args.len() {
+        match args[index].as_str() {
+            "--daemon" if index + 1 < args.len() => {
+                daemon_id = Some(args[index + 1].clone());
+                index += 2;
+            }
+            "--credential-env" if index + 1 < args.len() => {
+                credential_env = Some(args[index + 1].clone());
+                index += 2;
+            }
+            "--ttl-seconds" if index + 1 < args.len() => {
+                ttl_seconds = args[index + 1].parse::<u64>().map_err(|_| usage.clone())?;
+                index += 2;
+            }
+            "--web" => {
+                web_link = true;
+                index += 1;
+            }
+            _ => return Err(usage),
+        }
+    }
+    if ttl_seconds == 0 {
+        return Err("ttl-seconds must be greater than zero".to_owned());
+    }
+    let daemon_id = daemon_id.ok_or_else(|| usage.clone())?;
+    let credential_env = credential_env.ok_or_else(|| usage.clone())?;
+    let credential_value = std::env::var(&credential_env)
+        .map_err(|_| format!("credential env `{credential_env}` is not set"))?;
+    if credential_value.trim().is_empty() {
+        return Err(format!("credential env `{credential_env}` is empty"));
+    }
+    let now = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map_err(|err| format!("system time before unix epoch: {err}"))?
+        .as_secs();
+    let config = load_default_config().map_err(|err| err.to_string())?;
+    let bundle = config
+        .remote_daemon_registry()
+        .build_bootstrap_bundle_for_selected_route(
+            &daemon_id,
+            &[],
+            RemoteDaemonBootstrapCredential {
+                kind: RemoteDaemonBootstrapCredentialKind::OneTimeToken,
+                value: credential_value,
+            },
+            now,
+            now.saturating_add(ttl_seconds),
+            format!("{}-{}-{daemon_id}", now, std::process::id()),
+        )
+        .map_err(|err| err.to_string())?;
+    let link = if web_link {
+        build_remote_daemon_bootstrap_web_link(&bundle).map_err(|err| err.to_string())?
+    } else {
+        build_remote_daemon_bootstrap_link(&bundle).map_err(|err| err.to_string())?
+    };
+    let summary = bundle.safe_summary();
+    Ok(format!(
+        "remote_daemon_bootstrap_link_ok daemon={} account={} active_endpoint={} endpoint_count={} credential_kind={} expires_at_unix={} link={}",
+        summary.daemon_id,
+        summary.account_id,
+        summary.active_endpoint_id,
+        summary.endpoint_count,
+        summary.credential_kind,
+        summary.expires_at_unix,
+        link
+    ))
+}
+
 fn run_adp_error_query(args: Vec<String>) -> Result<String, String> {
     let usage =
         "usage: freehand-cli adp-error-query --url ws://127.0.0.1:4041/adp --session <id> [--trace <id>] [--turn <id>] [--domain <domain>]"
@@ -1632,20 +1716,39 @@ fn summarize_config_query_result(
                 .map(|peer| format!("{}:{}:{}", peer.agent_name, peer.agent_mode, peer.node_id))
                 .collect::<Vec<_>>()
                 .join(",");
+            let provider_registry = status
+                .provider_registry
+                .iter()
+                .map(|provider| {
+                    format!(
+                        "{}:{}:{}:{}:{}:{}:{}",
+                        sanitize_config_query_token(&provider.provider_id),
+                        sanitize_config_query_token(&provider.provider_type),
+                        sanitize_config_query_token(&provider.provider_protocol),
+                        sanitize_config_query_token(&provider.default_model),
+                        sanitize_config_query_token(&provider.provider_base_url_host),
+                        sanitize_config_query_token(&provider.provider_auth_source),
+                        provider.enabled
+                    )
+                })
+                .collect::<Vec<_>>()
+                .join(",");
             let output = format!(
-                "adp_config_query_ok url={} agent={} mode={} node={} paired_agents={} provider={} provider_type={} provider_protocol={} base_url_host={} default_model={} auth_type={} auth_source={} restart_required_on_change={}",
+                "adp_config_query_ok url={} agent={} mode={} node={} paired_agents={} provider={} fallback_provider={} provider_type={} provider_protocol={} base_url_host={} default_model={} auth_type={} auth_source={} provider_registry={} restart_required_on_change={}",
                 url,
                 status.agent_name,
                 status.agent_mode,
                 status.node_id,
                 paired_agents,
                 status.provider_id,
+                status.fallback_provider_id.as_deref().unwrap_or("none"),
                 status.provider_type,
                 status.provider_protocol,
                 status.provider_base_url_host,
                 status.default_model,
                 status.provider_auth_type,
                 status.provider_auth_source,
+                provider_registry,
                 status.restart_required_on_change
             );
             if output.contains("api_key")
@@ -1659,6 +1762,15 @@ fn summarize_config_query_result(
         }
         _ => Err("ADP config query returned non-config result".to_owned()),
     }
+}
+
+fn sanitize_config_query_token(value: &str) -> String {
+    value
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join("_")
+        .replace(',', "_")
+        .replace(':', "_")
 }
 
 fn summarize_error_query_result(

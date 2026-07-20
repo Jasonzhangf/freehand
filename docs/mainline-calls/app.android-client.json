@@ -6,23 +6,37 @@
   "test_design_doc": "docs/testing/app.android-client.md",
   "mainline_call_doc": "docs/mainline-calls/app.android-client.json",
   "generated_wiki_doc": "docs/wiki/app.android-client.md",
+  "resource_operations": [
+    "android_apk_update.check_manifest",
+    "android_apk_update.download_apk",
+    "android_apk_update.request_install"
+  ],
   "request_mainline": [
     "MainActivity::onCreate loads app-owned daemon endpoint config",
-    "DaemonConnectionConfig accepts only active Tailscale profile identity plus host and port; removed transport, relay, and alternate endpoint fields are explicit errors",
-    "MainActivity::onCreate renders a native neutral startup overlay before WebView navigation and immediately loads the canonical version-addressed daemon WebUI URL with client=android-webview",
+    "DaemonConnectionConfig accepts legacy active Tailscale profile identity plus host and port, or config-owned remote_registry bootstrap imported from a freehand://daemon/import deep link",
+    "removed top-level transport, relay, and alternate endpoint fields are explicit errors; relay is valid only as a remote_registry daemon endpoint with account relayUrl",
+    "AndroidApkUpdater checks the selected daemon endpoint update manifest in the background and compares it with the installed package versionCode",
+    "MainActivity::onCreate renders a native neutral startup overlay before WebView navigation and immediately loads the canonical daemon WebUI URL with client=android-webview; daemon HTML and no-store assets own WebUI versioning",
     "WebUI owns ADP query/subscribe/command, settings, lifecycle dashboard, transcript, composer, and error rendering",
+    "Android physical Back asks the canonical WebUI hook to close focused fields, dialogs, sheets, or drawers before Activity exit or WebView history navigation",
     "Android only exposes the system file-picker bridge for WebUI attachment controls"
   ],
   "response_mainline": [
     "daemon root returns the canonical WebUI shell and mobile layout attributes",
+    "remote_registry import persists scanned account, daemon, active endpoint, endpoint candidates, and one-time credential in app-owned config before WebView navigation",
+    "a positive higher-version daemon APK manifest with a relative or http(s) APK URL downloads the APK into app cache and opens Android's system package installer with a FileProvider URI",
     "WebViewClient::onPageFinished logs canonical WebUI selector/layout/asset readiness evidence and removes the startup overlay only after WebUiStartupGate accepts the Android WebUI shell, applied stylesheet, and module-JavaScript probe",
+    "MainActivity::handleAndroidBackPressed treats a true result from window.__freehandHandleAndroidBack as handled UI navigation and otherwise falls through to WebView history or Activity finish",
     "Android file-picker result returns URI metadata to window.__freehandAndroidAttachmentSelected"
   ],
   "error_mainline": [
     "config parse/load failure is an explicit Android startup failure",
-    "unknown config fields, including removed ADP/SSE/command path or relay fields, are rejected rather than ignored or migrated",
+    "unknown config fields, including removed ADP/SSE/command path or top-level relay fields, are rejected rather than ignored or migrated",
+    "APK update manifest parse errors, non-positive versions, non-http absolute APK URLs, HTTP download failures, empty files, or installer handoff failures are logged as FreehandApkUpdate errors and do not become false upgrade success",
+    "unsupported bootstrap kind/schema, malformed base64/JSON, expired bootstrap, missing credential, unknown daemon endpoint, relay endpoint without account relayUrl, or unsupported endpoint kind is an explicit startup/import error",
     "WebView network failure remains a WebView/network failure; Android does not render local fallback UI",
     "missing FreehandWebUiLayout evidence is a device-validation failure",
+    "missing or false WebUI back-hook handling falls through to normal Android navigation or exit instead of fabricating native drawer truth",
     "missing, malformed, wrong-client, stylesheet-not-applied, or WebUI-JavaScript-not-ready startup probes leave the startup state visible instead of pretending the app is ready"
   ],
   "call_table": [
@@ -30,11 +44,11 @@
       "step": "01",
       "symbol_path": "com.freehand.android.ui.MainActivity::onCreate",
       "file_path": "apps/freehand-android/app/src/main/java/com/freehand/android/ui/MainActivity.kt",
-      "responsibility": "load config, render startup overlay, configure WebView, attach file picker bridge, and load the version-addressed canonical daemon WebUI",
+      "responsibility": "import supported bootstrap deep link when present, load config, render startup overlay, configure WebView, attach file picker bridge, and load the canonical daemon WebUI",
       "input_semantic": "activity intent",
-      "output_semantic": "startup overlay plus WebView loading http://<host>:<port>/?client=android-webview&v=<bootstrap-version>",
+      "output_semantic": "startup overlay plus WebView loading http://<host>:<port>/?client=android-webview",
       "caller": "Android framework",
-      "callee": "ClientConfig::store, DaemonConnectionConfigStore::load, DaemonConnectionConfig::activeHostConfig, WebView::loadUrl",
+      "callee": "ClientConfig::store, DaemonConnectionConfigStore::importBootstrapLink, DaemonConnectionConfigStore::load, DaemonConnectionConfig::activeHostConfig, WebView::loadUrl",
       "binding_status": "bound"
     },
     {
@@ -50,22 +64,22 @@
     },
     {
       "step": "03",
-      "symbol_path": "com.freehand.android.data.DaemonConnectionConfigStore::load / com.freehand.android.data.DaemonConnectionConfig::parse / com.freehand.android.data.DaemonConnectionConfig::activeHostConfig",
+      "symbol_path": "com.freehand.android.data.DaemonConnectionConfigStore::load / com.freehand.android.data.DaemonConnectionConfigStore::importBootstrapLink / com.freehand.android.data.DaemonConnectionConfig::parse / com.freehand.android.data.DaemonConnectionConfig::parseBootstrapLink / com.freehand.android.data.DaemonConnectionConfig::activeHostConfig",
       "file_path": "apps/freehand-android/app/src/main/java/com/freehand/android/data/DaemonConnectionConfig.kt",
-      "responsibility": "read/bootstrap, strictly validate host/port-only profile schema, and select the active daemon endpoint",
-      "input_semantic": "app-owned or bundled daemon JSON",
+      "responsibility": "read/bootstrap, strictly validate legacy Tailscale or config-owned remote_registry schema, import daemon bootstrap links, and select the already-declared active daemon endpoint",
+      "input_semantic": "app-owned JSON, bundled daemon JSON, or freehand://daemon/import bootstrap link",
       "output_semantic": "HostConfig or explicit config error",
       "caller": "MainActivity::onCreate",
-      "callee": "Gson JSON parser and schema validator",
+      "callee": "Gson JSON parser, bootstrap decoder, and schema validator",
       "binding_status": "bound"
     },
     {
       "step": "04",
       "symbol_path": "com.freehand.android.data.HostConfig::baseUrl / com.freehand.android.data.HostConfig::webUiUrl",
       "file_path": "apps/freehand-android/app/src/main/java/com/freehand/android/data/HostConfig.kt",
-      "responsibility": "build daemon origin and version-addressed Android WebUI URL",
+      "responsibility": "build daemon origin and canonical Android WebUI URL",
       "input_semantic": "host and port",
-      "output_semantic": "http://<host>:<port> plus version-addressed client=android-webview URL",
+      "output_semantic": "http://<host>:<port> plus client=android-webview URL",
       "caller": "MainActivity::onCreate",
       "callee": "pure URL builder",
       "binding_status": "bound"
@@ -126,6 +140,17 @@
       "binding_status": "bound"
     },
     {
+      "step": "08b",
+      "symbol_path": "com.freehand.android.ui.MainActivity::handleAndroidBackPressed",
+      "file_path": "apps/freehand-android/app/src/main/java/com/freehand/android/ui/MainActivity.kt",
+      "responsibility": "ask the canonical WebUI to handle focused field, dialog, Header tree, Agent sheet, or mobile drawer back intent before native exit or history navigation",
+      "input_semantic": "Android physical Back",
+      "output_semantic": "WebUI-handled no-op, WebView history navigation, or Activity finish",
+      "caller": "Android back dispatcher",
+      "callee": "window.__freehandHandleAndroidBack, WebView::canGoBack, WebView::goBack, Activity::finish",
+      "binding_status": "bound"
+    },
+    {
       "step": "09",
       "symbol_path": "generate_launcher_icons",
       "file_path": "apps/freehand-android/scripts/generate-launcher-icons.sh",
@@ -157,6 +182,48 @@
       "caller": "operator",
       "callee": "adb install/start/dumpsys/logcat/screencap",
       "binding_status": "bound"
+    },
+    {
+      "step": "12",
+      "symbol_path": "com.freehand.android.ui.AndroidApkUpdater::checkForUpdateAsync",
+      "file_path": "apps/freehand-android/app/src/main/java/com/freehand/android/ui/AndroidApkUpdater.kt",
+      "responsibility": "check selected daemon update manifest against installed version without blocking canonical WebUI startup, rejecting non-positive versions and non-http absolute APK URLs",
+      "input_semantic": "HostConfig.updateManifestUrl plus BuildConfig.VERSION_CODE",
+      "output_semantic": "current-version no-op log or valid higher-version update plan",
+      "caller": "MainActivity::onCreate",
+      "callee": "ApkUpdateManifest::parse, ApkUpdateManifest::updatePlan",
+      "resource_operation": "android_apk_update.check_manifest",
+      "source_resource": "android_apk_update",
+      "target_resource": "android_apk_update",
+      "binding_status": "bound"
+    },
+    {
+      "step": "13",
+      "symbol_path": "com.freehand.android.ui.AndroidApkUpdater::downloadApk",
+      "file_path": "apps/freehand-android/app/src/main/java/com/freehand/android/ui/AndroidApkUpdater.kt",
+      "responsibility": "download the manifest-selected higher-version APK into app cache",
+      "input_semantic": "resolved relative/http(s) APK URL and target versionCode",
+      "output_semantic": "non-empty cached APK file",
+      "caller": "AndroidApkUpdater::checkForUpdateAsync",
+      "callee": "HttpURLConnection plus app cache",
+      "resource_operation": "android_apk_update.download_apk",
+      "source_resource": "android_apk_update",
+      "target_resource": "android_apk_update",
+      "binding_status": "bound"
+    },
+    {
+      "step": "14",
+      "symbol_path": "com.freehand.android.ui.AndroidApkUpdater::buildInstallIntent",
+      "file_path": "apps/freehand-android/app/src/main/java/com/freehand/android/ui/AndroidApkUpdater.kt",
+      "responsibility": "handoff the cached APK to Android's system package installer",
+      "input_semantic": "cached APK file",
+      "output_semantic": "ACTION_VIEW package installer intent with FileProvider URI",
+      "caller": "AndroidApkUpdater::checkForUpdateAsync",
+      "callee": "Android FileProvider and package installer",
+      "resource_operation": "android_apk_update.request_install",
+      "source_resource": "android_apk_update",
+      "target_resource": "android_apk_update",
+      "binding_status": "bound"
     }
   ],
   "shared_functions": [
@@ -172,7 +239,8 @@
   "sync_status": [
     "Android native conversation/settings/update fallback files are physically deleted.",
     "bridge.html, Android ADP/SSE/HTTP UI transports, native projector, native controllers, and Android mock route/assets are removed.",
-    "Android app-owned config contains only active Tailscale profile identity plus host and port; removed transport and relay fields fail explicitly.",
-    "Android APK update routes remain daemon-owned release distribution endpoints; Android does not render a native update panel."
+    "Android app-owned config contains legacy active Tailscale host/port or config-owned remote_registry bootstrap truth; removed transport and top-level relay fields fail explicitly.",
+    "Android imports remote_registry bootstrap links and loads declared Tailscale/IPv4/IPv6/relay WebUI endpoints, but does not own account directory truth, route scoring, live health probing, Tailscale OS connection, or relay tunnel semantics.",
+    "Android APK update routes remain daemon-owned release distribution endpoints; Android owns only manifest check, cache download, and system package-installer handoff, not a native update panel or silent package replacement."
   ]
 }

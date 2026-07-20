@@ -60,6 +60,8 @@
   - list_tasks returns task snapshots for queue and UI projection queries
   - agent registry exposes self agent
   - Phase 1 TaskBoard query projects owner-backed board truth
+  - TaskSpaceSnapshot query projects a bounded read-only prompt snapshot without
+    boot lease recovery, scheduler fact replay, or EventInbox cursor pagination
 - Phase 1 ExecutionFact sync admits typed worker execution facts into Task Center,
   including interrupted system-retry truth that keeps the same task retryable
   - Phase 1 SchedulerTick emits elapsed/stale/timeout facts without business decisions
@@ -136,6 +138,9 @@
   preserving pause when an assigned task is actually `Paused`
 - TaskBoard query returns blocked/review/stale filtered views and agent/task binding summaries
 - implemented owner test: `task_board_projects_owner_truth_with_filtered_views`
+- TaskSpaceSnapshot prompt projection remains bounded and does not replay
+  scheduler facts:
+  `task_space_snapshot_is_bounded_and_does_not_replay_scheduler_facts`
 - ExecutionFact recovering keeps task non-terminal:
   `execution_fact_recovering_keeps_running_and_writes_event`
 - ExecutionFact blocked creates a master-visible event:
@@ -177,7 +182,8 @@
 
 ## Module Black-Box Coverage
 
-- runtime task tool create persists a task and returns task id/status
+- runtime task tool create persists a task and returns task id/status plus
+  target_cwd path diagnostics for symlink-parent/missing-leaf paths
 - runtime task tool query returns snapshot JSON
 - runtime task tool list_agents returns self agent
 - runtime task tool close before approval returns failure
@@ -224,6 +230,7 @@ cargo test -p freehand-task lease_state_rmw_preserves_parallel_distinct_writers 
 cargo test -p freehand-task lease_state_rmw_removes_only_target_during_parallel_refresh -- --nocapture
 cargo test -p freehand-task boot_preserves_fresh_running_task_during_lease_acquisition_grace -- --nocapture
 cargo test -p freehand-task boot_interrupts_running_task_with_missing_lease_after_acquisition_grace -- --nocapture
+cargo test -p freehand-task task_space_snapshot_is_bounded_and_does_not_replay_scheduler_facts -- --nocapture
 cargo test -p freehand-tools
 cargo test -p freehand-runtime task_tool_create_persists_and_queries_task -- --nocapture
 cargo test -p freehand-runtime task_tool_review_lifecycle_rejects_early_close_and_closes_after_approval -- --nocapture

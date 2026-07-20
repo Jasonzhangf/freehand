@@ -58,7 +58,7 @@
   - checkpoint subscribe/SSE is intentionally out of scope for this slice; WebUI uses query refresh after command receipt
 - sync status between design and implementation:
   - design is locked
-  - runtime checkpoint store, live writable pre-execute checkpointing, and explicit rewind owner API are now code-bound
+  - runtime checkpoint store now lives in `crates/freehand-runtime/src/checkpoint_store.rs`; live writable pre-execute checkpointing and explicit rewind owner API are code-bound
   - runtime checkpoint workspace root is the canonical runtime home and is
     regression-locked against process-cwd/environment drift
   - runtime tests now cover create-file rewind, modify-file rewind, and previewless writable-tool rejection

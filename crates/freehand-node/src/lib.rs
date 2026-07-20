@@ -1,8 +1,13 @@
 //! Master/slave node runtime and topology contracts for Freehand.
 
+use std::collections::BTreeMap;
 use std::sync::Mutex;
 use std::sync::mpsc::{self, Receiver, SyncSender, TrySendError};
 
+use freehand_config::{
+    RemoteDaemonEndpointConfig, RemoteDaemonEndpointKind, RemoteDaemonRegistryConfig,
+    RemoteDaemonRouteHealthRecord,
+};
 use freehand_contracts::{AgentId, SessionId, TurnId};
 use freehand_debug::{
     DebugEvent, DebugHub, DebugScenePosition, DebugSemanticPosition, DebugStateSnapshot,
@@ -55,6 +60,178 @@ pub struct DirectMessageAck {
     pub source_node_id: String,
     pub target_node_id: String,
     pub echoed_text: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RemoteDaemonDirectoryAccount {
+    pub account_id: String,
+    pub label: String,
+    pub relay_configured: bool,
+    pub daemon_count: usize,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RemoteDaemonDirectoryEndpoint {
+    pub endpoint_id: String,
+    pub kind: RemoteDaemonEndpointKind,
+    pub endpoint: String,
+    pub auth_required: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RemoteDaemonDirectoryDaemon {
+    pub account_id: String,
+    pub daemon_id: String,
+    pub label: String,
+    pub node_id: String,
+    pub active_endpoint_id: String,
+    pub endpoints: Vec<RemoteDaemonDirectoryEndpoint>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct RemoteDaemonDirectorySnapshot {
+    pub accounts: Vec<RemoteDaemonDirectoryAccount>,
+    pub daemons: Vec<RemoteDaemonDirectoryDaemon>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RemoteDaemonDirectoryRouteDiagnostic {
+    pub endpoint_id: String,
+    pub kind: RemoteDaemonEndpointKind,
+    pub endpoint: String,
+    pub selectable: bool,
+    pub score: i32,
+    pub reasons: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RemoteDaemonDirectoryRouteResolution {
+    pub account_id: String,
+    pub daemon_id: String,
+    pub selected_endpoint_id: String,
+    pub selected_kind: RemoteDaemonEndpointKind,
+    pub selected_endpoint: String,
+    pub diagnostics: Vec<RemoteDaemonDirectoryRouteDiagnostic>,
+}
+
+#[derive(Debug, Default)]
+pub struct RemoteDaemonDirectory {
+    snapshot: RemoteDaemonDirectorySnapshot,
+    route_resolutions: BTreeMap<String, RemoteDaemonDirectoryRouteResolution>,
+}
+
+impl RemoteDaemonDirectory {
+    pub fn publish_registry(
+        &mut self,
+        registry: &RemoteDaemonRegistryConfig,
+    ) -> &RemoteDaemonDirectorySnapshot {
+        let mut daemon_counts = BTreeMap::<&str, usize>::new();
+        for daemon in registry.daemons().values() {
+            *daemon_counts.entry(daemon.account_id.as_str()).or_default() += 1;
+        }
+        let accounts = registry
+            .accounts()
+            .values()
+            .map(|account| RemoteDaemonDirectoryAccount {
+                account_id: account.id.clone(),
+                label: account.label.clone(),
+                relay_configured: account.relay_url.is_some(),
+                daemon_count: daemon_counts.get(account.id.as_str()).copied().unwrap_or(0),
+            })
+            .collect();
+        let daemons = registry
+            .daemons()
+            .values()
+            .map(|daemon| RemoteDaemonDirectoryDaemon {
+                account_id: daemon.account_id.clone(),
+                daemon_id: daemon.id.clone(),
+                label: daemon.label.clone(),
+                node_id: daemon.node_id.clone(),
+                active_endpoint_id: daemon.active_endpoint_id.clone(),
+                endpoints: daemon
+                    .endpoints
+                    .iter()
+                    .map(|endpoint| RemoteDaemonDirectoryEndpoint {
+                        endpoint_id: endpoint.id.clone(),
+                        kind: endpoint.kind,
+                        endpoint: remote_daemon_directory_endpoint(endpoint),
+                        auth_required: endpoint.auth_required,
+                    })
+                    .collect(),
+            })
+            .collect();
+        self.snapshot = RemoteDaemonDirectorySnapshot { accounts, daemons };
+        &self.snapshot
+    }
+
+    pub fn resolve_route(
+        &mut self,
+        registry: &RemoteDaemonRegistryConfig,
+        daemon_id: &str,
+        health_records: &[RemoteDaemonRouteHealthRecord],
+    ) -> Result<&RemoteDaemonDirectoryRouteResolution, NodeRuntimeError> {
+        let selected = registry
+            .select_route(daemon_id, health_records)
+            .map_err(|error| NodeRuntimeError::RemoteDaemonDirectory(error.to_string()))?;
+        let resolution = RemoteDaemonDirectoryRouteResolution {
+            account_id: selected.account.id,
+            daemon_id: selected.daemon.id.clone(),
+            selected_endpoint_id: selected.selected_endpoint.id.clone(),
+            selected_kind: selected.selected_endpoint.kind,
+            selected_endpoint: remote_daemon_directory_endpoint(&selected.selected_endpoint),
+            diagnostics: selected
+                .diagnostics
+                .into_iter()
+                .map(|diagnostic| RemoteDaemonDirectoryRouteDiagnostic {
+                    endpoint_id: diagnostic.endpoint_id,
+                    kind: diagnostic.kind,
+                    endpoint: diagnostic.endpoint,
+                    selectable: diagnostic.selectable,
+                    score: diagnostic.score,
+                    reasons: diagnostic.reasons,
+                })
+                .collect(),
+        };
+        self.route_resolutions
+            .insert(selected.daemon.id.clone(), resolution);
+        self.route_resolutions
+            .get(&selected.daemon.id)
+            .ok_or_else(|| {
+                NodeRuntimeError::RemoteDaemonDirectory(
+                    "resolved route was not materialized".to_owned(),
+                )
+            })
+    }
+
+    pub fn snapshot(&self) -> &RemoteDaemonDirectorySnapshot {
+        &self.snapshot
+    }
+
+    pub fn route_resolution(
+        &self,
+        daemon_id: &str,
+    ) -> Option<&RemoteDaemonDirectoryRouteResolution> {
+        self.route_resolutions.get(daemon_id)
+    }
+}
+
+fn remote_daemon_directory_endpoint(endpoint: &RemoteDaemonEndpointConfig) -> String {
+    match endpoint.kind {
+        RemoteDaemonEndpointKind::Tailscale
+        | RemoteDaemonEndpointKind::Ipv4
+        | RemoteDaemonEndpointKind::Ipv6 => {
+            format!(
+                "{}:{}",
+                endpoint.host.as_deref().unwrap_or_default(),
+                endpoint.port.unwrap_or_default()
+            )
+        }
+        RemoteDaemonEndpointKind::Relay => endpoint
+            .relay_host_id
+            .clone()
+            .or_else(|| endpoint.web_url.clone())
+            .unwrap_or_else(|| "relay".to_owned()),
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -111,6 +288,8 @@ pub enum NodeRuntimeError {
     SlaveNotPaired,
     #[error("metadata write failed: {0}")]
     MetadataWriteFailed(String),
+    #[error("remote daemon directory failed: {0}")]
+    RemoteDaemonDirectory(String),
 }
 
 pub struct LocalNodeRuntime {
@@ -835,6 +1014,7 @@ fn unix_timestamp_string() -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use freehand_config::{RemoteDaemonRouteHealthStatus, load_config_from_path};
     use freehand_contracts::{
         ErrorClass, ErrorContract, FeatureId, ReasonReq04ToolCall, ReasonResp01SemanticEvent,
         ReasonResp02UsageEvent, ReasonResp03TerminalEvent, RecoveryPolicy, SemanticEventKind,
@@ -843,8 +1023,10 @@ mod tests {
     use freehand_debug::{DebugSink, DebugSinkError, DebugSinkKind};
     use freehand_ui_protocol::{TurnProjectionInput, turn_projection_from_events};
     use serde_json::{Value, json};
+    use std::fs;
     use std::sync::{Arc, Mutex};
     use std::thread;
+    use std::time::{SystemTime, UNIX_EPOCH};
 
     fn sample_runtime() -> LocalNodeRuntime {
         LocalNodeRuntime::new(
@@ -931,12 +1113,167 @@ mod tests {
         }
     }
 
+    fn sample_remote_daemon_registry() -> RemoteDaemonRegistryConfig {
+        let unique = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .expect("clock")
+            .as_nanos();
+        let path = std::env::temp_dir().join(format!(
+            "freehand-node-remote-daemon-directory-{}-{unique}.toml",
+            std::process::id()
+        ));
+        fs::write(
+            &path,
+            r#"
+[providers.mock]
+id = "mock"
+enabled = true
+type = "anthropic"
+protocol = "messages"
+base_url = "https://provider.example"
+default_model = "mock"
+
+[providers.mock.auth]
+type = "apikey"
+api_key = "provider-secret"
+
+[agents.master]
+name = "master"
+mode = "master"
+node_id = "master-node"
+paired_agents = ["worker"]
+pair_token = "FREEHAND_MASTER_TOKEN"
+provider = "mock"
+
+[agents.worker]
+name = "worker"
+mode = "slave"
+node_id = "worker-node"
+paired_agents = ["master"]
+pair_token = "FREEHAND_WORKER_TOKEN"
+provider = "mock"
+
+[remote_daemon_accounts.jason]
+id = "jason"
+label = "Jason"
+relay_url = "https://relay.example/relay/"
+auth_token_env = "FREEHAND_RELAY_SECRET"
+
+[remote_daemons.studio]
+id = "studio"
+account = "jason"
+label = "Mac Studio"
+node_id = "studio-node"
+active_endpoint = "tailscale-main"
+
+[[remote_daemons.studio.endpoints]]
+id = "tailscale-main"
+kind = "tailscale"
+host = "100.66.1.82"
+port = 4042
+
+[[remote_daemons.studio.endpoints]]
+id = "relay-main"
+kind = "relay"
+web_url = "https://relay.example/daemon/studio/web"
+adp_url = "wss://relay.example/daemon/studio/adp"
+relay_host_id = "studio-host"
+auth_required = true
+
+[remote_daemons.air]
+id = "air"
+account = "jason"
+label = "MacBook Air"
+node_id = "air-node"
+active_endpoint = "tailscale-air"
+
+[[remote_daemons.air.endpoints]]
+id = "tailscale-air"
+kind = "tailscale"
+host = "100.66.1.83"
+port = 4041
+"#,
+        )
+        .expect("write config");
+        let config = load_config_from_path(&path).expect("load config");
+        fs::remove_file(&path).expect("remove config");
+        config.remote_daemon_registry().clone()
+    }
+
+    #[test]
+    fn remote_daemon_directory_publishes_one_account_with_multiple_daemons() {
+        let registry = sample_remote_daemon_registry();
+        let mut directory = RemoteDaemonDirectory::default();
+
+        let snapshot = directory.publish_registry(&registry);
+
+        assert_eq!(snapshot.accounts.len(), 1);
+        assert_eq!(snapshot.accounts[0].account_id, "jason");
+        assert_eq!(snapshot.accounts[0].daemon_count, 2);
+        assert!(snapshot.accounts[0].relay_configured);
+        assert_eq!(
+            snapshot
+                .daemons
+                .iter()
+                .map(|daemon| daemon.daemon_id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["air", "studio"]
+        );
+        let debug = format!("{snapshot:?}");
+        assert!(!debug.contains("FREEHAND_RELAY_SECRET"));
+        assert!(!debug.contains("provider-secret"));
+    }
+
+    #[test]
+    fn remote_daemon_directory_selects_relay_only_after_direct_failure() {
+        let registry = sample_remote_daemon_registry();
+        let mut directory = RemoteDaemonDirectory::default();
+        directory.publish_registry(&registry);
+
+        let direct = directory
+            .resolve_route(&registry, "studio", &[])
+            .expect("unknown health keeps direct route selectable")
+            .clone();
+        assert_eq!(direct.selected_endpoint_id, "tailscale-main");
+
+        let relay = directory
+            .resolve_route(
+                &registry,
+                "studio",
+                &[RemoteDaemonRouteHealthRecord {
+                    endpoint_id: "tailscale-main".to_owned(),
+                    status: RemoteDaemonRouteHealthStatus::Failure,
+                    rtt_ms: None,
+                    error: Some("connect timeout".to_owned()),
+                }],
+            )
+            .expect("relay route")
+            .clone();
+        assert_eq!(relay.selected_endpoint_id, "relay-main");
+        assert_eq!(relay.selected_kind, RemoteDaemonEndpointKind::Relay);
+        assert_eq!(relay.selected_endpoint, "studio-host");
+        assert!(
+            relay
+                .diagnostics
+                .iter()
+                .any(|diagnostic| diagnostic.endpoint_id == "tailscale-main"
+                    && !diagnostic.selectable)
+        );
+        assert_eq!(
+            directory
+                .route_resolution("studio")
+                .expect("stored resolution"),
+            &relay
+        );
+    }
+
     fn sample_slave_turn() -> UiTurnProjection {
         turn_projection_from_events(TurnProjectionInput {
             source_agent_id: AgentId::new("slave-agent"),
             source_node_id: "slave-node".to_owned(),
             session_id: SessionId::new("session-1"),
             turn_id: TurnId::new("turn-1"),
+            created_at: Some(10),
             cwd: None,
             user_text: Some("delegate to slave".to_owned()),
             semantic_events: vec![

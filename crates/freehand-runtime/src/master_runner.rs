@@ -1,4 +1,4 @@
-use std::collections::BTreeSet;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fs::{self, OpenOptions};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
@@ -10,8 +10,8 @@ use freehand_config::{AgentMode, SelectedAgentConfig};
 use freehand_contracts::{AgentId, SessionId, TerminalStatus, TraceId, TurnId};
 use freehand_reason::{ReasonPersistence, ReasonPersistenceError};
 use freehand_task::{
-    TaskActor, TaskAppendRequest, TaskBoardQuery, TaskEventInboxEntry, TaskEventInboxQuery, TaskId,
-    TaskRuntime, TaskSnapshot, TaskStatus, TaskWatermark,
+    TaskActor, TaskAppendRequest, TaskBoardQuery, TaskError, TaskEventInboxEntry,
+    TaskEventInboxQuery, TaskId, TaskRuntime, TaskSnapshot, TaskStatus, TaskWatermark,
 };
 use fs2::FileExt;
 use serde::{Deserialize, Serialize};
@@ -64,6 +64,11 @@ pub enum ProductionMasterTickOutcome {
         parent_session_id: SessionId,
         evaluated_child_task_ids: Vec<TaskId>,
         summary: String,
+    },
+    ParentEvaluationSkipped {
+        parent_session_id: SessionId,
+        evaluated_child_task_ids: Vec<TaskId>,
+        reason: String,
     },
 }
 
@@ -134,6 +139,8 @@ pub(crate) struct MasterActiveWorkCheckpoint {
     pub logical_turn_id: TurnId,
     pub trace_id: TraceId,
     pub work_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub owner_process_id: Option<u32>,
     pub priority: i64,
     pub state: MasterActiveWorkState,
     pub safe_point: MasterWorkSafePoint,
@@ -289,6 +296,8 @@ struct MasterLoopState {
     #[serde(default)]
     completed_parent_evaluations: BTreeSet<String>,
     #[serde(default)]
+    skipped_parent_evaluations: BTreeSet<String>,
+    #[serde(default)]
     pending_attention: Vec<MasterAttentionItem>,
     #[serde(default)]
     next_attention_sequence: u64,
@@ -344,6 +353,7 @@ pub(crate) fn register_master_active_work(
             logical_turn_id: logical_turn_id.clone(),
             trace_id: trace_id.clone(),
             work_id,
+            owner_process_id: Some(std::process::id()),
             priority: MASTER_ACTIVE_WORK_DEFAULT_PRIORITY,
             state: MasterActiveWorkState::Running,
             safe_point: MasterWorkSafePoint::BeforeProviderRequest,
@@ -434,7 +444,6 @@ fn with_master_active_work_lock<T>(
     }
 }
 
-#[cfg(test)]
 pub(crate) fn load_master_active_work(
     runtime_home: &Path,
     master_agent_id: &AgentId,
@@ -463,6 +472,81 @@ fn load_master_active_work_unlocked(
         ));
     }
     Ok(Some(checkpoint))
+}
+
+pub(crate) fn recoverable_stale_master_active_work(
+    runtime_home: &Path,
+    master_agent_id: &AgentId,
+    task_runtime: &TaskRuntime,
+) -> Result<Option<MasterActiveWorkCheckpoint>, String> {
+    let Some(checkpoint) = load_master_active_work(runtime_home, master_agent_id)? else {
+        return Ok(None);
+    };
+    if let Some(owner_process_id) = checkpoint.owner_process_id {
+        if owner_process_id == std::process::id() || process_is_alive(owner_process_id) {
+            return Ok(None);
+        }
+        return Ok(Some(checkpoint));
+    }
+    if matches!(
+        checkpoint.state,
+        MasterActiveWorkState::SuspendedByAttention | MasterActiveWorkState::Restoring
+    ) && suspended_attention_has_owner_decision(&checkpoint, master_agent_id, task_runtime)?
+    {
+        return Ok(Some(checkpoint));
+    }
+    Ok(None)
+}
+
+fn suspended_attention_has_owner_decision(
+    checkpoint: &MasterActiveWorkCheckpoint,
+    master_agent_id: &AgentId,
+    task_runtime: &TaskRuntime,
+) -> Result<bool, String> {
+    let Some(reference) = checkpoint.suspend_requested_by.as_ref() else {
+        return Ok(false);
+    };
+    let history = match task_runtime.task_history(&reference.task_id) {
+        Ok(history) => history,
+        Err(TaskError::TaskNotFound(_)) => return Ok(false),
+        Err(error) => return Err(error.to_string()),
+    };
+    let Some(reference_index) = history
+        .iter()
+        .position(|event| event.event_id == reference.event_id)
+    else {
+        return Ok(false);
+    };
+    Ok(history.iter().skip(reference_index + 1).any(|event| {
+        event.actor.agent_id == *master_agent_id
+            && matches!(
+                event.event_type.as_str(),
+                "TaskProgressed"
+                    | "TaskAssigned"
+                    | "TaskReviewApproved"
+                    | "TaskReviewRejected"
+                    | "TaskClosed"
+                    | "TaskCancelled"
+            )
+    }))
+}
+
+fn process_is_alive(process_id: u32) -> bool {
+    if process_id == 0 {
+        return false;
+    }
+    #[cfg(unix)]
+    {
+        let result = unsafe { libc::kill(process_id as libc::pid_t, 0) };
+        if result == 0 {
+            return true;
+        }
+        return std::io::Error::last_os_error().raw_os_error() == Some(libc::EPERM);
+    }
+    #[cfg(not(unix))]
+    {
+        false
+    }
 }
 
 fn write_master_active_work_unlocked(
@@ -694,16 +778,17 @@ impl ProductionMasterRunner {
             return Ok(ProductionMasterTickOutcome::Idle);
         }
 
-        let inbox = task_runtime
-            .query_event_inbox(TaskEventInboxQuery {
-                after_cursor: state.cursor.clone(),
-                limit: usize::MAX,
-            })
-            .map_err(task_center_error)?;
+        let inbox = self.query_event_inbox_repairing_stale_cursor(&task_runtime, &mut state)?;
         self.admit_attention_events(&task_runtime, &mut state, inbox.events)?;
 
         loop {
             if state.pending_attention.is_empty() {
+                if let Some(outcome) =
+                    self.reconcile_closed_parent_worksets(&task_runtime, &mut state)?
+                {
+                    self.write_state(&state)?;
+                    return Ok(outcome);
+                }
                 self.write_state(&state)?;
                 if let Some(outcome) = self.handle_due_timer()? {
                     return Ok(outcome);
@@ -773,9 +858,17 @@ impl ProductionMasterRunner {
             {
                 continue;
             }
-            let task = task_runtime
-                .query_task(&event.task_id)
-                .map_err(task_center_error)?;
+            let task = match task_runtime.query_task(&event.task_id) {
+                Ok(task) => task,
+                Err(TaskError::TaskNotFound(task_id)) => {
+                    eprintln!(
+                        "master lifecycle runner skipped stale EventInbox event `{}` for missing task `{task_id}`",
+                        event.event_id
+                    );
+                    continue;
+                }
+                Err(error) => return Err(task_center_error(error)),
+            };
             let admitted_sequence = state.next_attention_sequence;
             state.next_attention_sequence = state.next_attention_sequence.saturating_add(1);
             state.pending_attention.push(MasterAttentionItem {
@@ -872,6 +965,13 @@ impl ProductionMasterRunner {
                     "parent_goal_evaluated".to_owned(),
                     evaluated_child_task_ids.clone(),
                 ),
+                Some(ProductionMasterTickOutcome::ParentEvaluationSkipped {
+                    evaluated_child_task_ids,
+                    ..
+                }) => (
+                    "parent_goal_evaluation_skipped".to_owned(),
+                    evaluated_child_task_ids.clone(),
+                ),
                 Some(ProductionMasterTickOutcome::TimerFired { .. }) => {
                     return Err("timer outcome cannot resolve Task Center attention".to_owned());
                 }
@@ -903,6 +1003,33 @@ impl ProductionMasterRunner {
             write_master_active_work_unlocked(&self.runtime_home, &active_work)
         })
         .map_err(ProductionMasterRunnerError::State)
+    }
+
+    fn query_event_inbox_repairing_stale_cursor(
+        &self,
+        task_runtime: &TaskRuntime,
+        state: &mut MasterLoopState,
+    ) -> Result<freehand_task::TaskEventInboxProjection, ProductionMasterRunnerError> {
+        match task_runtime.query_event_inbox(TaskEventInboxQuery {
+            after_cursor: state.cursor.clone(),
+            limit: usize::MAX,
+        }) {
+            Ok(inbox) => Ok(inbox),
+            Err(TaskError::CursorNotFound(cursor)) => {
+                eprintln!(
+                    "master lifecycle runner ignored stale EventInbox cursor `{cursor}` and replayed current Task Center ledger truth"
+                );
+                state.cursor = None;
+                self.write_state(state)?;
+                task_runtime
+                    .query_event_inbox(TaskEventInboxQuery {
+                        after_cursor: None,
+                        limit: usize::MAX,
+                    })
+                    .map_err(task_center_error)
+            }
+            Err(error) => Err(task_center_error(error)),
+        }
     }
 
     fn handle_due_timer(
@@ -988,9 +1115,17 @@ impl ProductionMasterRunner {
         attempt: u32,
         state: &mut MasterLoopState,
     ) -> Result<Option<ProductionMasterTickOutcome>, ProductionMasterRunnerError> {
-        let task = task_runtime
-            .query_task(&event.task_id)
-            .map_err(task_center_error)?;
+        let task = match task_runtime.query_task(&event.task_id) {
+            Ok(task) => task,
+            Err(TaskError::TaskNotFound(task_id)) => {
+                eprintln!(
+                    "master lifecycle runner dropped stale pending attention `{}` for missing task `{task_id}`",
+                    event.event_id
+                );
+                return Ok(None);
+            }
+            Err(error) => return Err(task_center_error(error)),
+        };
         if event.kind == "task_closed" {
             return self.handle_parent_task_closed(task_runtime, &task, attempt, state);
         }
@@ -1123,6 +1258,23 @@ impl ProductionMasterRunner {
         let Some(parent_session_id) = closed_task.parent.session_id.clone() else {
             return Ok(None);
         };
+        let parent_turn_id = closed_task.parent.turn_id.clone();
+        let children =
+            parent_workset_children(task_runtime, &parent_session_id, parent_turn_id.as_ref())?;
+        self.evaluate_closed_parent_workset(
+            task_runtime,
+            parent_session_id,
+            children,
+            attempt,
+            state,
+        )
+    }
+
+    fn reconcile_closed_parent_worksets(
+        &self,
+        task_runtime: &TaskRuntime,
+        state: &mut MasterLoopState,
+    ) -> Result<Option<ProductionMasterTickOutcome>, ProductionMasterRunnerError> {
         let board = task_runtime
             .query_task_board(TaskBoardQuery {
                 status: None,
@@ -1130,11 +1282,64 @@ impl ProductionMasterRunner {
                 include_terminal: true,
             })
             .map_err(task_center_error)?;
-        let mut children = board
-            .tasks
-            .into_iter()
-            .filter(|task| task.parent.session_id.as_ref() == Some(&parent_session_id))
-            .collect::<Vec<_>>();
+        let mut groups = BTreeMap::<String, Vec<TaskSnapshot>>::new();
+        for task in board.tasks {
+            let Some(parent_session_id) = task.parent.session_id.as_ref() else {
+                continue;
+            };
+            let parent_turn_id = task
+                .parent
+                .turn_id
+                .as_ref()
+                .map(TurnId::as_str)
+                .unwrap_or("<session>");
+            groups
+                .entry(format!("{}|{}", parent_session_id.as_str(), parent_turn_id))
+                .or_default()
+                .push(task);
+        }
+        for mut children in groups.into_values() {
+            children.sort_by(|left, right| left.task_id.cmp(&right.task_id));
+            if children.is_empty()
+                || children
+                    .iter()
+                    .any(|task| task.status != TaskStatus::Closed)
+            {
+                continue;
+            }
+            let Some(parent_session_id) = children[0].parent.session_id.clone() else {
+                continue;
+            };
+            let parent_turn_id = children[0].parent.turn_id.clone();
+            if !parent_logical_turn_waits_for_lifecycle(
+                &self.runtime_home,
+                &self.master_agent_id,
+                &parent_session_id,
+                parent_turn_id.as_ref(),
+            )? {
+                continue;
+            }
+            if let Some(outcome) = self.evaluate_closed_parent_workset(
+                task_runtime,
+                parent_session_id,
+                children,
+                0,
+                state,
+            )? {
+                return Ok(Some(outcome));
+            }
+        }
+        Ok(None)
+    }
+
+    fn evaluate_closed_parent_workset(
+        &self,
+        task_runtime: &TaskRuntime,
+        parent_session_id: SessionId,
+        mut children: Vec<TaskSnapshot>,
+        attempt: u32,
+        state: &mut MasterLoopState,
+    ) -> Result<Option<ProductionMasterTickOutcome>, ProductionMasterRunnerError> {
         if children.is_empty()
             || children
                 .iter()
@@ -1144,7 +1349,9 @@ impl ProductionMasterRunner {
         }
         children.sort_by(|left, right| left.task_id.cmp(&right.task_id));
         let evaluation_key = parent_evaluation_key(&parent_session_id, &children);
-        if state.completed_parent_evaluations.contains(&evaluation_key) {
+        if state.completed_parent_evaluations.contains(&evaluation_key)
+            || state.skipped_parent_evaluations.contains(&evaluation_key)
+        {
             return Ok(None);
         }
         let evaluation_marker = parent_evaluation_marker(&evaluation_key);
@@ -1161,11 +1368,24 @@ impl ProductionMasterRunner {
                 summary,
             }));
         }
-        let user_objectives = parent_user_objectives(
+        let Some(user_objectives) = parent_user_objectives(
             &self.runtime_home,
             &self.master_agent_id,
             &parent_session_id,
-        )?;
+        )?
+        else {
+            let reason = format!(
+                "parent session `{}` has no persisted user objective truth; skipping this closed-child-set evaluation without finalizing",
+                parent_session_id.as_str()
+            );
+            eprintln!("master lifecycle runner skipped parent evaluation: {reason}");
+            state.skipped_parent_evaluations.insert(evaluation_key);
+            return Ok(Some(ProductionMasterTickOutcome::ParentEvaluationSkipped {
+                parent_session_id,
+                evaluated_child_task_ids: children.into_iter().map(|task| task.task_id).collect(),
+                reason,
+            }));
+        };
         let completed_subtasks = children
             .iter()
             .map(|task| parent_completed_subtask_truth(task_runtime, task))
@@ -1359,6 +1579,28 @@ fn review_payload_strings(payload: &serde_json::Value, field: &str) -> Vec<Strin
         .collect()
 }
 
+fn parent_workset_children(
+    task_runtime: &TaskRuntime,
+    parent_session_id: &SessionId,
+    parent_turn_id: Option<&TurnId>,
+) -> Result<Vec<TaskSnapshot>, ProductionMasterRunnerError> {
+    let board = task_runtime
+        .query_task_board(TaskBoardQuery {
+            status: None,
+            assignee: None,
+            include_terminal: true,
+        })
+        .map_err(task_center_error)?;
+    Ok(board
+        .tasks
+        .into_iter()
+        .filter(|task| {
+            task.parent.session_id.as_ref() == Some(parent_session_id)
+                && task.parent.turn_id.as_ref() == parent_turn_id
+        })
+        .collect())
+}
+
 fn parent_evaluation_key(parent_session_id: &SessionId, children: &[TaskSnapshot]) -> String {
     format!(
         "{}|{}",
@@ -1391,7 +1633,7 @@ fn persisted_parent_evaluation_summary(
     evaluation_marker: &str,
 ) -> Result<Option<String>, ProductionMasterRunnerError> {
     let persistence = ReasonPersistence::new(runtime_home.to_path_buf(), agent_id.clone());
-    let turns = match persistence.restore_turn_snapshots_for_ui(parent_session_id) {
+    let turns = match persistence.restore_authoritative_turn_snapshots_for_ui(parent_session_id) {
         Ok(turns) => turns,
         Err(ReasonPersistenceError::MissingRecoveryTruth(_)) => return Ok(None),
         Err(error) => return Err(ProductionMasterRunnerError::State(error.to_string())),
@@ -1408,13 +1650,45 @@ fn persisted_parent_evaluation_summary(
     }))
 }
 
+fn parent_logical_turn_waits_for_lifecycle(
+    runtime_home: &Path,
+    agent_id: &AgentId,
+    parent_session_id: &SessionId,
+    parent_turn_id: Option<&TurnId>,
+) -> Result<bool, ProductionMasterRunnerError> {
+    let Some(parent_turn_id) = parent_turn_id else {
+        return Ok(false);
+    };
+    let persistence = ReasonPersistence::new(runtime_home.to_path_buf(), agent_id.clone());
+    let turns = match persistence.restore_authoritative_turn_snapshots_for_ui(parent_session_id) {
+        Ok(turns) => turns,
+        Err(ReasonPersistenceError::MissingRecoveryTruth(_)) => return Ok(false),
+        Err(error) => return Err(ProductionMasterRunnerError::State(error.to_string())),
+    };
+    let (target_ordinal, _, target_raw) = runtime_turn_position(parent_turn_id);
+    let latest = turns
+        .iter()
+        .filter(|turn| {
+            let (ordinal, _, raw) = runtime_turn_position(&turn.request.turn_id);
+            if target_ordinal == 0 {
+                raw == target_raw
+            } else {
+                ordinal == target_ordinal
+            }
+        })
+        .max_by_key(|turn| runtime_turn_position(&turn.request.turn_id));
+    Ok(latest
+        .and_then(|turn| turn.terminal_event.as_ref())
+        .is_some_and(|terminal| terminal.status == TerminalStatus::ToolPending))
+}
+
 fn next_parent_evaluation_turn_id(
     runtime_home: &Path,
     agent_id: &AgentId,
     parent_session_id: &SessionId,
 ) -> Result<TurnId, ProductionMasterRunnerError> {
     let persistence = ReasonPersistence::new(runtime_home.to_path_buf(), agent_id.clone());
-    let turns = match persistence.restore_turn_snapshots_for_ui(parent_session_id) {
+    let turns = match persistence.restore_authoritative_turn_snapshots_for_ui(parent_session_id) {
         Ok(turns) => turns,
         Err(ReasonPersistenceError::MissingRecoveryTruth(_)) => Vec::new(),
         Err(error) => return Err(ProductionMasterRunnerError::State(error.to_string())),
@@ -1477,32 +1751,39 @@ fn parent_user_objectives(
     runtime_home: &Path,
     agent_id: &AgentId,
     parent_session_id: &SessionId,
-) -> Result<Vec<String>, ProductionMasterRunnerError> {
+) -> Result<Option<Vec<String>>, ProductionMasterRunnerError> {
     let persistence = ReasonPersistence::new(runtime_home.to_path_buf(), agent_id.clone());
     let turns = match persistence.restore_turn_start_snapshots(parent_session_id) {
         Ok(turns) => turns,
-        Err(ReasonPersistenceError::MissingRecoveryTruth(_)) => Vec::new(),
+        Err(ReasonPersistenceError::MissingRecoveryTruth(_)) => return Ok(None),
         Err(error) => return Err(ProductionMasterRunnerError::State(error.to_string())),
     };
     let mut seen = BTreeSet::new();
     let objectives = turns
         .into_iter()
         .filter(|turn| {
-            let (ordinal, round, _) = runtime_turn_position(&turn.request.turn_id);
-            ordinal == 1 && round == 1
+            let (_, round, _) = runtime_turn_position(&turn.request.turn_id);
+            round == 1
         })
         .map(|turn| ui_user_text_for_turn(&turn))
-        .filter(|text| !text.trim().is_empty())
-        .filter(|text| !text.contains("<freehand_parent_"))
+        .filter(|text| parent_user_objective_text_is_external(text))
         .filter(|text| seen.insert(text.clone()))
         .collect::<Vec<_>>();
     if objectives.is_empty() {
-        return Err(ProductionMasterRunnerError::State(format!(
-            "parent session `{}` has no persisted user objective truth",
-            parent_session_id.as_str()
-        )));
+        return Ok(None);
     }
-    Ok(objectives)
+    Ok(Some(objectives))
+}
+
+fn parent_user_objective_text_is_external(text: &str) -> bool {
+    let text = text.trim();
+    !text.is_empty()
+        && !text.contains("<freehand_parent_")
+        && !text.starts_with(
+            "You are the production Master starting a new follow-up turn injected by a due timer.",
+        )
+        && !text.starts_with("Master attention changed authoritative task truth.")
+        && !text.starts_with("The tool result has been returned.")
 }
 
 fn timer_live_request(

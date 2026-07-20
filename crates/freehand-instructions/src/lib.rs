@@ -7,7 +7,6 @@ use std::path::{Path, PathBuf};
 use serde::{Deserialize, Serialize};
 use serde_json::json;
 use thiserror::Error;
-use walkdir::{DirEntry, WalkDir};
 
 const SCHEMA_VERSION: u32 = 1;
 const GLOBAL_AGENTS_FILENAME: &str = "AGENTS.md";
@@ -319,18 +318,19 @@ fn collect_skills(
         return;
     }
 
-    let mut skill_paths = WalkDir::new(root)
-        .follow_links(true)
-        .max_depth(MAX_SCAN_DEPTH)
-        .into_iter()
-        .filter_entry(visible_entry)
-        .filter_map(Result::ok)
-        .filter(|entry| entry.file_type().is_file() && entry.file_name() == SKILL_FILENAME)
-        .map(|entry| normalize_path(entry.path()))
-        .collect::<Vec<_>>();
+    let normalized_root = normalize_path(root);
+    let mut visited_dirs = BTreeSet::new();
+    let mut skill_paths = Vec::new();
+    collect_skill_paths_bounded(
+        root,
+        &normalized_root,
+        0,
+        &mut visited_dirs,
+        &mut skill_paths,
+        errors,
+    );
     skill_paths.sort();
 
-    let normalized_root = normalize_path(root);
     for path in skill_paths {
         match skill_capability(scope, &normalized_root, &path, precedence) {
             Ok(skill) => {
@@ -343,12 +343,134 @@ fn collect_skills(
     }
 }
 
-fn visible_entry(entry: &DirEntry) -> bool {
-    entry.depth() == 0
-        || entry
-            .file_name()
-            .to_str()
-            .is_some_and(|name| !name.starts_with('.'))
+fn collect_skill_paths_bounded(
+    dir: &Path,
+    normalized_root: &Path,
+    depth: usize,
+    visited_dirs: &mut BTreeSet<String>,
+    skill_paths: &mut Vec<PathBuf>,
+    errors: &mut Vec<InstructionCapabilityErrorRecord>,
+) {
+    let normalized_dir = normalize_path(dir);
+    if !visited_dirs.insert(path_string(&normalized_dir)) {
+        return;
+    }
+    let read_dir = match fs::read_dir(dir) {
+        Ok(read_dir) => read_dir,
+        Err(err) => {
+            errors.push(record_error(
+                dir,
+                format!("failed to read skill directory: {err}"),
+            ));
+            return;
+        }
+    };
+    let mut entries = read_dir
+        .map(|entry| entry.map(|entry| entry.path()))
+        .collect::<Result<Vec<_>, _>>();
+    let mut entries = match entries.as_mut() {
+        Ok(entries) => {
+            entries.sort();
+            std::mem::take(entries)
+        }
+        Err(err) => {
+            errors.push(record_error(
+                dir,
+                format!("failed to read skill directory entry: {err}"),
+            ));
+            return;
+        }
+    };
+
+    for path in entries.drain(..) {
+        let Some(name) = path.file_name().and_then(|name| name.to_str()) else {
+            continue;
+        };
+        if name.starts_with('.') {
+            continue;
+        }
+        let entry_depth = depth.saturating_add(1);
+        if entry_depth > MAX_SCAN_DEPTH {
+            continue;
+        }
+        let metadata = match fs::symlink_metadata(&path) {
+            Ok(metadata) => metadata,
+            Err(err) => {
+                errors.push(record_error(
+                    &path,
+                    format!("failed to inspect entry: {err}"),
+                ));
+                continue;
+            }
+        };
+        let file_type = metadata.file_type();
+        if file_type.is_symlink() {
+            collect_symlink_skill_entry(
+                &path,
+                name,
+                normalized_root,
+                entry_depth,
+                visited_dirs,
+                skill_paths,
+                errors,
+            );
+        } else if file_type.is_dir() {
+            collect_skill_paths_bounded(
+                &path,
+                normalized_root,
+                entry_depth,
+                visited_dirs,
+                skill_paths,
+                errors,
+            );
+        } else if file_type.is_file() && name == SKILL_FILENAME {
+            skill_paths.push(normalize_path(&path));
+        }
+    }
+}
+
+fn collect_symlink_skill_entry(
+    path: &Path,
+    name: &str,
+    normalized_root: &Path,
+    entry_depth: usize,
+    visited_dirs: &mut BTreeSet<String>,
+    skill_paths: &mut Vec<PathBuf>,
+    errors: &mut Vec<InstructionCapabilityErrorRecord>,
+) {
+    let target = match fs::canonicalize(path) {
+        Ok(target) => target,
+        Err(err) => {
+            errors.push(record_error(
+                path,
+                format!("failed to resolve symlink target: {err}"),
+            ));
+            return;
+        }
+    };
+    if !target.starts_with(normalized_root) {
+        errors.push(InstructionCapabilityErrorRecord {
+            path: path_string(path),
+            message: format!(
+                "symlink target `{}` is outside skill root `{}`; not traversed",
+                target.display(),
+                normalized_root.display()
+            ),
+        });
+        return;
+    }
+    if target.is_dir() {
+        collect_skill_paths_bounded(
+            &target,
+            normalized_root,
+            entry_depth,
+            visited_dirs,
+            skill_paths,
+            errors,
+        );
+    } else if target.is_file() && name == SKILL_FILENAME {
+        skill_paths.push(normalize_path(&target));
+    }
 }
 
 fn skill_capability(
@@ -469,13 +591,15 @@ fn find_project_root(cwd: &Path, markers: &[String]) -> PathBuf {
 }
 
 fn dirs_between(project_root: &Path, cwd: &Path) -> Vec<PathBuf> {
+    let cwd = normalize_path(cwd);
+    let project_root = normalize_path(project_root);
     let mut dirs = cwd
         .ancestors()
         .scan(false, |done, dir| {
             if *done {
                 None
             } else {
-                if dir == project_root {
+                if dir == project_root.as_path() {
                     *done = true;
                 }
                 Some(normalize_path(dir))
@@ -623,6 +747,98 @@ mod tests {
         fs::remove_dir_all(root).expect("cleanup");
     }
 
+    #[cfg(unix)]
+    #[test]
+    fn skill_scan_stays_inside_root_and_does_not_follow_symlink_cycles() {
+        let root = temp_dir();
+        let home = root.join("home/.freehand");
+        let cwd = root.join("repo");
+        let skill_root = cwd.join(".agents/skills");
+        let external = root.join("external-skills");
+        fs::create_dir_all(&skill_root).expect("skill root");
+        fs::create_dir_all(&external).expect("external root");
+        write(&cwd.join("Cargo.toml"), "[workspace]\n");
+        write(
+            &skill_root.join("real/SKILL.md"),
+            "---\nname: real-skill\ndescription: real skill\n---\nBody\n",
+        );
+        write(
+            &external.join("SKILL.md"),
+            "---\nname: external-skill\ndescription: external skill\n---\nBody\n",
+        );
+        std::os::unix::fs::symlink(&skill_root, skill_root.join("cycle")).expect("cycle symlink");
+        std::os::unix::fs::symlink(&external, skill_root.join("external"))
+            .expect("external symlink");
+
+        let manifest = compile_instruction_capability_manifest(
+            InstructionCapabilityCompileInput::new(&home, &cwd),
+        )
+        .expect("manifest");
+
+        assert_eq!(
+            manifest
+                .skills
+                .iter()
+                .map(|entry| entry.name.as_str())
+                .collect::<Vec<_>>(),
+            vec!["real-skill"]
+        );
+        assert!(manifest.errors.iter().any(|entry| {
+            entry.path.ends_with("/.agents/skills/external")
+                && entry.message.contains("outside skill root")
+        }));
+
+        fs::remove_dir_all(root).expect("cleanup");
+    }
+
+    #[cfg(unix)]
+    #[test]
+    fn symlink_cwd_does_not_scan_alias_parent_instruction_roots() {
+        let root = temp_dir();
+        let home = root.join("home/.freehand");
+        let real_project = root.join("real/repo");
+        let alias_parent = root.join("alias-parent");
+        let alias_project = alias_parent.join("repo-link");
+        fs::create_dir_all(&real_project).expect("real project");
+        fs::create_dir_all(&alias_parent).expect("alias parent");
+        write(&real_project.join("Cargo.toml"), "[workspace]\n");
+        write(
+            &real_project.join("AGENTS.md"),
+            "real project instructions\n",
+        );
+        write(
+            &real_project.join(".agents/skills/real/SKILL.md"),
+            "---\nname: real-project-skill\ndescription: real skill\n---\nBody\n",
+        );
+        write(
+            &alias_parent.join(".agents/skills/alias-parent/SKILL.md"),
+            "---\nname: alias-parent-skill\ndescription: must not be scanned\n---\nBody\n",
+        );
+        std::os::unix::fs::symlink(&real_project, &alias_project).expect("project symlink");
+
+        let manifest = compile_instruction_capability_manifest(
+            InstructionCapabilityCompileInput::new(&home, &alias_project),
+        )
+        .expect("manifest");
+
+        assert!(
+            manifest
+                .agents
+                .iter()
+                .all(|entry| !entry.path.contains("alias-parent/AGENTS.md"))
+        );
+        assert_eq!(
+            manifest
+                .skills
+                .iter()
+                .map(|entry| entry.name.as_str())
+                .collect::<Vec<_>>(),
+            vec!["real-project-skill"]
+        );
+
+        fs::remove_dir_all(root).expect("cleanup");
+    }
+
     #[test]
     fn writes_manifest_json_to_state_path() {
         let root = temp_dir();
@@ -673,5 +889,38 @@ mod tests {
         assert!(context.contains(&manifest.manifest_fingerprint));
 
         fs::remove_dir_all(root).expect("cleanup");
+    }
+
+    #[test]
+    fn renders_current_repo_instruction_capability_without_scanning_outside_roots() {
+        let runtime_home = temp_dir();
+        let crate_dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"));
+        let repo_root = crate_dir
+            .parent()
+            .and_then(|path| path.parent())
+            .expect("repo root");
+
+        let manifest = compile_instruction_capability_manifest(
+            InstructionCapabilityCompileInput::new(&runtime_home, repo_root),
+        )
+        .expect("compile current repo instruction capability");
+        let context = render_instruction_capability_context(&manifest)
+            .expect("render current repo instruction capability");
+
+        assert!(context.contains("<freehand_instruction_capability>"));
+        assert!(
+            manifest
+                .agents
+                .iter()
+                .any(|entry| entry.path.ends_with("/AGENTS.md"))
+        );
+        assert!(
+            manifest
+                .skills
+                .iter()
+                .any(|entry| entry.name == "freehand-dev")
+        );
+
+        fs::remove_dir_all(runtime_home).expect("cleanup");
     }
 }

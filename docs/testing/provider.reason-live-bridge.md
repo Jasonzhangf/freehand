@@ -10,7 +10,7 @@
 
 | resource operation | status | white-box | module black-box | project black-box |
 | --- | --- | --- | --- | --- |
-| `request_context.build_provider_request` | bound | `cargo test -p freehand-runtime live_bridge -- --nocapture` covers provider descriptor, request/tool/terminal metadata, schema retry, provider retry, tool re-entry, and master framework request-contract tests | `cargo test -p freehand-runtime live_bridge -- --nocapture` covers selected provider bridge smokes for text/tool/writable/checkpoint/schema/provider-retry/task-tool paths | `scripts/verify-provider-retry-online.sh` covers CLI/daemon live bridge proof through provider -> reason -> tool -> persistence -> UI projection for provider retry behavior |
+| `request_context.build_provider_request` | bound | `cargo test -p freehand-runtime live_bridge -- --nocapture` covers provider descriptor, request/tool/terminal metadata, schema retry, provider retry, provider retry backoff cancellation, tool re-entry, and master framework request-contract tests | `cargo test -p freehand-runtime live_bridge -- --nocapture` plus `cargo test -p freehand-runtime provider_retry_backoff_sleep_observes_live_cancel_token -- --nocapture` cover selected provider bridge smokes for text/tool/writable/checkpoint/schema/provider-retry/task-tool paths and interruptible retry wait | `scripts/verify-provider-retry-online.sh` covers CLI/daemon live bridge proof through provider -> reason -> tool -> persistence -> UI projection for provider retry behavior |
 
 - lifecycle path under test:
   - selected config resolves one anthropic provider
@@ -30,7 +30,15 @@
   - unsupported provider rejection
   - metadata center bootstrap from `~/.freehand/ledgers/metadata`
   - runtime-owned restore/request/tool/terminal lifecycle metadata writes
+  - runtime-owned context-planning started/completed lifecycle metadata writes
+    before turn-start/provider-request build, plus segment-level
+    started/completed/failed metadata for completion, control, tool guidance,
+    instruction capability, task-space snapshot, and original-task segments,
+    without prompt or provider payload leakage
   - runtime-owned restore/request/tool/terminal lifecycle debug snapshot emission
+  - context-planning and context-segment debug snapshots project to UI
+    model-waiting activity so a live submit is not silent while request context
+    is being prepared and the exact segment can be identified
   - runtime-owned metadata write failure is explicit and aborts the live bridge
   - single-shot live-bridge mock path
   - SSE live-bridge mock path
@@ -38,6 +46,7 @@
   - incremental stream apply path proving broadcast can happen before stream completion
   - cancellation before tool execution path
   - cancellation before terminal persistence path
+  - cancellation during provider retry backoff path
   - missing completion-schema rejection then success path
   - invalid completion-schema rejection then success path
   - missing completion-schema feedback must be sent to the next provider request with the missing `<freehand_completion>` tag requirement
@@ -58,13 +67,25 @@
   - long operator prompts for master task orchestration reach the provider request with their tail sentinel intact instead of failing the `original-task` segment with a fixed 128-token budget
   - long previous-round visible output reaches the next provider request with its tail sentinel intact instead of failing `previous-visible-output` with a fixed 512-token budget
   - every live round includes completion contract, control status contract, runtime tool guidance, and the task contract before volatile carryover
-  - every Master live round includes TaskSpaceSnapshot with configured Worker,
-    known tasks, agents, recent events, valid status filters, and the explicit
-    no-`status="all"` instruction before the original task
+  - `live_context::base_live_context_segments` owns live segment construction in
+    `crates/freehand-runtime/src/live_context.rs`; the `src/lib.rs`
+    orchestrator must not duplicate those builders
+  - first-round `live_context::base_live_context_segments_with_observer` emits
+    owner-safe segment build observations and `run_live_provider_reason_turn`
+    records them as metadata/debug without prompt text, provider payload, or
+    segment content leakage
+  - every Master live round includes TaskSpaceSnapshot from task owner
+    `TaskRuntime::query_task_space_snapshot`, with configured Worker, known
+    tasks, agents, newest recent events, valid status filters, and the explicit
+    no-`status="all"` instruction before the original task; the live context
+    path must not boot full TaskRuntime, replay scheduler facts, or page
+    EventInbox just to build prompt context
   - master-task prompt contract, exposed `task` tool schema, tool field descriptions, dispatch conditions, workspace-boundary rule, concurrency/flow-control guidance, cross-workspace sample, and success/error/retry samples are present in the first provider request before any model task creation decision
   - master-task request contract tells the model every task call needs
     top-level `op`, shows valid create/assign examples, and says `target_cwd`
-    must be an expanded absolute existing repository/workspace path
+    should prefer an expanded absolute existing repository/workspace path while
+    accepting leading-~/symlink aliases only when they resolve to an existing
+    workspace
   - master-autonomous success path: mock provider emits `task` tool calls for create_agent/create/assign/claim_next/running/review_ready/approve/close, each tool result is paired back to the next provider request, and Task Center truth closes only after review approval
   - master-autonomous execution-error path: mock provider emits a worker `blocked` execution fact, runtime returns it as a normal tool result, and Task Center truth remains blocked without review approval or close
   - master-autonomous rejected-review path: mock provider emits review_ready, reject, recovering with retry_count, second review_ready, approve, and close; Task Center truth preserves the reject-before-retry-before-close event order
@@ -108,7 +129,7 @@
     next provider request, then a corrected status can close the same logical
     turn successfully
   - non-terminal completion-schema rejection retries emit a UI waiting projection showing feedback was sent back to the model
-  - recoverable non-stream provider HTTP/executor failure retries ten attempts with exponential backoff starting at 1 second before explicit dispatch failure, materializes failed terminal/error truth with a concrete provider error code, and leaves no active turn hanging
+  - recoverable non-stream provider HTTP/executor failure retries ten attempts with exponential backoff starting at 1 second before explicit dispatch failure, materializes failed terminal/error truth with a concrete provider error code, leaves no active turn hanging, and interrupts backoff immediately when the live cancel token is set
   - recoverable non-stream provider HTTP/executor failure can succeed after earlier attempts; metadata records `retry_same_step` attempts without terminal `fail_turn`
   - each actual retry and accepted fallback switch updates the same turn's typed model-request activity (`provider_retry` / `provider_failover`) before sleeping, retrying, or entering fallback; the next semantic response or terminal event clears that transient activity, and recovered turns contain no provider error event
   - OpenAI Responses HTTP 402 on the primary route immediately activates the configured Anthropic fallback; fallback success persists the fallback model and explicit route-switch metadata while retaining the primary error code, and the error-center recovery action is `failover_provider` rather than the contradictory `fail_turn`
@@ -151,7 +172,7 @@
   - runtime dispatch and daemon black-box coverage are landed against local mock providers
   - runtime live bridge now writes restore/request/tool/terminal lifecycle metadata through `metadata.core` and fails explicitly on metadata write errors
   - runtime live bridge now writes provider raw response/error/event bodies through `reason.persistence` and fails explicitly on provider raw ledger write errors
-  - runtime live bridge cancellation checkpoint coverage before tool execution and terminal persistence is landed
+  - runtime live bridge cancellation checkpoint coverage before tool execution, terminal persistence, and provider retry backoff is landed
   - runtime white-box coverage now explicitly locks failed tool-result multi-round continuation, including incomplete `tool_use` as paired failed tool-result truth with zero schema retries, proving execution failures become paired `ToolResultStatus::Failed` re-entry truth and provider/system errors remain explicit bridge failures
   - runtime white-box coverage now explicitly locks provider executor failure materialization: transport failure writes concrete provider error codes such as `anthropic_http_status_500` or `openai_http_status_500`, retries recoverable non-stream failures up to ten attempts, closes the active turn as failed only after exhaustion, and restores with no active turn
   - runtime white-box coverage locks configured primary/fallback routing: retryable primary provider exhaustion switches once to the configured fallback using the same provider-neutral round input, fallback success owns the persisted model/provider metadata, fallback exhaustion materializes one failed turn, and non-retryable adapter/callback/content failures do not switch providers

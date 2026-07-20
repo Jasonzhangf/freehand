@@ -47,7 +47,7 @@
 
 | step | symbol path | file path | responsibility | input semantic | output semantic | caller | callee | binding status |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| 01 | `control_status_contract_segment` | `crates/freehand-runtime/src/lib.rs` | provide model-visible status schema guidance before provider request | live round context | developer context segment | runtime live bridge | control schema owner | bound |
+| 01 | `control_status_contract_segment` | `crates/freehand-runtime/src/live_context.rs` | provide model-visible status schema guidance before provider request | live round context | developer context segment | runtime live bridge | control schema owner | bound |
 | 02 | `write_control_hook_metadata` | `crates/freehand-runtime/src/lib.rs` | write hook metadata with `control.center` owner watermark | hook node + trace/session/turn + accepted entries | durable metadata record | runtime live bridge | metadata center | bound |
 | 03 | `parse_control_status_block` | `crates/freehand-control/src/lib.rs` | parse and validate hidden status schema block | provider text | typed status submission or rejection | runtime live bridge | control center | bound |
 | 04 | `control_status_rhythm_decision` | `crates/freehand-control/src/lib.rs` | convert validated status into passive rhythm decision | status submission | stop/continue/block/options decision | runtime live bridge | control center | bound |

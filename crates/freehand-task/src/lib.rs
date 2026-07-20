@@ -296,6 +296,38 @@ pub struct TaskBoardProjection {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TaskSpaceSnapshotQuery {
+    pub task_limit: usize,
+    pub blocked_limit: usize,
+    pub review_ready_limit: usize,
+    pub event_limit: usize,
+    pub include_terminal: bool,
+}
+
+impl Default for TaskSpaceSnapshotQuery {
+    fn default() -> Self {
+        Self {
+            task_limit: 12,
+            blocked_limit: 8,
+            review_ready_limit: 8,
+            event_limit: 12,
+            include_terminal: true,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TaskSpaceSnapshotProjection {
+    pub schema_version: u32,
+    pub generated_at: u64,
+    pub tasks: Vec<TaskSnapshot>,
+    pub blocked: Vec<TaskSnapshot>,
+    pub review_ready: Vec<TaskSnapshot>,
+    pub agents: Vec<AgentLifecycleSnapshot>,
+    pub recent_events: Vec<TaskEventInboxEntry>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum ExecutionFactKind {
     Running {
@@ -810,6 +842,7 @@ impl TaskRuntime {
         state.leases = store.load_leases()?;
         reconcile_running_leases(&store, &mut state, now_unix_seconds())?;
         reconcile_paused_agents(&store, &mut state, now_unix_seconds())?;
+        reconcile_released_lifecycle_bindings(&store, &mut state, now_unix_seconds())?;
         state.scheduler_facts = store.load_scheduler_facts(state.tasks.keys())?;
         Ok(Self {
             store,
@@ -1082,6 +1115,75 @@ impl TaskRuntime {
             blocked,
             review_ready,
             stale,
+        })
+    }
+
+    pub fn query_task_space_snapshot(
+        runtime_home: impl Into<PathBuf>,
+        owner_agent_id: AgentId,
+        query: TaskSpaceSnapshotQuery,
+    ) -> Result<TaskSpaceSnapshotProjection, TaskError> {
+        let store = TaskStore::new(runtime_home, owner_agent_id.clone());
+        let now = now_unix_seconds();
+
+        let mut agent_snapshots = BTreeMap::<AgentId, AgentSnapshot>::new();
+        for agent in store.load_agent_snapshots()? {
+            agent_snapshots.insert(agent.agent_id.clone(), agent);
+        }
+        let self_agent = store.load_or_default_self_agent(&owner_agent_id)?;
+        agent_snapshots.insert(owner_agent_id, self_agent);
+
+        let mut lifecycle = BTreeMap::<AgentId, AgentLifecycleSnapshot>::new();
+        for agent in agent_snapshots.values() {
+            lifecycle.insert(
+                agent.agent_id.clone(),
+                lifecycle_from_agent_snapshot(agent, now),
+            );
+        }
+        for snapshot in store.load_agent_lifecycle_snapshots()? {
+            lifecycle.insert(snapshot.agent_id.clone(), snapshot);
+        }
+
+        let mut tasks = store.load_task_snapshots()?;
+        let task_ids = tasks
+            .iter()
+            .map(|task| task.task_id.clone())
+            .collect::<Vec<_>>();
+        tasks.retain(|task| query.include_terminal || !is_terminal_status(&task.status));
+        sort_task_space_snapshots(&mut tasks);
+
+        let visible_tasks = tasks
+            .iter()
+            .take(query.task_limit)
+            .cloned()
+            .collect::<Vec<_>>();
+        let blocked = sorted_task_space_subset(&tasks, query.blocked_limit, |task| {
+            matches!(task.status, TaskStatus::Blocked)
+        });
+        let review_ready = sorted_task_space_subset(&tasks, query.review_ready_limit, |task| {
+            matches!(task.status, TaskStatus::ReviewSubmitted)
+        });
+        let agents = lifecycle
+            .values()
+            .cloned()
+            .map(|snapshot| project_agent_lifecycle_health(snapshot, now))
+            .collect::<Vec<_>>();
+        let mut agents = agents;
+        agents.sort_by(|left, right| left.agent_id.cmp(&right.agent_id));
+        let recent_events = store
+            .load_recent_master_visible_events(task_ids.iter(), query.event_limit)?
+            .into_iter()
+            .filter_map(|event| task_event_inbox_entry(&event))
+            .collect::<Vec<_>>();
+
+        Ok(TaskSpaceSnapshotProjection {
+            schema_version: 1,
+            generated_at: now,
+            tasks: visible_tasks,
+            blocked,
+            review_ready,
+            agents,
+            recent_events,
         })
     }
 
@@ -2306,24 +2408,24 @@ impl TaskStore {
             return read_json(&path);
         }
         let now = now_unix_seconds();
-        let snapshot = AgentSnapshot {
-            schema_version: 1,
-            agent_id: owner_agent_id.clone(),
-            status: AgentStatus::Available,
-            current_task_id: None,
-            current_execution_id: None,
-            current_cwd: None,
-            capabilities: vec![
-                "code_edit".to_owned(),
-                "test_run".to_owned(),
-                "docs".to_owned(),
-            ],
-            last_seen_at: now,
-            running_tasks: 0,
-            queued_tasks: 0,
-        };
+        let snapshot = default_self_agent_snapshot(owner_agent_id, now);
         self.write_agent_snapshot(&snapshot)?;
         Ok(snapshot)
+    }
+
+    fn load_or_default_self_agent(
+        &self,
+        owner_agent_id: &AgentId,
+    ) -> Result<AgentSnapshot, TaskError> {
+        let path = self.agent_snapshot_path(owner_agent_id);
+        if path.is_file() {
+            read_json(&path)
+        } else {
+            Ok(default_self_agent_snapshot(
+                owner_agent_id,
+                now_unix_seconds(),
+            ))
+        }
     }
 
     fn load_task_snapshots(&self) -> Result<Vec<TaskSnapshot>, TaskError> {
@@ -2444,6 +2546,42 @@ impl TaskStore {
             }
         }
         Ok(facts)
+    }
+
+    fn load_recent_master_visible_events<'a>(
+        &self,
+        task_ids: impl IntoIterator<Item = &'a TaskId>,
+        limit: usize,
+    ) -> Result<Vec<TaskLedgerEvent>, TaskError> {
+        if limit == 0 {
+            return Ok(Vec::new());
+        }
+        let mut events = Vec::new();
+        for task_id in task_ids {
+            let path = self.task_ledger_path(task_id);
+            if !path.is_file() {
+                continue;
+            }
+            let file = fs::File::open(&path).map_err(io_err)?;
+            let reader = BufReader::new(file);
+            for line in reader.lines() {
+                let line = line.map_err(io_err)?;
+                if line.trim().is_empty() {
+                    continue;
+                }
+                let event: TaskLedgerEvent = serde_json::from_str(&line).map_err(json_err)?;
+                if master_visible_event_kind(&event.event_type).is_none() {
+                    continue;
+                }
+                events.push(event);
+                events.sort_by(task_event_order_cmp);
+                if events.len() > limit {
+                    events.remove(0);
+                }
+            }
+        }
+        events.sort_by(|left, right| task_event_order_cmp(right, left));
+        Ok(events)
     }
 
     fn load_agent_snapshots(&self) -> Result<Vec<AgentSnapshot>, TaskError> {
@@ -2992,6 +3130,85 @@ fn reconcile_paused_agents(
     Ok(())
 }
 
+fn reconcile_released_lifecycle_bindings(
+    store: &TaskStore,
+    state: &mut TaskRuntimeState,
+    now: u64,
+) -> Result<(), TaskError> {
+    let agent_ids = state
+        .lifecycle
+        .iter()
+        .filter_map(|(agent_id, lifecycle)| {
+            lifecycle
+                .current_task_id
+                .as_ref()
+                .and_then(|task_id| match state.tasks.get(task_id) {
+                    Some(task) if task_status_releases_lifecycle_binding(&task.status) => {
+                        Some(agent_id.clone())
+                    }
+                    None => Some(agent_id.clone()),
+                    _ => None,
+                })
+                .or_else(|| {
+                    lifecycle
+                        .current_execution_id
+                        .as_ref()
+                        .and_then(|execution_id| {
+                            let execution_binds_released_task = state.tasks.values().any(|task| {
+                                task.active_execution_id.as_deref() == Some(execution_id.as_str())
+                                    && task_status_releases_lifecycle_binding(&task.status)
+                            });
+                            (lifecycle.current_task_id.is_none() || execution_binds_released_task)
+                                .then(|| agent_id.clone())
+                        })
+                })
+        })
+        .collect::<Vec<_>>();
+
+    for agent_id in agent_ids {
+        let current_task_target = state
+            .lifecycle
+            .get(&agent_id)
+            .and_then(|lifecycle| lifecycle.current_task_id.as_ref())
+            .map(|task_id| task_id.as_str().to_owned());
+        let current_execution_id = state
+            .lifecycle
+            .get(&agent_id)
+            .and_then(|lifecycle| lifecycle.current_execution_id.as_deref())
+            .map(str::to_owned);
+        let execution_target = current_execution_id.as_deref().and_then(|execution_id| {
+            state
+                .tasks
+                .values()
+                .find(|task| task.active_execution_id.as_deref() == Some(execution_id))
+        });
+        let target = current_task_target
+            .or_else(|| execution_target.map(|task| task.task_id.as_str().to_owned()));
+        let release = target
+            .as_deref()
+            .and_then(|task_id| state.tasks.get(&TaskId::new(task_id.to_owned())))
+            .or(execution_target)
+            .map(|task| lifecycle_release_projection_for_status(&task.status))
+            .unwrap_or(LifecycleReleaseProjection {
+                last_kind: "released",
+                last_summary: "task or execution binding no longer exists",
+                idle_summary: "available after task/execution binding disappeared",
+            });
+        if let Some(lifecycle) = state.lifecycle.get_mut(&agent_id) {
+            release_lifecycle_current_binding(
+                lifecycle,
+                release.last_kind,
+                release.last_summary,
+                target,
+                release.idle_summary,
+                now,
+            );
+            store.write_agent_lifecycle_snapshot(lifecycle)?;
+        }
+    }
+    Ok(())
+}
+
 fn validate_worker_control_request(request: &WorkerControlRequest) -> Result<(), TaskError> {
     require_text(request.task_id.as_str(), "task_id")?;
     require_text(&request.execution_id, "execution_id")?;
@@ -3208,6 +3425,14 @@ fn task_event_cursor(event: &TaskLedgerEvent) -> String {
         event.seq,
         event.event_id
     )
+}
+
+fn task_event_order_cmp(left: &TaskLedgerEvent, right: &TaskLedgerEvent) -> std::cmp::Ordering {
+    left.timestamp
+        .cmp(&right.timestamp)
+        .then_with(|| left.task_id.cmp(&right.task_id))
+        .then_with(|| left.seq.cmp(&right.seq))
+        .then_with(|| left.event_id.cmp(&right.event_id))
 }
 
 #[cfg(test)]
@@ -3575,40 +3800,18 @@ fn project_task_event_to_lifecycle(
             .and_then(Value::as_str)
             .map(ToOwned::to_owned)
     });
-    if event_type == "TaskInterrupted" {
-        snapshot.state = AgentLifecycleState::Idle;
-        snapshot.state_entered_at = now;
-        snapshot.elapsed_ms = 0;
-        snapshot.current_task_id = None;
-        snapshot.current_execution_id = None;
-        snapshot.current_turn_id = None;
-        snapshot.last_activity = Some(AgentLifecycleActivity {
-            kind: "interrupted".to_owned(),
-            semantic_summary: payload
-                .get("reason")
-                .and_then(Value::as_str)
-                .unwrap_or("task execution interrupted")
-                .to_owned(),
-            target: Some(task.task_id.as_str().to_owned()),
-            started_at: now,
-            elapsed_ms: 0,
-            tool_name: None,
-            model: None,
-            retry_count: None,
-            visibility: "compact".to_owned(),
-        });
-        snapshot.current_activity = Some(AgentLifecycleActivity {
-            kind: "idle".to_owned(),
-            semantic_summary: "available after interrupted execution".to_owned(),
-            target: None,
-            started_at: now,
-            elapsed_ms: 0,
-            tool_name: None,
-            model: None,
-            retry_count: None,
-            visibility: "compact".to_owned(),
-        });
-        snapshot.last_seen_at = now;
+    if let Some(release) = lifecycle_release_projection_for_event(event_type, payload) {
+        release_lifecycle_current_binding(
+            &mut snapshot,
+            release.last_kind,
+            release.last_summary,
+            Some(task.task_id.as_str().to_owned()),
+            release.idle_summary,
+            now,
+        );
+        if event_type == "TaskBlocked" {
+            snapshot.stats.blocked_count = snapshot.stats.blocked_count.saturating_add(1);
+        }
         state.lifecycle.insert(assignee.agent_id.clone(), snapshot);
         return;
     }
@@ -3733,6 +3936,179 @@ fn project_task_event_to_lifecycle(
     state.lifecycle.insert(assignee.agent_id.clone(), snapshot);
 }
 
+struct LifecycleReleaseProjection<'a> {
+    last_kind: &'a str,
+    last_summary: &'a str,
+    idle_summary: &'a str,
+}
+
+fn task_status_releases_lifecycle_binding(status: &TaskStatus) -> bool {
+    matches!(
+        status,
+        TaskStatus::Blocked
+            | TaskStatus::ReviewSubmitted
+            | TaskStatus::Approved
+            | TaskStatus::Rejected
+            | TaskStatus::Interrupted
+            | TaskStatus::Cancelled
+            | TaskStatus::Failed
+            | TaskStatus::Closed
+    )
+}
+
+fn lifecycle_release_projection_for_status(status: &TaskStatus) -> LifecycleReleaseProjection<'_> {
+    match status {
+        TaskStatus::Blocked => LifecycleReleaseProjection {
+            last_kind: "blocked",
+            last_summary: "task blocked",
+            idle_summary: "available after blocked task",
+        },
+        TaskStatus::ReviewSubmitted => LifecycleReleaseProjection {
+            last_kind: "review_ready",
+            last_summary: "submitted for review",
+            idle_summary: "available while task awaits review",
+        },
+        TaskStatus::Approved => LifecycleReleaseProjection {
+            last_kind: "approved",
+            last_summary: "review approved",
+            idle_summary: "available after review approval",
+        },
+        TaskStatus::Rejected => LifecycleReleaseProjection {
+            last_kind: "review_rejected",
+            last_summary: "review rejected",
+            idle_summary: "available after review rejection",
+        },
+        TaskStatus::Interrupted => LifecycleReleaseProjection {
+            last_kind: "interrupted",
+            last_summary: "task execution interrupted",
+            idle_summary: "available after interrupted execution",
+        },
+        TaskStatus::Cancelled => LifecycleReleaseProjection {
+            last_kind: "cancelled",
+            last_summary: "task cancelled",
+            idle_summary: "available after task cancellation",
+        },
+        TaskStatus::Failed => LifecycleReleaseProjection {
+            last_kind: "failed",
+            last_summary: "task failed",
+            idle_summary: "available after task failure",
+        },
+        TaskStatus::Closed => LifecycleReleaseProjection {
+            last_kind: "closed",
+            last_summary: "task closed",
+            idle_summary: "available after task closed",
+        },
+        _ => LifecycleReleaseProjection {
+            last_kind: "released",
+            last_summary: "task no longer binds this agent",
+            idle_summary: "available after task release",
+        },
+    }
+}
+
+fn lifecycle_release_projection_for_event<'a>(
+    event_type: &str,
+    payload: &'a Value,
+) -> Option<LifecycleReleaseProjection<'a>> {
+    match event_type {
+        "TaskBlocked" => Some(LifecycleReleaseProjection {
+            last_kind: "blocked",
+            last_summary: payload
+                .get("reason")
+                .and_then(Value::as_str)
+                .unwrap_or("task blocked"),
+            idle_summary: "available after blocked task",
+        }),
+        "TaskAttentionRequired" => Some(LifecycleReleaseProjection {
+            last_kind: "attention_required",
+            last_summary: payload
+                .get("reason")
+                .and_then(Value::as_str)
+                .unwrap_or("task execution requires Master attention"),
+            idle_summary: "available after interrupted execution requiring attention",
+        }),
+        "TaskReviewSubmitted" => Some(LifecycleReleaseProjection {
+            last_kind: "review_ready",
+            last_summary: payload
+                .get("summary")
+                .and_then(Value::as_str)
+                .unwrap_or("submitted for review"),
+            idle_summary: "available while task awaits review",
+        }),
+        "TaskReviewApproved" => Some(LifecycleReleaseProjection {
+            last_kind: "approved",
+            last_summary: "review approved",
+            idle_summary: "available after review approval",
+        }),
+        "TaskReviewRejected" => Some(LifecycleReleaseProjection {
+            last_kind: "review_rejected",
+            last_summary: payload
+                .get("reject_reason")
+                .and_then(Value::as_str)
+                .unwrap_or("review rejected"),
+            idle_summary: "available after review rejection",
+        }),
+        "TaskInterrupted" => Some(LifecycleReleaseProjection {
+            last_kind: "interrupted",
+            last_summary: payload
+                .get("reason")
+                .and_then(Value::as_str)
+                .unwrap_or("task execution interrupted"),
+            idle_summary: "available after interrupted execution",
+        }),
+        "TaskCancelled" => Some(LifecycleReleaseProjection {
+            last_kind: "cancelled",
+            last_summary: "task cancelled",
+            idle_summary: "available after task cancellation",
+        }),
+        "TaskClosed" => Some(LifecycleReleaseProjection {
+            last_kind: "closed",
+            last_summary: "task closed",
+            idle_summary: "available after task closed",
+        }),
+        _ => None,
+    }
+}
+
+fn release_lifecycle_current_binding(
+    snapshot: &mut AgentLifecycleSnapshot,
+    last_kind: &str,
+    last_summary: &str,
+    last_target: Option<String>,
+    idle_summary: &str,
+    now: u64,
+) {
+    snapshot.state = AgentLifecycleState::Idle;
+    snapshot.state_entered_at = now;
+    snapshot.elapsed_ms = 0;
+    snapshot.current_task_id = None;
+    snapshot.current_execution_id = None;
+    snapshot.current_turn_id = None;
+    snapshot.last_activity = Some(AgentLifecycleActivity {
+        kind: last_kind.to_owned(),
+        semantic_summary: last_summary.to_owned(),
+        target: last_target,
+        started_at: now,
+        elapsed_ms: 0,
+        tool_name: None,
+        model: None,
+        retry_count: None,
+        visibility: "compact".to_owned(),
+    });
+    snapshot.current_activity = Some(AgentLifecycleActivity {
+        kind: "idle".to_owned(),
+        semantic_summary: idle_summary.to_owned(),
+        target: None,
+        started_at: now,
+        elapsed_ms: 0,
+        tool_name: None,
+        model: None,
+        retry_count: None,
+        visibility: "compact".to_owned(),
+    });
+    snapshot.last_seen_at = now;
+}
+
 fn lifecycle_from_agent_snapshot(agent: &AgentSnapshot, now: u64) -> AgentLifecycleSnapshot {
     let state = match agent.status {
         AgentStatus::Available => AgentLifecycleState::Idle,
@@ -3800,6 +4176,25 @@ fn lifecycle_from_agent_snapshot(agent: &AgentSnapshot, now: u64) -> AgentLifecy
         process_started_at: None,
         process_heartbeat_at: None,
         restart_count: 0,
+    }
+}
+
+fn default_self_agent_snapshot(owner_agent_id: &AgentId, now: u64) -> AgentSnapshot {
+    AgentSnapshot {
+        schema_version: 1,
+        agent_id: owner_agent_id.clone(),
+        status: AgentStatus::Available,
+        current_task_id: None,
+        current_execution_id: None,
+        current_cwd: None,
+        capabilities: vec![
+            "code_edit".to_owned(),
+            "test_run".to_owned(),
+            "docs".to_owned(),
+        ],
+        last_seen_at: now,
+        running_tasks: 0,
+        queued_tasks: 0,
     }
 }
 
@@ -4028,6 +4423,51 @@ fn sort_task_snapshots(tasks: &mut [TaskSnapshot]) {
             .then_with(|| left.created_at.cmp(&right.created_at))
             .then_with(|| left.task_id.cmp(&right.task_id))
     });
+}
+
+fn sort_task_space_snapshots(tasks: &mut [TaskSnapshot]) {
+    tasks.sort_by(|left, right| {
+        task_space_status_rank(&left.status)
+            .cmp(&task_space_status_rank(&right.status))
+            .then_with(|| right.priority.cmp(&left.priority))
+            .then_with(|| task_recent_activity_at(right).cmp(&task_recent_activity_at(left)))
+            .then_with(|| left.created_at.cmp(&right.created_at))
+            .then_with(|| left.task_id.cmp(&right.task_id))
+    });
+}
+
+fn sorted_task_space_subset(
+    tasks: &[TaskSnapshot],
+    limit: usize,
+    predicate: impl Fn(&TaskSnapshot) -> bool,
+) -> Vec<TaskSnapshot> {
+    if limit == 0 {
+        return Vec::new();
+    }
+    let mut subset = tasks
+        .iter()
+        .filter(|task| predicate(task))
+        .cloned()
+        .collect::<Vec<_>>();
+    sort_task_space_snapshots(&mut subset);
+    subset.into_iter().take(limit).collect()
+}
+
+fn task_space_status_rank(status: &TaskStatus) -> u8 {
+    match status {
+        TaskStatus::ReviewSubmitted => 0,
+        TaskStatus::Blocked => 1,
+        TaskStatus::Running => 2,
+        TaskStatus::Interrupted | TaskStatus::Rejected => 3,
+        TaskStatus::Assigned | TaskStatus::WaitingAgent | TaskStatus::Created => 4,
+        TaskStatus::Paused => 5,
+        TaskStatus::Approved => 6,
+        TaskStatus::Failed | TaskStatus::Cancelled | TaskStatus::Closed => 7,
+    }
+}
+
+fn task_recent_activity_at(task: &TaskSnapshot) -> u64 {
+    task.last_progress_at.unwrap_or(task.updated_at)
 }
 
 fn validate_create_request(request: &TaskCreateRequest) -> Result<(), TaskError> {
@@ -5663,6 +6103,92 @@ mod tests {
     }
 
     #[test]
+    fn task_space_snapshot_is_bounded_and_does_not_replay_scheduler_facts() {
+        let runtime_home = temp_runtime_home("task-space-snapshot-bounded");
+        let agent_id = AgentId::new("master");
+        let runtime = TaskRuntime::boot(&runtime_home, agent_id.clone()).expect("boot");
+        let mut task_ids = Vec::new();
+        for index in 0..5 {
+            let mut request = sample_create_request(agent_id.clone());
+            request.task_id = Some(TaskId::new(format!("task-space-{index}")));
+            request.priority = index;
+            request.dispatch = TaskDispatchRequest::None;
+            task_ids.push(
+                runtime
+                    .create_task(request)
+                    .expect("create task")
+                    .task
+                    .task_id,
+            );
+        }
+
+        let poisoned_task = runtime.query_task(&task_ids[0]).expect("poisoned task");
+        let poisoned_event = TaskLedgerEvent {
+            schema_version: 1,
+            task_id: poisoned_task.task_id.clone(),
+            seq: poisoned_task.last_event_seq.saturating_add(1),
+            event_id: format!(
+                "{}:{}",
+                poisoned_task.task_id.as_str(),
+                poisoned_task.last_event_seq.saturating_add(1)
+            ),
+            event_type: "TaskSchedulerTick".to_owned(),
+            from_status: Some(poisoned_task.status.clone()),
+            to_status: poisoned_task.status,
+            timestamp: now_unix_seconds().saturating_add(1_000),
+            actor: sample_actor(agent_id.clone()),
+            watermark: sample_watermark(),
+            payload: json!({
+                "scheduler_fact": {
+                    "task_id": poisoned_task.task_id.as_str(),
+                    "observed_at": now_unix_seconds(),
+                    "fact": {"kind": "stale"},
+                    "recommendation": "poisoned scheduler fact for boot-only replay"
+                }
+            }),
+        };
+        let ledger_path = runtime_home
+            .join("ledgers/tasks/master")
+            .join(format!("{}.jsonl", poisoned_task.task_id.as_str()));
+        let mut ledger = OpenOptions::new()
+            .append(true)
+            .open(&ledger_path)
+            .expect("open ledger");
+        writeln!(
+            ledger,
+            "{}",
+            serde_json::to_string(&poisoned_event).expect("poison event json")
+        )
+        .expect("append poison event");
+
+        assert!(TaskRuntime::boot(&runtime_home, agent_id.clone()).is_err());
+        let snapshot = TaskRuntime::query_task_space_snapshot(
+            &runtime_home,
+            agent_id.clone(),
+            TaskSpaceSnapshotQuery {
+                task_limit: 3,
+                blocked_limit: 1,
+                review_ready_limit: 1,
+                event_limit: 2,
+                include_terminal: true,
+            },
+        )
+        .expect("bounded task-space snapshot");
+
+        assert_eq!(snapshot.tasks.len(), 3);
+        assert_eq!(snapshot.recent_events.len(), 2);
+        assert_eq!(snapshot.recent_events[0].kind, "scheduler_tick");
+        assert_eq!(snapshot.recent_events[0].task_id, poisoned_task.task_id);
+        assert!(
+            snapshot
+                .agents
+                .iter()
+                .any(|agent| agent.agent_id == agent_id)
+        );
+        let _ = fs::remove_dir_all(runtime_home);
+    }
+
+    #[test]
     fn execution_fact_recovering_keeps_running_and_writes_event() {
         let runtime_home = temp_runtime_home("execution-fact-recovering");
         let agent_id = AgentId::new("master");
@@ -5786,6 +6312,19 @@ mod tests {
             runtime.query_task(&task.task_id).expect("blocked").status,
             TaskStatus::Blocked
         );
+        let blocked_lifecycle = runtime
+            .query_agent_lifecycle(&worker_id)
+            .expect("blocked lifecycle");
+        assert_eq!(blocked_lifecycle.state, AgentLifecycleState::Idle);
+        assert_eq!(blocked_lifecycle.current_task_id, None);
+        assert_eq!(blocked_lifecycle.current_execution_id, None);
+        assert_eq!(
+            blocked_lifecycle
+                .last_activity
+                .as_ref()
+                .map(|activity| activity.kind.as_str()),
+            Some("blocked")
+        );
         runtime
             .apply_execution_fact(ExecutionFact {
                 execution_id: execution_id.clone(),
@@ -5816,6 +6355,19 @@ mod tests {
                 watermark: sample_watermark(),
             })
             .expect("review ready");
+        let review_lifecycle = runtime
+            .query_agent_lifecycle(&worker_id)
+            .expect("review lifecycle");
+        assert_eq!(review_lifecycle.state, AgentLifecycleState::Idle);
+        assert_eq!(review_lifecycle.current_task_id, None);
+        assert_eq!(review_lifecycle.current_execution_id, None);
+        assert_eq!(
+            review_lifecycle
+                .last_activity
+                .as_ref()
+                .map(|activity| activity.kind.as_str()),
+            Some("review_ready")
+        );
         runtime
             .reject_review(TaskReviewRejection {
                 task_id: task.task_id.clone(),
@@ -5828,6 +6380,19 @@ mod tests {
         assert_eq!(
             runtime.query_task(&task.task_id).expect("rejected").status,
             TaskStatus::Rejected
+        );
+        let rejected_lifecycle = runtime
+            .query_agent_lifecycle(&worker_id)
+            .expect("rejected lifecycle");
+        assert_eq!(rejected_lifecycle.state, AgentLifecycleState::Idle);
+        assert_eq!(rejected_lifecycle.current_task_id, None);
+        assert_eq!(rejected_lifecycle.current_execution_id, None);
+        assert_eq!(
+            rejected_lifecycle
+                .last_activity
+                .as_ref()
+                .map(|activity| activity.kind.as_str()),
+            Some("review_rejected")
         );
         runtime
             .apply_execution_fact(ExecutionFact {
@@ -5880,6 +6445,19 @@ mod tests {
         assert_eq!(
             recovered_task.active_execution_id.as_deref(),
             Some(execution_id.as_str())
+        );
+        let recovered_worker = recovered
+            .query_agent_lifecycle(&worker_id)
+            .expect("recovered worker lifecycle");
+        assert_eq!(recovered_worker.state, AgentLifecycleState::Idle);
+        assert_eq!(recovered_worker.current_task_id, None);
+        assert_eq!(recovered_worker.current_execution_id, None);
+        assert_eq!(
+            recovered_worker
+                .last_activity
+                .as_ref()
+                .map(|activity| activity.kind.as_str()),
+            Some("closed")
         );
         let history = recovered.task_history(&task.task_id).expect("history");
         for required in [
@@ -6125,6 +6703,19 @@ mod tests {
             runtime.query_agent(&worker_id).expect("worker").status,
             AgentStatus::Available
         );
+        let blocked_lifecycle = runtime
+            .query_agent_lifecycle(&worker_id)
+            .expect("blocked lifecycle");
+        assert_eq!(blocked_lifecycle.state, AgentLifecycleState::Idle);
+        assert_eq!(blocked_lifecycle.current_task_id, None);
+        assert_eq!(blocked_lifecycle.current_execution_id, None);
+        assert_eq!(
+            blocked_lifecycle
+                .last_activity
+                .as_ref()
+                .map(|activity| activity.kind.as_str()),
+            Some("blocked")
+        );
         let mut next_request = sample_create_request(owner_id.clone());
         next_request.task_id = Some(TaskId::new("task-worker-after-block"));
         next_request.dispatch = TaskDispatchRequest::None;
@@ -6141,6 +6732,157 @@ mod tests {
             })
             .expect("assign released worker");
         assert_eq!(assigned.task.status, TaskStatus::Assigned);
+        let _ = fs::remove_dir_all(runtime_home);
+    }
+
+    #[test]
+    fn task_close_releases_agent_lifecycle_and_boot_repairs_stale_current_binding() {
+        let runtime_home = temp_runtime_home("close-lifecycle-release");
+        let owner_id = AgentId::new("master");
+        let worker_id = AgentId::new("worker-close-release");
+        let execution_id = "exec-worker-close-release";
+        let runtime = TaskRuntime::boot(&runtime_home, owner_id.clone()).expect("boot");
+        create_worker_agent(&runtime, &owner_id, &worker_id);
+        let task = create_claimed_worker_task(
+            &runtime,
+            &owner_id,
+            &worker_id,
+            "task-worker-close-release",
+            execution_id,
+            80,
+        );
+
+        runtime
+            .apply_execution_fact(ExecutionFact {
+                execution_id: execution_id.to_owned(),
+                task_id: task.task_id.clone(),
+                agent_id: worker_id.clone(),
+                turn_id: Some(TurnId::new("turn-worker-close-release")),
+                occurred_at: now_unix_seconds(),
+                kind: ExecutionFactKind::ReviewReady {
+                    summary: "ready for close".to_owned(),
+                    deliverables: vec!["result".to_owned()],
+                    evidence: vec!["checked".to_owned()],
+                },
+                watermark: sample_watermark(),
+            })
+            .expect("review ready");
+        let review_ready_lifecycle = runtime
+            .query_agent_lifecycle(&worker_id)
+            .expect("waiting review lifecycle");
+        assert_eq!(review_ready_lifecycle.state, AgentLifecycleState::Idle);
+        assert_eq!(review_ready_lifecycle.current_task_id, None);
+        assert_eq!(review_ready_lifecycle.current_execution_id, None);
+        assert_eq!(
+            review_ready_lifecycle
+                .last_activity
+                .as_ref()
+                .map(|activity| activity.kind.as_str()),
+            Some("review_ready")
+        );
+
+        runtime
+            .approve_review(TaskMutationRequest {
+                task_id: task.task_id.clone(),
+                actor: sample_actor(owner_id.clone()),
+                watermark: sample_watermark(),
+            })
+            .expect("approve review");
+        runtime
+            .close_task(TaskMutationRequest {
+                task_id: task.task_id.clone(),
+                actor: sample_actor(owner_id.clone()),
+                watermark: sample_watermark(),
+            })
+            .expect("close task");
+
+        let closed_board = runtime.query_agent_board().expect("closed agent board");
+        let closed_worker = closed_board
+            .agents
+            .iter()
+            .find(|agent| agent.agent_id == worker_id)
+            .expect("closed worker projection");
+        assert_eq!(closed_worker.state, AgentLifecycleState::Idle);
+        assert_eq!(closed_worker.current_task_id, None);
+        assert_eq!(closed_worker.current_execution_id, None);
+        assert_eq!(
+            closed_worker
+                .current_activity
+                .as_ref()
+                .map(|activity| activity.kind.as_str()),
+            Some("idle")
+        );
+        assert_eq!(
+            closed_worker
+                .last_activity
+                .as_ref()
+                .map(|activity| activity.kind.as_str()),
+            Some("closed")
+        );
+        assert_eq!(
+            runtime.query_agent(&worker_id).expect("worker").status,
+            AgentStatus::Available
+        );
+
+        let mut stale_waiting_review = review_ready_lifecycle.clone();
+        stale_waiting_review.state = AgentLifecycleState::WaitingReview;
+        stale_waiting_review.current_task_id = Some(task.task_id.clone());
+        stale_waiting_review.current_execution_id = Some(execution_id.to_owned());
+        runtime
+            .store
+            .write_agent_lifecycle_snapshot(&stale_waiting_review)
+            .expect("write stale persisted lifecycle");
+        let recovered = TaskRuntime::boot(&runtime_home, owner_id).expect("recover runtime");
+        let recovered_worker = recovered
+            .query_agent_lifecycle(&worker_id)
+            .expect("recovered lifecycle");
+        assert_eq!(recovered_worker.state, AgentLifecycleState::Idle);
+        assert_eq!(recovered_worker.current_task_id, None);
+        assert_eq!(recovered_worker.current_execution_id, None);
+        assert_eq!(
+            recovered_worker
+                .last_activity
+                .as_ref()
+                .map(|activity| activity.kind.as_str()),
+            Some("closed")
+        );
+
+        let mut execution_only_stale = recovered_worker.clone();
+        execution_only_stale.state = AgentLifecycleState::WaitingReview;
+        execution_only_stale.current_task_id = None;
+        execution_only_stale.current_execution_id = Some(execution_id.to_owned());
+        execution_only_stale.current_activity = Some(AgentLifecycleActivity {
+            kind: "review_ready".to_owned(),
+            semantic_summary: "legacy execution-only binding".to_owned(),
+            target: Some(task.task_id.as_str().to_owned()),
+            started_at: now_unix_seconds(),
+            elapsed_ms: 0,
+            tool_name: None,
+            model: None,
+            retry_count: None,
+            visibility: "compact".to_owned(),
+        });
+        recovered
+            .store
+            .write_agent_lifecycle_snapshot(&execution_only_stale)
+            .expect("write execution-only stale lifecycle");
+        drop(recovered);
+        let recovered_execution_only = TaskRuntime::boot(&runtime_home, AgentId::new("master"))
+            .expect("recover runtime again");
+        let recovered_worker = recovered_execution_only
+            .query_agent_lifecycle(&worker_id)
+            .expect("recovered execution-only lifecycle");
+        assert_eq!(recovered_worker.state, AgentLifecycleState::Idle);
+        assert_eq!(recovered_worker.current_task_id, None);
+        assert_eq!(recovered_worker.current_execution_id, None);
+        assert_eq!(recovered_worker.current_turn_id, None);
+        assert_eq!(
+            recovered_worker
+                .last_activity
+                .as_ref()
+                .map(|activity| activity.kind.as_str()),
+            Some("closed")
+        );
         let _ = fs::remove_dir_all(runtime_home);
     }
 

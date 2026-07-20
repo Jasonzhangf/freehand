@@ -6115,7 +6115,8 @@ Current real root cause split:
 - implementation:
   - runtime `QuerySessionTurns` searches configured Master/Worker reason namespaces, preserves source-agent attribution, and hides `worker-task-*` framework prompts from `user_text`.
   - WebUI selected-session switch now uses `sessionRefreshInFlight` / `sessionRefreshError`, pins the requested session id, discards late transcript responses, renders an explicit loading/failure card, and never shows empty `New conversation` while a selected transcript query is in flight.
-  - `ReasonPersistence::restore_turn_snapshots_for_ui` now uses authoritative closed/active turn snapshots plus rollback-marker sidecar truth when available, coalesces repaired `-rN` rounds to the latest logical turn, and reserves ledger rebuild for missing authoritative snapshots.
+  - Historical 2026-07-15 behavior: `ReasonPersistence::restore_turn_snapshots_for_ui` used authoritative closed/active turn snapshots plus rollback-marker sidecar truth when available, coalesced repaired `-rN` rounds to the latest logical turn, and reserved ledger rebuild for missing authoritative snapshots.
+  - Superseded on 2026-07-18: Worker/tool transcript observability requires exact per-round UI restore for selected `QuerySessionTurns`; daemon bootstrap alone uses authoritative-only snapshots to avoid historical ledger scans.
   - rollback now persists a compact `rollback-markers.json` sidecar so effective UI transcript filtering no longer requires reading the full reason ledger on normal query paths.
 - local evidence:
   - `cargo test -p freehand-reason --lib -- --nocapture` passed 61/61.
@@ -6453,3 +6454,1095 @@ Current real root cause split:
     requires S-profile daemon/WebUI current-session proof, busy-Master live
     preemption proof, real-provider non-fixture crash/recovery/takeover proof,
     and Android true-device proof if native/package assets change.
+
+# 2026-07-16 S-profile manual-test readiness closeout
+
+- objective:
+  - Continue the multi-agent closeout until Jason can begin manual testing on
+    the fixed S-profile without creating more random sessions.
+- implementation already present and verified this round:
+  - Master daemon mode keeps WebUI/ADP host lifetime independent from the
+    background Master lifecycle runner.
+  - Master runner repairs stale EventInbox cursor, drops stale missing-task
+    attention, and records missing-goal parent evaluation as skipped instead of
+    killing the lifecycle loop.
+  - `QuerySessionTurns` hides internal timer follow-up prompts from public UI
+    projection.
+  - AgentBoard releases Worker current binding on `TaskClosed` and repairs
+    stale persisted lifecycle snapshots at boot.
+  - WebUI Worker labels now use Worker-only ordinals.
+  - Worker-subtasks WebUI verifier pins a fixed parent session, checks exact
+    delegated-task count, clicks every child Worker card, verifies canonical
+    `worker_session_id`, and rejects internal prompt leakage.
+  - launchd Worker env generation copies credential-style provider env keys
+    from the matching Master env; xtask CI/CD gate fixtures were fixed so the
+    new gate requirement has aligned positive/negative tests.
+- online S-profile evidence:
+  - fixed parent session: `s-profile-three-worker-real-1781784192325`.
+  - `scripts/verify-worker-subtasks-online.py --url ws://127.0.0.1:4042/adp --parent-session s-profile-three-worker-real-1781784192325 --include-terminal --require-transcript --require-count 4` passed with four closed Success child tasks and `user_text_leak_count=0`.
+  - browser verifier passed with artifact
+    `artifacts/webui-online/worker-subtasks-1784203306738`: Header
+    `0 running agents · 4 delegated tasks · 3 configured`, sheet status
+    `4 current task(s) · 0 blocked · 0 review · 0 stale`, Worker labels max 3,
+    and all four Worker transcripts selected by canonical `worker-task-*`
+    session with `userMessageCount=0` and `fakePromptVisible=false`.
+  - session drawer DOM proof on the same parent had `topWorkerRows=[]` and
+    `parentChildCount=4`, proving Worker task sessions are not top-level global
+    sessions and are indented under the owning persisted Master session.
+  - AgentBoard query showed `worker`, `worker-2`, and `worker-3` all
+    `alive=true`, `state=idle`, `current_task_id=null`,
+    `current_execution_id=null`, `current_activity=idle`,
+    `last_activity=closed`.
+  - S config stayed `provider=cc`, `provider_type=openai`,
+    `provider_protocol=responses`, `base_url_host=api.anyint.ai`,
+    `default_model=gpt-5.5`, `auth_source=env`.
+  - fixture env grep over `~/.freehand/daemonS.env` and `workerS*.env` returned
+    zero matches.
+  - launchd list has only `com.freehand.daemonS`,
+    `com.freehand.workerS.worker`, `com.freehand.workerS.worker-2`, and
+    `com.freehand.workerS.worker-3`.
+- local/gate evidence:
+  - `master_mode_keeps_host_alive_when_lifecycle_runner_stops` passed.
+  - `production_master_runner` passed 24/24.
+  - `runtime_query_session_turns_restores_background_parent_evaluation` passed.
+  - `production_worker_runner` passed 19/19.
+  - `task_close_releases_agent_lifecycle_and_boot_repairs_stale_current_binding`
+    passed.
+  - `agent_process` passed 2/2.
+  - full `freehand-task` passed 59/59.
+  - `webui_smoke_renders_shell_and_asset_routes` passed.
+  - xtask CI/CD gate subset passed 5/5 after fixture repair; full xtask passed
+    50/50.
+  - targeted clippy for `freehand-daemon`, `freehand-runtime`,
+    `freehand-task`, `freehand-server`, and `xtask` passed after narrowing the
+    daemon test's `HOME_LOCK` scope so the sync lock is not held across await.
+  - `cargo fmt --check`, `cargo run -p xtask -- mainlines check`,
+    `cargo run -p xtask -- gates check`, and `git diff --check` passed.
+- remaining:
+  - Android true-device and release `4041` were not part of this S-profile
+    manual-test readiness closeout.
+  - Historical untracked `.agent-collab/`, `.DS_Store`, `output/`,
+    `scripts/__pycache__/`, and WebUI artifact files were left untouched.
+
+# 2026-07-16 Android S-profile true-device closeout
+
+- device:
+  - serial `100.104.163.65:5555`, model `PLZ110`, authorized and foreground.
+  - current debug APK built with Android Studio JBR; `testDebugUnitTest assembleDebug` passed and `adb install -r` succeeded.
+- endpoint truth:
+  - release `4041` was not used or restarted.
+  - S-profile remained `127.0.0.1:4042`, `cc/openai/responses`, `api.anyint.ai`, `gpt-5.5`, env auth.
+  - device used `adb reverse tcp:4042 tcp:4042` plus app-owned `files/daemon-connection.json` set to `127.0.0.1:4042`; both were read back.
+- canonical WebUI proof:
+  - `apps/freehand-android/scripts/verify-device-ui.sh` passed with artifact `artifacts/android-device/s-profile-4042-20260716T125516Z-PLZ110`.
+  - logcat probe: `webuiShell=true`, `layoutClient=android-webview`, `layoutShape=tall_phone`, `webuiCssApplied=true`, `webuiJsReady=true`, stylesheet URLs from `127.0.0.1:4042`.
+  - dumpsys showed `com.freehand.android/.ui.MainActivity` top-resumed/focused; fatal logcat grep returned no matches; screenshot was manually reviewed.
+- Agent/Worker navigation proof:
+  - artifact `artifacts/android-device/s-profile-4042-20260716T130309Z-PLZ110-agent-nav`.
+  - parent `webui-session-20260715151744-4957c72a` showed `0 running agents · 1 delegated task · 3 configured`.
+  - Agent sheet listed only current task `task-1784128683`, closed under Worker 1.
+  - task click selected canonical `worker-task-task-1784128683`, displayed Worker final output, had `userMessageCount=0` and `fakePromptVisible=false`, then returned to the exact parent session.
+- remaining:
+  - device currently depends on the active `adb reverse` mapping for S-profile manual testing; reconnecting adb may require recreating that mapping.
+  - release `4041` remains untouched and unverified in this closeout.
+
+# 2026-07-16 path diagnostics and ambiguous-submit recovery closeout
+
+- objective:
+  - Fix hardcoded-path/symlink confusion and the WebUI state where a submit
+    timeout/error could render `dispatch status unknown · refresh needed`
+    without first checking service truth.
+- implementation:
+  - Master task guidance and `task.target_cwd` schema now keep
+    leading-~/symlink aliases valid only when they resolve to an existing
+    workspace, reject broad/glob/output-directory targets, and require
+    requested plus canonical path evidence.
+  - Removed stale project-name path examples from Master guidance and replaced
+    them with generic `~/work/repo-a` / `~/work/repo-b` and
+    `/absolute/existing/workspace` examples.
+  - `task(op="create")` and Worker target-cwd preflight now include
+    `target_cwd_path_diagnostic` with requested, expanded, nearest existing,
+    nearest existing canonical, symlink ancestors, and missing suffix.
+  - WebUI submit catch path now calls an owner-truth refresh helper before
+    showing unknown-dispatch. If submitted text materialized, pending state
+    clears and the current session continues; if not, the selected fixed/draft
+    session and pending card remain visible.
+  - WebUI `Turn:null` query results are safe during refresh and no longer
+    throw while checking `turn.session_id`.
+  - Added `scripts/verify-webui-ambiguous-submit-recovery.mjs`, using a fixed
+    session id and explicit test hook to verify both ambiguous-submit branches
+    against the served WebUI asset without creating random persisted sessions.
+- evidence:
+  - Local focused tests passed: `freehand-tools task_tool_exposes_operation_parameter`,
+    `freehand-runtime task_tool_create`, `production_worker_runner_missing`,
+    `live_bridge_master_autonomy`, and `freehand-server webui_smoke_renders_shell_and_asset_routes`.
+  - JS checks passed for `apps/freehand-server/assets/webui.js` and
+    `scripts/verify-webui-ambiguous-submit-recovery.mjs`.
+  - S-profile `127.0.0.1:4042` was service-scoped restarted; health and
+    `adp-smoke` passed; served WebUI JS hash matched workspace hash
+    `97301220e08baf34846a2b1e092a5c47926f3d33d0573f6c6fc5d35a29b9b993`.
+  - `node scripts/verify-webui-ambiguous-submit-recovery.mjs` passed with
+    fixed session `webui-ambiguous-submit-recovery-fixed`; summary shows
+    `materializedClearsPending=true` and `unknownKeepsPendingSession=true`.
+  - Hardcoded sample grep for `~/code/codex`, `Deepseek-reasonix`,
+    `/Users/fanzhang`, and `github/codex` over touched product/docs/script
+    paths returned zero matches.
+  - Final checks passed: `cargo fmt --check`,
+    `cargo clippy -p freehand-server --all-targets -- -D warnings`,
+    `cargo run -p xtask -- mainlines generate/check`,
+    `cargo run -p xtask -- gates check`, and `git diff --check`.
+- restoration:
+  - S-profile config remained `cc/openai/responses`, `api.anyint.ai`,
+    `gpt-5.5`, env auth.
+  - fixture env grep over daemonS and workerS env files returned zero matches.
+
+# 2026-07-17 zterm remote-daemon connectivity contract slice
+
+- objective:
+  - Inspect `~/code/zterm` relay/Tailscale traversal mechanism and integrate the condensed Freehand local contract for account-scoped multi-daemon configuration, direct-first route selection, relay endpoint declaration, and QR/deep-link bootstrap import.
+- zterm mechanism inspected:
+  - `relay-directory.ts`: account directory publishes devices, daemon presence, endpoint candidates, and sessions.
+  - `connection-config-share.ts`: URL-safe base64 JSON deep links use app/web prefixes.
+  - traversal config/route selector: direct Tailscale/IPv6/IPv4 candidates are preferred before relay, with health diagnostics.
+  - relay client/server/RTC bridge: real relay traversal is a WebSocket signaling plus WebRTC/DataChannel tunnel, not an ordinary WebUI URL fallback.
+- implementation:
+  - Added config-owned `remote_daemon_registry` under `config.core` with `[remote_daemon_accounts]`, `[remote_daemons]`, endpoint candidates, direct-first route diagnostics, route health records, selected route, and QR/deep-link bootstrap bundle helpers.
+  - Added CLI `remote-daemon-bootstrap-link --daemon <id> --credential-env <ENV> [--ttl-seconds <seconds>] [--web]`.
+  - Added Android `remote_registry` app-owned config mode, `freehand://daemon/import?payload=...` deep-link import, explicit relay endpoint validation, and version-addressed WebUI load for selected endpoint.
+  - Fixed the bootstrap payload cross-platform field contract: Rust now emits daemon `activeEndpoint` for Android import, not `activeEndpointId`; the config test decodes the generated link and locks this.
+  - Updated resource map, function map, mainline call source, test design, generated mainline docs, and local skill rule so Android cannot own account directory truth, route scoring, Tailscale probing, or relay tunnel semantics.
+- evidence:
+  - `cargo test -p freehand-config remote_daemon -- --nocapture` passed 6/6.
+  - `cargo test -p freehand-config -- --nocapture` passed 29/29.
+  - `cargo test -p freehand-cli cli_generates_remote_daemon_bootstrap_link_from_config_registry -- --nocapture` passed.
+  - `JAVA_HOME="/Applications/Android Studio.app/Contents/jbr/Contents/Home" ./gradlew testDebugUnitTest --tests com.freehand.android.data.DaemonConnectionConfigTest --tests com.freehand.android.data.HostConfigTest` passed.
+  - `JAVA_HOME="/Applications/Android Studio.app/Contents/jbr/Contents/Home" ./gradlew testDebugUnitTest assembleDebug` passed.
+  - `cargo fmt --check`, `jq empty docs/resource-maps/core.json docs/mainline-calls/config.core.json docs/mainline-calls/app.android-client.json`, `cargo run -p xtask -- mainlines generate`, `cargo run -p xtask -- mainlines check`, `cargo run -p xtask -- gates check`, and `git diff --check` passed.
+- validation gaps:
+  - Full `cargo test -p freehand-cli -- --nocapture` is not green: `cli_runs_reason_live_tool_call_mock_and_persists` and `cli_runs_reason_live_unsupported_provider_smoke` fail in adjacent reason-live/tool/provider assertions.
+  - This slice does not implement the Freehand relay server, relay WebRTC/DataChannel/pass-through IO, live account directory/presence service, Tailscale OS auto-connect/probing loop, or true-device QR scan proof.
+  - Android can import selected endpoint config and load the daemon-hosted WebUI URL, but relay tunnel semantics are still unimplemented and must not be claimed.
+
+# 2026-07-17 node-owned remote-daemon directory slice
+
+- objective:
+  - Continue the zterm remote-daemon integration by moving runtime directory/presence projection into `node.master-slave` instead of leaving only config/Android bootstrap contracts.
+- implementation:
+  - Added `RemoteDaemonDirectory` in `crates/freehand-node`: publishes account-scoped directory snapshots from `RemoteDaemonRegistryConfig`, stores per-daemon route resolutions, and maps route diagnostics without credentials.
+  - Added resource-map resource `remote_daemon_directory` and direct operation `remote_daemon_registry.project_directory`, with source-edge registry binding to `RemoteDaemonDirectory::publish_registry`.
+  - Updated node function map, mainline call source, test design, generated wiki, feature-map resource ownership index, and local skill.
+- evidence:
+  - `cargo test -p freehand-node remote_daemon_directory -- --nocapture` passed 2/2.
+  - `cargo test -p freehand-node -- --nocapture` passed 23/23.
+  - `cargo check -p freehand-runtime` passed after mapping `NodeRuntimeError::RemoteDaemonDirectory` to dispatch failure.
+  - `cargo test -p freehand-config remote_daemon -- --nocapture` passed 6/6.
+  - `cargo test -p freehand-cli cli_generates_remote_daemon_bootstrap_link_from_config_registry -- --nocapture` passed 1/1.
+  - `cargo fmt --check`, `cargo run -p xtask -- mainlines generate`, `cargo run -p xtask -- mainlines check`, `cargo run -p xtask -- gates check`, and `git diff --check` passed.
+- gaps:
+  - This still is not relay tunnel/pass-through implementation. Real relay signaling/DataChannel or equivalent tunnel IO, live account directory/presence service, Tailscale OS auto-connect/probing loop, and true-device QR scan proof remain open.
+
+# 2026-07-17 local remote relay transport closeout
+
+- objective:
+  - Continue the remote-daemon work from config/bootstrap and node directory into a real local relay transport proof.
+  - Keep the resource independent from task/session truth; relay is a standard daemon transport resource under `app.runtime-daemon`.
+- implementation:
+  - Added `apps/freehand-server/src/remote_relay.rs`.
+  - Added `RemoteRelayDirectory`, `RemoteRelayHostRegistration`, account directory projection, `/relay/hosts`, `/relay/directory/{account_id}`, `/relay/daemon/{relay_host_id}/health`, and `/relay/daemon/{relay_host_id}/adp`.
+  - Added `freehand-daemon remote-relay [--bind HOST:PORT]`.
+  - Added `scripts/verify-remote-relay-local-online.sh`, which starts real upstream smoke server, relay daemon, and CLI ADP smoke processes, then validates register/directory/health/ADP/missing-host behavior.
+  - Updated `remote_relay_transport` resource map, function map, test design, mainline call source, generated wiki, feature map, and local skill.
+- evidence:
+  - `cargo test -p freehand-server remote_relay -- --nocapture` passed 2/2.
+  - `scripts/verify-remote-relay-local-online.sh` passed with `remote_relay_local_online_ok upstream_url=http://127.0.0.1:61093 relay_url=http://127.0.0.1:61094 relay_host=studio-host adp=ws://127.0.0.1:61094/relay/daemon/studio-host/adp`.
+  - `cargo check -p freehand-daemon --message-format=short` passed.
+  - `cargo test -p freehand-daemon master_mode_keeps_host_alive_when_lifecycle_runner_stops -- --nocapture` passed 1/1.
+  - `cargo test -p freehand-daemon -- --list` listed 20 tests successfully.
+  - `jq empty docs/resource-maps/core.json docs/mainline-calls/app.runtime-daemon.json` passed.
+  - `cargo fmt --check`, `cargo run -p xtask -- mainlines generate`, `cargo run -p xtask -- mainlines check`, `cargo run -p xtask -- gates check`, and `git diff --check` passed.
+- gap / risk:
+  - Full unfiltered `cargo test -p freehand-daemon -- --nocapture` was started once and hung before test output with the test process at 0% CPU; it was interrupted and not counted as pass.
+  - This slice proves local HTTP/ADP pass-through relay, not WebRTC/TURN/DataChannel signaling, Tailscale OS auto-connect/probing, authenticated persistent relay service, or true-device QR scan.
+
+# 2026-07-17 relay WebUI HTTP and Android true-device attempt
+
+- objective:
+  - Extend `remote_relay_transport.proxy_http` from `/health` only to the daemon-hosted WebUI HTTP surface required by Android WebView, then install the APK on PLZ110 and prove the app loads through the relay endpoint.
+- implementation:
+  - `freehand-daemon remote-relay` now proxies registered-host HTTP paths under `/relay/daemon/{relay_host_id}/...` to the upstream daemon path.
+  - The relay preserves query strings and streams non-rewritten upstream bodies.
+  - Static WebUI HTML/JS responses are rewritten from daemon-root absolute paths (`/assets`, `/adp`, `/ui/...`) to the relay host namespace so `/relay/daemon/studio-host/?client=android-webview` can load assets and ADP through the same relay URL.
+  - `scripts/verify-remote-relay-local-online.sh` now uses unique temporary ports, waits longer for health, and verifies namespaced WebUI HTML/CSS/JS/query plus ADP and missing-host behavior.
+  - Resource map, function map, mainline call source, generated wiki, test design, and local skill now require namespaced WebUI HTTP relay proof, not only health/ADP.
+- evidence:
+  - `cargo test -p freehand-server --lib remote_relay -- --nocapture` passed 2/2.
+  - `scripts/verify-remote-relay-local-online.sh` passed with `remote_relay_local_online_ok upstream_url=http://127.0.0.1:62798 relay_url=http://127.0.0.1:62799 relay_host=studio-host adp=ws://127.0.0.1:62799/relay/daemon/studio-host/adp`.
+  - `JAVA_HOME="/Applications/Android Studio.app/Contents/jbr/Contents/Home" ./gradlew testDebugUnitTest assembleDebug` passed.
+  - Current APK installed on PLZ110 and app-owned `files/daemon-connection.json` was read back with `connectionMode=remote_registry` and `webUrl=http://127.0.0.1:44042/relay/daemon/studio-host/`.
+  - Fixed relay device attempt artifact: `artifacts/android-device/relay-s-profile-4042-20260717T061410Z-PLZ110`.
+  - Device-side relay setup succeeded before UI probe: `adb reverse tcp:44042 tcp:44042`, relay host registration, and `freehand-cli adp-smoke` over `ws://127.0.0.1:44042/relay/daemon/studio-host/adp`.
+  - Local checks passed: `cargo fmt --check`, `jq empty docs/resource-maps/core.json docs/mainline-calls/app.runtime-daemon.json`, `cargo check -p freehand-daemon --message-format=short`, `cargo run -p xtask -- mainlines generate`, `cargo run -p xtask -- mainlines check`, `cargo run -p xtask -- gates check`, and `git diff --check`.
+- blocked:
+  - The true-device canonical WebUI probe is not closed because PLZ110 is security locked/dozing: `mDreamingLockscreen=true`, `secure=true`, `mCurrentFocus=NotificationShade`, while `mFocusedApp` is `com.freehand.android/.ui.MainActivity`.
+  - `wm dismiss-keyguard` and wake/swipe did not unlock the device. Manual unlock is required before rerunning `apps/freehand-android/scripts/verify-device-ui.sh` against the fixed relay config.
+
+# 2026-07-17 Android relay true-device closeout after unlock
+
+- objective:
+  - Complete the blocked PLZ110 true-device closeout after manual unlock.
+- evidence:
+  - Artifact: `artifacts/android-device/relay-s-profile-4042-20260717T063227Z-PLZ110-unlocked`.
+  - Current debug APK installed successfully: `install.txt` has `Performing Streamed Install` and `Success`.
+  - App-owned `files/daemon-connection.json` was read back with `connectionMode=remote_registry`, active daemon `studio-s-profile-relay`, and `webUrl=http://127.0.0.1:44042/relay/daemon/studio-host/`.
+  - Relay host registration and account directory succeeded for account `jason`, daemon `studio-s-profile`, host `studio-host`, upstream `http://127.0.0.1:4042`.
+  - Relay ADP proof succeeded: `adp_smoke_ok url=ws://127.0.0.1:44042/relay/daemon/studio-host/adp`.
+  - `apps/freehand-android/scripts/verify-device-ui.sh 100.104.163.65:5555` passed with summary `freehand_activity_foreground_no_fatal_logcat`.
+  - Canonical WebUI layout probe: `layoutClient=android-webview`, `layoutShape=tall_phone`, `webuiShell=true`, `webuiCssApplied=true`, `webuiJsReady=true`, stylesheet URLs loaded from `http://127.0.0.1:44042/relay/daemon/studio-host/assets/...`.
+  - Foreground evidence: dumpsys showed `topResumedActivity`, `ResumedActivity`, `mCurrentFocus`, and `mFocusedApp` all on `com.freehand.android/.ui.MainActivity`.
+  - Screenshot `device-ui/screenshot.png` was manually reviewed and shows the canonical Freehand mobile WebUI with Agent summary and conversation content, not native fallback UI.
+  - No fatal/exception logcat pattern matched for `com.freehand.android`.
+- restoration:
+  - Scoped relay process recorded in `relay.pid` exited; local `127.0.0.1:44042` was available after cleanup.
+  - Device `adb reverse tcp:44042 tcp:44042` remains present for repeat testing.
+  - S-profile `4042` config remained `cc/openai/responses`, `api.anyint.ai`, `gpt-5.5`, env auth.
+
+# 2026-07-17 Android relay live recheck and manual-test readiness
+
+- Reinstalled the current debug APK on unlocked PLZ110 and completed a fresh
+  relay-path device verification in
+  `artifacts/android-device/relay-s-profile-4042-20260717T064054Z-PLZ110-live-recheck`.
+- The fixed artifact contains `adb install -r` success, relay ADP smoke
+  success, app-owned `remote_registry` config readback, canonical WebUI layout
+  truth (`android-webview`, `tall_phone`, shell/CSS/JS all ready), foreground
+  Activity evidence, a reviewed screenshot, and no matching fatal app logcat.
+- S-profile stayed on `4042` with `cc/openai/responses`,
+  `api.anyint.ai`, `gpt-5.5`, env auth; release `4041` was not touched and
+  fixture env grep remained empty.
+- The one-shot shell background relay was not a durable hand-test service:
+  the execution environment reaped the `nohup` child after command exit, even
+  though relay stdout/stderr showed no application error. Do not report a
+  one-shot background PID as running proof here.
+- For immediate manual testing in this Codex run, relay `127.0.0.1:44042` is
+  held by persistent exec session `22966`; `studio-host` is registered to
+  `http://127.0.0.1:4042`, ADP smoke passes through the relay, the device keeps
+  `adb reverse tcp:44042 tcp:44042`, and Freehand MainActivity was launched.
+
+# 2026-07-17 framework-owned reasoning and AgentBoard online closeout
+
+- Correction:
+  - Master does not drive Worker reasoning.
+  - The runtime reason loop owns schema validation, tool-call/result pairing,
+    history continuation, and provider re-entry for both Master and Worker.
+  - Worker runner owns claim, heartbeat, execution, and completion mapping into
+    Task Center truth. Master only makes task-level decisions from current
+    TaskBoard, AgentBoard, EventInbox, and review truth.
+- Lifecycle implementation:
+  - `TaskBlocked`, `TaskAttentionRequired`, `TaskReviewSubmitted`,
+    `TaskReviewRejected`, `TaskReviewApproved`, `TaskInterrupted`,
+    `TaskCancelled`, and `TaskClosed` release AgentBoard current task,
+    execution, and turn bindings and retain typed audit truth in
+    `last_activity`.
+  - Boot reconciliation also clears legacy execution-only stale bindings where
+    `current_task_id` was empty but `current_execution_id` remained set.
+- Online evidence:
+  - Rebuilt and service-scoped restarted `com.freehand.daemonS`,
+    `com.freehand.workerS.worker`, `worker-2`, and `worker-3`.
+  - `curl http://127.0.0.1:4042/health` returned `ok`; `freehand-cliS adp-smoke`
+    passed.
+  - Config remained `cc/openai/responses`, `api.anyint.ai`, `gpt-5.5`, env
+    auth; fixture env grep was empty.
+  - Final AgentBoard query returned 21 rows,
+    `idle_current_binding_violations=[]`, and `non_idle_rows=[]`.
+  - `worker`, `worker-2`, and `worker-3` were all `alive=true`, `state=idle`,
+    `current_task_id=null`, `current_execution_id=null`, with historical audit
+    state only in `last_activity`.
+- Local verification:
+  - `task_close_releases_agent_lifecycle_and_boot_repairs_stale_current_binding`
+    passed.
+  - `agent_process` passed 2/2.
+  - `runtime_query_reads_phase1_task_and_agent_boards` passed after test-home
+    isolation repair.
+  - `runtime_dispatches_phase2a_master_worker_loop_into_task_truth` passed.
+  - `production_worker_runner` passed 20/20.
+  - `cargo fmt --check`, mainlines check, gates check, and `git diff --check`
+    passed.
+- Test isolation root cause:
+  - Concurrent independent cargo test processes could generate the same
+    nanosecond-plus-counter temp runtime home because the counter was
+    process-local.
+  - `temp_runtime_home()` now includes the OS pid, preventing false shared task
+    truth across concurrent test processes.
+
+# 2026-07-17 tool path diagnostic owner proof
+
+- Correction:
+  - The `/Users/fanzhang/github/codex` failure was a built-in path-tool owner
+    bug, not a model reasoning bug.
+  - On macOS/Linux, path tools must own relative-to-absolute normalization,
+    leading-`~` expansion, symlink-parent inspection, nearest existing parent,
+    canonical parent, and missing-leaf diagnostics.
+- Implementation:
+  - `freehand-tools` now renders `path_diagnostic` on path resolution failure
+    with requested path, locked workspace, absolute path, existence/type,
+    nearest existing parent, nearest existing canonical parent, missing suffix,
+    and symlink ancestors.
+  - `read_file`, `ls`, writable path resolution, and locked path resolution use
+    that diagnostic; `glob` expands leading `~` and canonicalizes the nearest
+    existing absolute glob prefix before workspace-boundary checks.
+  - Tool schemas and `tool.registry` docs now tell Workers that relative paths
+    resolve from the locked workspace, leading `~` expands, absolute in-workspace
+    symlink aliases are valid, and `ls` is the existence/type probe.
+- Online S-profile proof:
+  - Artifact: `/tmp/freehand-tool-path-online-1781784281165`.
+  - Task: `task-tool-path-diagnostic-1781784281165`.
+  - Execution: `exec-tool-path-diagnostic-1781784281165`.
+  - Worker session: `worker-task-task-tool-path-diagnostic-1781784281165`.
+  - Target cwd: `/Users/fanzhang/github`, canonical `/Users/fanzhang/Documents/github`.
+  - Missing requested leaf: `/Users/fanzhang/github/codex`.
+  - Fixture forced real Worker provider call sequence: first response called
+    `ls(path="/Users/fanzhang/github/codex")`; second provider request included
+    the failed `tool_result`.
+  - Second provider request evidence:
+    `secondHadToolResult=true`, `secondHadDiagnostic=true`,
+    `bodyLength=13646`, and matches for `path_diagnostic`,
+    `requested=/Users/fanzhang/github/codex`,
+    `absolute=/Users/fanzhang/github/codex`,
+    `nearest_existing=/Users/fanzhang/github`,
+    `nearest_existing_canonical=/Users/fanzhang/Documents/github`,
+    `missing_suffix=codex`, and symlink ancestor
+    `/Users/fanzhang/github -> /Users/fanzhang/Documents/github`.
+  - Task history reached `TaskCreated, TaskWaitingAgent, TaskAssigned,
+    TaskResumed, TaskHeartbeat, TaskInterrupted, TaskAssigned, TaskResumed,
+    TaskHeartbeat, TaskBlocked` in the same task.
+  - Restoration: S-profile health and `adp-smoke` passed; config restored to
+    `cc/openai/responses`, `api.anyint.ai`, `gpt-5.5`, env auth; fixture env
+    grep over `daemonS.env` and `workerS.worker.env` returned 0 matches.
+- Harness lessons:
+  - `task-restart-seed-running` with a long TTL keeps the running lease valid,
+    so Worker correctly does not take over. To force same-task Worker recovery,
+    seed with `--ttl-seconds 1`, wait for expiry, then restart the worker.
+  - `worker` provider fixture must use a provider id distinct from its fallback
+    provider id; `tool-path-fixture` was accepted while `minimax` was rejected.
+
+# 2026-07-17 WebUI path diagnostic closed-loop proof
+
+- Scope:
+  - S-profile only: `ws://127.0.0.1:4042/adp` and
+    `http://127.0.0.1:4042/health`.
+  - Fixed parent session: `webui-path-diagnostic-fixed-v2`.
+  - Prompt: WebUI-submitted Master/Worker path diagnostic for
+    `/Users/fanzhang/github/codex` under symlink workspace
+    `/Users/fanzhang/github -> /Users/fanzhang/Documents/github`.
+- Fixes verified:
+  - Stale/dead-owner `master.active-work.json` no longer blocks a new live
+    submit. Runtime live submit recovers a dead-owner active work checkpoint,
+    interrupts the stale persisted turn, clears the checkpoint, and then accepts
+    the new foreground turn.
+  - WebUI no longer renders `ToolPending` lifecycle truth as completed. Parent
+    ToolPending turns render `waiting lifecycle` and terminal row `Lifecycle /
+    running`; blocked Worker turns render `blocked` at assistant badge, final
+    row, and bottom turn status.
+  - `scripts/verify-webui-path-diagnostic-online.mjs` now rejects stale
+    ToolPending evidence, requires current task id matching, and waits for
+    Master lifecycle `task(op="append")` blocked decision to produce
+    `TaskProgressed`.
+- Final online artifact:
+  - `/Volumes/extension/code/freehand/artifacts/webui-online/path-diagnostic-1784290032509`.
+  - Task: `task-webui-path-diagnostic-1784290032509`.
+  - Worker session: `worker-task-task-webui-path-diagnostic-1784290032509`.
+  - Fixture evidence: `masterRequests=4`, `workerRequests=2`,
+    `secondHadToolResult=true`, `secondHadDiagnostic=true`,
+    `masterLifecycleAppendRequested=true`.
+  - Master lifecycle append checks all true: lifecycle coordinator request,
+    current task id, TaskBlocked/execution_blocked context, path_diagnostic,
+    requested path, nearest existing canonical path, and missing suffix.
+  - TaskHistory events: `TaskCreated, TaskWaitingAgent, TaskAssigned,
+    TaskResumed, TaskHeartbeat, TaskBlocked, TaskProgressed`.
+  - Parent WebUI DOM: selected current `runtime-turn-398-r3`,
+    `selectedTerminalStatus=toolpending`, `turnStatus=waiting lifecycle`,
+    `assistantStatus=waiting lifecycle`, `finalStatus=running`.
+  - Worker WebUI DOM: `selectedTerminalStatus=blocked`,
+    `turnStatus=blocked`, `assistantStatus=blocked`, `finalStatus=blocked`,
+    `userMessageCount=0`, requested/canonical/missing_suffix visible, internal
+    Worker prompt text hidden.
+  - Agent sheet opened the current Worker card and
+    `globalSessionListHasWorker=false`; direct ADP session list showed only
+    persistent parent sessions, no top-level `worker-task-*`.
+- Verification:
+  - `node --check scripts/verify-webui-path-diagnostic-online.mjs`
+  - `node scripts/verify-webui-path-diagnostic-online.mjs`
+  - `cargo test -p freehand-server root_and_asset_routes_return_webui_shell_files -- --nocapture`
+  - `cargo test -p freehand-ui-protocol tool_pending_terminal_projects_as_lifecycle_running_not_final_completed -- --nocapture`
+  - `cargo test -p freehand-runtime live_dispatch_recovers_dead_owner_master_active_work_before_new_turn -- --nocapture`
+  - `cargo test -p freehand-runtime production_master_recovery_candidates_require_resolved_legacy_attention -- --nocapture`
+  - `cargo fmt --check`
+  - `cargo run -p xtask -- mainlines check`
+  - `cargo run -p xtask -- gates check`
+  - `git diff --check`
+  - Final health/config/env restore: health `ok`; provider restored to
+    `cc/openai/responses`, `api.anyint.ai`, `gpt-5.5`, env auth; fixture env
+    grep returned 0 matches.
+- Residual:
+  - The fixed parent session intentionally avoids creating new sessions, but
+    previous repeated validation runs left three blocked child tasks visible in
+    that fixed session. The final run matches the newest task id exactly and
+    does not expose Worker sessions globally. Cleaning historical test tasks is
+    a separate destructive/runtime-state decision and was not performed.
+
+# 2026-07-17 Android Tailscale relay correction
+
+- correction:
+  - A real Android device must not receive `127.0.0.1` for the Mac relay.
+  - `adb reverse` is not product connectivity proof and must not remain part of
+    the real-device acceptance path.
+- live topology:
+  - Mac Tailscale IPv4: `100.66.1.82`
+  - relay listener: `100.66.1.82:44042`
+  - registered upstream: `http://127.0.0.1:4042` (S-profile only)
+  - Android relay WebUI: `http://100.66.1.82:44042/relay/daemon/studio-host/`
+  - Android relay ADP: `ws://100.66.1.82:44042/relay/daemon/studio-host/adp`
+- evidence:
+  - relay health over Tailscale returned `ok`
+  - `freehand-cli adp-smoke` over the Tailscale relay passed
+  - app-owned Android config readback contains only the Tailscale relay URLs
+  - `adb reverse --list` was empty after removing `tcp:44042` and `tcp:4042`
+  - `apps/freehand-android/scripts/verify-device-ui.sh 100.104.163.65:5555`
+    passed at `artifacts/android-device/tailscale-relay-s-profile-4042-20260717T-final`
+  - WebView logcat proved stylesheet URLs came from
+    `http://100.66.1.82:44042/...`, with `webuiShell=true`,
+    `webuiCssApplied=true`, and `webuiJsReady=true`
+- task distinction:
+  - The displayed Worker `blocked` state is not a transport failure.
+  - `/Users/fanzhang/github` resolves to `/Users/fanzhang/Documents/github`,
+    but the requested leaf `codex` does not exist in either location.
+  - Therefore the path-diagnostic task is correctly blocked pending a real
+    repository path; it is not evidence that the phone failed to connect.
+
+# 2026-07-18 WebUI accepted TaskBoard receipt closeout
+
+- objective:
+  - Remove user-visible `unknown` / "任务未知" style submit states when service
+    truth has already accepted a request but the selected transcript has not
+    materialized yet.
+  - Keep fixed-session testing reusable and avoid creating new test sessions.
+- implementation:
+  - `UiTaskSnapshotProjection` carries task-owner `created_at`.
+  - Runtime TaskBoard projection preserves owner `created_at`.
+  - WebUI ambiguous-submit recovery clears pending state from either
+    materialized transcript truth or same-parent TaskBoard task truth whose
+    `created_at` is after the submit window.
+  - If TaskBoard proves acceptance while transcript is still empty, WebUI
+    renders an accepted service receipt card instead of the clean "New
+    conversation" empty state.
+  - Agent summary wording is locked away from old "delegated task" language and
+    toward Worker lifecycle buckets.
+- evidence:
+  - `node --check apps/freehand-server/assets/webui.js`
+  - `node --check scripts/verify-webui-ambiguous-submit-recovery.mjs`
+  - `jq empty docs/mainline-calls/app.webui-smoke.json docs/mainline-calls/ui.protocol.json docs/mainline-calls/runtime.ui-command-dispatch.json`
+  - `cargo test -p freehand-server root_and_asset_routes_return_webui_shell_files -- --nocapture`
+  - `cargo test -p freehand-ui-protocol task_list_subscription_matches_runtime_projection_only -- --nocapture`
+  - `cargo test -p freehand-runtime runtime_query_reads_phase1_task_and_agent_boards -- --nocapture`
+  - `cargo test -p freehand-cli cli_runs_task_lifecycle_sample_against_mock_websocket -- --nocapture`
+  - `cargo run -p xtask -- mainlines generate`
+  - `cargo run -p xtask -- mainlines check`
+  - `cargo run -p xtask -- gates check`
+  - `cargo fmt --check`
+  - `git diff --check`
+  - `scripts/install-launchd.sh restartS`
+  - S-profile `http://127.0.0.1:4042/health` returned `ok`.
+  - Served JS hash matched workspace:
+    `018c06b7f1a862dd4931b2a29ed9ff07ddecac7742a355039097004e40bf2fc3`.
+  - `FREEHAND_WEBUI_BASE_URL=http://127.0.0.1:4042/ node scripts/verify-webui-ambiguous-submit-recovery.mjs`
+    passed with artifact
+    `artifacts/webui-online/ambiguous-submit-recovery-fixed/summary.json`.
+  - Artifact checks all true: `materializedClearsPending`,
+    `taskTruthClearsPending`, and `unverifiedKeepsPendingSession`.
+  - Accepted receipt branch rendered
+    `Service accepted this request through TaskBoard truth` and
+    `task-ambiguous-submit-accepted`, with zero `New conversation` or `unknown`
+    text.
+  - Unverified branch kept the selected fixed session and pending card with
+    `checking service truth · submit receipt not verified`.
+  - Tailscale relay health and ADP smoke passed through
+    `100.66.1.82:44042`.
+- restoration / gap:
+  - S-profile remained `cc/openai/responses`, `api.anyint.ai`, `gpt-5.5`, env
+    auth; fixture env grep returned zero matches.
+  - Android true-device proof is not closed in this slice because
+    `adb connect 100.104.163.65:5555` timed out and `adb devices` was empty.
+    Do not claim current Android closure until the device ADB endpoint is
+    reachable and `verify-device-ui.sh` passes over the Tailscale relay with
+    `adb reverse --list` empty.
+
+# 2026-07-18 Android Tailscale relay final reproof
+
+- objective:
+  - Close the Android true-device gap from the WebUI accepted-receipt slice.
+  - Keep device connectivity on Tailscale relay and prove no `adb reverse`.
+- verifier fix:
+  - `verify-device-ui.sh` previously misreported a local `apkanalyzer` Java
+    runtime failure as `apk_missing_launcher_activity_class`.
+  - It now records `blocked` / `apkanalyzer_failed` with
+    `apkanalyzer-failed.txt`, instead of treating local toolchain failure as APK
+    content truth.
+- evidence:
+  - `nc -vz -G 5 100.104.163.65 5555` succeeded and ping had 0% packet loss.
+  - `adb connect 100.104.163.65:5555` succeeded; device reported
+    `product:PLZ110 model:PLZ110`.
+  - `adb reverse --list` was empty before and after verification.
+  - App-owned `files/daemon-connection.json` readback used
+    `connectionMode=remote_registry`,
+    `relayUrl=http://100.66.1.82:44042`,
+    `webUrl=http://100.66.1.82:44042/relay/daemon/studio-host/`, and
+    `adpUrl=ws://100.66.1.82:44042/relay/daemon/studio-host/adp`.
+  - Android local build passed:
+    `JAVA_HOME="/Applications/Android Studio.app/Contents/jbr/Contents/Home" ./gradlew testDebugUnitTest assembleDebug`.
+  - Negative verifier proof without `JAVA_HOME` returned
+    `VERIFY_EXIT=2`, summary `status=blocked`, `reason=apkanalyzer_failed`.
+  - Final true-device proof passed:
+    `JAVA_HOME="/Applications/Android Studio.app/Contents/jbr/Contents/Home" FREEHAND_ANDROID_ARTIFACT_DIR=artifacts/android-device/tailscale-relay-s-profile-4042-20260718T-final apps/freehand-android/scripts/verify-device-ui.sh 100.104.163.65:5555`.
+  - Final artifact:
+    `artifacts/android-device/tailscale-relay-s-profile-4042-20260718T-final`.
+  - Summary: `status=passed`,
+    `reason=freehand_activity_foreground_no_fatal_logcat`.
+  - WebUI layout log:
+    `layoutClient=android-webview`, `layoutShape=tall_phone`,
+    `webuiCssApplied=true`, `webuiJsReady=true`, `webuiShell=true`.
+  - Stylesheet URLs came from
+    `http://100.66.1.82:44042/relay/daemon/studio-host/assets/...`.
+  - Foreground evidence showed `topResumedActivity`, `ResumedActivity`,
+    `mCurrentFocus`, and `mFocusedApp` all on
+    `com.freehand.android/.ui.MainActivity`, with
+    `mDreamingLockscreen=false`.
+  - App-scoped fatal grep returned zero matches.
+  - Screenshot was manually inspected: it shows the canonical mobile Freehand
+    WebUI with current session content, Agent summary, and `waiting lifecycle`,
+    not a native fallback or empty session.
+
+# 2026-07-18 Master stale waiting and message timestamps closeout
+
+- trigger:
+  - Fixed parent session `webui-session-20260716144723-93040bd0` had `0 running tasks` but stayed in stale blocked/waiting lifecycle after the correct Worker task closed.
+  - Root evidence from `runtime-turn-401-r11`: completion schema rejected `claim=complete` because historical `task-1784213603:Cancelled` and `task-1784213319:Cancelled` were treated as still-open child Worker tasks.
+- root fix:
+  - `crates/freehand-runtime/src/lib.rs::master_parent_session_completion_rejection` no longer uses `status != Closed`.
+  - New helper `task_status_blocks_parent_completion` blocks only actionable/unresolved statuses: `Created`, `WaitingAgent`, `Assigned`, `Running`, `Interrupted`, `Paused`, `Blocked`, `ReviewSubmitted`, `Approved`, and `Rejected`.
+  - Terminal historical children `Cancelled`, `Failed`, and `Closed` no longer keep a parent session in stale waiting.
+  - Added live regression `live_master_allows_complete_with_terminal_cancelled_child_tasks`; existing negative `live_master_rejects_complete_while_parent_child_task_open` still protects no-premature-complete.
+- docs / skill:
+  - Updated `docs/function-maps/runtime.master-worker-loop.md`.
+  - Updated `docs/testing/runtime.master-worker-loop.md`.
+  - Updated `.agents/skills/freehand-dev/SKILL.md` with the reusable gate rule.
+- local proof:
+  - `cargo fmt -p freehand-runtime`
+  - `cargo fmt --check`
+  - `cargo test -p freehand-runtime live_master_allows_complete_with_terminal_cancelled_child_tasks -- --nocapture` passed.
+  - `cargo test -p freehand-runtime live_master_rejects_complete_while_parent_child_task_open -- --nocapture` passed.
+  - `cargo test -p freehand-runtime production_master_runner_recovers_closed_parent_workset_after_cursor_advanced -- --nocapture` passed.
+  - `node --check apps/freehand-server/assets/webui.js` passed.
+  - `cargo test -p freehand-runtime production_master_runner_ -- --nocapture` passed 25/25.
+  - `cargo run -p xtask -- mainlines generate`, `mainlines check`, `gates check`, and `git diff --check` passed.
+- S-profile online proof:
+  - Pre/post config stayed `provider=cc provider_type=openai provider_protocol=responses base_url_host=api.anyint.ai default_model=gpt-5.5 auth_source=env`.
+  - Fixture env grep over `daemonS.env` and three worker env files returned zero matches.
+  - `scripts/install-launchd.sh restartS` passed and `http://127.0.0.1:4042/health` returned `ok`.
+  - TaskHistory proved `task-1784213319` and `task-1784213603` ended with `TaskCancelled`, while `task-1784303605` ended with `TaskReviewSubmitted,TaskReviewApproved,TaskClosed`.
+  - Same fixed parent session submit produced receipt `reason_live_turn_completed rounds=2 schema_rejections=0 tool_executions=1 restored_closed_turns=6`.
+  - `adp-session-query --session webui-session-20260716144723-93040bd0` then showed session status `:7:success` with latest `runtime-turn-402-r2`.
+  - `runtime-turn-402-r2.json` has terminal `Success`, `schema_rejections=0`, and summary saying the correct `~/code/codex` Worker audit was reviewed/closed and obsolete wrong-path tasks were cancelled.
+  - `adp-error-query --turn runtime-turn-402-r2` showed only provider recoverable `retry_same_step` rows, no completion schema rejection.
+  - `adp-task-query --status running` returned `count=0`; fixed-session observability output showed Worker idle with `current_task_id=null`.
+- WebUI timestamp proof:
+  - Headless Chrome opened `http://127.0.0.1:4042/?verify=message-times` with selected session `webui-session-20260716144723-93040bd0`.
+  - DOM result: `messageCount=7`, `missingTimeCount=0`, selected turn `runtime-turn-402-r2`.
+  - Artifact: `artifacts/webui-online/message-times-1784350844712/message-times.json` and `message-times.png`.
+- toolchain note:
+  - `mempalace` remains unavailable due bad interpreter `/Users/fanzhang/.local/pipx/venvs/mempalace/bin/python`; this was recorded as a tooling gap and did not block owner-map/doc/test verification.
+
+# 2026-07-18 WebUI Header relationship schema contract strict closeout
+
+- trigger:
+  - Jason corrected that UI and all Master/Worker/session relationships must be
+    locked by document contracts and schema, not guessed from UI copy, id
+    prefixes, DOM order, or debug text.
+- owner truth:
+  - resource map route: `task.project_to_ui` is the allowed `task ->
+    ui_projection` operation; UI-to-task remains indirect through projection /
+    runtime command.
+  - protocol schema: `UiTaskSnapshotProjection.parent_session_id`,
+    `attached_session_ids`, `worker_session_id`, and `task_id`; Master root is
+    persisted session metadata.
+  - runtime projection owner always populates `worker_session_id` through
+    `project_task_snapshot_for_ui`.
+- implementation closeout:
+  - WebUI already consumed `task.worker_session_id` through
+    `workerSessionIdForTask()` and had no browser-side `worker-task-*`
+    synthesis.
+  - `scripts/verify-webui-path-diagnostic-online.mjs` still had a verifier-only
+    `task.worker_session_id || worker-task-${taskId}` fallback; removed it.
+  - The verifier now fails if the current task or any same-parent schema child
+    task lacks `UiTaskSnapshotProjection.worker_session_id`, instead of
+    filtering missing-schema children out of the comparison set.
+  - `docs/function-maps/app.webui-smoke.md`,
+    `docs/testing/app.webui-smoke.md`, and `.agents/skills/freehand-dev/SKILL.md`
+    now state the relationship lock as schema-contract truth, including
+    `task_id`.
+- local proof:
+  - `node --check apps/freehand-server/assets/webui.js`
+  - `node --check scripts/verify-webui-path-diagnostic-online.mjs`
+  - `node --check scripts/verify-worker-subtasks-webui-online.mjs`
+  - `jq empty docs/mainline-calls/app.webui-smoke.json docs/mainline-calls/ui.protocol.json docs/resource-maps/core.json`
+  - `cargo test -p freehand-server root_and_asset_routes_return_webui_shell_files -- --nocapture`
+  - `cargo fmt --check`
+  - `cargo run -p xtask -- mainlines generate`
+  - `cargo run -p xtask -- mainlines check`
+  - `cargo run -p xtask -- gates check`
+  - `git diff --check`
+- online S-profile proof:
+  - command:
+    `FREEHAND_WEBUI_PATH_RUN_STAMP=20260718-schema-contract-strict FREEHAND_WEBUI_PATH_TASK_ID=task-webui-path-diagnostic-schema-contract-strict FREEHAND_WEBUI_PATH_ARTIFACT_DIR=artifacts/webui-online/path-diagnostic-schema-contract-strict node scripts/verify-webui-path-diagnostic-online.mjs`
+  - artifact:
+    `artifacts/webui-online/path-diagnostic-schema-contract-strict/summary.json`
+  - parent session: `webui-path-diagnostic-fixed-v2`
+  - task id: `task-webui-path-diagnostic-schema-contract-strict`
+  - worker session:
+    `worker-task-task-webui-path-diagnostic-schema-contract-strict`
+  - Header node proof: `relationSchema=UiTaskSnapshotProjection`,
+    `relationSource=TaskBoard.worker_session_id`,
+    `data-session-id=worker-task-task-webui-path-diagnostic-schema-contract-strict`,
+    `data-task-id=task-webui-path-diagnostic-schema-contract-strict`.
+  - Header dropdown proof: `dropdownHeight=420`, `viewportHeight=844`,
+    `halfScreenOk=true`.
+  - schema set proof:
+    `headerTreeCoversEverySchemaChild=true` and
+    `headerTreeHasNoExtraWorkerProjection=true`.
+  - navigation proof:
+    `headerWorkerClickSelectedProjectedSession=true` and
+    `headerBackRestoredExactParent=true`.
+  - Worker detail proof: selected Worker session was `blocked`, contained
+    requested path `/Users/fanzhang/github/codex`, canonical parent
+    `/Users/fanzhang/Documents/github`, and `missing_suffix=codex`, with
+    `userMessageCount=0` and `fakePromptVisible=false`.
+- restoration:
+  - `freehand-cliS adp-config-query --url ws://127.0.0.1:4042/adp`
+    returned `provider=cc provider_type=openai provider_protocol=responses
+    base_url_host=api.anyint.ai default_model=gpt-5.5 auth_source=env`.
+  - fixture env grep over daemon and worker S env files returned 0 matches.
+  - health `http://127.0.0.1:4042/health` returned `ok`.
+  - `freehand-cliS adp-smoke --url ws://127.0.0.1:4042/adp` passed.
+  - served asset hashes matched workspace:
+    JS `18effaf9873d5bc75ede0dbec82aaf805b8ab7946365524b4f3f0b45e4edae33`,
+    CSS `1b2c1a2f536f45f7b72eaef7b49797df7bd703b684574ffb71f0cc80d2f1ed9c`.
+- residual:
+  - The fixed parent session intentionally retains historical blocked child
+    tasks from earlier fixed-session runs. The strict schema verifier now proves
+    the Header tree renders exactly every same-parent TaskBoard schema child and
+    no extra Worker projection. Cleaning old task truth remains a separate
+    destructive/runtime-state decision and was not performed.
+
+# 2026-07-18 Android WebView settings drawer back correction
+
+- trigger:
+  - User-visible phone state was reported as "closed loop" while the screen was
+    still visibly wrong/stuck from the operator perspective.
+- read-only evidence:
+  - Device `100.104.163.65:5555` was online, app package version remained
+    `versionCode=2`, `versionName=0.1.1`.
+  - App-owned `daemon-connection.json` pointed to
+    `http://100.66.1.82:44042/relay/daemon/studio-host/`, with no
+    `adb reverse`.
+  - Relay health and root HTML over `100.66.1.82:44042` returned canonical
+    Freehand WebUI.
+  - After scoped app restart, foreground evidence was
+    `com.freehand.android/.ui.MainActivity`; `FreehandWebUiLayout` reported
+    `layoutClient=android-webview`, `webuiShell=true`,
+    `webuiCssApplied=true`, and `webuiJsReady=true`.
+  - `verify-device-ui.sh` passed, but manual tap evidence found the real UX
+    defect: Settings drawer content could scroll the Close header out of view,
+    and Android Back did not close the WebUI drawer, so it could look stuck.
+- fix:
+  - WebUI mobile drawer headers are sticky for Sessions and Settings drawers.
+  - WebUI exposes `window.__freehandHandleAndroidBack`, which blurs focused form
+    controls, then closes WebUI dialog/Header tree/Agent sheet/mobile drawer.
+  - Android `MainActivity` routes physical Back through that WebUI hook before
+    WebView history or Activity finish.
+- verification target:
+  - Rebuild/reinstall APK, restart app on the Tailscale relay, open Config,
+    scroll/focus provider field, prove Back first keeps the app in settings or
+    clears focus, Back again returns to the conversation instead of exiting, and
+    capture screenshot/logcat evidence.
+
+# 2026-07-18 Android WebView settings drawer verification blocked by device lock
+
+- completed local/install evidence:
+  - `node --check apps/freehand-server/assets/webui.js` passed.
+  - `jq empty docs/mainline-calls/app.android-client.json docs/mainline-calls/app.webui-smoke.json` passed.
+  - `cargo fmt -p freehand-server`, then `cargo fmt --check` passed.
+  - `cargo test -p freehand-server root_and_asset_routes_return_webui_shell_files -- --nocapture` passed.
+  - `JAVA_HOME="/Applications/Android Studio.app/Contents/jbr/Contents/Home" ./gradlew testDebugUnitTest assembleDebug` passed.
+  - `adb -s 100.104.163.65:5555 install -r apps/freehand-android/app/build/outputs/apk/debug/app-debug.apk` succeeded.
+  - App-owned `daemon-connection.json` still points to
+    `http://100.66.1.82:44042/relay/daemon/studio-host/` and
+    `ws://100.66.1.82:44042/relay/daemon/studio-host/adp`; `adb reverse --list`
+    returned empty output.
+  - Relay health returned `ok`; `freehand-cliS adp-smoke --url ws://100.66.1.82:44042/relay/daemon/studio-host/adp` passed.
+  - `cargo run -p xtask -- mainlines generate`, `mainlines check`, `gates check`,
+    and `git diff --check` passed after wiki regeneration.
+- blocked true-device evidence:
+  - After app-scoped restart, screenshots under
+    `artifacts/android-device/live-corrective-20260718T1928-afterfix/` were
+    black or lock screen, not WebUI.
+  - `dumpsys power` reported `mWakefulness=Dozing` after timeout; `dumpsys
+    window` reported `KeyguardServiceDelegate showing=true secure=true` and
+    `screenState=SCREEN_STATE_OFF`.
+  - Freehand activity/process was not a valid foreground UI proof; `dumpsys
+    activity top` showed `com.freehand.android has been frozen`.
+  - Standard verifier:
+    `FREEHAND_ANDROID_SKIP_INSTALL=1 FREEHAND_ANDROID_ARTIFACT_DIR=artifacts/android-device/live-corrective-20260718T1928-afterfix-verify-locked apps/freehand-android/scripts/verify-device-ui.sh 100.104.163.65:5555`
+    exited 2 with `blocked: device is locked/dozing`.
+- current conclusion:
+  - APK/build/config/relay/local gates are verified.
+  - The required real-device UI interaction closeout is still open until the
+    phone is unlocked and kept awake long enough to tap Config, scroll/focus the
+    provider form, and prove Android Back closes WebUI state instead of exiting.
+
+# 2026-07-18 Worker tool-turn transcript render closeout
+
+- trigger:
+  - Worker/Master conversation only rendered the final summary for a completed
+    Worker session; every intermediate tool-call reasoning turn was missing
+    from the visible transcript.
+- root evidence:
+  - ADP `QuerySessionTurns` for `worker-task-task-1784351742` previously showed
+    only final `worker-turn-exec-worker-worker-1784351747370675000-45119-r35`
+    with no `tool_activities`.
+  - Reason ledger
+    `~/.freehand/ledgers/reason/worker/worker-task-task-1784351742.jsonl`
+    contained 35 actual turn ids and provider/tool activity, while authoritative
+    closed snapshots had only the final continuation file.
+  - A first attempted full ledger backfill inside daemon bootstrap made S daemon
+    startup parse large historical ledgers; `~/.freehand/ledgers/reason/worker`
+    was about 18G and startup sampled inside
+    `restore_all_persisted_sessions_into_ui -> restore_turn_snapshots_for_ui ->
+    load_reason_ledger`.
+- fix:
+  - `ReasonPersistence::restore_turn_snapshots_for_ui` preserves exact turn ids
+    instead of coalescing `runtime-turn-N` / `runtime-turn-N-rM` by logical key,
+    and backfills incomplete authoritative snapshots from reason-ledger truth.
+  - New `ReasonPersistence::restore_authoritative_turn_snapshots_for_ui` is the
+    daemon bootstrap path; it reads only authoritative closed/active snapshots
+    and never scans every historical reason ledger.
+  - `restore_all_persisted_sessions_into_ui` now calls the authoritative-only
+    API, while selected `QuerySessionTurns` keeps the heavier exact-round ledger
+    backfill path.
+  - Function maps, test designs, generated wiki, and `freehand-dev` skill were
+    updated to lock: bootstrap is lightweight; selected transcript query is
+    exact per-round and must not collapse tool rounds.
+- local proof:
+  - `cargo test -p freehand-reason ui_restore_ -- --nocapture` passed.
+  - `cargo test -p freehand-runtime live_bootstrap_restores_multiround_turns_as_separate_ui_cards -- --nocapture` passed after switching the assertion to runtime `QuerySessionTurns`.
+  - `cargo test -p freehand-runtime live_bootstrap_does_not_replay_incomplete_historical_reason_ledgers -- --nocapture` passed and proves incomplete historical snapshots plus a poisoned ledger no longer block bootstrap.
+  - `node --check apps/freehand-server/assets/webui.js`, `cargo fmt --check`,
+    `cargo test -p freehand-server --lib root_and_asset_routes_return_webui_shell_files -- --nocapture`,
+    `cargo run -p xtask -- mainlines generate`, `mainlines check`,
+    `gates check`, and `git diff --check` passed.
+- online S-profile proof:
+  - `scripts/install-launchd.sh restartS` rebuilt and service-scoped restarted
+    S; launchd PID changed from the stuck old `57397` to `50117`.
+  - Health `http://127.0.0.1:4042/health` returned `ok`.
+  - Config remained `provider=cc provider_type=openai
+    provider_protocol=responses base_url_host=api.anyint.ai
+    default_model=gpt-5.5 auth_source=env`; fixture env grep over daemon and
+    Worker S env files returned 0 matches.
+  - ADP `QueryTaskBoard` for `task-1784351742` projected
+    `worker_session_id=worker-task-task-1784351742` under parent
+    `webui-session-20260718051445-b7657881`.
+  - ADP `QuerySessionTurns` for that Worker returned `turn_count=35`,
+    `tool_turn_count=34`, `total_tool_activities=36`, no user-text leak, and
+    tool summaries including `todo_write`, `ls`, `grep`, and `read_file`.
+  - WebUI mobile Header/Agent sheet verifier opened the Worker card, selected
+    the canonical Worker session, returned to the parent, and found
+    `userMessageCount=0` / `fakePromptVisible=false`.
+  - DOM proof artifact
+    `artifacts/webui-online/tool-turn-render-1784351742-dom/summary.json`
+    showed selected session `worker-task-task-1784351742`, selected turn
+    `...-r35`, `.chat-section-tool` `toolCardCount=36`,
+    `successToolCardCount=36`, and semantic summaries for `List directory`,
+    `Read file`, `Search text`, and `Update plan`.
+- residual:
+  - Worktree remains broadly dirty from unrelated in-progress features; this
+    closeout does not clean or revert those files.
+# 2026-07-18 Live active turn observability regression
+
+- User-visible regression: a submitted Master request flashes dispatching, then UI returns to a prior-looking transcript and silently stops instead of showing provider retry/waiting/tool progress.
+- Owner evidence: `webui-session-20260718051445-b7657881` has active `runtime-turn-411`; `active-turn.json` exists; ADP session status is `waiting_model`; error-center for the turn has recoverable provider retry rows (`openai_http_request_failed`, retry_same_step), but `QuerySessionTurns` projected `model_request=null`, `tool_count=0`, `terminal_status=null`.
+- Root direction: selected-session transcript refresh replaces `UiProtocolState` session turns from reason persistence. Active turn persistence does not contain live-only `model_request`/debug retry activity, so refresh clears the UI-visible waiting/retry state. Fix should preserve same-turn nonterminal live activity during transcript replacement and keep terminal snapshots authoritative.
+
+# 2026-07-18 Live tool-call round render closeout
+
+- trigger:
+  - User-visible WebUI execution flashed `dispatching`, then silently stopped or showed only the final summary while the runtime was still doing tool/model continuation work.
+- fix:
+  - `UiProtocolState::replace_session_turn_projections` preserves nonterminal same-turn live `model_request` and `tool_activities` across selected transcript refreshes, while terminal replacements stay authoritative and clear stale live activity.
+  - Runtime-backed `QuerySessionTurns` now preserves active live provider retry and tool activity projections.
+  - WebUI render lifecycle now treats terminal status/text and `ToolPending` as authoritative before submit-in-flight/tool/model waiting state; final rows cannot remain labeled `dispatching`, and `ToolPending` remains lifecycle/running instead of current-live model wait.
+  - The online verifier `scripts/verify-webui-live-tool-render-online.mjs` uses fixed persisted session `webui-live-tool-render-fixed`, captures the pre-run transcript, scopes all DOM/ADP assertions to the current run marker and new turn ids, and avoids putting the exact final marker in the user prompt.
+- online S-profile proof:
+  - Artifact: `artifacts/webui-online/live-tool-render-1784384733439/summary.json`.
+  - Current run marker `live-tool-render-1784384733439`; task path marker `definitely-missing-live-tool-render-live-tool-render-1784384733439`; final assistant marker `live tool render completed live-tool-render-1784384733439`.
+  - Current-run ADP turns were `runtime-turn-415` and `runtime-turn-415-r2`.
+  - Fixture saw `requestCount=2`, `toolOutputRequestCount=1`, `toolSchemaIncluded=true`, and provider requests included only framework tools `task,timer`; second request contained the paired tool output.
+  - During the first round the WebUI selected `runtime-turn-415` and rendered one current-run tool card with running state for `task`.
+  - During continuation the WebUI selected `runtime-turn-415-r2`, kept the failed `task` tool card visible, and rendered model waiting/continuation rows before final.
+  - Final DOM selected `runtime-turn-415-r2`, projected terminal `Success`, showed command/turn status `completed`, had `liveCount=0` and `currentRunLiveCount=0`, and had no residual `dispatching`, thinking, or tool-running status for the current run.
+  - Final ADP truth: latest current-run turn `runtime-turn-415-r2` was `Success`; tool activity stayed attached to `runtime-turn-415` with count `1`.
+- local proof:
+  - `node --check apps/freehand-server/assets/webui.js` passed.
+  - `node --check scripts/verify-webui-live-tool-render-online.mjs` passed.
+  - `cargo test -p freehand-ui-protocol session_refresh -- --nocapture --test-threads=1` passed.
+  - `cargo test -p freehand-runtime runtime_query_session_turns_preserves_live -- --nocapture --test-threads=1` passed.
+  - `cargo test -p freehand-server root_and_asset_routes_return_webui_shell_files -- --nocapture` passed.
+  - `cargo fmt --check`, `cargo run -p xtask -- mainlines generate`, `cargo run -p xtask -- mainlines check`, `cargo run -p xtask -- gates check`, and `git diff --check` passed.
+- restoration:
+  - S-profile config restored to `provider=cc provider_type=openai provider_protocol=responses base_url_host=api.anyint.ai default_model=gpt-5.5 auth_source=env`.
+  - `~/.freehand/daemonS.env` contained no `FREEHAND_LIVE_TOOL_RENDER_FIXTURE_KEY`, `FREEHAND_PROVIDER_RETRY_BACKOFF_MS`, or `FREEHAND_PROVIDER_RECOVERY_FIXTURE_KEY`.
+  - Health `http://127.0.0.1:4042/health` returned `ok`.
+
+# 2026-07-18 Live tool-call round render continuation reproof
+
+- trigger:
+  - After context compaction, the latest stored artifact was a failed
+    `verify-webui-live-tool-render-online.mjs` run where the browser timed out
+    before the current-run `task` tool card.
+- failure evidence rechecked:
+  - Failed artifact:
+    `artifacts/webui-online/live-tool-render-1784389975204/failure/failure.json`.
+  - The failure had `requestCount=0`, `toolOutputRequestCount=0`, and
+    `toolSchemaIncluded=false`; metadata stopped at
+    `RuntimeLive01ContextPlanningStarted` for `runtime-turn-416` with no
+    `ContextPlanningCompleted`, no `ReasonReq02ContextComposedInput`, and no
+    `RuntimeLive02ProviderRequestBuilt`.
+  - During that failed run, `master.active-work.json` belonged to the live
+    daemon PID at the time, so normal dead-owner stale cleanup was not expected
+    to clear it while the process was still alive. After the verifier's
+    service-scoped restart, `~/.freehand/state/master-loop/master.active-work.json`
+    was absent.
+- fresh online S-profile proof:
+  - Command: `node scripts/verify-webui-live-tool-render-online.mjs`.
+  - Passing artifact:
+    `artifacts/webui-online/live-tool-render-1784390175397/summary.json`.
+  - Fixed session: `webui-live-tool-render-fixed`.
+  - Current run marker: `live-tool-render-1784390175397`.
+  - Current-run ADP turns: `runtime-turn-416`, `runtime-turn-416-r2`.
+  - Fixture proof: `requestCount=2`, `toolOutputRequestCount=1`,
+    `toolSchemaIncluded=true`; second provider request contained the paired
+    tool output.
+  - Browser proof:
+    - first round rendered a running `task` tool card for current-run
+      `runtime-turn-416` before final response;
+    - continuation rendered the failed `task` tool card plus
+      `tool result returned: 1 failed / 1 total · waiting model`;
+    - final selected `runtime-turn-416-r2`, terminal `Success`, current-run
+      failed tool card still visible, `liveCount=0`,
+      `currentRunLiveCount=0`, and `finalStatusStillDispatching=false`.
+  - Metadata proof now includes `RuntimeLive01ContextPlanningCompleted`,
+    `ReasonReq02ContextComposedInput`, `RuntimeLive02ProviderRequestBuilt`,
+    `RuntimeLive03ToolExecuted`, and `RuntimeLive04TurnClosed` for
+    `runtime-trace-416`.
+- focused local proof:
+  - `node --check scripts/verify-webui-live-tool-render-online.mjs` passed.
+  - `node --check apps/freehand-server/assets/webui.js` passed.
+  - `jq empty docs/mainline-calls/provider.reason-live-bridge.json docs/mainline-calls/runtime.ui-command-dispatch.json docs/mainline-calls/ui.protocol.json docs/mainline-calls/app.webui-smoke.json` passed.
+  - `git diff --check` passed.
+  - `cargo test -p freehand-runtime debug_projects_model_waiting_ui_state -- --nocapture --test-threads=1` passed 2/2.
+  - `cargo test -p freehand-runtime live_bridge_runs_single_shot_anthropic_provider_into_turn_truth -- --nocapture --test-threads=1` passed 1/1.
+  - `cargo test -p freehand-runtime runtime_query_session_turns_preserves_live -- --nocapture --test-threads=1` passed 2/2.
+  - `cargo test -p freehand-ui-protocol session_refresh -- --nocapture --test-threads=1` passed 3/3.
+  - `cargo test -p freehand-server root_and_asset_routes_return_webui_shell_files -- --nocapture` passed.
+  - `cargo fmt --check`, `cargo run -p xtask -- mainlines check`, and
+    `cargo run -p xtask -- gates check` passed.
+- restoration:
+  - Final S-profile config query returned
+    `provider=cc provider_type=openai provider_protocol=responses
+    base_url_host=api.anyint.ai default_model=gpt-5.5 auth_source=env`.
+  - `grep` for `FREEHAND_LIVE_TOOL_RENDER_FIXTURE_KEY`,
+    `FREEHAND_PROVIDER_RETRY_BACKOFF_MS`, and
+    `FREEHAND_PROVIDER_RECOVERY_FIXTURE_KEY` in `~/.freehand/daemonS.env`
+    returned zero matches.
+  - Health `http://127.0.0.1:4042/health` returned `ok`.
+  - `~/.freehand/state/master-loop/master.active-work.json` was absent.
+- residual:
+  - The fixed session intentionally retains historical successful verifier turns
+    `runtime-turn-412` through `runtime-turn-416-r2`; the verifier scopes proof
+    to the current marker and newly added turn ids instead of treating historical
+    turns as current evidence.
+
+# 2026-07-19 Live tool/render S-profile final closeout after context split
+
+- marker:
+  - `live-tool-render-final-closeout-20260719`
+- target:
+  - Continue the prior closeout after `freehand-runtime/src/lib.rs` split and
+    fixed-session WebUI live tool verifier failures.
+  - No release `4041`, no historical session deletion, no broad kill.
+- current source state:
+  - `crates/freehand-runtime/src/turn_projection.rs` is split out and bound in
+    `runtime.ui-command-dispatch`.
+  - `crates/freehand-runtime/src/lib.rs` is now 8283 lines; the split module is
+    522 lines.
+  - Existing fixes already present: symlink-safe instruction capability scanning,
+    early failed/cancelled live submit materialization, active-work owner PID
+    recovery, and Master parent reconciliation using authoritative snapshots
+    instead of selected transcript ledger backfill.
+- online proof:
+  - `node scripts/verify-webui-live-tool-render-online.mjs` passed on S-profile
+    `127.0.0.1:4042`.
+  - Artifact:
+    `artifacts/webui-online/live-tool-render-1784426079812/summary.json`.
+  - Fixed session `webui-live-tool-render-fixed`, current-run turns
+    `runtime-turn-420` and `runtime-turn-420-r2`.
+  - Fixture proof: `requestCount=2`, `toolOutputRequestCount=1`,
+    `toolSchemaIncluded=true`; request 1 exposed only framework tools
+    `task,timer`, request 2 included function-call output.
+  - DOM proof: current-run tool card visible before final, continuation waiting
+    visible, final selected `runtime-turn-420-r2`, terminal `Success`,
+    `liveCount=0`, `currentRunLiveCount=0`,
+    `finalStatusStillDispatching=false`.
+- local proof:
+  - `node --check apps/freehand-server/assets/webui.js` passed.
+  - `node --check scripts/verify-webui-live-tool-render-online.mjs` passed.
+  - `cargo test -p freehand-instructions --lib -- --nocapture --test-threads=1`
+    passed 7/7.
+  - `cargo test -p freehand-runtime instruction_capability -- --nocapture
+    --test-threads=1` passed 1/1.
+  - `cargo test -p freehand-runtime runtime_live_submit_ -- --nocapture
+    --test-threads=1` passed 3/3.
+  - Parent reconciliation/idempotency/turn-start focused runtime tests passed
+    3/3.
+  - `cargo test -p freehand-runtime debug_projects_model_waiting_ui_state --
+    --nocapture --test-threads=1` passed 2/2.
+  - `cargo test -p freehand-runtime runtime_query_session_turns_preserves_live
+    -- --nocapture --test-threads=1` passed 2/2.
+  - `cargo test -p freehand-ui-protocol session_refresh -- --nocapture
+    --test-threads=1` passed 3/3.
+  - `cargo test -p freehand-server root_and_asset_routes_return_webui_shell_files
+    -- --nocapture` passed.
+  - `cargo fmt --check`, `cargo run -p xtask -- mainlines generate`,
+    `cargo run -p xtask -- mainlines check`,
+    `cargo run -p xtask -- gates check`, and `git diff --check` passed.
+- restoration:
+  - S health returned `ok`.
+  - Final config query returned `provider=cc provider_type=openai
+    provider_protocol=responses base_url_host=api.anyint.ai
+    default_model=gpt-5.5 auth_source=env`.
+  - Fixture-env grep over actual S env files returned zero matches.
+  - `~/.freehand/state/master-loop/master.active-work.json` is absent.
+  - `~/.local/bin/freehand-daemonS-bin` and `target/debug/freehand-daemon`
+    hash matched:
+    `28e57c20852b11098628146c1709cc643a55cac57c02a0532f431e8131a3accd`.
+- residual:
+  - Worktree remains broadly dirty with unrelated Android/relay/docs/runtime
+    files and untracked `output/`; this closeout does not clean or revert them.
+
+# 2026-07-19 Android WebView stale live projection closeout
+
+- trigger:
+  - PLZ110 Android WebView showed `provider retry... 3h 55m` on `runtime-turn-423` with `workspaceStatus=closed` and `liveCount=1`, while ADP owner truth for `webui-session-20260719051023-357f19ac` was terminal success through `runtime-turn-429` and `task-1784437931` was closed.
+- root cause:
+  - Phone was loading the Tailscale relay URL `http://100.66.1.82:44042/relay/daemon/studio-host/`.
+  - The old relay process was manually started outside launchd, so S-profile `restartS` did not manage it.
+  - The page asset URL still used `webui.js?v=20260718-header-tree-actions`, so Android WebView could keep the old JS cached even after the server-side reconnect/watchdog code existed.
+- fix:
+  - Added `scripts/install-relay-launchd.sh` and wired `scripts/install-launchd.sh restartS` / `installS` to restart `com.freehand.relayS` after `com.freehand.daemonS`.
+  - `relayS` binds `100.66.1.82:44042`, registers `studio-host` to `http://127.0.0.1:4042`, and writes env/log truth under `~/.freehand`.
+  - Bumped WebUI asset version to `20260719-mobile-live-reconnect` in `apps/freehand-server/src/page.rs` and `apps/freehand-server/assets/webui.js`.
+  - Updated `app.runtime-daemon` docs/test design/feature map and `freehand-dev` skill so Android proof checks relay-served asset version plus true-device DOM.
+- proof:
+  - Before reload DOM: selected session `webui-session-20260719051023-357f19ac`, selected turn `runtime-turn-423`, script `?v=20260718-header-tree-actions`, `workspaceStatus=closed`, `turnStatus=provider retry... 3h 55m`, `liveCount=1`.
+  - After CDP bypass-cache reload: selected turn `runtime-turn-429`, script/resource `?v=20260719-mobile-live-reconnect`, `workspaceStatus=connected`, `turnStatus=completed`, `commandStatus=completed`, `liveCount=0`, `hasProviderRetry=false`.
+  - Screenshot: `artifacts/android-device/live-hang-20260719T-after-fix/screen.png` shows completed final answer and `0 running · 1 closed task`.
+  - Android verifier with installed APK passed: `FREEHAND_ANDROID_SKIP_INSTALL=1 apps/freehand-android/scripts/verify-device-ui.sh 100.104.163.65:5555`, artifact `artifacts/android-device/20260719T091258Z-100.104.163.65_5555-61229/summary.json`.
+  - Focused gates passed: JS/shell syntax, `freehand-server` asset route test, `freehand-server remote_relay`, `scripts/verify-remote-relay-local-online.sh`, `cargo fmt --check`, `xtask mainlines generate/check`, `xtask gates check`, and `git diff --check`.
+- residual:
+  - Full Android install verifier without `FREEHAND_ANDROID_SKIP_INSTALL=1` is blocked by local `apkanalyzer`/`JAVA_HOME`, matching the known verifier blocker; the already installed APK/UI path was verified.
+
+# 2026-07-19 Android WebView current-hang challenge reproof
+
+- trigger:
+  - Jason reported the mobile version was still hung for three hours, so the prior closeout could not stand on backend truth or a one-off manual CDP reload alone.
+- current true-device checks:
+  - Foreground activity was `com.freehand.android/.ui.MainActivity`, unlocked, Freehand PID `15873` before verifier; app-owned config used relay `http://100.66.1.82:44042/relay/daemon/studio-host/`.
+  - Relay HTML served `webui.js?v=20260719-mobile-live-reconnect` and `theme/webui.css?v=20260719-mobile-live-reconnect`; relay ADP smoke passed.
+  - Current foreground Freehand CDP DOM before app relaunch already showed `selectedSession=webui-session-20260719051023-357f19ac`, `selectedTurn=runtime-turn-429`, `workspaceStatus=connected`, `turnStatus=completed`, `commandStatus=completed`, `liveCount=0`, `hasProviderRetry=false`; screenshot saved at `artifacts/android-device/live-hang-20260719T-current/screen.png`.
+  - The other WebView devtools socket belonged to `com.zterm.android`, not Freehand, so no second stale Freehand page was hidden.
+- app-level relaunch proof:
+  - `FREEHAND_ANDROID_SKIP_INSTALL=1 apps/freehand-android/scripts/verify-device-ui.sh 100.104.163.65:5555` passed and force-stopped/restarted the app; artifact `artifacts/android-device/20260719T092146Z-100.104.163.65_5555-3373/summary.json`.
+  - New Freehand PID was `17450`; logcat showed relay stylesheet URLs with `?v=20260719-mobile-live-reconnect`, `webuiShell=true`, `webuiCssApplied=true`, and `webuiJsReady=true`.
+  - Post-relaunch CDP DOM on PID `17450` showed `selectedTurn=runtime-turn-429`, `selectedTerminalStatus=success`, `workspaceStatus=connected`, `turnStatus=completed`, `commandStatus=completed`, `liveCount=0`, `hasProviderRetry=false`, and final text `贵州兴义八月初天气与适宜景点的联网资料整理任务已完成，最终攻略已交付用户，无需后续等待或重试。`.
+  - Post-relaunch screenshot saved at `artifacts/android-device/live-hang-20260719T-after-restart/screen.png`.
+- owner truth:
+  - Relay ADP session query returned `webui-session-20260719051023-357f19ac:17:success` through `runtime-turn-429`.
+  - Relay TaskHistory for `task-1784437931` returned 281 events ending `TaskReviewSubmitted,TaskReviewApproved,TaskClosed`.
+- durable rule:
+  - If the phone was already foreground when a WebUI/relay stale-live fix lands, Android acceptance must include app-level relaunch plus CDP reattachment to the new Freehand PID. Manual CDP reload proof is insufficient for user-visible recovery.
+
+# 2026-07-19 WebUI live request-cycle card audit reproof
+
+- trigger:
+  - Jason restated the UI contract: one request/model round cycle is one chronological card; the card may update while live, must show tool calls/results/status in real time, and must freeze once that cycle completes. Later cycles must append as new cards and must not mutate old cards.
+- audit result:
+  - Current WebUI code uses `.turn-cycle-card` parents, stable `cycleKey` (`submit_id` or `session_id + turn_id`), `renderConversationFragments`, and `reconcileCycleCardFragments`.
+  - Terminal cycle cards set `data-frozen="true"` and are reused during reconciliation; the transcript no longer uses a bare `messageList.replaceChildren();` full rebuild for normal cycle-only renders.
+  - The latest failed artifact `artifacts/webui-online/live-tool-render-1784462576772/failure/failure.json` had `requestCount=0`, `toolOutputRequestCount=0`, and metadata stopped at `RuntimeLive01ContextSegmentStarted` for `instruction-capability`; that failure was pre-provider/runtime context admission, not evidence that tool-card DOM reconciliation failed.
+- online S-profile proof:
+  - `node scripts/verify-webui-live-tool-render-online.mjs` passed with artifact `artifacts/webui-online/live-tool-render-1784464051115/summary.json`.
+  - Fixed session `webui-live-tool-render-fixed`; current run turns `runtime-turn-444` and `runtime-turn-444-r2`.
+  - Provider fixture saw `requestCount=2`, `toolOutputRequestCount=1`, and `toolSchemaIncluded=true`.
+  - Browser stages: `duringTool` selected `runtime-turn-444` with one current-run running `task` tool card ordered after the user cycle; `duringContinuation` selected `runtime-turn-444-r2` with the failed tool card plus model waiting; `finalState` selected `runtime-turn-444-r2`, terminal `success`, two current-run cycle cards, frozen count 2, live count 0, final dispatching false.
+- local proof:
+  - `node --check apps/freehand-server/assets/webui.js`.
+  - `node --check scripts/verify-webui-live-tool-render-online.mjs`.
+  - `jq empty docs/mainline-calls/app.webui-smoke.json docs/mainline-calls/instruction.capability-loader.json docs/mainline-calls/provider.reason-live-bridge.json`.
+  - `cargo test -p freehand-instructions --lib -- --nocapture --test-threads=1` passed 7/7.
+  - `cargo test -p freehand-runtime instruction_capability -- --nocapture --test-threads=1` passed 1/1 after waiting for cargo lock.
+  - `cargo test -p freehand-server root_and_asset_routes_return_webui_shell_files -- --nocapture` passed.
+  - `cargo test -p freehand-ui-protocol session_refresh -- --nocapture --test-threads=1` passed 3/3.
+  - `cargo test -p freehand-runtime runtime_query_session_turns_preserves_live -- --nocapture --test-threads=1` passed 2/2.
+  - `cargo test -p freehand-runtime debug_projects_model_waiting_ui_state -- --nocapture --test-threads=1` passed 2/2.
+  - `cargo fmt --check`, `cargo run -p xtask -- mainlines check`, `cargo run -p xtask -- gates check`, and `git diff --check` passed.
+- restoration:
+  - Final config query returned `provider=cc provider_type=openai provider_protocol=responses base_url_host=api.anyint.ai default_model=gpt-5.5 auth_source=env`.
+  - Fixture env grep over S daemon/worker env files returned zero matches.
+  - `http://127.0.0.1:4042/health` returned `ok`.
+  - `~/.freehand/state/master-loop/master.active-work.json` was absent.
+- durable verifier note:
+  - In `verify-webui-live-tool-render-online.mjs` summary, `serviceTurn` is an early pre-tool snapshot and may legitimately still show live/dispatching; final acceptance must be read from `duringTool`, `duringContinuation`, and `finalState`.
+
+# 2026-07-19 Provider registry Settings UI closeout
+
+- trigger:
+  - Jason required that users can switch provider and add new provider configs from UI; `minimax` must remain in registry while active provider may be `cc`.
+- implementation notes:
+  - Existing owner chain was already landed in config/protocol/runtime/WebUI/CLI from the handoff.
+  - Fixed WebUI selector draft handling: fallback/current selectors now follow `QueryConfigStatus` until the operator changes a selector; provider definition upsert does not clear fallback selection.
+  - Fixed `scripts/verify-provider-registry-ui-online.mjs`: CDP `Runtime.evaluate` now injects browser helper source and writes DOM/page-event debug artifacts on failure.
+- online proof:
+  - `FREEHAND_PROVIDER_REGISTRY_UI_DEBUG_PORT=9262 node scripts/verify-provider-registry-ui-online.mjs` passed.
+  - Artifact: `artifacts/webui-online/provider-registry-ui-1784472971174/summary.json`.
+  - Initial DOM: `currentProvider=cc`, `fallbackSelectValue=minimax`, provider ids `cc,minimax`.
+  - After upsert: provider ids `cc,minimax,ui-verify-provider-registry`; `currentProvider=cc`; `fallbackSelectValue=minimax`.
+  - After explicit switch: `currentProvider=minimax`, fallback cleared for the proof, registry still included `cc,minimax,ui-verify-provider-registry`.
+  - Final restore: `provider=cc`, `fallback=minimax`, registry `cc,minimax`, fixture env grep 0, health `ok`.
+- local proof:
+  - `node --check apps/freehand-server/assets/webui.js` passed.
+  - `node --check scripts/verify-provider-registry-ui-online.mjs` passed.
+  - `cargo test -p freehand-server root_and_asset_routes_return_webui_shell_files -- --nocapture` passed.
+  - `cargo test -p freehand-config provider -- --nocapture --test-threads=1` passed 15/15.
+  - `cargo test -p freehand-ui-protocol provider_config -- --nocapture --test-threads=1` passed 3/3.
+  - `cargo test -p freehand-runtime runtime_query_projects_config_status_without_secrets -- --nocapture --test-threads=1` passed.
+  - `cargo test -p freehand-runtime runtime_dispatch_upserts_provider_registry_without_switching_active_selection -- --nocapture --test-threads=1` passed.
+  - `cargo test -p freehand-runtime runtime_dispatch_switches_agent_provider_selection_without_hot_reload -- --nocapture --test-threads=1` passed.
+  - `cargo check -p freehand-cli`, `cargo fmt --check`, `cargo run -p xtask -- mainlines check`, `cargo run -p xtask -- gates check`, and `git diff --check` passed.
+- residual:
+  - Worktree remains broadly dirty with unrelated Android/relay/runtime/doc changes and untracked `output/`; this closeout did not revert or clean unrelated state.

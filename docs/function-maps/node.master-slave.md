@@ -19,17 +19,22 @@
   - `LocalNodeRuntime::publish_slave_turn`
   - `LocalNodeRuntime::query_node_status`
   - `LocalNodeRuntime::query_task_progress`
+  - `RemoteDaemonDirectory::publish_registry`
+  - `RemoteDaemonDirectory::resolve_route`
 
 ## Resource Map Binding
 
 - resource map: `docs/resource-maps/core.json`
 - owned resources:
   - `node_pairing`
+  - `remote_daemon_directory`
 - touched resources:
   - `config`
+  - `remote_daemon_registry`
   - `ui_projection`
 - resource operations:
   - `config.bootstrap_node_pairing`
+  - `remote_daemon_registry.project_directory`
   - `node_pairing.project_to_ui`
 - forbidden shortcuts:
   - UI projection must not mutate or synthesize node pairing truth directly.
@@ -39,6 +44,7 @@
 
 - local master accepts user input or task delegation intent
 - node runtime may optionally receive one shared `MetadataCenter` and/or one shared `DebugHub` before any state mutation
+- remote daemon directory may consume config-owned remote daemon registry truth to publish account-scoped daemon presence and direct-first route resolution without owning credentials or tunnel success
 - master may dispatch to the paired slave only after `LocalNodeRuntime::pair_slave`
 - slave accepts task/projection/message input only from the active paired source node
 - pairing loss reverts slave runtime back to listening state for later re-pairing
@@ -46,6 +52,7 @@
 ## Response Mainline
 
 - slave returns progress, status, direct conversation, or turn stream updates
+- remote daemon directory returns account summaries, daemon endpoint summaries, and selected-route diagnostics with direct routes preferred until direct health proves failure
 - accepted bootstrap, pairing, progress, and slave-turn publications may emit owner-tagged metadata before node truth mutates
 - bootstrap, pairing, pairing-loss, delegated-task, and slave-turn publication may emit read-only debug snapshots through `debug.core`
 - `UiProtocolState` stores node status, progress, and latest slave turn
@@ -54,6 +61,7 @@
 ## Error Mainline
 
 - pairing failure, health failure, or unauthorized input to slave return explicit node errors
+- invalid remote daemon registry route resolution returns explicit node errors and does not create relay tunnel success truth
 - metadata write failure returns explicit node errors and must not materialize rejected status, progress, or slave-turn truth
 - debug sink failure is observation-only through `DebugHub::subscribe_failures` and must not block node truth mutation
 - pairing rejection materializes node status as `rejected`
@@ -86,6 +94,8 @@
 | 07 | `LocalNodeRuntime::publish_slave_turn` | `crates/freehand-node/src/lib.rs` | accept authorized slave turn projection and publish to subscribers only after metadata admission | slave turn projection | UI turn projection stream | slave runtime | subscribed master/UI surfaces | bound |
 | 08 | `LocalNodeRuntime::query_node_status` | `crates/freehand-node/src/lib.rs` | expose latest slave node status snapshot | node id | node status snapshot | query surface | `UiProtocolState` | bound |
 | 09 | `LocalNodeRuntime::query_task_progress` | `crates/freehand-node/src/lib.rs` | expose latest delegated task progress snapshot | turn id | progress snapshot | query surface | `UiProtocolState` | bound |
+| 10 | `RemoteDaemonDirectory::publish_registry` | `crates/freehand-node/src/lib.rs` | publish account-scoped daemon directory snapshot from config-owned registry without credential leakage | compiled remote daemon registry | account and daemon directory snapshot | node runtime / tests | remote daemon directory | bound |
+| 11 | `RemoteDaemonDirectory::resolve_route` | `crates/freehand-node/src/lib.rs` | resolve one daemon route using config-owned direct-first route selection and node-owned current health records | daemon id plus endpoint health records | selected endpoint plus diagnostics | node runtime / tests | config route selector + remote daemon directory | bound |
 
 ## Sync Status Against Code
 
@@ -94,4 +104,5 @@
 - debug producer wiring is now bound on `LocalNodeRuntime::with_debug_hub` / `LocalNodeRuntime::with_debug_hub_and_metadata_center` and proves bootstrap, pairing rejection, and slave-turn snapshots exclude pair-token, user-turn, reasoning-text, and terminal-text leakage
 - direct white-box locks now cover unauthorized pair source node, unauthorized pair source ip, empty delegated task status, pre-pair or intruder slave-turn publication, metadata write failure no-truth-materialization, debug sink failure observation-only delivery, and request-text-free metadata persistence
 - real websocket IO adapter remains intentionally out of scope for this first runtime semantic layer
+- remote daemon directory and route-resolution core is code-bound; relay signaling/tunnel IO, live account directory server, and Tailscale OS auto-connect remain intentionally outside this slice
 - generated wiki must be regenerated from `docs/mainline-calls/node.master-slave.json` when this function-map truth changes

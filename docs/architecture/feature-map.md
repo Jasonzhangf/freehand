@@ -38,7 +38,7 @@ Use this table before grep or implementation. Every bug or feature request must 
 | problem area | feature_id | owner module / crate | function map | test orchestration |
 | --- | --- | --- | --- | --- |
 | workspace gates, CI/CD, repo rules | `foundation.workspace` | `xtask`, workspace root | `docs/function-maps/foundation.workspace.md` | `docs/testing/foundation.workspace.md` |
-| config load, agents, providers, startup selection | `config.core` | `crates/freehand-config` | `docs/function-maps/config.core.md` | `docs/testing/config.core.md` |
+| config load, agents, providers, remote daemon registry, startup selection | `config.core` | `crates/freehand-config` | `docs/function-maps/config.core.md` | `docs/testing/config.core.md` |
 | shared IDs, cross-module contracts, request/response/error contracts | `contracts.core` | `crates/freehand-contracts` | `docs/function-maps/contracts.core.md` | `docs/testing/contracts.core.md` |
 | provider-neutral semantics and recovery policy | `provider.semantic` | `crates/freehand-provider-core` | `docs/function-maps/provider.semantic.md` | `docs/testing/provider.semantic.md` |
 | OpenAI-compatible wire rendering/parsing | `provider.openai-adapter` | `crates/freehand-provider-openai` | `docs/function-maps/provider.openai-adapter.md` | `docs/testing/provider.openai-adapter.md` |
@@ -68,7 +68,7 @@ Use this table before grep or implementation. Every bug or feature request must 
 | CLI reason smoke and config-selected runtime harness | `app.cli-runtime-smoke` | `apps/freehand-cli` | `docs/function-maps/app.cli-runtime-smoke.md` | `docs/testing/app.cli-runtime-smoke.md` |
 | CLI live provider turn and completion loop smoke | `app.cli-live-turn` | `apps/freehand-cli` | `docs/function-maps/app.cli-live-turn.md` | `docs/testing/app.cli-live-turn.md` |
 | WebUI/protocol-only app boundary smoke | `app.webui-smoke` | `apps/freehand-server` | `docs/function-maps/app.webui-smoke.md` | `docs/testing/app.webui-smoke.md` |
-| runtime-backed HTTP/SSE UI daemon host | `app.runtime-daemon` | `apps/freehand-daemon` | `docs/function-maps/app.runtime-daemon.md` | `docs/testing/app.runtime-daemon.md` |
+| runtime-backed HTTP/SSE UI daemon host and local relay transport | `app.runtime-daemon` | `apps/freehand-daemon` | `docs/function-maps/app.runtime-daemon.md` | `docs/testing/app.runtime-daemon.md` |
 | Android/protocol-only app boundary client | `app.android-client` | `apps/freehand-android` | `docs/function-maps/app.android-client.md` | `docs/testing/app.android-client.md` |
 
 If a problem does not fit this table, update this routing index before making code changes. Do not create a second owner by patching an adjacent module.
@@ -79,7 +79,7 @@ This table is the feature-map backlink for `docs/resource-maps/core.json`. The r
 
 | feature_id | owned resources | resource map |
 | --- | --- | --- |
-| `config.core` | `config` | `docs/resource-maps/core.json` |
+| `config.core` | `config`, `remote_daemon_registry` | `docs/resource-maps/core.json` |
 | `reason.persistence` | `session` | `docs/resource-maps/core.json` |
 | `reason.turn` | `turn` | `docs/resource-maps/core.json` |
 | `reason.context-planner` | `request_context` | `docs/resource-maps/core.json` |
@@ -95,7 +95,9 @@ This table is the feature-map backlink for `docs/resource-maps/core.json`. The r
 | `ui.protocol` | `ui_projection` | `docs/resource-maps/core.json` |
 | `runtime.ui-command-dispatch` | `runtime_command` | `docs/resource-maps/core.json` |
 | `runtime.checkpoint-rewind` | `checkpoint` | `docs/resource-maps/core.json` |
-| `node.master-slave` | `node_pairing` | `docs/resource-maps/core.json` |
+| `node.master-slave` | `node_pairing`, `remote_daemon_directory` | `docs/resource-maps/core.json` |
+| `app.runtime-daemon` | `remote_relay_transport` | `docs/resource-maps/core.json` |
+| `app.android-client` | `android_apk_update` | `docs/resource-maps/core.json` |
 | `instruction.capability-loader` | `instruction_capability` | `docs/resource-maps/core.json` |
 
 ## Architecture Gap Registry
@@ -478,6 +480,7 @@ Non-violation pending items live in `docs/architecture/architecture-gaps.md`. Ea
   - multi-agent named-table config tests
   - reciprocal peer-topology config tests
   - multi-provider named-table config tests
+  - remote daemon registry, route selection, and QR bootstrap bundle contract tests
   - provider auth source resolution tests
   - provider protocol declaration tests
   - provider unknown-field rejection tests
@@ -499,6 +502,7 @@ Non-violation pending items live in `docs/architecture/architecture-gaps.md`. Ea
   - `~/.freehand/logs/config`
 - update_triggers:
   - config schema changes
+  - remote daemon registry, route selection, or QR bootstrap schema changes
   - provider registry schema changes
   - provider selection rules change
   - config resolution order changes
@@ -513,6 +517,7 @@ Non-violation pending items live in `docs/architecture/architecture-gaps.md`. Ea
   - config update path is closed-loop
   - one-process-one-agent startup rule remains explicit
   - paired node topology remains config-owned and reciprocal
+  - remote daemon accounts, daemon endpoint candidates, route diagnostics, and QR bootstrap bundles remain config-owned and secret-safe
   - migrated mainline call source and generated wiki stay in sync with the function map
 
 ### `app.cli-runtime-smoke`
@@ -660,6 +665,9 @@ Non-violation pending items live in `docs/architecture/architecture-gaps.md`. Ea
 - forbidden_paths: `crates/freehand-reason/**`, `crates/freehand-node/**`, `crates/freehand-config/**`, `crates/freehand-provider-*/**` except through `crates/freehand-runtime`
 - required_checks:
   - `cargo test -p freehand-daemon`
+  - `cargo test -p freehand-server remote_relay -- --nocapture`
+  - `scripts/verify-remote-relay-local-online.sh`
+  - `scripts/install-launchd.sh restartS` with `com.freehand.relayS` health and relay asset-version proof for Android/WebView work
   - `cargo run -p xtask -- mainlines check`
   - `cargo run -p xtask -- gates check`
 - required_white_box_tests:
@@ -679,6 +687,8 @@ Non-violation pending items live in `docs/architecture/architecture-gaps.md`. Ea
   - daemon ADP query-as-command rejection smoke
   - daemon direct-message dispatch smoke
   - daemon slave-mode production Worker runner bootstrap smoke
+  - remote relay host registration/directory/HTTP/ADP pass-through smoke
+  - S-profile relay launchd restart and current relay-served asset proof
 - required_project_black_box_tests:
   - real runtime owner injection over shared HTTP/SSE/command and ADP WebSocket transport without app-owned business logic
 - test_design_doc: `docs/testing/app.runtime-daemon.md`
@@ -706,7 +716,7 @@ Non-violation pending items live in `docs/architecture/architecture-gaps.md`. Ea
 ### `app.android-client`
 
 - owner: `apps/freehand-android`
-- allowed_paths: `apps/freehand-android/**`, `apps/freehand-server/src/assets.rs`, `apps/freehand-server/src/lib.rs`, `docs/function-maps/app.android-client.md`, `docs/testing/app.android-client.md`, `docs/mainline-calls/app.android-client.json`, `docs/wiki/app.android-client.md`, `docs/design/multi-platform-ui-architecture.md`, `MEMORY.md`, `note.md`
+- allowed_paths: `apps/freehand-android/**`, `apps/freehand-server/src/assets.rs`, `apps/freehand-server/src/lib.rs`, `docs/resource-maps/core.json`, `docs/function-maps/app.android-client.md`, `docs/testing/app.android-client.md`, `docs/mainline-calls/app.android-client.json`, `docs/wiki/app.android-client.md`, `docs/design/multi-platform-ui-architecture.md`, `MEMORY.md`, `note.md`
 - forbidden_paths: `crates/freehand-reason/**`, `crates/freehand-provider-*/**`, `crates/freehand-node/**`, `crates/freehand-config/**`, `crates/freehand-runtime/**` except through `freehand-ui-protocol` projections
 - required_checks:
   - `cd apps/freehand-android && ./gradlew testDebugUnitTest assembleDebug`
@@ -717,7 +727,9 @@ Non-violation pending items live in `docs/architecture/architecture-gaps.md`. Ea
 - required_white_box_tests:
   - `HostConfigTest`
   - `DaemonConnectionConfigTest`
-  - source scan rejects local HTML and native conversation/settings/update/projector symbols
+  - `ApkUpdateManifestTest`
+  - remote daemon bootstrap deep-link import coverage
+  - source scan rejects local HTML and native conversation/settings/projector symbols while allowing the contract-owned APK updater
 - required_module_black_box_tests:
   - `cd apps/freehand-android && ./gradlew testDebugUnitTest assembleDebug`
   - APK packages `MainActivity` and does not package a local HTML conversation shell
@@ -725,6 +737,8 @@ Non-violation pending items live in `docs/architecture/architecture-gaps.md`. Ea
   - `/?client=android-webview` returns the canonical WebUI shell
 - required_project_black_box_tests:
   - Android app immediately loads the configured daemon WebUI URL
+  - Android app checks the selected daemon endpoint update manifest, downloads a higher-version APK, and opens the Android system installer through a FileProvider URI
+  - Android deep-link import writes the scanned remote daemon bootstrap bundle into the app-owned config before WebUI navigation
   - canonical WebUI owns protocol query/subscribe/command, transcript, composer, settings, lifecycle, and errors
   - Android device script requires foreground activity, `data-webui-shell=true`, `layoutClient=android-webview`, mobile shape, no fatal logcat, and a screenshot
   - a locked/offline/non-foreground device produces an explicit blocker and never acceptance evidence
@@ -736,15 +750,20 @@ Non-violation pending items live in `docs/architecture/architecture-gaps.md`. Ea
   - Android device verification artifact under `artifacts/android-device/<run>/`
 - runtime_paths:
   - Android app-owned `files/daemon-connection.json`
+  - scanned `freehand://daemon/import?payload=...` bootstrap bundles
 - update_triggers:
   - Android WebView host or platform bridge changes
   - daemon WebUI URL or mobile layout contract changes
+  - remote daemon bootstrap/deep-link config schema changes
   - Android device validation script changes
+  - Android APK update manifest/download/install handoff changes
   - generated wiki freshness policy changes
 - lifecycle_checks:
   - Android remains a thin WebView/platform bridge only
   - daemon-hosted WebUI is the only product UI
-  - Android does not own protocol projection, command transport, conversation, settings, status, update, error, reason, debug, session, provider, or metadata truth
+  - Android may import account/daemon endpoint config but must not own account directory truth or route scoring
+  - Android does not own protocol projection, command transport, conversation, settings, status, update UI, error, reason, debug, session, provider, or metadata truth
+  - Android owns only the `android_apk_update` package-update handoff; daemon release distribution remains the manifest/APK source
   - config and network failures remain explicit WebView/startup failures; no local replacement UI exists
   - `/mock/android` remains absent
   - migrated mainline call source and generated wiki stay in sync with the function map
@@ -1647,6 +1666,7 @@ Non-violation pending items live in `docs/architecture/architecture-gaps.md`. Ea
   - `cargo run -p xtask -- gates check`
 - required_white_box_tests:
   - master/slave pairing tests
+  - remote daemon directory account/daemon projection and route-resolution tests
   - paired slave input-restriction tests
   - slave startup config permission tests
   - local websocket handshake tests
@@ -1659,6 +1679,7 @@ Non-violation pending items live in `docs/architecture/architecture-gaps.md`. Ea
   - status query and health-check tests
 - required_module_black_box_tests:
   - node status snapshot smoke
+  - remote daemon directory publish/resolve smoke
   - slave progress query smoke
   - node metadata ledger smoke
   - node debug snapshot subscription smoke
@@ -1666,6 +1687,7 @@ Non-violation pending items live in `docs/architecture/architecture-gaps.md`. Ea
   - master-delegate/slave-progress smoke
   - master-subscribe-slave-turn smoke
   - config-selected live runtime bootstrap shares node metadata ledger smoke
+  - gates check for remote daemon registry to directory source edge
 - test_design_doc: `docs/testing/node.master-slave.md`
 - function_map_doc: `docs/function-maps/node.master-slave.md`
 - mainline_call_doc: `docs/mainline-calls/node.master-slave.json`
@@ -1683,6 +1705,7 @@ Non-violation pending items live in `docs/architecture/architecture-gaps.md`. Ea
   - `~/.freehand/replays/nodes`
 - update_triggers:
   - pairing semantics changes
+  - remote daemon directory / route-resolution semantics changes
   - input-permission semantics changes
   - slave input restrictions change
   - node mode lifecycle changes

@@ -27,6 +27,7 @@
   - `TaskRuntime::list_agents`
   - `TaskRuntime::query_agent`
   - `TaskRuntime::query_task_board`
+  - `TaskRuntime::query_task_space_snapshot`
   - `TaskRuntime::query_event_inbox`
   - `TaskRuntime::run_master_poll`
   - `TaskRuntime::apply_execution_fact`
@@ -90,6 +91,10 @@
 - `heartbeat_task` refreshes the lease for the assigned running agent
 - TaskBoard query reads task snapshots, agent registry state, blocked items,
   review queue, and current skeleton stale projection
+- TaskSpaceSnapshot query builds a bounded read-only prompt snapshot from task
+  snapshots, AgentLifecycle projection, and newest master-visible ledger events
+  without running boot lease recovery, scheduler fact replay, or EventInbox
+  cursor pagination
 - ExecutionFact sync admits typed running/recovering/blocked/interrupted/review_ready
   facts into Task Center truth without parsing raw prose
 - Phase 2A worker loop keeps `execution_id` attached to claim/start,
@@ -129,7 +134,10 @@
 - `TaskRuntime::task_history` returns ordered persisted task ledger events
 - `TaskRuntime::list_agents` returns current in-memory agent registry projection
 - `TaskRuntime::query_agent` returns one agent snapshot
-- task tool result returns semantic task ids, status, event counts, or JSON snapshots
+- task tool create result returns semantic task ids, status, event counts, and
+  target_cwd path diagnostics when present, including requested/expanded path,
+  nearest existing parent, canonical parent, symlink ancestors, and missing
+  suffix
 - review lifecycle actions return event-backed mutation summaries
 - heartbeat returns event-backed running-state mutation summary
 - heartbeat and execution-fact mutation re-read persisted task truth before
@@ -139,6 +147,9 @@
 - agent create/close returns persisted agent snapshot summaries
 - TaskBoard query returns board-level task, blocker, review, stale, and agent
   binding summaries
+- TaskSpaceSnapshot query returns actionable tasks first, bounded blocked and
+  review-ready ids, AgentLifecycle health, and newest recent events for prompt
+  context while leaving full TaskBoard/EventInbox semantics unchanged
 - ExecutionFact sync returns event-backed Task Center updates while preserving
   recovering as non-terminal; interrupted execution facts preserve same-task
   retryability instead of creating replacement task truth
@@ -221,6 +232,16 @@
   - allowed callers: runtime query dispatch, CLI/ADP headless samples, tests
   - related tests: `task_board_projects_owner_truth_with_filtered_views`
   - why shared: keeps TaskBoard truth in Task Center instead of UI-local state
+- `TaskRuntime::query_task_space_snapshot`
+  - owner: `crates/freehand-task/src/lib.rs`
+  - purpose: build the bounded read-only TaskSpaceSnapshot projection used by
+    provider prompt context without invoking boot recovery, scheduler fact
+    replay, or EventInbox cursor pagination
+  - allowed callers: provider.reason-live-bridge live context builder, tests
+  - related tests:
+    `task_space_snapshot_is_bounded_and_does_not_replay_scheduler_facts`
+  - why shared: keeps prompt task-space projection in Task Center owner truth
+    instead of rebuilding full task runtime state from the live bridge
 - `TaskRuntime::apply_execution_fact`
   - owner: `crates/freehand-task/src/lib.rs`
   - purpose: admit typed execution facts into Task Center transition/event truth
@@ -268,7 +289,7 @@
 | step | symbol path | file path | responsibility | input semantic | output semantic | caller | callee | binding status |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | 01 | `reasonix_aligned_builtin_specs` | `crates/freehand-tools/src/lib.rs` | expose one `task` tool schema with op-dispatched arguments | static registry truth | provider tool definition | runtime live bridge | tool registry | bound |
-| 02 | `execute_task_tool` | `crates/freehand-runtime/src/lib.rs` | route task tool calls into task owner with runtime home/session/turn context | task tool call | tool result text | runtime live bridge | task runtime | bound |
+| 02 | `execute_task_tool` | `crates/freehand-runtime/src/lib.rs` | route task tool calls into task owner with runtime home/session/turn context and append target_cwd path diagnostics to create results | task tool call | tool result text with task truth and optional path diagnostic | runtime live bridge | task runtime + path diagnostic helper | bound |
 | 03 | `TaskRuntime::boot` | `crates/freehand-task/src/lib.rs` | load task and agent snapshots into memory | runtime home + owner agent | ready task runtime | runtime task bridge | task owner | bound |
 | 04 | `TaskRuntime::create_task` | `crates/freehand-task/src/lib.rs` | validate, persist, attach optional parent session, assign/wait, and update memory state | task create request | task snapshot + ledger events | runtime task bridge | task owner | bound |
 | 05 | `TaskRuntime::query_task` | `crates/freehand-task/src/lib.rs` | return one task snapshot truth | task id | task snapshot | runtime task bridge | task owner | bound |
@@ -293,6 +314,7 @@
 | 24 | `TaskRuntime::run_master_poll` | `crates/freehand-task/src/lib.rs` | load TaskBoard, AgentBoard, EventInbox, classify master-visible states, and persist processed cursor without task business mutations | master poll request + persisted cursor | master poll outcome with classifications and next cursor | runtime ADP command dispatch / CLI sample | task owner | bound |
 | 25 | `write_json_atomic` | `crates/freehand-task/src/lib.rs` | atomically replace JSON persistence files with process/nanos/counter-qualified temp paths | serializable task owner truth | replaced JSON truth without cross-writer temp collisions | TaskStore persistence helpers | filesystem atomic rename | bound |
 | 26 | `TaskStore::with_lease_state_lock` | `crates/freehand-task/src/lib.rs` | serialize shared lease read-modify-write mutation across independent Worker processes | lease create/refresh/remove mutation | complete `leases.json` truth without lost updates or stale reintroduction | TaskStore lease helpers | filesystem advisory lock + atomic rename | bound |
+| 28 | `TaskRuntime::query_task_space_snapshot` | `crates/freehand-task/src/lib.rs` | project a bounded read-only task-space snapshot for provider prompt context without boot recovery, scheduler fact replay, or EventInbox cursor pagination | runtime home + owner agent + task/event limits | bounded TaskSpaceSnapshotProjection with tasks, blocked/review-ready queues, AgentLifecycle health, and newest master-visible events | provider.reason-live-bridge live context builder | task owner | bound |
 
 ## Sync Status Against Code
 

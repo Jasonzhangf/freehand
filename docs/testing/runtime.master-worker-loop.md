@@ -162,6 +162,9 @@ Task Center truth before another execution starts.
 - Master "timer scheduled" claims must be backed by a successful `timer`
   tool result and timer ledger truth; verbal completion text alone is not proof
   of a scheduled wakeup.
+- Consecutive timer schedules in the same source turn receive distinct
+  framework-generated timer ids and remain as separate persisted schedules;
+  second-level clock collisions must not overwrite earlier timer truth.
 - Master guidance requires timer prompts to say what current truth to inspect,
   what waited condition to revisit, and what decision to make.
 - Assigned task is claimed once with one execution id.
@@ -205,10 +208,33 @@ Task Center truth before another execution starts.
 - Retryable Master lifecycle failure preserves the same pending attention item,
   admitted sequence, and cursor; stale no-op events are removed and selection
   continues in the same runner tick.
+- A stale persisted EventInbox cursor is repaired by clearing the cursor,
+  rewriting loop state, and replaying current Task Center ledger truth; a
+  missing-task EventInbox row or pending attention is skipped explicitly and
+  cannot block later actionable events in the same runner tick.
 - Parent overall-goal evaluation reads the original persisted first user turn
   from reason `TurnStarted` ledger truth, not the UI coalesced transcript
   projection or latest repaired snapshot; repair rounds and control text cannot
   replace the user objective.
+- Parent workset reconciliation reads waiting/idempotency/next-turn state from
+  authoritative closed/active turn snapshots only. It must not use selected
+  transcript restore or parse historical reason ledgers while polling in the
+  background Master loop.
+- If a historical all-children-closed parent set has no original persisted user
+  objective truth, the runner returns `ParentEvaluationSkipped`, records that
+  child-set key as skipped, does not call the Master executor, and does not
+  finalize the parent session.
+- Master user-session completion schema rejects `claim="complete"` while any
+  child task in the same parent session remains actionable or unresolved
+  (`Created`, `WaitingAgent`, `Assigned`, `Running`, `Interrupted`, `Paused`,
+  `Blocked`, `ReviewSubmitted`, `Approved`, or `Rejected`), preserving the
+  no-premature-completion boundary covered by
+  `cargo test -p freehand-runtime live_master_rejects_complete_while_parent_child_task_open -- --nocapture`.
+- Master user-session completion schema allows `claim="complete"` when the
+  same parent session only has terminal historical children such as
+  `Cancelled`, `Failed`, or `Closed`; cancelled wrong-path child tasks must not
+  keep the parent UI in stale waiting state, covered by
+  `cargo test -p freehand-runtime live_master_allows_complete_with_terminal_cancelled_child_tasks -- --nocapture`.
 - review-ready decision boundary closes only after the target task reaches
   `Rejected` or `Closed`; `Approved` alone remains incomplete and retryable.
 - blocked decision boundary closes after the target task records a new
@@ -267,6 +293,10 @@ Task Center truth before another execution starts.
 - non-canonicalizable `target_cwd` records `Blocked`; model execution does not start.
 - missing `~/...` target cwd records `Blocked` with both original and expanded path; model execution does not start.
 - missing target cwd under an existing parent records `Blocked` as workspace-preflight failure that explicitly says this is not a repository permission denial and likely means `target_cwd` was misused for a not-yet-created output directory.
+- missing target cwd under a symlink parent records `Blocked` before model
+  execution and includes target_cwd path diagnostic evidence for
+  nearest_existing, nearest_existing_canonical, symlink_ancestors, and
+  missing_suffix.
 - provider/network system failure after internal provider retry exhaustion records
   `Interrupted`, reuses the same task on the next Worker tick, and never writes
   `ReviewReady` for the failed execution.
@@ -298,6 +328,9 @@ Task Center truth before another execution starts.
   terminal success, even if the model emits a syntactically valid
   `claim="complete"` schema.
 - A closed child task with an open sibling must not trigger parent evaluation.
+- A closed child workset in a later parent turn must still trigger parent
+  evaluation when older same-session child tasks from earlier turns are blocked
+  and the durable EventInbox cursor has already advanced past the close event.
 - A replayed closed-child event for an already evaluated parent/child set must
   not trigger another parent follow-up turn.
 - A parent evaluation must not treat accepted child results as sufficient merely
@@ -323,6 +356,12 @@ Task Center truth before another execution starts.
   lifecycle event cursor unchanged.
 - Task Center and lifecycle-state read/write failures stop the Master runner
   explicitly instead of being treated as retryable model/provider failures.
+- stale historical EventInbox cursor or missing-task attention is not a current
+  owner-truth failure: it is repaired or dropped with explicit log evidence and
+  must not terminate the daemon host or hide later current-session events.
+- missing original parent objective truth for a historical closed-child set must
+  not become a success, aggregation, or final answer; it is a skipped
+  non-final evaluation and must be idempotent on the next tick.
 - timer state read/write failures stop the Master runner explicitly because
   independent timer truth is unavailable.
 - historical lifecycle turns from another task are absent from the current
@@ -344,18 +383,29 @@ Task Center truth before another execution starts.
     `master_attention_dequeue_gives_blocked_and_task_priority_large_weight`,
     `master_attention_dequeue_ages_old_low_priority_item_without_starvation`,
     and `master_attention_retry_keeps_same_pending_item`
+  - stale EventInbox cursor repair and stale pending-attention drop:
+    `production_master_runner_repairs_stale_event_inbox_cursor_from_loop_state`
+    and `production_master_runner_drops_stale_pending_attention_and_continues`
   - review approve and close
   - review rejection with persisted requirements
   - blocked decision persisted through `task(op="append")`
   - missing review decision and same-event retry
   - all-children-closed parent evaluation in the original parent session
+  - stale waiting parent workset recovery after cursor advancement while an
+    older same-session turn remains blocked:
+    `production_master_runner_recovers_closed_parent_workset_after_cursor_advanced`
   - parent evaluation request contains original user objective history plus
     each child task's goal/deliverables/acceptance and accepted review result
+  - missing original parent objective truth is non-final and idempotently skipped:
+    `production_master_runner_rejects_parent_evaluation_without_persisted_goal_truth`
   - parent evaluation creates a same-session improvement task when the combined
     child results do not satisfy the overall objective
   - open-sibling closed event no-op
   - parent evaluation idempotency across repeated runner ticks/restart,
     including a persisted waiting evaluation that already created next work
+  - background reconciliation with a poisoned reason ledger and valid
+    authoritative parent/evaluation snapshots:
+    `production_master_runner_parent_reconciliation_uses_authoritative_snapshots_not_ui_ledger`
 - active-work handshake tests drive:
   - `production_master_foreground_acknowledges_suspend_at_safe_point`
     through `SuspendRequested -> SuspendedByAttention` at the exact foreground
@@ -381,7 +431,9 @@ Task Center truth before another execution starts.
     closed-turn truth and the next request re-reasons with typed resolution
 - runtime/query projection coverage proves `QuerySessionTurns` can see a
   background-persisted parent evaluation turn by restoring
-  `ReasonPersistence` owner truth into UI projection.
+  `ReasonPersistence` owner truth into UI projection, and hides internal
+  timer/parent-evaluation prompts from both raw request text and original-task
+  context-derived display candidates while preserving terminal truth.
 - due timer wakeup without task truth
 - recurring timer reschedule up to `max_runs`
 - timer wakeup failure release back to active retryable state

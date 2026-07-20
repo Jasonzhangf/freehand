@@ -103,6 +103,8 @@ pub struct TurnProjection {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TurnRecord {
+    #[serde(default)]
+    pub created_at: u64,
     pub request: ReasonReq02ContextComposedInput,
     pub provider_payload: ReasonReq03ProviderPayload,
     pub planned_context: PlannedContext,
@@ -237,6 +239,7 @@ impl ReasonTurnEngine {
             input_segments: planned_context.ordered_segments.clone(),
         };
         let turn = TurnRecord {
+            created_at: unix_seconds_now(),
             request,
             provider_payload,
             planned_context,
@@ -744,11 +747,15 @@ impl ReasonTurnEngine {
     }
 }
 
+fn unix_seconds_now() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_secs())
+        .unwrap_or(0)
+}
+
 fn unix_timestamp_string() -> String {
-    match SystemTime::now().duration_since(UNIX_EPOCH) {
-        Ok(duration) => duration.as_secs().to_string(),
-        Err(_) => "0".to_owned(),
-    }
+    unix_seconds_now().to_string()
 }
 
 fn completion_error_message(err: CompletionValidationError) -> String {

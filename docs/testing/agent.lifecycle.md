@@ -17,8 +17,10 @@
   - AgentBoard projection exposes lifecycle truth
   - runtime/ADP/CLI query returns lifecycle truth without UI-local inference
   - restart proof re-queries the same agent id once persistence is implemented
-  - lifecycle snapshot persists independently from agent resource state so close
-    can release a worker while restart query still sees the typed closed state
+  - lifecycle snapshot persists independently from agent resource state so
+    blocked, review-ready, rejected, approved, interrupted, cancelled, failed,
+    and closed task truth can release a worker while restart query still sees
+    the typed event as last activity instead of current binding
   - Phase 2A worker execution and review events project lifecycle state from
     typed Task Center truth, not from raw model text
 
@@ -45,7 +47,21 @@
 - `recovering` state from failed-tool/schema-polishing/provider-retry typed facts
 - `blocked` state from typed blocker fact
 - current activity, last activity, elapsed time, task/execution/turn binding, and model/tool/error counters
-- worker progress, review_ready, retrying, approved, and closed task lifecycle projections keep the current execution id visible until terminal close
+- worker progress and recovering task lifecycle projections keep the current
+  execution id visible while execution is active
+- blocked, review_ready, review_rejected, approved, interrupted, cancelled,
+  failed, and closed task lifecycle projections clear `current_task_id`,
+  `current_execution_id`, and `current_turn_id`, project
+  `current_activity.kind=idle`, and preserve the typed state in
+  `last_activity`
+- `TaskClosed` releases the former Worker resource: AgentBoard projects
+  `state=idle`, clears current task/execution/turn binding, and retains one
+  `last_activity.kind=closed` record naming the closed task
+- boot reconciliation repairs stale persisted lifecycle snapshots whose current
+  binding points at a blocked, review-ready, rejected, approved, interrupted,
+  cancelled, failed, or closed task snapshot, including execution-only legacy
+  snapshots where `current_task_id` is already empty but `current_execution_id`
+  still points at the released task execution
 - `TaskInterrupted` releases the former Worker resource: AgentBoard projects
   `state=idle`, clears current task/execution/turn binding, and retains one
   `last_activity.kind=interrupted` record naming the released task. A later
@@ -55,6 +71,8 @@
 - raw assistant prose is not accepted as lifecycle input
 - unknown agent id returns explicit not-found
 - implemented owner test: `agent_lifecycle_reducer_projects_model_tool_recovering_and_blocked`
+- implemented owner test:
+  `task_close_releases_agent_lifecycle_and_boot_repairs_stale_current_binding`
 - Phase 2A owner test:
   `phase2a_worker_claim_reject_retry_approve_close_recovers_same_execution_id`
 
@@ -69,10 +87,12 @@
 - runtime can query one AgentLifecycleSnapshot by agent id
 - CLI/ADP headless sample can query lifecycle truth for a known agent id
 - malformed lifecycle event returns explicit validation error and does not mutate truth
-- interrupted task truth cannot leave the former Worker projected as running
-  after its lease/execution has ended
+- blocked, review-ready, rejected, interrupted, cancelled, failed, approved, or
+  closed task truth cannot leave the former Worker projected as running after
+  its lease/execution has ended
 - CLI/ADP Phase 2A sample can query lifecycle truth for the worker across
-  claim, blocked, recovering, review/retry, approved, and closed phases
+  claim, blocked, recovering, review/retry, approved, and closed phases; only
+  active execution phases are current-bound
 
 ## Project Black-Box Impact
 

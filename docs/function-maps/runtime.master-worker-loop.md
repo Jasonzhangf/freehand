@@ -9,6 +9,8 @@
   - `crates/freehand-runtime/src/worker_runner/heartbeat.rs`
   - `crates/freehand-runtime/src/worker_runner/tests.rs`
   - `crates/freehand-runtime/src/lib.rs`
+  - `crates/freehand-runtime/src/path_diagnostics.rs`
+  - `crates/freehand-runtime/src/tests.rs`
 - host wiring: `apps/freehand-daemon/src/main.rs`
 - task truth dependency: `crates/freehand-task`
 - config truth dependency: `crates/freehand-config`
@@ -60,6 +62,10 @@
   runner over Task Center EventInbox truth
 - the Master lifecycle runner keeps a durable event cursor and invokes the
   Master model for current review-ready, blocked, interrupted, or all-current-children-closed parent-evaluation truth
+- a stale durable EventInbox cursor from historical/global Task Center truth is
+  repaired by clearing the cursor and replaying the current Task Center ledger;
+  stale EventInbox rows or pending attention for missing tasks are logged and
+  skipped instead of permanently stopping current lifecycle progress
 - interrupted decisions include current AgentBoard resource truth. Agent
   identity is independent of Session; Master may retry the same Worker or
   replace the temporary assignment with another available configured Worker
@@ -109,6 +115,10 @@
 - a selected task is claimed with one execution id and lease heartbeat
 - the task target cwd expands a leading `~`, canonicalizes through symlinks, and becomes the worker's locked execution root
 - worker live reasoning receives task goal, content, deliverables, acceptance criteria, the requested `target_cwd`, the canonical locked workspace, and path-preflight instructions
+- Worker target_cwd preflight failures include the shared target_cwd path
+  diagnostic so blocked truth names symlink ancestors, nearest existing
+  canonical parent, and missing suffix before the Master asks the user for
+  clarification
 - while a Worker execution is active, the runner monitors persisted `WorkerControlOp::Pause` truth for the same task/execution and wires it into `LiveReasonCancelToken`; the live bridge may only stop at its existing provider/tool/terminal safe points
 - worker provider requests expose governed workspace tools but exclude recursive `task` and unrestricted shell tools
 - Master provider guidance binds dispatch to the ordered configured Worker id set,
@@ -130,10 +140,21 @@ continue other ready work rather than dead-waiting in the current turn
   user objective still depends on future Task Center/timer truth; `claim="complete"`
   is reserved for verified final user-facing completion
 - Runtime independently rejects a Master user-session `claim="complete"` while
-  any Task Center child task with the same `parent_session_id` remains open;
-  the model must inspect Task Center truth, wait, or approve/close required
-  child work before final user-facing synthesis can be accepted
-- When a child `task_closed` event arrives, the runner checks every terminal-included child task with the same `parent_session_id`; if all are `Closed` and the same parent/child-set evaluation was not already recorded, it starts a follow-up Master turn in the original parent session. The turn evaluates original user objective history against each decomposed task's goal/deliverables/acceptance and accepted Worker review truth, then either creates/assigns correction or next-round child tasks, records an explicit blocker, or claims final completion only when the overall objective is verified complete.
+  any Task Center child task with the same `parent_session_id` remains
+  actionable or unresolved: `Created`, `WaitingAgent`, `Assigned`,
+  `Running`, `Interrupted`, `Paused`, `Blocked`, `ReviewSubmitted`,
+  `Approved`, or `Rejected`. Terminal historical children such as
+  `Cancelled`, `Failed`, and `Closed` are not running agents and must not
+  keep the parent UI in stale waiting state.
+- When a child `task_closed` event arrives, the runner checks the same
+  parent-turn child workset; if all children in that workset are `Closed` and
+  the same parent/child-set evaluation was not already recorded, it starts a
+  follow-up Master turn in the original parent session. The turn evaluates
+  original user objective history against each decomposed task's
+  goal/deliverables/acceptance and accepted Worker review truth, then either
+  creates/assigns correction or next-round child tasks, records an explicit
+  blocker, or claims final completion only when the overall objective is
+  verified complete.
 - Master task-tool execution independently enforces membership in the configured
   Worker set; a non-configured assignment becomes a paired failed tool result
   and cannot mutate Task Center truth
@@ -175,12 +196,25 @@ continue other ready work rather than dead-waiting in the current turn
   session/logical-turn/trace identity, and requires the model to re-evaluate
   the original objective before any new tool call or terminal claim
 - approved review-ready truth remains retryable until the Master closes it
-- parent evaluation truth is durable-idempotent by parent session plus closed child task set, so EventInbox replay or daemon restart cannot repeat the same evaluation decision or duplicate next-round task creation; successful, waiting, and blocked terminal evaluation turns are durable decisions, while failed/interrupted/cancelled turns remain retryable
+- parent evaluation truth is durable-idempotent by parent session plus closed child task workset, so EventInbox replay or daemon restart cannot repeat the same evaluation decision or duplicate next-round task creation; successful, waiting, and blocked terminal evaluation turns are durable decisions, while failed/interrupted/cancelled turns remain retryable
+- child workset admission is scoped to the parent `turn_id`, not the whole parent session; historical blocked children from earlier user turns must not keep a later corrected user turn stuck in `waiting lifecycle`
+- when the durable EventInbox cursor has already advanced past a `task_closed` event without a completed/skipped parent evaluation marker, the Master loop reconciles TaskBoard truth while idle and re-enters parent evaluation for a still-waiting parent logical turn
+- parent workset reconciliation reads parent waiting state, idempotency markers,
+  and next evaluation turn ordinals from authoritative closed/active turn
+  snapshots only; it must not call selected-transcript UI restore or parse
+  historical reason ledgers while the background Master loop is polling
 - parent evaluation reads the original first-round user objective from
   authoritative reason `TurnStarted` ledger truth via
   `ReasonPersistence::restore_turn_start_snapshots`; UI-coalesced
   repair/control rounds and latest effective snapshots cannot replace or
   become the overall goal
+- if a historical all-children-closed parent set has no persisted original user
+  objective truth, the runner records that exact child set as
+  `ParentEvaluationSkipped` without finalizing, then continues current
+  lifecycle processing
+- `QuerySessionTurns` hides internal timer/parent-evaluation follow-up prompts
+  from both raw `request.user_text` and original-task-context-derived display
+  text while preserving terminal status, tool truth, and final summaries
 - a blocked task may remain blocked only when the Master records that outside
   action is still required through `task(op="append")`, or explicitly
   reassigns it
@@ -255,6 +289,9 @@ continue other ready work rather than dead-waiting in the current turn
   `TaskProgressed` blocked decision after the retry cap so one blocked task
   cannot permanently starve later lifecycle events
 - lifecycle cursor parse/write failures stop the Master loop explicitly
+- stale historical EventInbox cursor or missing-task attention is repaired or
+  dropped explicitly; other Task Center owner-truth failures still stop the
+  Master loop because current owner truth is unavailable
 - Task Center and lifecycle-state failures are fatal owner-truth failures;
   lifecycle executor and missing/incomplete decision failures are retryable
 - missing paired Master identity or invalid provider config blocks runner bootstrap
@@ -293,6 +330,12 @@ continue other ready work rather than dead-waiting in the current turn
   - allowed callers: live Master safe-point continuation paths and runtime tests
   - related tests: `live_master_attention_invalidates_stale_tool_without_side_effect`, `live_master_attention_rejects_stale_terminal_persistence`, and `production_master_resume_consumes_resolution_once`
   - why shared: stale tool invalidation, stale terminal invalidation, and before-provider continuation must use the same typed context admission semantics
+- `path_resolution_diagnostic_text` / `expand_leading_tilde_path`
+  - owner: `crates/freehand-runtime/src/path_diagnostics.rs`
+  - purpose: render one shared target-cwd diagnostic with requested, expanded, nearest-existing, canonical parent, missing suffix, and symlink ancestor evidence
+  - allowed callers: Worker target-cwd preflight, Master task-tool target-cwd diagnostics
+  - related tests: Worker target-cwd symlink and missing-path preflight tests; `task_tool_create_returns_symlink_parent_path_diagnostic`
+  - why shared: path/symlink diagnosis must not diverge between Worker preflight and Master task dispatch failure text
 
 ## Function Call Table
 
@@ -309,17 +352,17 @@ continue other ready work rather than dead-waiting in the current turn
 | 08 | `run_worker_mode` | `apps/freehand-daemon/src/main.rs` | select Slave host path without constructing Master UI dispatcher | daemon agent selection | Worker service process | daemon CLI | runtime Worker runner | bound |
 | 09 | `ProductionMasterRunner::from_default_config` | `crates/freehand-runtime/src/master_runner.rs` | load selected Master config and bind the Master Task Center namespace | configured agent name | Master lifecycle runner | daemon Master startup | config + runtime owner | bound |
 | 10 | `ProductionMasterRunner::run_until` | `crates/freehand-runtime/src/master_runner.rs` | poll Task Center lifecycle events, retry model/provider decision failures with bounded backoff, and stop on owner-truth failure or daemon shutdown | runner + cancellation signal | long-running Master lifecycle service | daemon Master mode | `ProductionMasterRunner::run_once` | bound |
-| 11 | `ProductionMasterRunner::run_once` | `crates/freehand-runtime/src/master_runner.rs` | admit EventInbox source order into durable attention, dequeue by deterministic weighted aging, preserve retry identity, drain stale no-ops, then consider due timers | Task Center cursor + pending attention + timer store | task decision, timer-fired, or idle outcome | Master lifecycle service/tests | `admit_attention_events` + `highest_priority_attention_index` + `handle_event` + `handle_due_timer` | bound |
-| 11a | `ProductionMasterRunner::admit_attention_events` | `crates/freehand-runtime/src/master_runner.rs` | persist attention in EventInbox order and advance the cursor without priority reordering | ordered EventInbox rows + Master loop state | durable pending attention + monotonic admission sequence | `ProductionMasterRunner::run_once` | TaskRuntime query + Master loop state | bound |
+| 11 | `ProductionMasterRunner::run_once` | `crates/freehand-runtime/src/master_runner.rs` | repair stale EventInbox cursor if needed, admit EventInbox source order into durable attention, dequeue by deterministic weighted aging, preserve retry identity, drain stale no-ops, reconcile closed parent worksets whose parent turn still waits for lifecycle, then consider due timers | Task Center cursor + pending attention + timer store | task decision, parent-evaluation skip/evaluation, timer-fired, or idle outcome | Master lifecycle service/tests | `query_event_inbox_repairing_stale_cursor` + `admit_attention_events` + `highest_priority_attention_index` + `handle_event` + `reconcile_closed_parent_worksets` + `handle_due_timer` | bound |
+| 11a | `ProductionMasterRunner::admit_attention_events` | `crates/freehand-runtime/src/master_runner.rs` | persist attention in EventInbox order and advance the cursor without priority reordering, while skipping stale rows whose task no longer exists in current Task Center truth | ordered EventInbox rows + Master loop state | durable pending attention + monotonic admission sequence or explicit stale-row skip | `ProductionMasterRunner::run_once` | TaskRuntime query + Master loop state | bound |
 | 11b | `highest_priority_attention_index` | `crates/freehand-runtime/src/master_runner.rs` | select by severity, bounded task priority, deterministic admission aging, and stable tie-breaks | durable pending attention + next admission sequence | selected pending index | `ProductionMasterRunner::run_once` | pure score comparator | bound |
 | 11c | `register_master_active_work` / `clear_master_active_work_if_current` | `crates/freehand-runtime/src/master_runner.rs` | persist and clear foreground Master work identity under the master-work lock | live Master submit identity | active-work checkpoint or explicit concurrent-work rejection | runtime live submit dispatcher | active-work JSON + lock file | bound |
 | 11d | `ProductionMasterRunner::apply_busy_attention_policy` | `crates/freehand-runtime/src/master_runner.rs` | compare pending attention score with foreground work priority, defer lower-priority attention, and request/suspend higher-priority attention only at declared safe points | pending attention + master_work checkpoint | deferred attention, suspend request, or suspended active work | `ProductionMasterRunner::run_once` | active-work store + weighted attention score | bound |
 | 11e | `ProductionMasterRunner::restore_active_work_after_attention` | `crates/freehand-runtime/src/master_runner.rs` | persist typed attention resolution from the event-scoped isolated control decision and restore the exact foreground work identity without copying control transcript text | suspended master_work + Task Center decision outcome | running active work with typed resolution and original work/session/turn/trace identity | `ProductionMasterRunner::run_once` | active-work store | bound |
 | 11f | `admit_master_attention_resolution_for_next_round` | `crates/freehand-runtime/src/lib.rs` | consume one validated resolution, refresh TaskSpaceSnapshot, and admit volatile/no-cache AttentionResolution before the original foreground work continues | running master_work typed resolution + current task truth | next-round request-context candidates without stale task/terminal semantics | Master live safe-point continuation paths | context planner candidate admission | bound |
 | 12 | `ProductionMasterRunner::handle_due_timer` | `crates/freehand-runtime/src/master_runner.rs` | execute a due independent timer wakeup and complete/reschedule/release timer truth | due timer schedule | timer-fired outcome or retryable execution error | `run_once` | timer store + live reason turn | bound |
-| 13 | `TimerStore::claim_due` / `TimerStore::complete_due` / `TimerStore::fail_due` | `crates/freehand-runtime/src/lib.rs` | persist independent timer schedule state and timer ledger events outside Task Center truth | timer state json + timer ledger | running/completed/active timer truth | Master timer tool + Master runner | timer store owner | bound |
+| 13 | `TimerStore::claim_due` / `TimerStore::complete_due` / `TimerStore::fail_due` | `crates/freehand-runtime/src/timer_store.rs` | persist independent timer schedule state and timer ledger events outside Task Center truth | timer state json + timer ledger | running/completed/active timer truth | Master timer tool + Master runner | timer store owner | bound |
 | 14 | `ProductionMasterRunner::handle_event` | `crates/freehand-runtime/src/master_runner.rs` | invoke Master decision for current review-ready, blocked, interrupted, or all-children-closed parent evaluation truth; interrupted decisions receive AgentBoard resource truth and may replace the existing task assignment | task snapshot + trigger event + AgentBoard | same task advanced, blocked observed, parent evaluated, no-op, or explicit error | `run_once` | Master live reason turn + task owner | bound |
-| 14a | `ProductionMasterRunner::handle_parent_task_closed` / `parent_user_objectives` | `crates/freehand-runtime/src/master_runner.rs` | decide whether a child `task_closed` event completes the current parent child set, recover only the original first-round user objective from authoritative reason `TurnStarted` ledger truth, and build an idempotent overall-goal evaluation request | original parent user objective history + closed child task definitions + accepted review truth | next-round task creation, explicit blocker, verified final completion, or no-op | `handle_event` | TaskRuntime + ReasonPersistence + Master live reason turn | bound |
+| 14a | `ProductionMasterRunner::handle_parent_task_closed` / `ProductionMasterRunner::reconcile_closed_parent_worksets` / `parent_logical_turn_waits_for_lifecycle` / `persisted_parent_evaluation_summary` / `next_parent_evaluation_turn_id` / `parent_user_objectives` | `crates/freehand-runtime/src/master_runner.rs` | decide whether a child `task_closed` event or idle reconciliation completes the current parent-turn child workset, read waiting/idempotency/next-turn state from authoritative turn snapshots without selected-transcript ledger backfill, recover first-round external user objectives from authoritative reason `TurnStarted` ledger truth across global runtime turn ordinals, and build an idempotent overall-goal evaluation request; if historical parent objective truth is missing, record a non-final skipped evaluation for that exact child set | original parent user objective history + authoritative parent-turn/evaluation snapshot truth + same-parent-turn closed child task definitions + accepted review truth | next-round task creation, explicit blocker, verified final completion, skipped non-final historical evaluation, or no-op without background reason-ledger replay | `handle_event` / `run_once` idle reconciliation | TaskRuntime + ReasonPersistence + Master live reason turn | bound |
 | 15 | `run_master_lifecycle_reason_turn` | `crates/freehand-runtime/src/lib.rs` | execute one event-isolated lifecycle decision with a target-task boundary and finite round budget | selected Master config + typed lifecycle prompt + decision boundary | closed Master turn and Task Center mutation | `ProductionMasterRunner::handle_event` | provider/reason live bridge | bound |
 | 16 | `configured_worker_task_boundary_failure` | `crates/freehand-runtime/src/lib.rs` | validate Master task create/assign routing against the configured Worker topology | task tool call + ordered configured Worker id set | explicit topology failure or allowed mutation path | `execute_registry_tool_call_with_workspace` | pure boundary validator | bound |
 | 17 | `execute_registry_tool_call_with_workspace` | `crates/freehand-runtime/src/lib.rs` | enforce configured Worker-set routing before task-tool mutation and route Master timer tool calls to independent timer truth | Master task/timer tool call + ordered configured Worker id set | paired failed result or owner-routed task/timer mutation | provider/reason live bridge | topology validator + task tool/timer owners | bound |
@@ -332,6 +375,9 @@ continue other ready work rather than dead-waiting in the current turn
 - Master framework-only tool boundary, external-cwd delegation, and path/symlink dispatch guidance are already bound; Master delegates external repo read/search/write/report work to Worker tasks instead of directly using file/search/write tools
 - production Worker runner, Worker-specific live tool policy, pause monitor cancel-token safe-point handling, resumed controlled task selection, periodic task
   lease heartbeat, process heartbeat, and Slave daemon startup are code-bound
+- independent timer persistence and recurrence logic is now code-bound in
+  `crates/freehand-runtime/src/timer_store.rs`; `src/lib.rs` only routes the
+  Master timer tool call into that owner
 - config-selected Master guidance, TaskSpaceSnapshot, and task mutation boundary
   consume the full ordered Worker peer set; singular configured-Worker fields
   are physically removed
