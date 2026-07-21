@@ -50,7 +50,7 @@ Generated from `docs/mainline-calls/ui.protocol.json`. Do not edit by hand.
 - subscribe returns an initial snapshot followed by continuous incremental projections through a protocol-owned subscription channel, or waits for the first turn when the latest-turn stream is subscribed before any turn exists
 - ADP subscribe returns an explicit SubscriptionAccepted frame before later SubscriptionEvent frames so UI-less clients can distinguish waiting from transport failure
 - projections are read-only views over owner-written truth
-- model request lifecycle is projected as UiModelRequestActivity inside UiTurnProjection for ordinary thinking, schema retry, provider retry, provider failover, and tool-result continuation, and it clears when response/tool/usage/terminal/error projection arrives
+- model request lifecycle is projected as UiModelRequestActivity inside UiTurnProjection for ordinary thinking, schema retry, and tool-result continuation; provider retry/failover are transport substate on the same activity, not separate reasoning-flow phases, and the activity clears when response/tool/usage/terminal/error projection arrives
 - terminal completion shows only final projected text
 - public conversation projection preserves the user prompt while stripping raw completion schema blocks and excluding reasoning, usage, provider payload, debug details, and verbose tool term text from the main user-visible stream
 - debug state is projected as a read-only per-turn snapshot/stream with summary text plus ordered detail lines
@@ -67,6 +67,7 @@ Generated from `docs/mainline-calls/ui.protocol.json`. Do not edit by hand.
 - cancel commands route to reason.turn whether they target an explicit turn_id or the latest active turn
 - session list and transcript projections expose cwd bound by runtime/session truth
 - session list projections expose only owner-supplied persisted session metadata as top-level active/archived sessions; internal framework sessions such as `master-lifecycle-*`, `master-timer-*`, and `worker-task-*` remain directly transcript-queryable but are hidden from global session lists
+- UiSessionSummary.active_turn_id is a live/progress identity only: it points only to the latest same-session turn when that turn is nonterminal; terminal latest turns remain visible as terminal summaries but do not appear active, and later nonterminal model/tool activity can become active again
 - TaskBoard projections carry parent_session_id, observing attached_session_ids, canonical worker_session_id, and task-owner created_at so WebUI can scope current Worker work, correlate submit receipt truth, and open Worker transcripts without synthesizing ids or making workers top-level sessions
 - task list/history query results use protocol-owned UI-safe DTOs supplied through `UiRuntimeQueryPort`
 - Phase 1 TaskBoard, AgentBoard, and AgentLifecycle query results use protocol-owned UI-safe DTOs supplied through `UiRuntimeQueryPort`
@@ -175,9 +176,9 @@ Generated from `docs/mainline-calls/ui.protocol.json`. Do not edit by hand.
   - why shared: keeps error-center read projection shape protocol-owned and transport-neutral
 - `UiProtocolState::replace_session_turn_projections`
   - owner: `crates/freehand-ui-protocol/src/lib.rs`
-  - purpose: replace one session transcript projection after persistence-owned rollback or selected-session refresh without making the UI a truth writer or erasing same-turn nonterminal live activity
+  - purpose: replace one session transcript projection after persistence-owned rollback or selected-session refresh without making the UI a truth writer, erasing current latest-turn live activity, or preserving stale live activity on historical rounds
   - allowed callers: runtime.ui-command-dispatch
-  - related tests: session_transcript_replacement_updates_query_projection, runtime_dispatches_session_rollback_into_effective_ui_projection, session_refresh_preserves_active_model_request_activity, session_refresh_preserves_active_tool_activity_cards, terminal_session_refresh_drops_stale_live_activity
+  - related tests: session_transcript_replacement_updates_query_projection, runtime_dispatches_session_rollback_into_effective_ui_projection, session_refresh_preserves_active_model_request_activity, session_refresh_preserves_active_tool_activity_cards, terminal_session_refresh_drops_stale_live_activity, session_list_active_turn_id_tracks_only_nonterminal_turns
   - why shared: runtime must refresh effective transcript projection centrally after rollback instead of letting each UI delete DOM rows locally
 - `UiTaskEventInboxProjection / UiMasterPollProjection`
   - owner: `crates/freehand-ui-protocol/src/lib.rs`
@@ -201,7 +202,8 @@ Generated from `docs/mainline-calls/ui.protocol.json`. Do not edit by hand.
 | 03 | `protocol_rejection` | `crates/freehand-ui-protocol/src/lib.rs` | convert protocol error into transport-safe rejection payload | protocol error | rejection payload | CLI/WebUI transport adapters | protocol boundary |  |  |  | bound |
 | 04 | `build_command_dispatch_envelope` | `crates/freehand-ui-protocol/src/lib.rs` | wrap accepted ingress command with declared owner routing | UI command | dispatch envelope | CLI/WebUI transport adapters | protocol boundary |  |  |  | bound |
 | 04a | `validate_command / command_dispatch_target` | `crates/freehand-ui-protocol/src/lib.rs` | validate session-management mutation intents and route them to the session persistence owner | session CRUD or rollback command | owner-routed dispatch envelope or protocol rejection | CLI/WebUI/ADP transports | protocol boundary |  |  |  | bound |
-| 04b | `UiProtocolState::replace_session_turn_projections / preserve_live_activity_on_nonterminal_refresh / merge_tool_activity` | `crates/freehand-ui-protocol/src/lib.rs` | replace one session's effective transcript projection after persistence-owned rollback or selected-session refresh while preserving same-turn nonterminal live provider/tool activity and keeping terminal snapshots authoritative | session id plus effective turn projections | queryable session transcript excluding rolled-back turns and retaining active provider retry/tool-call observability until terminal truth | runtime.ui-command-dispatch | protocol state |  |  |  | bound |
+| 04b | `UiProtocolState::replace_session_turn_projections / preserve_live_activity_on_nonterminal_refresh / merge_tool_activity` | `crates/freehand-ui-protocol/src/lib.rs` | replace one session's effective transcript projection after persistence-owned rollback or selected-session refresh while preserving live provider-transport/tool activity only for the latest nonterminal replacement turn and keeping terminal snapshots authoritative | session id plus effective turn projections | queryable session transcript excluding rolled-back turns, retaining current latest provider transport retry/tool-call observability until terminal truth, and clearing stale live activity on historical rounds | runtime.ui-command-dispatch | protocol state |  |  |  | bound |
+| 04c | `session_list_projection / turn_is_nonterminal` | `crates/freehand-ui-protocol/src/lib.rs` | project persisted session summaries while allowing active turn identity only for the latest nonterminal live/progress turn | persisted session metadata plus turn projections plus latest protocol active turn id | session summary list where terminal latest turns remain visible but do not appear active | UiProtocolState::query | protocol state |  |  |  | bound |
 | 05 | `UiProtocolState::query` | `crates/freehand-ui-protocol/src/lib.rs` | execute read-only query path | query command | snapshot projection | protocol boundary | query handler |  |  |  | bound |
 | 06 | `UiProtocolState::subscribe` | `crates/freehand-ui-protocol/src/lib.rs` | expose the protocol-owned continuous subscription channel for app transports | none | UiSubscriptionEvent receiver | app/transport adapters | protocol state |  |  |  | bound |
 | 07 | `subscription_selector` | `crates/freehand-ui-protocol/src/lib.rs` | build read-only subscribe selector | subscribe command | subscription selector | protocol boundary | stream handler |  |  |  | bound |
@@ -247,7 +249,8 @@ Generated from `docs/mainline-calls/ui.protocol.json`. Do not edit by hand.
 - UI ingress versus truth-writer separation is now locked in the function map
 - minimal per-turn debug-state query/subscribe plus receiver-drain bridge are now bound in UiProtocolState
 - model request waiting projection is bound in UiProtocolState and clears on response/tool/usage/terminal/error projection
-- selected-session transcript replacement preserves same-turn nonterminal model_request and tool_activities already present in UiProtocolState, while terminal refresh drops stale live activity
+- selected-session transcript replacement preserves model_request and tool_activities already present in UiProtocolState only for the latest nonterminal replacement turn, while later-round or terminal refresh drops stale live activity
+- session list active_turn_id projection is latest-nonterminal-only so terminal latest turns do not make completed/failed/cancelled sessions look active
 - public turn projection is protocol-owned
 - terminal status is now preserved in UiTurnProjection and public conversation status mapping
 - tool activity status and result detail are now preserved in UiTurnProjection.tool_activities and public conversation status mapping

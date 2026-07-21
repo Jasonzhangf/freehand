@@ -1769,8 +1769,7 @@ fn sanitize_config_query_token(value: &str) -> String {
         .split_whitespace()
         .collect::<Vec<_>>()
         .join("_")
-        .replace(',', "_")
-        .replace(':', "_")
+        .replace([',', ':'], "_")
 }
 
 fn summarize_error_query_result(

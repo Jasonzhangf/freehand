@@ -391,27 +391,20 @@ pub(crate) fn base_live_context_segments_with_observer<F>(
 where
     F: FnMut(LiveContextSegmentBuildEvent) -> Result<(), RuntimeLiveBridgeError>,
 {
-    let mut segments = Vec::new();
-    segments.push(build_required_context_segment(
-        "completion-contract",
-        &mut observe,
-        || Ok(completion_contract_segment()),
-    )?);
-    segments.push(build_required_context_segment(
-        "control-status-contract",
-        &mut observe,
-        || Ok(control_status_contract_segment()),
-    )?);
-    segments.push(build_required_context_segment(
-        "runtime-tool-guidance",
-        &mut observe,
-        || Ok(tool_guidance_segment(role, configured_worker_set)),
-    )?);
-    segments.push(build_required_context_segment(
-        "instruction-capability",
-        &mut observe,
-        || instruction_capability_segment(runtime_home, cwd),
-    )?);
+    let mut segments = vec![
+        build_required_context_segment("completion-contract", &mut observe, || {
+            Ok(completion_contract_segment())
+        })?,
+        build_required_context_segment("control-status-contract", &mut observe, || {
+            Ok(control_status_contract_segment())
+        })?,
+        build_required_context_segment("runtime-tool-guidance", &mut observe, || {
+            Ok(tool_guidance_segment(role, configured_worker_set))
+        })?,
+        build_required_context_segment("instruction-capability", &mut observe, || {
+            instruction_capability_segment(runtime_home, cwd)
+        })?,
+    ];
     if let Some(segment) =
         build_optional_context_segment("task-space-snapshot", &mut observe, || {
             task_space_snapshot_segment(runtime_home, agent_id, role, configured_worker_set)

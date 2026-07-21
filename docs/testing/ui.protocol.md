@@ -54,6 +54,7 @@
   - completion-schema rejection retry projection marks a turn as `SchemaRetry` and carries only compact retry count plus field issue detail for UI rendering
   - tool-result continuation projection marks a turn as `ToolResultContinuation` so UI clients do not infer continuation waits from completed/failed tool cards
   - selected-session transcript refresh preserves same-turn nonterminal live-only provider/model waiting and tool activity projections already present in protocol state, while terminal refresh clears stale live waiting truth
+  - session list active identity is latest-nonterminal-only: a latest terminal turn keeps its terminal status/summary but cannot keep `UiSessionSummary.active_turn_id` populated, and a later nonterminal model wait can become active again
   - tool-call projection stays lifecycle-aware: requested tool calls remain `waiting` until a matching `ReasonReq05ToolResultReentry` marks the activity `completed`, or failed terminal truth marks still-waiting activities `failed`
   - tool display projection is attached to `UiToolActivity` from the `tool.display` parser owner and is preserved in public conversation tool summaries
   - terminal events preserve both terminal text and terminal status in UI projection
@@ -84,8 +85,9 @@
   - incremental turn projection updates from shared contracts
   - turn created-time projection through `TurnProjectionInput.created_at` into
     `UiTurnProjection.created_at`
-  - model request waiting projection, typed phase kind, timing-key stability, and response-clear behavior, including transient provider retry/failover activity that never becomes a permanent conversation error after recovery
-  - session transcript replacement preservation coverage for active provider retry/model waiting, active tool cards, and terminal refresh clearing stale live state
+  - model request waiting projection, typed phase kind, timing-key stability, and response-clear behavior, including transient provider retry/failover transport activity that never becomes a permanent conversation error or separate reasoning-flow phase after recovery
+  - session transcript replacement preservation coverage for active provider transport retry/model waiting, active tool cards, and terminal refresh clearing stale live state
+  - session summary projection coverage proves `active_turn_id` tracks only the latest nonterminal model/tool activity and clears for terminal latest turns instead of presenting completed work as still active
   - completion-schema mismatch waiting projection with `kind=SchemaRetry` and compact `schema polishing #N: issue` detail
   - tool activity projection from `ReasonReq04ToolCall` plus matching `ReasonReq05ToolResultReentry`
   - structured tool display projection from read/search/write/plan/shell/generic parser output
@@ -119,7 +121,7 @@
   - selected-session submit command smoke
   - selected-session cwd projection smoke
 - session metadata projection smoke covers created empty sessions, renamed sessions, archived sessions being hidden from the active list, and restored sessions becoming visible again
-- session list projection smoke covers top-level active/archived lists being metadata-only: created persisted sessions appear even when empty, turn-only sessions do not become global sessions, and internal `master-lifecycle-*`, `master-timer-*`, and `worker-task-*` sessions are absent while explicit `QuerySessionTurns` for those ids remains queryable
+- session list projection smoke covers top-level active/archived lists being metadata-only: created persisted sessions appear even when empty, turn-only sessions do not become global sessions, internal `master-lifecycle-*`, `master-timer-*`, and `worker-task-*` sessions are absent while explicit `QuerySessionTurns` for those ids remains queryable, and `active_turn_id` is present only for the latest nonterminal live/progress turn
   - command dispatch envelope owner-routing smoke
   - latest-turn subscribe, specific-turn query, stream-kind routing through protocol boundary
   - debug-state snapshot/query by `turn_id`
@@ -184,8 +186,9 @@
   - checkpoint summary projection/query is code-bound as read-only UI protocol state
   - protocol-owned continuous subscription channel landed
   - incremental turn projection update methods from shared contracts landed
-  - typed model request waiting projection is landed and regression-locked for normal thinking, schema retry, provider retry, and provider failover; tool-result continuation uses the same typed activity surface
-  - selected-session transcript refresh preserves active provider retry/model waiting and active tool activity cards through `replace_session_turn_projections`, and terminal refresh clearing stale live state is regression-locked
+  - typed model request waiting projection is landed and regression-locked for normal thinking, schema retry, and tool-result continuation; provider retry/failover are regression-locked as transport substate on the same model request activity
+  - selected-session transcript refresh preserves active provider transport retry/model waiting and active tool activity cards through `replace_session_turn_projections`, and terminal refresh clearing stale live state is regression-locked
+  - session list nonterminal-only active identity is regression-locked by `session_list_active_turn_id_tracks_only_nonterminal_turns`
   - minimal per-turn debug-state query/subscribe baseline landed
   - debug receiver-drain bridge from `debug.core` into protocol state landed
   - debug-state snapshot shape now comes from `freehand-debug`

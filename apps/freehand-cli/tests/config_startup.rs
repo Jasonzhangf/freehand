@@ -337,6 +337,7 @@ fn spawn_adp_sample_mock_server(kind: MockAdpSampleKind) -> (String, thread::Joi
                                                     "schema polishing #1: missing completion schema"
                                                         .to_owned(),
                                                 ),
+                                                transport: None,
                                             });
                                         }
                                         let mut second = turn;
@@ -2943,6 +2944,7 @@ fn master_autonomy_turn_projection(truth: &MockMasterWorkerAutonomyTruth) -> UiT
         },
         session_id: truth.session_id.clone(),
         turn_id: TurnId::new("cli-master-autonomy-turn"),
+        created_at: Some(1),
         cwd: Some("/tmp/cli-session".to_owned()),
         user_text: Some(truth.prompt.clone()),
         model_request: None,
@@ -3090,6 +3092,7 @@ fn test_turn_projection() -> UiTurnProjection {
         },
         session_id: SessionId::new("cli-session"),
         turn_id: TurnId::new("cli-adp-turn"),
+        created_at: Some(1),
         cwd: Some("/tmp/cli-session".to_owned()),
         user_text: Some("cli adp smoke".to_owned()),
         model_request: None,
@@ -3131,6 +3134,7 @@ fn test_sample_turn_projection(
                 "cli-adp-sample-turn"
             },
         ),
+        created_at: Some(1),
         cwd: Some("/tmp/cli-session".to_owned()),
         user_text: Some(prompt.to_owned()),
         model_request: None,
@@ -3189,8 +3193,8 @@ fn complete_single_response(visible_text: &str) -> String {
     )
 }
 
-fn tool_use_single_response() -> String {
-    r#"{"content":[{"type":"tool_use","id":"toolu_read_1","name":"read_file","input":{"path":"Cargo.toml","offset":0,"limit":2}}],"usage":{"input_tokens":20,"output_tokens":16},"stop_reason":"tool_use"}"#.to_owned()
+fn task_tool_use_single_response() -> String {
+    r#"{"content":[{"type":"tool_use","id":"toolu_task_1","name":"task","input":{"op":"list_tasks"}}],"usage":{"input_tokens":20,"output_tokens":16},"stop_reason":"tool_use"}"#.to_owned()
 }
 
 fn complete_stream_response(visible_text: &str) -> String {
@@ -4328,7 +4332,7 @@ fn cli_runs_reason_live_tool_call_mock_and_persists() {
     let (base_url, rx, handle) = spawn_sequence_server(
         "application/json",
         vec![
-            tool_use_single_response(),
+            task_tool_use_single_response(),
             complete_single_response("tool done"),
         ],
     );
@@ -4379,7 +4383,7 @@ provider = "minimonth"
         .arg("--agent")
         .arg("master")
         .arg("--prompt")
-        .arg("call read_file then finish")
+        .arg("list tasks with the task tool then finish")
         .arg("--session")
         .arg("cli-tool-session")
         .output()
@@ -4396,11 +4400,13 @@ provider = "minimonth"
     );
     let stdout = String::from_utf8(output.stdout).expect("stdout utf8");
     assert!(first_request.contains("\"tools\""));
-    assert!(first_request.contains("\"name\":\"read_file\""));
+    assert!(first_request.contains("\"name\":\"task\""));
+    assert!(first_request.contains("\"name\":\"timer\""));
+    assert!(!first_request.contains("\"name\":\"read_file\""));
     assert!(!first_request.contains("\"tool_choice\""));
     assert!(second_request.contains("\"type\":\"tool_result\""));
-    assert!(second_request.contains("toolu_read_1"));
-    assert!(second_request.contains("Cargo.toml"));
+    assert!(second_request.contains("toolu_task_1"));
+    assert!(!second_request.contains("Cargo.toml"));
     assert!(stdout.contains("text=tool done"));
     assert!(stdout.contains("rounds=2"));
     assert!(stdout.contains("tool_executions=1"));
@@ -4438,8 +4444,8 @@ fn cli_runs_reason_live_unsupported_provider_smoke() {
 [providers.mini27]
 id = "mini27"
 enabled = true
-type = "openai"
-protocol = "chat_completions"
+type = "anthropic"
+protocol = "responses"
 base_url = "http://127.0.0.1:1"
 default_model = "MiniMax-M2.7"
 
@@ -4480,7 +4486,9 @@ provider = "mini27"
 
     assert!(!output.status.success());
     let stderr = String::from_utf8(output.stderr).expect("stderr utf8");
-    assert!(stderr.contains("is not supported"));
+    assert!(stderr.contains(
+        "provider `mini27` protocol `responses` is invalid for provider type `anthropic`"
+    ));
 
     fs::remove_dir_all(home).expect("cleanup");
 }

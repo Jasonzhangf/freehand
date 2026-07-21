@@ -290,6 +290,29 @@ pub struct UiModelRequestActivity {
     #[serde(default)]
     pub kind: UiModelRequestKind,
     pub detail: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub transport: Option<UiModelTransportActivity>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct UiModelTransportActivity {
+    pub kind: UiModelTransportKind,
+    pub detail: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum UiModelTransportKind {
+    ProviderRetry,
+    ProviderFailover,
+}
+
+impl UiModelTransportKind {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            UiModelTransportKind::ProviderRetry => "provider_retry",
+            UiModelTransportKind::ProviderFailover => "provider_failover",
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -311,6 +334,7 @@ pub struct UiModelRequestWaiting {
     pub turn_id: TurnId,
     pub kind: UiModelRequestKind,
     pub detail: Option<String>,
+    pub transport: Option<UiModelTransportActivity>,
     pub slave_substream_card: bool,
 }
 
@@ -324,8 +348,6 @@ pub enum UiModelRequestKind {
     #[default]
     Thinking,
     SchemaRetry,
-    ProviderRetry,
-    ProviderFailover,
     ToolResultContinuation,
 }
 
@@ -334,8 +356,6 @@ impl UiModelRequestKind {
         match self {
             UiModelRequestKind::Thinking => "thinking",
             UiModelRequestKind::SchemaRetry => "schema_retry",
-            UiModelRequestKind::ProviderRetry => "provider_retry",
-            UiModelRequestKind::ProviderFailover => "provider_failover",
             UiModelRequestKind::ToolResultContinuation => "tool_result_continuation",
         }
     }
@@ -685,6 +705,8 @@ pub struct UiErrorCenterEventProjection {
     pub owner_target: String,
     pub repair_fields: Vec<String>,
     pub raw_hash: String,
+    #[serde(default)]
+    pub public_message: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -1257,6 +1279,11 @@ impl UiProtocolState {
         session_id: &SessionId,
         projections: impl IntoIterator<Item = UiTurnProjection>,
     ) {
+        let projections = projections.into_iter().collect::<Vec<_>>();
+        let live_preserve_turn_id = projections
+            .last()
+            .filter(|projection| turn_is_nonterminal(projection))
+            .map(|projection| projection.turn_id.clone());
         let existing = self
             .turns
             .values()
@@ -1267,7 +1294,9 @@ impl UiProtocolState {
             .retain(|_, projection| &projection.session_id != session_id);
         let mut latest_session_turn_id = None;
         for mut projection in projections {
-            if let Some(previous) = existing.get(&projection.turn_id) {
+            if live_preserve_turn_id.as_ref() == Some(&projection.turn_id)
+                && let Some(previous) = existing.get(&projection.turn_id)
+            {
                 preserve_live_activity_on_nonterminal_refresh(&mut projection, previous);
             }
             latest_session_turn_id = Some(projection.turn_id.clone());
@@ -1415,6 +1444,7 @@ impl UiProtocolState {
             turn_id: turn_id.clone(),
             kind: UiModelRequestKind::Thinking,
             detail,
+            transport: None,
             slave_substream_card,
         })
     }
@@ -1431,11 +1461,11 @@ impl UiProtocolState {
                 &waiting.turn_id,
                 waiting.slave_substream_card,
             );
-            projection.model_request = Some(UiModelRequestActivity {
-                status: UiModelRequestStatus::Waiting,
-                kind: waiting.kind,
-                detail: waiting.detail,
-            });
+            projection.model_request = Some(model_request_activity_from_waiting(
+                waiting.kind,
+                waiting.detail,
+                waiting.transport,
+            ));
             projection.clone()
         };
         self.latest_active_turn_id = Some(waiting.turn_id.clone());
@@ -1458,6 +1488,7 @@ impl UiProtocolState {
             turn_id: waiting.turn_id,
             kind: UiModelRequestKind::SchemaRetry,
             detail: Some(detail),
+            transport: None,
             slave_substream_card: waiting.slave_substream_card,
         })
     }
@@ -1746,6 +1777,19 @@ impl UiProtocolState {
             projection,
             latest_active_turn_id: self.latest_active_turn_id.clone(),
         });
+    }
+}
+
+fn model_request_activity_from_waiting(
+    kind: UiModelRequestKind,
+    detail: Option<String>,
+    transport: Option<UiModelTransportActivity>,
+) -> UiModelRequestActivity {
+    UiModelRequestActivity {
+        status: UiModelRequestStatus::Waiting,
+        kind,
+        detail,
+        transport,
     }
 }
 
@@ -2370,8 +2414,12 @@ fn session_list_projection(
             let active_turn_id = latest_active_turn_id.and_then(|turn_id| {
                 session_turns
                     .iter()
-                    .any(|turn| &turn.turn_id == turn_id)
-                    .then(|| turn_id.clone())
+                    .find(|turn| {
+                        &turn.turn_id == turn_id
+                            && latest.is_some_and(|latest| latest.turn_id == turn.turn_id)
+                            && turn_is_nonterminal(turn)
+                    })
+                    .map(|_| turn_id.clone())
             });
             let cwd = session_cwds
                 .get(&metadata.session_id)
@@ -2454,6 +2502,10 @@ fn session_latest_status(turn: &UiTurnProjection) -> String {
         return "active".to_owned();
     }
     "submitted".to_owned()
+}
+
+fn turn_is_nonterminal(turn: &UiTurnProjection) -> bool {
+    turn.terminal_status.is_none() && turn.terminal_text.is_none()
 }
 
 fn session_latest_summary(turn: &UiTurnProjection) -> Option<String> {
@@ -3769,6 +3821,104 @@ mod tests {
     }
 
     #[test]
+    fn session_list_active_turn_id_tracks_only_nonterminal_turns() {
+        let mut state = UiProtocolState::default();
+        let session_id = SessionId::new("session-active-terminal-filter");
+        let active_turn_id = TurnId::new("runtime-turn-1");
+        let terminal_turn_id = TurnId::new("runtime-turn-2");
+        let next_active_turn_id = TurnId::new("runtime-turn-3");
+        state.set_session_metadata(UiSessionMetadataProjection {
+            session_id: session_id.clone(),
+            title: Some("Active terminal filter".to_owned()),
+            archived: false,
+            cwd: None,
+        });
+
+        state.apply_model_request_waiting_kind(UiModelRequestWaiting {
+            source_agent_id: AgentId::new("agent-1"),
+            source_node_id: "node-1".to_owned(),
+            session_id: session_id.clone(),
+            turn_id: active_turn_id.clone(),
+            kind: UiModelRequestKind::Thinking,
+            detail: Some("Waiting for model response.".to_owned()),
+            transport: Some(UiModelTransportActivity {
+                kind: UiModelTransportKind::ProviderRetry,
+                detail: Some("provider retry 2/10".to_owned()),
+            }),
+            slave_substream_card: false,
+        });
+        match state.query(&UiCommand::QuerySessionList).expect("list") {
+            UiQueryResult::SessionList(list) => {
+                assert_eq!(
+                    list.sessions[0].active_turn_id.as_ref(),
+                    Some(&active_turn_id)
+                );
+            }
+            other => panic!("unexpected list result: {other:?}"),
+        }
+
+        state.replace_session_turn_projections(
+            &session_id,
+            vec![
+                active_refresh_projection(&session_id, &active_turn_id),
+                terminal_refresh_projection(
+                    &session_id,
+                    &terminal_turn_id,
+                    TerminalStatus::Success,
+                ),
+            ],
+        );
+        match state
+            .query(&UiCommand::QuerySessionTurns {
+                session_id: session_id.clone(),
+            })
+            .expect("transcript")
+        {
+            UiQueryResult::SessionTurns(transcript) => {
+                let stale_round = transcript
+                    .turns
+                    .iter()
+                    .find(|turn| turn.turn_id == active_turn_id)
+                    .expect("stale round");
+                assert_eq!(stale_round.model_request, None);
+            }
+            other => panic!("unexpected transcript result: {other:?}"),
+        }
+        match state.query(&UiCommand::QuerySessionList).expect("list") {
+            UiQueryResult::SessionList(list) => {
+                assert_eq!(
+                    list.sessions[0].latest_turn_id.as_ref(),
+                    Some(&terminal_turn_id)
+                );
+                assert_eq!(list.sessions[0].latest_status, "success");
+                assert_eq!(list.sessions[0].active_turn_id, None);
+            }
+            other => panic!("unexpected list result: {other:?}"),
+        }
+
+        state.apply_model_request_waiting_kind(UiModelRequestWaiting {
+            source_agent_id: AgentId::new("agent-1"),
+            source_node_id: "node-1".to_owned(),
+            session_id: session_id.clone(),
+            turn_id: next_active_turn_id.clone(),
+            kind: UiModelRequestKind::Thinking,
+            detail: Some("provider request built".to_owned()),
+            transport: None,
+            slave_substream_card: false,
+        });
+        match state.query(&UiCommand::QuerySessionList).expect("list") {
+            UiQueryResult::SessionList(list) => {
+                assert_eq!(
+                    list.sessions[0].active_turn_id.as_ref(),
+                    Some(&next_active_turn_id)
+                );
+                assert_eq!(list.sessions[0].latest_status, "waiting_model");
+            }
+            other => panic!("unexpected list result: {other:?}"),
+        }
+    }
+
+    #[test]
     fn tool_activity_waits_until_matching_result_reentry() {
         let mut projection = sample_turn_projection(false);
         projection.terminal_text = None;
@@ -4233,32 +4383,79 @@ mod tests {
         let mut state = UiProtocolState::default();
         let session_id = SessionId::new("session-provider-recovery");
         let turn_id = TurnId::new("turn-provider-recovery");
+        state.replace_session_turn_projections(
+            &session_id,
+            vec![active_refresh_projection(&session_id, &turn_id)],
+        );
 
-        let retrying = state.apply_model_request_waiting_kind(UiModelRequestWaiting {
-            source_agent_id: AgentId::new("agent-1"),
-            source_node_id: "node-1".to_owned(),
-            session_id: session_id.clone(),
-            turn_id: turn_id.clone(),
-            kind: UiModelRequestKind::ProviderRetry,
-            detail: Some("provider request retry 2/10".to_owned()),
-            slave_substream_card: false,
-        });
+        let retrying = (1..=3)
+            .map(|retry_index| {
+                state.apply_model_request_waiting_kind(UiModelRequestWaiting {
+                    source_agent_id: AgentId::new("agent-1"),
+                    source_node_id: "node-1".to_owned(),
+                    session_id: session_id.clone(),
+                    turn_id: turn_id.clone(),
+                    kind: UiModelRequestKind::Thinking,
+                    detail: Some("Waiting for model response.".to_owned()),
+                    transport: Some(UiModelTransportActivity {
+                        kind: UiModelTransportKind::ProviderRetry,
+                        detail: Some(format!("provider request retry {retry_index}/10")),
+                    }),
+                    slave_substream_card: false,
+                })
+            })
+            .last()
+            .expect("provider retry projection");
         assert_eq!(
             retrying
                 .model_request
                 .as_ref()
                 .map(|activity| activity.kind),
-            Some(UiModelRequestKind::ProviderRetry)
+            Some(UiModelRequestKind::Thinking)
         );
+        let retry_transport = retrying
+            .model_request
+            .as_ref()
+            .and_then(|activity| activity.transport.as_ref())
+            .expect("provider retry transport activity");
+        assert_eq!(retry_transport.kind, UiModelTransportKind::ProviderRetry);
+        assert_eq!(
+            retry_transport.detail.as_deref(),
+            Some("provider request retry 3/10")
+        );
+        assert_eq!(retrying.user_text.as_deref(), Some("run active work"));
         assert!(retrying.errors.is_empty());
+        match state
+            .query(&UiCommand::QuerySessionTurns {
+                session_id: session_id.clone(),
+            })
+            .expect("provider retry transcript")
+        {
+            UiQueryResult::SessionTurns(transcript) => {
+                assert_eq!(transcript.turns.len(), 1);
+                let public_items = public_conversation_items(&transcript.turns[0]);
+                assert_eq!(
+                    public_items
+                        .iter()
+                        .filter(|item| item.kind == UiConversationItemKind::UserText)
+                        .count(),
+                    1
+                );
+            }
+            other => panic!("unexpected transcript query: {other:?}"),
+        }
 
         let failover = state.apply_model_request_waiting_kind(UiModelRequestWaiting {
             source_agent_id: AgentId::new("agent-1"),
             source_node_id: "node-1".to_owned(),
             session_id: session_id.clone(),
             turn_id: turn_id.clone(),
-            kind: UiModelRequestKind::ProviderFailover,
-            detail: Some("provider route switched to fallback".to_owned()),
+            kind: UiModelRequestKind::Thinking,
+            detail: Some("Waiting for model response.".to_owned()),
+            transport: Some(UiModelTransportActivity {
+                kind: UiModelTransportKind::ProviderFailover,
+                detail: Some("provider route switched to fallback".to_owned()),
+            }),
             slave_substream_card: false,
         });
         assert_eq!(
@@ -4266,7 +4463,15 @@ mod tests {
                 .model_request
                 .as_ref()
                 .map(|activity| activity.kind),
-            Some(UiModelRequestKind::ProviderFailover)
+            Some(UiModelRequestKind::Thinking)
+        );
+        assert_eq!(
+            failover
+                .model_request
+                .as_ref()
+                .and_then(|activity| activity.transport.as_ref())
+                .map(|transport| transport.kind),
+            Some(UiModelTransportKind::ProviderFailover)
         );
         assert!(failover.errors.is_empty());
 
@@ -4299,8 +4504,12 @@ mod tests {
             source_node_id: "node-1".to_owned(),
             session_id: session_id.clone(),
             turn_id: turn_id.clone(),
-            kind: UiModelRequestKind::ProviderRetry,
-            detail: Some("provider retry 6/10".to_owned()),
+            kind: UiModelRequestKind::Thinking,
+            detail: Some("Waiting for model response.".to_owned()),
+            transport: Some(UiModelTransportActivity {
+                kind: UiModelTransportKind::ProviderRetry,
+                detail: Some("provider retry 6/10".to_owned()),
+            }),
             slave_substream_card: false,
         });
         state.replace_session_turn_projections(
@@ -4320,8 +4529,13 @@ mod tests {
                     .model_request
                     .as_ref()
                     .expect("active provider activity must survive refresh");
-                assert_eq!(activity.kind, UiModelRequestKind::ProviderRetry);
-                assert_eq!(activity.detail.as_deref(), Some("provider retry 6/10"));
+                assert_eq!(activity.kind, UiModelRequestKind::Thinking);
+                let transport = activity
+                    .transport
+                    .as_ref()
+                    .expect("active provider retry transport survives refresh");
+                assert_eq!(transport.kind, UiModelTransportKind::ProviderRetry);
+                assert_eq!(transport.detail.as_deref(), Some("provider retry 6/10"));
             }
             other => panic!("unexpected transcript query: {other:?}"),
         }
@@ -4381,8 +4595,12 @@ mod tests {
             source_node_id: "node-1".to_owned(),
             session_id: session_id.clone(),
             turn_id: turn_id.clone(),
-            kind: UiModelRequestKind::ProviderRetry,
-            detail: Some("provider retry 9/10".to_owned()),
+            kind: UiModelRequestKind::Thinking,
+            detail: Some("Waiting for model response.".to_owned()),
+            transport: Some(UiModelTransportActivity {
+                kind: UiModelTransportKind::ProviderRetry,
+                detail: Some("provider retry 9/10".to_owned()),
+            }),
             slave_substream_card: false,
         });
         state.replace_session_turn_projections(

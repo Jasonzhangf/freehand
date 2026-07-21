@@ -1941,6 +1941,9 @@ mod tests {
         assert!(js_body.contains("function cycleCardFromChatCards"));
         assert!(js_body.contains("function cycleCardKey"));
         assert!(js_body.contains("function cycleCardKeyFromNode"));
+        assert!(js_body.contains("function sessionLiveObservation"));
+        assert!(js_body.contains("function globalLiveSessionObservation"));
+        assert!(js_body.contains("function liveObservationLine"));
         assert!(js_body.contains("function cycleCardMetaForTimelineItem"));
         assert!(js_body.contains("function cycleCardIsTerminal"));
         assert!(js_body.contains("function pendingSubmitTimelineIndex"));
@@ -1992,6 +1995,9 @@ mod tests {
         assert!(js_body.contains("state.sessionTurns = logicalSessionTurns"));
         assert!(js_body.contains("sameRenderableTurn(existing, state.turn)"));
         assert!(js_body.contains("sameRenderableTurn(turn, latestTurn)"));
+        assert!(js_body.contains("const leftSessionId = `${left.session_id || \"\"}`.trim();"));
+        assert!(js_body.contains("const rightSessionId = `${right.session_id || \"\"}`.trim();"));
+        assert!(js_body.contains("return !!leftSessionId && leftSessionId === rightSessionId;"));
         assert!(!js_body.contains("existing.turn_id === state.turn.turn_id"));
         assert!(js_body.contains("function renderModelHasLiveLifecycle"));
         assert!(js_body.contains("function turnIsCurrentLiveTurn"));
@@ -2012,6 +2018,11 @@ mod tests {
         assert!(js_body.contains("article.dataset.submitId"));
         assert!(js_body.contains("article.dataset.terminal = \"true\""));
         assert!(js_body.contains("article.dataset.frozen = \"true\""));
+        assert!(js_body.contains("if (kind === \"turn\" && turnId)"));
+        assert!(js_body.contains("return `turn:${sessionId}:${turnId}`"));
+        assert!(js_body.contains("sessionRelationHeader.dataset.liveSessionId"));
+        assert!(js_body.contains("sessionRelationHeader.dataset.liveTurnId"));
+        assert!(js_body.contains("active · ${observation.label}"));
         assert!(js_body.contains("if (existing && existing.dataset.frozen === \"true\")"));
         assert!(js_body.contains("return `submit:${sessionId}:${submitId}`"));
         assert!(js_body.contains("state.renderedCycleSessionId"));
@@ -2111,11 +2122,11 @@ mod tests {
         assert!(js_body.contains("logicalSessionTurns(state.sessionTurns)"));
         assert!(js_body.contains("stripFreehandCompletionBlock"));
         assert!(js_body.contains("stripped.includes(\"</freehand_completion>\")"));
-        assert!(js_body.contains("const leftInternal = isInternalRuntimePrompt(left);"));
-        assert!(js_body.contains(
+        assert!(!js_body.contains(
             "left.session_id && right.session_id && left.session_id !== right.session_id"
         ));
-        assert!(js_body.contains("return leftInternal && rightInternal;"));
+        assert!(!js_body.contains("normalizeVisibleText(left.user_text)"));
+        assert!(!js_body.contains("normalizeVisibleText(right.user_text)"));
         assert!(js_body.contains("terminalBodyForDisplay"));
         assert!(js_body.contains("terminalSummaryBlock"));
         assert!(!js_body.contains("function terminalSummaryLine"));
@@ -2142,13 +2153,20 @@ mod tests {
         assert!(js_body.contains("function modelRequestPhase"));
         assert!(js_body.contains("phase: modelRequestPhase(turn)"));
         assert!(js_body.contains("modelRequestLabel"));
+        assert!(js_body.contains("function modelRequestTransport"));
+        assert!(js_body.contains("function modelRequestTransportPhase"));
+        assert!(js_body.contains("function modelRequestTransportLabel"));
+        assert!(!js_body.contains("function modelRequestKindIsLegacyTransport"));
         assert!(js_body.contains("turnIsWaitingForModelResponse"));
         assert!(js_body.contains("schema polishing"));
         assert!(js_body.contains("thinking after tool result"));
-        assert!(js_body.contains("provider retry"));
-        assert!(js_body.contains("provider failover"));
-        assert!(js_body.contains("provider_retry"));
-        assert!(js_body.contains("provider_failover"));
+        assert!(js_body.contains("transport retry"));
+        assert!(js_body.contains("transport switch"));
+        assert!(js_body.contains("return \"provider_retry\";"));
+        assert!(js_body.contains("return \"provider_failover\";"));
+        assert!(!js_body.contains("return \"provider retry\";"));
+        assert!(!js_body.contains("return \"provider failover\";"));
+        assert!(!js_body.contains("label.startsWith(\"provider \")"));
         assert!(!js_body.contains("turnIsWaitingForModel("));
         assert!(js_body.contains("rememberInputHistory"));
         assert!(js_body.contains("recallInputHistory"));

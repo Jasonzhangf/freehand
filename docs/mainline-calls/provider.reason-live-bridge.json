@@ -25,7 +25,7 @@
     "`reason.turn` may start multiple rounds under one logical live request when completion schema says `continue` or when schema rejection requires same-task retry",
     "provider semantic request is built from each round's turn-owned provider payload",
     "retryable non-stream HTTP/network failure retries on the primary route; after primary exhaustion, or immediately for failover-eligible non-retryable HTTP status such as 402, the bridge switches once to the configured fallback at the provider-neutral semantic request boundary",
-    "actual retry and fallback-switch progress is projected as typed transient model-request activity on the same turn before the bridge sleeps, retries, or enters the fallback route; a later provider semantic response replaces it, while retry/error-center evidence remains outside public conversation truth",
+    "actual retry and fallback-switch progress is projected as transient model-request transport substate on the same turn before the bridge sleeps, retries, or enters the fallback route; a later provider semantic response replaces it, while retry/error-center evidence remains outside public conversation truth",
     "runtime writes provider-request lifecycle metadata without request payload text before executor IO",
     "runtime emits provider-request lifecycle debug snapshots through `debug.core` without provider payload text",
     "the first master tool-capable request exposes the Reasonix-aligned master-safe registry subset through provider-neutral request metadata",

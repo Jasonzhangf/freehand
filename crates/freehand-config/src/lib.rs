@@ -1354,13 +1354,13 @@ fn validate_remote_daemon_bootstrap_bundle(
             reason: "expiresAtUnix must be after exportedAtUnix".to_owned(),
         });
     }
-    if let Some(now_unix) = now_unix {
-        if bundle.expires_at_unix <= now_unix {
-            return Err(ConfigError::RemoteDaemonBootstrapExpired {
-                expires_at_unix: bundle.expires_at_unix,
-                now_unix,
-            });
-        }
+    if let Some(now_unix) = now_unix
+        && bundle.expires_at_unix <= now_unix
+    {
+        return Err(ConfigError::RemoteDaemonBootstrapExpired {
+            expires_at_unix: bundle.expires_at_unix,
+            now_unix,
+        });
     }
     if bundle.nonce.trim().is_empty() {
         return Err(ConfigError::InvalidRemoteDaemonBootstrap {

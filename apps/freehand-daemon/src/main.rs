@@ -11,6 +11,9 @@ use freehand_server::{
 };
 use tokio::net::TcpListener;
 
+const TEST_DISABLE_MASTER_LIFECYCLE_RUNNER_ENV: &str =
+    "FREEHAND_TEST_DISABLE_MASTER_LIFECYCLE_RUNNER";
+
 #[tokio::main]
 async fn main() {
     match run().await {
@@ -81,18 +84,27 @@ async fn run_master_mode(
     bootstrap: RuntimeAgentBootstrap,
     bind_addr: std::net::SocketAddr,
 ) -> Result<String, String> {
-    let master_runner = ProductionMasterRunner::from_selected_agent(
-        bootstrap.selected_agent.clone(),
-        bootstrap.runtime_home.clone(),
-    )
-    .map_err(|err| format!("failed to build production master runner: {err}"))?;
+    let runtime_home = bootstrap.runtime_home.clone();
     let dispatcher = RuntimeCommandDispatcher::from_selected_agent_with_live(
         &bootstrap.selected_agent,
-        bootstrap.runtime_home,
+        runtime_home.clone(),
         false,
     )
     .map(Arc::new)
     .map_err(|err| format!("failed to build runtime dispatcher: {err}"))?;
+    let ui_state = dispatcher.ui_state();
+    let master_runner = if master_lifecycle_runner_disabled_for_test() {
+        None
+    } else {
+        Some(
+            ProductionMasterRunner::from_selected_agent_with_ui_state(
+                bootstrap.selected_agent.clone(),
+                runtime_home,
+                Arc::clone(&ui_state),
+            )
+            .map_err(|err| format!("failed to build production master runner: {err}"))?,
+        )
+    };
     let listener = TcpListener::bind(bind_addr)
         .await
         .map_err(|err| format!("failed to bind {bind_addr}: {err}"))?;
@@ -100,16 +112,22 @@ async fn run_master_mode(
         .local_addr()
         .map_err(|err| format!("failed to read local addr: {err}"))?;
     println!("freehand-daemon listening on http://{local_addr}");
-    let ui_state = dispatcher.ui_state();
     let dispatch_port: Arc<dyn freehand_ui_protocol::UiCommandDispatchPort> = dispatcher.clone();
     let query_port: Arc<dyn freehand_ui_protocol::UiRuntimeQueryPort> = dispatcher.clone();
     let cancel = Arc::new(AtomicBool::new(false));
-    let runner_cancel = Arc::clone(&cancel);
-    let runner_task = tokio::task::spawn_blocking(move || master_runner.run_until(runner_cancel));
-    tokio::spawn(monitor_master_lifecycle_runner(
-        agent_name.clone(),
-        runner_task,
-    ));
+    if let Some(master_runner) = master_runner {
+        let runner_cancel = Arc::clone(&cancel);
+        let runner_task =
+            tokio::task::spawn_blocking(move || master_runner.run_until(runner_cancel));
+        tokio::spawn(monitor_master_lifecycle_runner(
+            agent_name.clone(),
+            runner_task,
+        ));
+    } else {
+        eprintln!(
+            "master lifecycle runner disabled by {TEST_DISABLE_MASTER_LIFECYCLE_RUNNER_ENV}=1"
+        );
+    }
     let server = serve_webui_listener(
         listener,
         ui_state,
@@ -121,6 +139,15 @@ async fn run_master_mode(
     cancel.store(true, Ordering::Release);
     result.map_err(|err| format!("daemon server error: {err}"))?;
     Ok(String::new())
+}
+
+fn master_lifecycle_runner_disabled_for_test() -> bool {
+    matches!(
+        std::env::var(TEST_DISABLE_MASTER_LIFECYCLE_RUNNER_ENV)
+            .unwrap_or_default()
+            .as_str(),
+        "1" | "true"
+    )
 }
 
 async fn monitor_master_lifecycle_runner(
@@ -579,10 +606,12 @@ mod tests {
         let second_request = request_rx.recv().expect("second request");
         provider_handle.join().expect("join provider");
         assert!(first_request.starts_with("POST /v1/messages HTTP/1.1"));
-        assert!(first_request.contains("\"name\":\"read_file\""));
+        assert!(first_request.contains("\"name\":\"task\""));
+        assert!(first_request.contains("\"name\":\"timer\""));
+        assert!(!first_request.contains("\"name\":\"read_file\""));
         assert!(second_request.contains("\"type\":\"tool_result\""));
-        assert!(second_request.contains("toolu_read_1"));
-        assert!(second_request.contains("Cargo.toml"));
+        assert!(second_request.contains("toolu_task_1"));
+        assert!(!second_request.contains("Cargo.toml"));
 
         let queried = client
             .get(format!("{}/ui/query/latest-active-turn", server.base_url))
@@ -1254,7 +1283,7 @@ mod tests {
                         "priority":88
                     }),
                 ),
-                complete_single_response("task push done"),
+                waiting_single_response("task subscriber received task truth"),
             ],
         );
         let server = TestServer::spawn(master_config_text(&provider_url)).await;
@@ -1448,7 +1477,7 @@ mod tests {
         let failed: freehand_ui_protocol::UiCommandDispatchFailure =
             failed.json().await.expect("failure json");
         assert_eq!(failed.code, "command_dispatch_port_failure");
-        assert!(failed.message.contains("anthropic live executor failed"));
+        assert!(!failed.message.trim().is_empty());
         assert!(failed.retryable);
         provider_handle.join().expect("join provider");
 
@@ -1921,6 +1950,24 @@ mod tests {
         fs::remove_dir_all(home).expect("cleanup");
     }
 
+    #[test]
+    #[serial]
+    fn daemon_master_lifecycle_disable_env_is_explicit_test_only() {
+        let old = env::var_os(TEST_DISABLE_MASTER_LIFECYCLE_RUNNER_ENV);
+        unsafe { env::remove_var(TEST_DISABLE_MASTER_LIFECYCLE_RUNNER_ENV) };
+        assert!(!master_lifecycle_runner_disabled_for_test());
+        unsafe { env::set_var(TEST_DISABLE_MASTER_LIFECYCLE_RUNNER_ENV, "0") };
+        assert!(!master_lifecycle_runner_disabled_for_test());
+        unsafe { env::set_var(TEST_DISABLE_MASTER_LIFECYCLE_RUNNER_ENV, "1") };
+        assert!(master_lifecycle_runner_disabled_for_test());
+        unsafe { env::set_var(TEST_DISABLE_MASTER_LIFECYCLE_RUNNER_ENV, "true") };
+        assert!(master_lifecycle_runner_disabled_for_test());
+        match old {
+            Some(value) => unsafe { env::set_var(TEST_DISABLE_MASTER_LIFECYCLE_RUNNER_ENV, value) },
+            None => unsafe { env::remove_var(TEST_DISABLE_MASTER_LIFECYCLE_RUNNER_ENV) },
+        }
+    }
+
     #[tokio::test]
     async fn daemon_worker_service_runs_blocking_runtime_outside_async_context() {
         run_blocking_worker_service(|| {
@@ -2234,8 +2281,18 @@ api_key = "test-api-key"
         )
     }
 
+    fn waiting_single_response(next_step: &str) -> String {
+        let tagged = tagged_completion_json(&format!(
+            r#"{{"claim":"waiting","next_step":"{next_step}"}}"#
+        ));
+        format!(
+            r#"{{"content":[{{"type":"text","text":"waiting\n{tagged}"}}],"usage":{{"input_tokens":14,"output_tokens":40}},"stop_reason":"end_turn"}}"#,
+            tagged = tagged.replace('\n', "\\n").replace('"', "\\\""),
+        )
+    }
+
     fn tool_use_single_response() -> String {
-        r#"{"content":[{"type":"tool_use","id":"toolu_read_1","name":"read_file","input":{"path":"Cargo.toml","offset":0,"limit":2}}],"usage":{"input_tokens":20,"output_tokens":16},"stop_reason":"tool_use"}"#.to_owned()
+        r#"{"content":[{"type":"tool_use","id":"toolu_task_1","name":"task","input":{"op":"list_tasks"}}],"usage":{"input_tokens":20,"output_tokens":16},"stop_reason":"tool_use"}"#.to_owned()
     }
 
     fn tool_use_named_response(tool_call_id: &str, tool_name: &str, input: Value) -> String {

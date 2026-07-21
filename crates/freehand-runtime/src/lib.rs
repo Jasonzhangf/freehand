@@ -142,13 +142,14 @@ use freehand_ui_protocol::{
     UiCommandDispatchReceipt, UiCompletionSchemaRetryWaiting, UiConfigPeerProjection,
     UiConfigStatusProjection, UiErrorCenterEventListProjection, UiErrorCenterEventProjection,
     UiExecutionFactCommand, UiExecutionFactKind, UiMasterPollClassificationProjection,
-    UiMasterPollProjection, UiModelRequestKind, UiModelRequestWaiting, UiProtocolState,
-    UiProviderConfigSummaryProjection, UiProviderConfigUpdate, UiQueryResult, UiRuntimeQueryPort,
-    UiSchedulerTickCommand, UiSessionMetadataProjection, UiTaskAgentCreateCommand,
-    UiTaskAssignCommand, UiTaskBoardProjection, UiTaskClaimCommand, UiTaskCreateCommand,
-    UiTaskDispatchCommand, UiTaskEventInboxEntryProjection, UiTaskEventInboxProjection,
-    UiTaskHistoryProjection, UiTaskLedgerEventProjection, UiTaskListProjection,
-    UiTaskReviewCommand, UiTaskReviewRejectionCommand, UiTaskSnapshotProjection, UiTurnProjection,
+    UiMasterPollProjection, UiModelRequestKind, UiModelRequestWaiting, UiModelTransportActivity,
+    UiModelTransportKind, UiProtocolState, UiProviderConfigSummaryProjection,
+    UiProviderConfigUpdate, UiQueryResult, UiRuntimeQueryPort, UiSchedulerTickCommand,
+    UiSessionMetadataProjection, UiTaskAgentCreateCommand, UiTaskAssignCommand,
+    UiTaskBoardProjection, UiTaskClaimCommand, UiTaskCreateCommand, UiTaskDispatchCommand,
+    UiTaskEventInboxEntryProjection, UiTaskEventInboxProjection, UiTaskHistoryProjection,
+    UiTaskLedgerEventProjection, UiTaskListProjection, UiTaskReviewCommand,
+    UiTaskReviewRejectionCommand, UiTaskSnapshotProjection, UiTurnProjection,
     UiWorkerControlCommand, UiWorkerControlEventProjection, UiWorkerControlProjection,
     checkpoint_projection_from_runtime_summary, turn_projection_for_client,
     turn_projection_from_events,
@@ -417,6 +418,30 @@ pub(crate) fn run_master_lifecycle_reason_turn(
         |_| {},
         |_| {},
         |_| {},
+    )
+}
+
+pub(crate) fn run_master_lifecycle_reason_turn_with_hooks<FB, FD, FT>(
+    selected: &SelectedAgentConfig,
+    request: LiveReasonTurnRequest,
+    decision_boundary: LiveReasonTaskDecisionBoundary,
+    on_broadcast: FB,
+    on_debug: FD,
+    on_task_list_projection: FT,
+) -> Result<LiveReasonTurnOutcome, RuntimeLiveBridgeError>
+where
+    FB: FnMut(&ReasonBroadcastEvent),
+    FD: FnMut(&DebugEvent),
+    FT: FnMut(&UiTaskListProjection),
+{
+    run_live_reason_turn_with_policy(
+        selected,
+        request,
+        LiveReasonExecutionRole::Master,
+        Some(decision_boundary),
+        on_broadcast,
+        on_debug,
+        on_task_list_projection,
     )
 }
 
@@ -827,6 +852,15 @@ where
         },
     );
     drain_debug_events(&debug_receiver, &mut on_debug);
+    let context_record_scope = LiveContextSegmentRecordScope {
+        metadata_center: &metadata_center,
+        debug_hub: &debug_hub,
+        debug_receiver: &debug_receiver,
+        agent_id: &agent_id,
+        session_id: &request.session_id,
+        turn_id: &first_round_turn_id,
+        trace_id: &first_round_trace_id,
+    };
     let mut carryover_segments = base_live_context_segments_with_observer(
         &request.prompt,
         role,
@@ -835,17 +869,7 @@ where
         request.cwd.as_deref(),
         &agent_id,
         |event| {
-            record_live_context_segment_build_event(
-                &metadata_center,
-                &debug_hub,
-                &debug_receiver,
-                &mut on_debug,
-                &agent_id,
-                &request.session_id,
-                &first_round_turn_id,
-                &first_round_trace_id,
-                event,
-            )
+            record_live_context_segment_build_event(&context_record_scope, &mut on_debug, event)
         },
     )?;
     let context_segment_count = carryover_segments.len();
@@ -1362,6 +1386,7 @@ where
                             turns.push(turn);
                             return Err(mapped);
                         }
+                        let retry_backoff = retry_plan.backoff_duration(retry_index);
                         emit_provider_retry_debug(
                             &debug_hub,
                             &agent_id,
@@ -1370,10 +1395,11 @@ where
                             &info,
                             retry_index,
                             retry_plan.cap,
+                            retry_backoff,
                         );
                         drain_debug_events(&debug_receiver, &mut on_debug);
                         ensure_live_not_cancelled(&request)?;
-                        sleep_provider_retry(&request, retry_plan.backoff_duration(retry_index))?;
+                        sleep_provider_retry(&request, retry_backoff)?;
                     }
                 }
             };
@@ -3021,7 +3047,14 @@ impl RuntimeCommandDispatcher {
                     })
                     .collect::<Vec<_>>();
                 let mut ui = self.ui_state.lock().expect("lock ui state");
-                ui.replace_session_turn_projections(session_id, projections);
+                apply_error_center_live_activity_to_session_projections(
+                    &live.runtime_home,
+                    &source_agent_id,
+                    &source_node_id,
+                    session_id,
+                    &mut ui,
+                    projections,
+                )?;
                 ui.query(command)
                     .map(Some)
                     .map_err(|error| UiCommandDispatchPortError::DispatchFailed(error.to_string()))
@@ -5592,6 +5625,161 @@ fn query_error_center_events_for_ui(
     })
 }
 
+fn apply_error_center_live_activity_to_session_projections(
+    runtime_home: &Path,
+    source_agent_id: &AgentId,
+    source_node_id: &str,
+    session_id: &SessionId,
+    ui: &mut UiProtocolState,
+    projections: Vec<UiTurnProjection>,
+) -> Result<(), UiCommandDispatchPortError> {
+    let recovered_waiting = error_center_live_activity_waitings(
+        runtime_home,
+        source_agent_id,
+        source_node_id,
+        session_id,
+        &projections,
+    )
+    .map_err(|error| UiCommandDispatchPortError::DispatchFailed(error.to_string()))?;
+    ui.replace_session_turn_projections(session_id, projections);
+    if recovered_waiting.is_empty() {
+        return Ok(());
+    }
+    let eligible_turn_ids = match ui
+        .query(&UiCommand::QuerySessionTurns {
+            session_id: session_id.clone(),
+        })
+        .map_err(|error| UiCommandDispatchPortError::DispatchFailed(error.to_string()))?
+    {
+        UiQueryResult::SessionTurns(transcript) => transcript
+            .turns
+            .into_iter()
+            .filter(|turn| {
+                turn.model_request.is_none()
+                    && turn.terminal_status.is_none()
+                    && turn.terminal_text.is_none()
+            })
+            .map(|turn| turn.turn_id)
+            .collect::<Vec<_>>(),
+        _ => Vec::new(),
+    };
+    for waiting in recovered_waiting {
+        if eligible_turn_ids.contains(&waiting.turn_id) {
+            ui.apply_model_request_waiting_kind(waiting);
+        }
+    }
+    Ok(())
+}
+
+fn error_center_live_activity_waitings(
+    runtime_home: &Path,
+    source_agent_id: &AgentId,
+    source_node_id: &str,
+    session_id: &SessionId,
+    projections: &[UiTurnProjection],
+) -> Result<Vec<UiModelRequestWaiting>, MetadataError> {
+    let error_events = query_error_center_events_for_ui(
+        runtime_home,
+        source_agent_id,
+        session_id,
+        None,
+        None,
+        None,
+    )?;
+    let mut waitings = Vec::new();
+    let Some(projection) = projections.last() else {
+        return Ok(waitings);
+    };
+    if projection.model_request.is_some()
+        || projection.terminal_status.is_some()
+        || projection.terminal_text.is_some()
+    {
+        return Ok(waitings);
+    }
+    let Some(waiting_activity) = error_events
+        .events
+        .iter()
+        .filter(|event| event.turn_id.as_ref() == Some(&projection.turn_id))
+        .filter_map(error_center_model_waiting_activity)
+        .next_back()
+    else {
+        return Ok(waitings);
+    };
+    waitings.push(UiModelRequestWaiting {
+        source_agent_id: source_agent_id.clone(),
+        source_node_id: source_node_id.to_owned(),
+        session_id: session_id.clone(),
+        turn_id: projection.turn_id.clone(),
+        kind: waiting_activity.kind,
+        detail: waiting_activity.detail,
+        transport: waiting_activity.transport,
+        slave_substream_card: projection.slave_substream_card,
+    });
+    Ok(waitings)
+}
+
+struct ErrorCenterModelWaitingActivity {
+    kind: UiModelRequestKind,
+    detail: Option<String>,
+    transport: Option<UiModelTransportActivity>,
+}
+
+fn error_center_model_waiting_activity(
+    event: &UiErrorCenterEventProjection,
+) -> Option<ErrorCenterModelWaitingActivity> {
+    match (event.domain.as_str(), event.recovery_action.as_str()) {
+        ("provider", "retry_same_step") => Some(ErrorCenterModelWaitingActivity {
+            kind: UiModelRequestKind::Thinking,
+            detail: Some("Waiting for model response.".to_owned()),
+            transport: Some(UiModelTransportActivity {
+                kind: UiModelTransportKind::ProviderRetry,
+                detail: Some(error_center_provider_retry_detail(event)),
+            }),
+        }),
+        ("provider", "failover_provider") => Some(ErrorCenterModelWaitingActivity {
+            kind: UiModelRequestKind::Thinking,
+            detail: Some("Waiting for model response.".to_owned()),
+            transport: Some(UiModelTransportActivity {
+                kind: UiModelTransportKind::ProviderFailover,
+                detail: Some(format!(
+                    "provider failover after {} at {}/{}",
+                    event.code, event.retry_index, event.retry_cap
+                )),
+            }),
+        }),
+        ("schema", "repair_schema") => Some(ErrorCenterModelWaitingActivity {
+            kind: UiModelRequestKind::SchemaRetry,
+            detail: Some(schema_error_center_waiting_detail(event)),
+            transport: None,
+        }),
+        _ => None,
+    }
+}
+
+fn error_center_provider_retry_detail(event: &UiErrorCenterEventProjection) -> String {
+    let base = format!(
+        "provider retry {}/{}: {}",
+        event.retry_index, event.retry_cap, event.code
+    );
+    match event
+        .public_message
+        .as_deref()
+        .filter(|message| !message.is_empty())
+    {
+        Some(message) => format!("{base}; error: {message}; raw_hash={}", event.raw_hash),
+        None => format!("{base}; raw_hash={}", event.raw_hash),
+    }
+}
+
+fn schema_error_center_waiting_detail(event: &UiErrorCenterEventProjection) -> String {
+    let fields = if event.repair_fields.is_empty() {
+        event.code.clone()
+    } else {
+        event.repair_fields.join(", ")
+    };
+    format!("schema polishing #{}: {}", event.retry_index, fields)
+}
+
 fn project_error_center_event_for_ui(
     record: &MetadataEnvelope,
 ) -> Option<UiErrorCenterEventProjection> {
@@ -5617,6 +5805,7 @@ fn project_error_center_event_for_ui(
         owner_target: metadata_entry_string(record, "error.owner_target")?,
         repair_fields: metadata_entry_string_array(record, "error.repair_fields")?,
         raw_hash: metadata_entry_string(record, "error.raw_hash")?,
+        public_message: metadata_entry_string(record, "error.public_message"),
     })
 }
 
@@ -5964,6 +6153,10 @@ fn write_error_center_metadata(
                 key: "error.raw_hash".to_owned(),
                 value: json!(fnv1a_hex(&spec.observed.message)),
             },
+            MetadataEntry {
+                key: "error.public_message".to_owned(),
+                value: json!(public_error_center_message(&spec.observed.message)),
+            },
         ],
     )
     .map_err(|err: MetadataError| RuntimeLiveBridgeError::MetadataFailed(err.to_string()))?;
@@ -6059,15 +6252,19 @@ fn emit_live_bridge_debug(
     let _ = debug_hub.emit(event);
 }
 
+struct LiveContextSegmentRecordScope<'a> {
+    metadata_center: &'a Arc<Mutex<MetadataCenter>>,
+    debug_hub: &'a DebugHub,
+    debug_receiver: &'a Receiver<DebugEvent>,
+    agent_id: &'a AgentId,
+    session_id: &'a SessionId,
+    turn_id: &'a TurnId,
+    trace_id: &'a TraceId,
+}
+
 fn record_live_context_segment_build_event<F>(
-    metadata_center: &Arc<Mutex<MetadataCenter>>,
-    debug_hub: &DebugHub,
-    debug_receiver: &Receiver<DebugEvent>,
+    scope: &LiveContextSegmentRecordScope<'_>,
     on_debug: &mut F,
-    agent_id: &AgentId,
-    session_id: &SessionId,
-    turn_id: &TurnId,
-    trace_id: &TraceId,
     event: LiveContextSegmentBuildEvent,
 ) -> Result<(), RuntimeLiveBridgeError>
 where
@@ -6105,12 +6302,12 @@ where
         });
     }
     write_live_bridge_metadata(
-        metadata_center,
-        agent_id,
-        session_id,
+        scope.metadata_center,
+        scope.agent_id,
+        scope.session_id,
         RuntimeMetadataWriteSpec {
-            turn_id: Some(turn_id),
-            trace_id,
+            turn_id: Some(scope.turn_id),
+            trace_id: scope.trace_id,
             kind: MetadataKind::RuntimeState,
             pipeline_node,
             metadata_suffix: format!(
@@ -6148,19 +6345,19 @@ where
         detail_lines.push(format!("context_segment_elapsed_ms={elapsed_ms}"));
     }
     emit_live_bridge_debug(
-        debug_hub,
-        agent_id,
-        session_id,
+        scope.debug_hub,
+        scope.agent_id,
+        scope.session_id,
         RuntimeDebugEmitSpec {
-            turn_id,
-            trace_id,
+            turn_id: scope.turn_id,
+            trace_id: scope.trace_id,
             pipeline_node,
             function: "live_context::base_live_context_segments",
             status_text,
             detail_lines,
         },
     );
-    drain_debug_events(debug_receiver, on_debug);
+    drain_debug_events(scope.debug_receiver, on_debug);
     Ok(())
 }
 
@@ -6352,6 +6549,82 @@ fn provider_executor_retry_plan() -> ProviderExecutorRetryPlan {
     plan
 }
 
+fn provider_retry_detail(
+    error: &ProviderExecutorErrorInfo,
+    retry_index: u32,
+    retry_cap: u32,
+    backoff: Option<Duration>,
+) -> String {
+    let wait = backoff
+        .map(|duration| {
+            format!(
+                "; wait {} before internal resend",
+                format_duration_for_ui(duration)
+            )
+        })
+        .unwrap_or_default();
+    format!(
+        "provider retry {}/{}: {}{}; error: {}; raw_hash={}",
+        retry_index,
+        retry_cap,
+        error.code,
+        wait,
+        public_error_center_message(&error.message),
+        fnv1a_hex(&error.message)
+    )
+}
+
+fn format_duration_for_ui(duration: Duration) -> String {
+    let millis = duration.as_millis();
+    if millis < 1000 {
+        return format!("{millis}ms");
+    }
+    let seconds = millis / 1000;
+    let remainder_ms = millis % 1000;
+    if remainder_ms == 0 {
+        format!("{seconds}s")
+    } else {
+        format!("{}.{:03}s", seconds, remainder_ms)
+    }
+}
+
+fn public_error_center_message(message: &str) -> String {
+    const MAX_PUBLIC_ERROR_MESSAGE_CHARS: usize = 240;
+    let compact = message.split_whitespace().collect::<Vec<_>>().join(" ");
+    let compact = provider_error_json_public_message(&compact).unwrap_or(compact);
+    let mut public = compact
+        .chars()
+        .take(MAX_PUBLIC_ERROR_MESSAGE_CHARS)
+        .collect::<String>();
+    if compact.chars().count() > MAX_PUBLIC_ERROR_MESSAGE_CHARS {
+        public.push_str("...");
+    }
+    public
+}
+
+fn provider_error_json_public_message(message: &str) -> Option<String> {
+    let json_start = message.find('{')?;
+    let value: serde_json::Value = serde_json::from_str(&message[json_start..]).ok()?;
+    let error = value.get("error").unwrap_or(&value);
+    let mut parts = Vec::new();
+    if let Some(kind) = error
+        .get("type")
+        .or_else(|| error.get("code"))
+        .and_then(|value| value.as_str())
+        .filter(|value| !value.trim().is_empty())
+    {
+        parts.push(kind.trim().to_owned());
+    }
+    if let Some(message) = error
+        .get("message")
+        .and_then(|value| value.as_str())
+        .filter(|value| !value.trim().is_empty())
+    {
+        parts.push(message.trim().to_owned());
+    }
+    (!parts.is_empty()).then(|| parts.join(": "))
+}
+
 fn sleep_provider_retry(
     request: &LiveReasonTurnRequest,
     duration: Duration,
@@ -6488,7 +6761,9 @@ fn emit_provider_retry_debug(
     error: &ProviderExecutorErrorInfo,
     retry_index: u32,
     retry_cap: u32,
+    backoff: Duration,
 ) {
+    let detail = provider_retry_detail(error, retry_index, retry_cap, Some(backoff));
     emit_live_bridge_debug(
         debug_hub,
         agent_id,
@@ -6498,12 +6773,19 @@ fn emit_provider_retry_debug(
             trace_id: &turn.request.trace_id,
             pipeline_node: "RuntimeLive05ProviderError",
             function: "run_live_provider_reason_turn",
-            status_text: "provider error retry scheduled",
+            status_text: &detail,
             detail_lines: vec![
                 format!("error_code={}", error.code),
+                format!(
+                    "error_message={}",
+                    public_error_center_message(&error.message)
+                ),
+                format!("error_hash={}", fnv1a_hex(&error.message)),
                 format!("retry_index={retry_index}"),
                 format!("retry_cap={retry_cap}"),
                 format!("retryable={}", error.retryable),
+                format!("backoff_ms={}", backoff.as_millis()),
+                "retry_scope=internal_provider_resend".to_owned(),
             ],
         },
     );
@@ -8304,7 +8586,7 @@ where
     }
 }
 
-fn apply_runtime_reason_broadcast(
+pub(crate) fn apply_runtime_reason_broadcast(
     ui_state: &Arc<Mutex<UiProtocolState>>,
     reason_agent_id: &AgentId,
     master_node_id: &str,
@@ -8370,6 +8652,7 @@ fn apply_runtime_reason_broadcast(
                 turn_id: event.turn_id.clone(),
                 kind: UiModelRequestKind::ToolResultContinuation,
                 detail: Some(event.detail.clone()),
+                transport: None,
                 slave_substream_card: false,
             });
         }
@@ -8392,35 +8675,60 @@ fn apply_runtime_reason_broadcast(
     }
 }
 
-fn apply_runtime_debug_event(
+pub(crate) fn apply_runtime_debug_event(
     ui_state: &Arc<Mutex<UiProtocolState>>,
     reason_agent_id: &AgentId,
     master_node_id: &str,
     event: &DebugEvent,
 ) {
     let mut ui = ui_state.lock().expect("lock ui state");
-    let model_request_kind = match event.envelope.semantic.pipeline_node.as_deref() {
+    let model_request_waiting = match event.envelope.semantic.pipeline_node.as_deref() {
         Some("RuntimeLive01ContextPlanningStarted")
         | Some("RuntimeLive01ContextSegmentStarted")
         | Some("RuntimeLive01ContextSegmentCompleted")
         | Some("RuntimeLive01ContextSegmentFailed")
         | Some("RuntimeLive01ContextPlanningCompleted")
-        | Some("RuntimeLive02ProviderRequestBuilt") => Some(UiModelRequestKind::Thinking),
-        Some("RuntimeLive05ProviderError") => Some(UiModelRequestKind::ProviderRetry),
-        Some("RuntimeLive05ProviderFailover") => Some(UiModelRequestKind::ProviderFailover),
+        | Some("RuntimeLive02ProviderRequestBuilt") => Some(ErrorCenterModelWaitingActivity {
+            kind: UiModelRequestKind::Thinking,
+            detail: event
+                .snapshot
+                .as_ref()
+                .map(|snapshot| snapshot.status_text.clone()),
+            transport: None,
+        }),
+        Some("RuntimeLive05ProviderError") => Some(ErrorCenterModelWaitingActivity {
+            kind: UiModelRequestKind::Thinking,
+            detail: Some("Waiting for model response.".to_owned()),
+            transport: event
+                .snapshot
+                .as_ref()
+                .map(|snapshot| UiModelTransportActivity {
+                    kind: UiModelTransportKind::ProviderRetry,
+                    detail: Some(snapshot.status_text.clone()),
+                }),
+        }),
+        Some("RuntimeLive05ProviderFailover") => Some(ErrorCenterModelWaitingActivity {
+            kind: UiModelRequestKind::Thinking,
+            detail: Some("Waiting for model response.".to_owned()),
+            transport: event
+                .snapshot
+                .as_ref()
+                .map(|snapshot| UiModelTransportActivity {
+                    kind: UiModelTransportKind::ProviderFailover,
+                    detail: Some(snapshot.status_text.clone()),
+                }),
+        }),
         _ => None,
     };
-    if let Some(kind) = model_request_kind {
+    if let Some(waiting) = model_request_waiting {
         ui.apply_model_request_waiting_kind(UiModelRequestWaiting {
             source_agent_id: reason_agent_id.clone(),
             source_node_id: master_node_id.to_owned(),
             session_id: event.envelope.semantic.session_id.clone(),
             turn_id: event.envelope.semantic.turn_id.clone(),
-            kind,
-            detail: event
-                .snapshot
-                .as_ref()
-                .map(|snapshot| snapshot.status_text.clone()),
+            kind: waiting.kind,
+            detail: waiting.detail,
+            transport: waiting.transport,
             slave_substream_card: false,
         });
     }

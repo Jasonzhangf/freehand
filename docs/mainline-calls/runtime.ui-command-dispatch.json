@@ -15,7 +15,7 @@
     "runtime dispatch owner reads the declared owner target from the envelope",
     "session management commands route through runtime into `reason.persistence` session metadata and rollback APIs; runtime refreshes `UiProtocolState` from persistence-owned metadata/effective transcript projections after mutation",
     "runtime dispatch routes the command into reason, node, or checkpoint owner adapters without letting the app own those semantics",
-    "`QuerySessionTurns` enters through RuntimeCommandDispatcher::query_runtime, restores effective logical-turn snapshots from reason.persistence, hides framework-owned parent-evaluation and worker-task prompts from user_text, and replaces the derived session transcript so background-written turns are visible without daemon restart while preserving same-turn nonterminal live provider/model waiting and tool activity already published into UiProtocolState",
+    "`QuerySessionTurns` enters through RuntimeCommandDispatcher::query_runtime, restores effective logical-turn snapshots from reason.persistence, hides framework-owned parent-evaluation and worker-task prompts from user_text, derives same-session/same-turn model waiting from ErrorCenter metadata only for the latest nonterminal turn when background lifecycle live hooks are absent, and replaces the derived session transcript so background-written turns are visible without daemon restart while preserving live provider/model waiting and tool activity already published into UiProtocolState only for the latest nonterminal replacement turn",
     "live pending and cancelled turn projections use the same internal-prompt hiding helper before publishing to UiProtocolState, so framework-owned worker-task prompts never become live user_text while ordinary user sessions remain visible",
     "runtime read-only task queries enter through `UiRuntimeQueryPort` and call task owner list/history APIs",
     "protocol-owned task mutation commands route through runtime into `TaskRuntime::create_task`, `TaskRuntime::create_agent`, `TaskRuntime::assign_task`, `TaskRuntime::claim_next_task`, `TaskRuntime::submit_review`, `TaskRuntime::reject_review`, `TaskRuntime::approve_review`, and `TaskRuntime::close_task`; runtime publishes updated task list projection after each accepted mutation",
@@ -55,7 +55,7 @@
     "selected session cwd is persisted on turn records, projected to UiProtocolState, and restored for later same-session inheritance",
     "session metadata mutations return receipts only after the persistence owner accepts the create/rename/archive/restore/delete-as-archive operation and protocol projection is refreshed",
     "session rollback mutations return receipts only after the persistence owner writes an append-only rollback marker and runtime replaces the selected session transcript with effective turn projections",
-    "runtime-backed QuerySessionTurns refreshes the requested session transcript from reason persistence truth at query time; every runtime-turn-N / runtime-turn-N-rM round remains chronological and retains its own tool activity, active same-turn provider retry/model waiting and tool activity already in UiProtocolState are preserved for nonterminal refreshes, parent-goal evaluation internal prompt turns hide their synthetic user text while preserving the final assistant decision, and worker-task transcripts hide internal task/continuation prompts while preserving Worker source-agent attribution and final/tool truth",
+    "runtime-backed QuerySessionTurns refreshes the requested session transcript from reason persistence truth at query time; every runtime-turn-N / runtime-turn-N-rM round remains chronological and retains its own tool activity, active provider transport retry/model waiting and tool activity already in UiProtocolState are preserved only for the latest nonterminal replacement turn, missed background lifecycle provider retry/failover is restored from ErrorCenter metadata as model-request transport substate and schema waiting as model-request phase only for that latest nonterminal turn, terminal and historical earlier turns are not reactivated, parent-goal evaluation internal prompt turns hide their synthetic user text while preserving the final assistant decision, and worker-task transcripts hide internal task/continuation prompts while preserving Worker source-agent attribution and final/tool truth",
     "runtime task list/history queries return UI-safe projections built from task owner snapshots and ledger events",
     "runtime Phase 1 TaskBoard and AgentBoard queries return UI-safe board projections sourced from task.orchestration and agent.lifecycle, preserving task created_at for UI submit-receipt correlation",
     "runtime Phase 1 execution fact and scheduler tick dispatch receipts return only after task.orchestration accepts owner truth and task-list projection publication succeeds",
@@ -199,6 +199,20 @@
         "daemon_adp_queries_runtime_error_center_truth"
       ],
       "why_shared": "keeps metadata/error-center read projection in runtime owner instead of app transports"
+    },
+    {
+      "symbol": "apply_error_center_live_activity_to_session_projections",
+      "owner": "crates/freehand-runtime/src/lib.rs",
+      "purpose": "restore query-time provider retry/failover as model-request transport substate and schema waiting as model-request phase from ErrorCenter metadata only for the latest same-session nonterminal turn when background lifecycle hooks were not already present in UiProtocolState",
+      "allowed_callers": [
+        "RuntimeCommandDispatcher::query_runtime"
+      ],
+      "related_tests": [
+        "runtime_query_session_turns_projects_background_provider_retry_from_error_center",
+        "runtime_query_session_turns_does_not_reactivate_terminal_error_center_retry",
+        "runtime_query_session_turns_does_not_reactivate_historical_retry_before_later_terminal_round"
+      ],
+      "why_shared": "keeps ErrorCenter-to-UI retry projection in the runtime query bridge instead of making UI guess from raw error text or AgentBoard state"
     },
     {
       "symbol": "project_config_status_for_ui",
@@ -439,13 +453,13 @@
     },
     {
       "step": "10s",
-      "symbol_path": "RuntimeCommandDispatcher::query_runtime / restore_session_turns_for_ui_query / UiProtocolState::replace_session_turn_projections",
+      "symbol_path": "RuntimeCommandDispatcher::query_runtime / restore_session_turns_for_ui_query / apply_error_center_live_activity_to_session_projections / UiProtocolState::replace_session_turn_projections",
       "file_path": "crates/freehand-runtime/src/lib.rs",
-      "responsibility": "restore exact-round QuerySessionTurns snapshots from the master plus configured Worker reason-persistence namespaces and replace the derived transcript at query time without projecting framework-owned parent/Worker prompts as user-authored text or erasing same-turn nonterminal live provider/tool activity",
+      "responsibility": "restore exact-round QuerySessionTurns snapshots from the master plus configured Worker reason-persistence namespaces, derive latest-turn nonterminal retry/waiting state from ErrorCenter metadata when live hooks are absent, and replace the derived transcript at query time without projecting framework-owned parent/Worker prompts as user-authored text or reactivating historical retry rows",
       "input_semantic": "session id",
-      "output_semantic": "fresh queryable transcript with runtime-turn-N / runtime-turn-N-rM rounds preserved, per-round tool activity visible, active live provider/tool activity preserved on same-turn nonterminal refresh, internal parent-goal evaluation user text hidden, and Worker task transcript rows sourced to the configured Worker with internal task prompts hidden from user_text",
+      "output_semantic": "fresh queryable transcript with runtime-turn-N / runtime-turn-N-rM rounds preserved, per-round tool activity visible, background provider retry/failover observable only as model-request transport substate on the latest nonterminal owning turn, schema waiting observable as model-request phase, terminal and historical earlier turns not reactivated, active live provider/tool activity preserved only on latest-turn nonterminal refresh, internal parent-goal evaluation user text hidden, and Worker task transcript rows sourced to the configured Worker with internal task prompts hidden from user_text",
       "caller": "ADP query transport / runtime query tests",
-      "callee": "ReasonPersistence::restore_turn_snapshots_for_ui + configured agent/node map + turn_projection + ui.protocol state",
+      "callee": "ReasonPersistence::restore_turn_snapshots_for_ui + configured agent/node map + turn_projection + ErrorCenter metadata projection + ui.protocol state",
       "binding_status": "bound"
     },
     {
@@ -529,7 +543,7 @@
       "step": "15",
       "symbol_path": "UiProtocolState::replace_session_turn_projections",
       "file_path": "crates/freehand-ui-protocol/src/lib.rs",
-      "responsibility": "replace one session transcript with persistence-owned effective projections after rollback or selected-session refresh while preserving same-turn nonterminal live provider/tool activity",
+      "responsibility": "replace one session transcript with persistence-owned effective projections after rollback or selected-session refresh while preserving live provider/tool activity only for the latest nonterminal replacement turn",
       "input_semantic": "session id plus effective turn projections",
       "output_semantic": "queryable transcript excluding rolled-back logical turns and preserving active live activity until terminal truth arrives",
       "caller": "RuntimeCommandDispatcher::dispatch_session_management",
@@ -696,7 +710,7 @@
     "unwritable shared node metadata ledgers are now regression-locked as explicit bootstrap failures",
     "config-selected live bootstrap restores persisted turn projection and next runtime turn ordinal when recovery truth exists",
     "config-selected live bootstrap recovers or clears dead-owner Master active-work checkpoints, including checkpoint-only stale work with missing session truth or no matching active turn snapshot",
-    "selected QuerySessionTurns refresh preserves active same-turn provider retry/model waiting and tool activity already published into UiProtocolState",
+    "selected QuerySessionTurns refresh preserves active provider transport retry/model waiting and tool activity already published into UiProtocolState only for the latest nonterminal replacement turn and reconstructs missed background lifecycle retry state as model-request transport substate from ErrorCenter metadata only for that latest nonterminal turn without reactivating terminal or historical earlier turns",
     "final live projection now keeps each runtime round as its own UI turn so earlier-round tool activity cannot be merged into the final latest turn",
     "generated wiki must be regenerated from `docs/mainline-calls/runtime.ui-command-dispatch.json` when this function-map truth changes",
     "live submit now releases the runtime mutex before provider IO so CancelTurn can enter concurrently",

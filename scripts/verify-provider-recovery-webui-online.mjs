@@ -16,6 +16,8 @@ const adpUrl = process.env.FREEHAND_PROVIDER_RECOVERY_ADP_URL || 'ws://127.0.0.1
 const fixturePort = Number.parseInt(process.env.FREEHAND_PROVIDER_RECOVERY_FIXTURE_PORT || '18137', 10);
 const debugPort = Number.parseInt(process.env.FREEHAND_PROVIDER_RECOVERY_DEBUG_PORT || '9237', 10);
 const retryBackoffMs = process.env.FREEHAND_PROVIDER_RECOVERY_BACKOFF_MS || '5000';
+const fixedSessionId =
+  process.env.FREEHAND_PROVIDER_RECOVERY_SESSION_ID || 'webui-provider-recovery-fixed';
 const chromePath =
   process.env.FREEHAND_PROVIDER_RECOVERY_CHROME ||
   '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
@@ -49,10 +51,16 @@ try {
     stripFixtureEnv(originalEnv) +
       '\nFREEHAND_PROVIDER_RECOVERY_FIXTURE_KEY="fixture-key"\nFREEHAND_PROVIDER_RETRY_BACKOFF_MS="' +
       retryBackoffMs +
-      '"\n',
+      '"\nFREEHAND_TEST_DISABLE_MASTER_LIFECYCLE_RUNNER="1"\n',
   );
   await must(['scripts/install-launchd.sh', 'restartS'], { env: retryBackoffEnv });
   await waitHealth();
+  const configBeforeFixture = await must([cli, 'adp-config-query', '--url', adpUrl]);
+  await fs.writeFile(path.join(artifactDir, 'adp-config.before.txt'), configBeforeFixture.stdout);
+  const fixtureProviderId = parseAdpConfigValue(configBeforeFixture.stdout, 'provider');
+  if (!fixtureProviderId) {
+    throw new Error('unable to read active provider from adp-config-query output');
+  }
   await must([
     cli,
     'adp-config-update',
@@ -61,7 +69,7 @@ try {
     '--agent',
     'master',
     '--provider',
-    'cc',
+    fixtureProviderId,
     '--type',
     'openai',
     '--protocol',
@@ -75,6 +83,7 @@ try {
   ]);
   await must(['scripts/install-launchd.sh', 'restartS'], { env: retryBackoffEnv });
   await waitHealth();
+  await ensureFixedSession();
 
   const profileDir = await fs.mkdtemp(path.join(os.tmpdir(), 'freehand-provider-recovery-chrome-'));
   chrome = spawn(
@@ -111,20 +120,8 @@ try {
     20000,
     'WebUI shell',
   );
-
-  await evalPage(cdp, () => document.getElementById('new-conversation-button')?.click());
-  await waitFor(() => evalPage(cdp, () => document.getElementById('new-session-dialog')?.open === true), 10000, 'new dialog');
-  await evalPage(cdp, () => document.getElementById('new-session-confirm-button')?.click());
-  await waitFor(
-    () =>
-      evalPage(cdp, () => {
-        const shell = document.querySelector('[data-webui-shell="true"]');
-        return !(document.getElementById('new-session-dialog')?.open) && (shell?.dataset.selectedSession || '').includes('webui-session-');
-      }),
-    10000,
-    'new session',
-  );
-  await capture(cdp, '01-new-session');
+  await selectFixedSession(cdp);
+  await capture(cdp, '01-fixed-session');
 
   const prompt = 'Provider recovery UI fixture ' + Date.now() + '. Answer normally with completion schema.';
   await evalPage(
@@ -139,10 +136,14 @@ try {
   );
 
   let retryObserved = false;
+  const retryStates = [];
   await waitFor(
     async () => {
       const state = await capture(cdp, '02-during-retry');
       retryObserved = retryObserved || state.providerRetryPresent;
+      if (state.providerRetryPresent) {
+        retryStates.push(state);
+      }
       return state.providerRetryPresent;
     },
     20000,
@@ -151,6 +152,9 @@ try {
   if (!retryObserved) {
     const state = await capture(cdp, '02-after-retry-window');
     retryObserved = state.providerRetryPresent;
+    if (state.providerRetryPresent) {
+      retryStates.push(state);
+    }
   }
 
   const finalState = await waitFor(
@@ -164,13 +168,17 @@ try {
       const query = await adpQuerySession(sessionId).catch(() => null);
       const turns = (query && query.result && query.result.SessionTurns && query.result.SessionTurns.turns) || [];
       const current = turns.find((turn) => turn.turn_id === state.selectedTurn) || turns[turns.length - 1] || {};
-      if (current.terminal_status === 'Success') {
+      if (
+        current.terminal_status === 'Success' &&
+        `${state.selectedTerminalStatus || ''}`.toLowerCase() === 'success' &&
+        state.liveCount === 0
+      ) {
         return state;
       }
       return null;
     },
     90000,
-    'ADP terminal success',
+    'ADP and DOM terminal success',
   );
   const selectedSession = finalState.selectedSession;
   retryObserved = retryObserved || finalState.providerRetryPresent;
@@ -184,16 +192,37 @@ try {
     artifactDir,
     requestCount,
     retryObserved,
+    fixedSessionId,
     selectedSession,
+    selectedTurn: finalState.selectedTurn,
+    retryStates: retryStates.map((state) => ({
+      selectedTurn: state.selectedTurn,
+      selectedTurnCycleCount: state.selectedTurnCycleCount,
+      selectedTurnUserCardCount: state.selectedTurnUserCardCount,
+      providerRetryDetailText: state.providerRetryDetailText,
+      providerRetryFlowLabelPresent: state.providerRetryFlowLabelPresent,
+      duplicateCycleKeys: state.duplicateCycleKeys,
+    })),
     finalState,
     adpTerminalStatus: lastTurn.terminal_status || null,
     adpErrors: lastTurn.errors || [],
+    adpTurnIds: turns.map((turn) => turn.turn_id),
     checks: {
       fixtureRetriedThenRecovered: requestCount === 3,
       providerRetryVisible: retryObserved,
+      providerRetryDetailVisible: retryStates.some((state) => state.providerRetryDetailVisible),
+      retryNotRenderedAsProviderFlow: retryStates.every((state) => !state.providerRetryFlowLabelPresent),
+      retryStayedOnSingleTurnCard: retryStates.every((state) => state.selectedTurnCycleCount <= 1),
+      noDuplicateCycleKeys: finalState.duplicateCycleKeys.length === 0,
+      finalSelectedTurnSingleCycle: finalState.selectedTurnCycleCount === 1,
+      finalSelectedTurnSingleUserCard: finalState.selectedTurnUserCardCount === 1,
+      fixedSessionReused: selectedSession === fixedSessionId,
       finalNoOpenAiRequestFailed: !finalState.errorTextPresent,
+      finalNoProviderRetryText: !finalState.providerRetryPresent,
       adpSuccess: lastTurn.terminal_status === 'Success',
       adpNoErrors: Array.isArray(lastTurn.errors) && lastTurn.errors.length === 0,
+      domTerminalSuccess: `${finalState.selectedTerminalStatus || ''}`.toLowerCase() === 'success',
+      domNoLiveRows: finalState.liveCount === 0,
     },
   };
   await fs.writeFile(path.join(artifactDir, 'summary.json'), JSON.stringify(summary, null, 2));
@@ -201,9 +230,19 @@ try {
   if (
     !summary.checks.fixtureRetriedThenRecovered ||
     !summary.checks.providerRetryVisible ||
+    !summary.checks.providerRetryDetailVisible ||
+    !summary.checks.retryNotRenderedAsProviderFlow ||
+    !summary.checks.retryStayedOnSingleTurnCard ||
+    !summary.checks.noDuplicateCycleKeys ||
+    !summary.checks.finalSelectedTurnSingleCycle ||
+    !summary.checks.finalSelectedTurnSingleUserCard ||
+    !summary.checks.fixedSessionReused ||
     !summary.checks.finalNoOpenAiRequestFailed ||
+    !summary.checks.finalNoProviderRetryText ||
     !summary.checks.adpSuccess ||
-    !summary.checks.adpNoErrors
+    !summary.checks.adpNoErrors ||
+    !summary.checks.domTerminalSuccess ||
+    !summary.checks.domNoLiveRows
   ) {
     process.exitCode = 1;
   }
@@ -298,6 +337,7 @@ function stripFixtureEnv(value) {
   return value
     .replace(/\n?FREEHAND_PROVIDER_RECOVERY_FIXTURE_KEY=.*$/gm, '')
     .replace(/\n?FREEHAND_PROVIDER_RETRY_BACKOFF_MS=.*$/gm, '')
+    .replace(/\n?FREEHAND_TEST_DISABLE_MASTER_LIFECYCLE_RUNNER=.*$/gm, '')
     .replace(/\n+$/g, '');
 }
 
@@ -347,6 +387,12 @@ async function must(argv, opts = {}) {
     throw new Error('command failed ' + argv.join(' ') + '\nSTDOUT:\n' + result.stdout + '\nSTDERR:\n' + result.stderr);
   }
   return result;
+}
+
+function parseAdpConfigValue(stdout, key) {
+  const pattern = new RegExp('(?:^|\\s)' + key.replace(/[.*+?^${}()|[\]\\]/g, '\\$&') + '=([^\\s]+)');
+  const match = `${stdout || ''}`.match(pattern);
+  return match ? match[1] : '';
 }
 
 async function waitFor(fn, timeoutMs, label) {
@@ -435,6 +481,66 @@ async function waitForLoad(cdp) {
   });
 }
 
+async function ensureFixedSession() {
+  const activeList = await adpRawRequest('query', 'query', 'QuerySessionList');
+  const activeSessions =
+    (activeList.result && activeList.result.SessionList && activeList.result.SessionList.sessions) || [];
+  if (activeSessions.some((session) => session.session_id === fixedSessionId)) {
+    return;
+  }
+  const archivedList = await adpRawRequest('query', 'query', 'QueryArchivedSessionList');
+  const archivedSessions =
+    (archivedList.result && archivedList.result.SessionList && archivedList.result.SessionList.sessions) || [];
+  if (archivedSessions.some((session) => session.session_id === fixedSessionId)) {
+    await adpRawRequest('command', 'command', {
+      RestoreSession: { session_id: fixedSessionId },
+    });
+    return;
+  }
+  await adpRawRequest('command', 'command', {
+    CreateSession: {
+      session_id: fixedSessionId,
+      title: 'Provider recovery fixed verifier',
+      cwd: repo,
+    },
+  });
+}
+
+async function selectFixedSession(cdp) {
+  await waitFor(
+    () =>
+      evalPage(
+        cdp,
+        (sessionId) => {
+          const buttons = Array.from(document.querySelectorAll('.session-button[data-session-id]'));
+          const button = buttons.find((candidate) => candidate.dataset.sessionId === sessionId);
+          if (!button) {
+            document.getElementById('refresh-session-button')?.click();
+            return false;
+          }
+          button.click();
+          return true;
+        },
+        fixedSessionId,
+      ),
+    20000,
+    'fixed session visible in WebUI',
+  );
+  await waitFor(
+    () =>
+      evalPage(
+        cdp,
+        (sessionId) => {
+          const shell = document.querySelector('[data-webui-shell="true"]');
+          return (shell && shell.dataset.selectedSession) === sessionId;
+        },
+        fixedSessionId,
+      ),
+    20000,
+    'fixed session selected',
+  );
+}
+
 async function evalPage(cdp, fn, ...args) {
   const response = await cdp.send('Runtime.evaluate', {
     expression: '(' + fn + ')(...' + JSON.stringify(args) + ')',
@@ -452,17 +558,46 @@ async function capture(cdp, name) {
     const shell = document.querySelector('[data-webui-shell="true"]');
     const messageList = document.getElementById('message-list');
     const text = (messageList && messageList.innerText) || '';
+    const selectedTurn = (shell && shell.dataset.selectedTurn) || '';
+    const cycleCards = Array.from(document.querySelectorAll('.turn-cycle-card'));
+    const cycleKeys = cycleCards.map((node) => node.dataset.cycleKey || '').filter(Boolean);
+    const duplicateCycleKeys = cycleKeys.filter((key, index) => cycleKeys.indexOf(key) !== index);
+    const selectedTurnCycleCards = cycleCards.filter((node) => node.dataset.turnId === selectedTurn);
+    const selectedTurnText = selectedTurnCycleCards.map((node) => node.innerText || '').join('\n');
+    const providerRetryDetailText = selectedTurnCycleCards
+      .flatMap((node) => Array.from(node.querySelectorAll('.execution-row, .chat-message')))
+      .map((node) => node.innerText || '')
+      .find((value) => /transport retry|provider retry/i.test(value)) || '';
+    const providerRetryFlowLabelPresent = selectedTurnCycleCards
+      .flatMap((node) => Array.from(node.querySelectorAll('.execution-row-label')))
+      .map((node) => (node.textContent || '').trim())
+      .some((value) => value === 'Provider');
     return {
       selectedSession: (shell && shell.dataset.selectedSession) || '',
-      selectedTurn: (shell && shell.dataset.selectedTurn) || '',
+      selectedTurn,
       selectedTerminalStatus: (shell && shell.dataset.selectedTerminalStatus) || '',
       messageText: text,
-      latestTurnText: Array.from(document.querySelectorAll('[data-turn-id=\"' + ((shell && shell.dataset.selectedTurn) || '') + '\"]')).map((node) => node.innerText || '').join('\n'),
-      errorTextPresent: /openai request failed|Error\\s+openai request failed/i.test(Array.from(document.querySelectorAll('[data-turn-id=\"' + ((shell && shell.dataset.selectedTurn) || '') + '\"]')).map((node) => node.innerText || '').join('\n')),
-      providerRetryPresent: /provider retry|provider error retry scheduled/i.test(text),
+      latestTurnText: selectedTurnText,
+      errorTextPresent: /openai request failed|Error\\s+openai request failed/i.test(selectedTurnText),
+      providerRetryPresent: /transport retry|provider retry|provider error retry scheduled/i.test(text),
+      providerRetryDetailVisible:
+        /transport retry/i.test(providerRetryDetailText) &&
+        /provider retry\s+\d+\/\d+/i.test(providerRetryDetailText) &&
+        /wait\s+\d+(?:ms|s)|before internal resend/i.test(providerRetryDetailText) &&
+        /fixture transient|http_status_500|raw_hash/i.test(providerRetryDetailText),
+      providerRetryDetailText,
+      providerRetryFlowLabelPresent,
       providerFailoverPresent: /provider failover|provider route switched/i.test(text),
       terminalSuccessPresent: /provider recovered without persistent error card|fixture provider recovered/i.test(text),
       liveCount: document.querySelectorAll('[data-live="true"]').length,
+      cycleCardCount: cycleCards.length,
+      cycleKeys,
+      duplicateCycleKeys: Array.from(new Set(duplicateCycleKeys)),
+      selectedTurnCycleCount: selectedTurnCycleCards.length,
+      selectedTurnUserCardCount: selectedTurnCycleCards.reduce(
+        (count, node) => count + node.querySelectorAll('.chat-message-user').length,
+        0,
+      ),
     };
   });
   const screenshot = await cdp.send('Page.captureScreenshot', {
@@ -475,29 +610,38 @@ async function capture(cdp, name) {
 }
 
 async function adpQuerySession(sessionId) {
+  return await adpRawRequest('query', 'query', {
+    QuerySessionTurns: {
+      session_id: sessionId,
+    },
+  });
+}
+
+function adpRawRequest(kind, payloadKey, payload) {
   const socket = new WebSocket(adpUrl);
-  return await new Promise((resolve, reject) => {
-    const timer = setTimeout(() => reject(new Error('ADP query timeout')), 15000);
+  const requestId = 'provider-recovery-' + kind + '-' + Date.now() + '-' + Math.random().toString(36).slice(2);
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error('ADP ' + kind + ' timeout')), 15000);
     socket.addEventListener('open', () => {
       socket.send(
         JSON.stringify({
-          kind: 'query',
-          request_id: 'provider-recovery-query',
-          query: {
-            QuerySessionTurns: {
-              session_id: sessionId,
-            },
-          },
+          kind,
+          request_id: requestId,
+          [payloadKey]: payload,
         }),
       );
     });
     socket.addEventListener('message', (event) => {
       const message = JSON.parse(event.data);
-      if (message.request_id !== 'provider-recovery-query') {
+      if (message.request_id !== requestId) {
         return;
       }
       clearTimeout(timer);
       socket.close();
+      if (message.kind === 'failure') {
+        reject(new Error((message.failure && (message.failure.message || message.failure.code)) || 'ADP failure'));
+        return;
+      }
       resolve(message);
     });
     socket.addEventListener('error', () => {

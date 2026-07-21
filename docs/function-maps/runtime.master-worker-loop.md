@@ -105,6 +105,22 @@
   `master-lifecycle-<task>` reason session, plus deterministic
   event-and-attempt-isolated turn and trace ids, and an explicit target-task
   decision boundary
+- each Master lifecycle, parent-evaluation, and timer wakeup live turn publishes
+  the same reason/debug/task-list hooks into the shared `UiProtocolState` as
+  foreground user submits, so provider retry, failover, schema repair, tool
+  execution, terminal status, and task mutations are immediately observable by
+  owning session and turn instead of existing only in stderr or ErrorCenter
+  query side channels
+- every lifecycle is closed by its owning truth source: TaskRuntime owns
+  task/execution success, blocked, interrupted, rejected, approved, and closed
+  transitions; AgentLifecycle owns Worker process liveness, restart count, and
+  current binding; Master loop state owns attention retry/backoff and cursor
+  advance; reason persistence owns parent-session waiting/final turn truth
+- Master supervision is a Task Center plus AgentBoard decision loop. A Worker
+  process restart or stale heartbeat is never treated as task success; it is
+  only resource truth that the Master combines with TaskHistory to reassign the
+  same interrupted task, keep a blocked task explicit, or close an accepted
+  review
 - Slave mode constructs a production Worker runner instead of a Master UI dispatcher
 - each Worker opens its only configured Master's Task Center namespace and uses
   its own distinct configured agent id as execution identity
@@ -147,10 +163,14 @@ continue other ready work rather than dead-waiting in the current turn
   `Cancelled`, `Failed`, and `Closed` are not running agents and must not
   keep the parent UI in stale waiting state.
 - When a child `task_closed` event arrives, the runner checks the same
-  parent-turn child workset; if all children in that workset are `Closed` and
-  the same parent/child-set evaluation was not already recorded, it starts a
-  follow-up Master turn in the original parent session. The turn evaluates
-  original user objective history against each decomposed task's
+  logical parent-turn child workset. `runtime-turn-N`, `runtime-turn-N-r2`,
+  and later repair/tool-result rounds are one parent logical turn for workset
+  membership; exact round ids must not let the first closed child trigger
+  parent evaluation while sibling children from the same logical request are
+  still open. If all children in that workset are `Closed` and the same
+  parent/child-set evaluation was not already recorded, it starts a follow-up
+  Master turn in the original parent session. The turn evaluates original user
+  objective history against each decomposed task's
   goal/deliverables/acceptance and accepted Worker review truth, then either
   creates/assigns correction or next-round child tasks, records an explicit
   blocker, or claims final completion only when the overall objective is
@@ -188,6 +208,15 @@ continue other ready work rather than dead-waiting in the current turn
   attention item, admitted sequence, and EventInbox cursor unchanged, persist
   the next attempt id, apply bounded exponential backoff, and do not stop the
   daemon
+- provider retry/failover inside a background lifecycle or parent-evaluation
+  turn is a live model-waiting state on the owning session/turn. It must be
+  published before retry backoff or fallback, and the durable ErrorCenter row is
+  sufficient for query-time recovery after restart or a missed hook.
+- success, failure, and retry branches each write a terminal or retryable owner
+  state before the loop advances: success becomes review/approve/close truth,
+  retry becomes rejected or interrupted truth with a later new execution id,
+  non-retryable failure becomes blocked truth plus an explicit Master decision,
+  and no branch may remain as an unbounded active reason turn
 - stale or already-satisfied attention items are removed and dequeue continues
   in the same runner tick; a stale high-weight event cannot hide a later
   actionable parent/task event
@@ -197,7 +226,7 @@ continue other ready work rather than dead-waiting in the current turn
   the original objective before any new tool call or terminal claim
 - approved review-ready truth remains retryable until the Master closes it
 - parent evaluation truth is durable-idempotent by parent session plus closed child task workset, so EventInbox replay or daemon restart cannot repeat the same evaluation decision or duplicate next-round task creation; successful, waiting, and blocked terminal evaluation turns are durable decisions, while failed/interrupted/cancelled turns remain retryable
-- child workset admission is scoped to the parent `turn_id`, not the whole parent session; historical blocked children from earlier user turns must not keep a later corrected user turn stuck in `waiting lifecycle`
+- child workset admission is scoped to the parent logical turn ordinal, not the whole parent session and not the exact `runtime-turn-N-rM` repair/tool-result round; historical blocked children from earlier user turns must not keep a later corrected user turn stuck in `waiting lifecycle`, while sibling child tasks created across multiple rounds of the same logical request must close before parent evaluation starts
 - when the durable EventInbox cursor has already advanced past a `task_closed` event without a completed/skipped parent evaluation marker, the Master loop reconciles TaskBoard truth while idle and re-enters parent evaluation for a still-waiting parent logical turn
 - parent workset reconciliation reads parent waiting state, idempotency markers,
   and next evaluation turn ordinals from authoritative closed/active turn
@@ -362,11 +391,11 @@ continue other ready work rather than dead-waiting in the current turn
 | 12 | `ProductionMasterRunner::handle_due_timer` | `crates/freehand-runtime/src/master_runner.rs` | execute a due independent timer wakeup and complete/reschedule/release timer truth | due timer schedule | timer-fired outcome or retryable execution error | `run_once` | timer store + live reason turn | bound |
 | 13 | `TimerStore::claim_due` / `TimerStore::complete_due` / `TimerStore::fail_due` | `crates/freehand-runtime/src/timer_store.rs` | persist independent timer schedule state and timer ledger events outside Task Center truth | timer state json + timer ledger | running/completed/active timer truth | Master timer tool + Master runner | timer store owner | bound |
 | 14 | `ProductionMasterRunner::handle_event` | `crates/freehand-runtime/src/master_runner.rs` | invoke Master decision for current review-ready, blocked, interrupted, or all-children-closed parent evaluation truth; interrupted decisions receive AgentBoard resource truth and may replace the existing task assignment | task snapshot + trigger event + AgentBoard | same task advanced, blocked observed, parent evaluated, no-op, or explicit error | `run_once` | Master live reason turn + task owner | bound |
-| 14a | `ProductionMasterRunner::handle_parent_task_closed` / `ProductionMasterRunner::reconcile_closed_parent_worksets` / `parent_logical_turn_waits_for_lifecycle` / `persisted_parent_evaluation_summary` / `next_parent_evaluation_turn_id` / `parent_user_objectives` | `crates/freehand-runtime/src/master_runner.rs` | decide whether a child `task_closed` event or idle reconciliation completes the current parent-turn child workset, read waiting/idempotency/next-turn state from authoritative turn snapshots without selected-transcript ledger backfill, recover first-round external user objectives from authoritative reason `TurnStarted` ledger truth across global runtime turn ordinals, and build an idempotent overall-goal evaluation request; if historical parent objective truth is missing, record a non-final skipped evaluation for that exact child set | original parent user objective history + authoritative parent-turn/evaluation snapshot truth + same-parent-turn closed child task definitions + accepted review truth | next-round task creation, explicit blocker, verified final completion, skipped non-final historical evaluation, or no-op without background reason-ledger replay | `handle_event` / `run_once` idle reconciliation | TaskRuntime + ReasonPersistence + Master live reason turn | bound |
+| 14a | `ProductionMasterRunner::handle_parent_task_closed` / `ProductionMasterRunner::reconcile_closed_parent_worksets` / `parent_turn_group_key` / `parent_turns_share_logical_group` / `parent_logical_turn_waits_for_lifecycle` / `persisted_parent_evaluation_summary` / `next_parent_evaluation_turn_id` / `parent_user_objectives` | `crates/freehand-runtime/src/master_runner.rs` | decide whether a child `task_closed` event or idle reconciliation completes the current logical parent-turn child workset, grouping `runtime-turn-N` and `runtime-turn-N-rM` children together while keeping different logical user turns separate; read waiting/idempotency/next-turn state from authoritative turn snapshots without selected-transcript ledger backfill, recover first-round external user objectives from authoritative reason `TurnStarted` ledger truth across global runtime turn ordinals, and build an idempotent overall-goal evaluation request; if historical parent objective truth is missing, record a non-final skipped evaluation for that exact child set | original parent user objective history + authoritative parent logical-turn/evaluation snapshot truth + same-logical-parent-turn closed child task definitions + accepted review truth | next-round task creation, explicit blocker, verified final completion, skipped non-final historical evaluation, or no-op without background reason-ledger replay | `handle_event` / `run_once` idle reconciliation | TaskRuntime + ReasonPersistence + Master live reason turn | bound |
 | 15 | `run_master_lifecycle_reason_turn` | `crates/freehand-runtime/src/lib.rs` | execute one event-isolated lifecycle decision with a target-task boundary and finite round budget | selected Master config + typed lifecycle prompt + decision boundary | closed Master turn and Task Center mutation | `ProductionMasterRunner::handle_event` | provider/reason live bridge | bound |
 | 16 | `configured_worker_task_boundary_failure` | `crates/freehand-runtime/src/lib.rs` | validate Master task create/assign routing against the configured Worker topology | task tool call + ordered configured Worker id set | explicit topology failure or allowed mutation path | `execute_registry_tool_call_with_workspace` | pure boundary validator | bound |
 | 17 | `execute_registry_tool_call_with_workspace` | `crates/freehand-runtime/src/lib.rs` | enforce configured Worker-set routing before task-tool mutation and route Master timer tool calls to independent timer truth | Master task/timer tool call + ordered configured Worker id set | paired failed result or owner-routed task/timer mutation | provider/reason live bridge | topology validator + task tool/timer owners | bound |
-| 18 | `run_master_mode` | `apps/freehand-daemon/src/main.rs` | run WebUI/ADP host and Master lifecycle runner under one daemon lifetime | Master bootstrap + bind | supervised Master daemon | daemon CLI | server host + `ProductionMasterRunner::run_until` | bound |
+| 18 | `run_master_mode` / `master_lifecycle_runner_disabled_for_test` | `apps/freehand-daemon/src/main.rs` | run WebUI/ADP host and Master lifecycle runner under one daemon lifetime, except explicit fixture verifier runs may set `FREEHAND_TEST_DISABLE_MASTER_LIFECYCLE_RUNNER=1` to keep ADP/WebUI live submit active while preventing background Task Center lifecycle decisions from sharing a temporary provider fixture | Master bootstrap + bind + explicit test-only lifecycle-disable env | supervised Master daemon with lifecycle runner, or verifier-isolated WebUI/ADP host without background lifecycle runner | daemon CLI | server host + optional `ProductionMasterRunner::run_until` | bound |
 | 19 | `ProductionWorkerRunner::record_process_started` / `ProductionWorkerRunner::record_process_heartbeat_in` | `crates/freehand-runtime/src/worker_runner.rs` | emit one unique process instance at runner construction and refresh it on every poll tick | configured Worker identity + PID + process-instance id | persisted agent.lifecycle process health | Worker construction / `run_once` | `TaskRuntime::apply_agent_lifecycle_event` | bound |
 
 ## Sync Status Against Code

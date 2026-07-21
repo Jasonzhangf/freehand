@@ -7,8 +7,8 @@ use freehand_contracts::{ToolCallContract, ToolCallId};
 use freehand_metadata::MetadataEnvelope;
 use freehand_reason::ProviderRawLedgerRow;
 use freehand_ui_protocol::{
-    UiConversationItemKind, UiModelRequestKind, UiModelRequestWaiting, UiQueryResult,
-    UiToolActivityStatus, build_command_dispatch_envelope,
+    UiConversationItemKind, UiModelRequestKind, UiModelRequestWaiting, UiModelTransportActivity,
+    UiModelTransportKind, UiQueryResult, UiToolActivityStatus, build_command_dispatch_envelope,
 };
 use serde_json::{Value, json};
 use std::fs;
@@ -926,8 +926,12 @@ fn runtime_query_session_turns_preserves_live_provider_retry_activity() {
             source_node_id: selected.node_id.clone(),
             session_id: session_id.clone(),
             turn_id: turn_id.clone(),
-            kind: UiModelRequestKind::ProviderRetry,
-            detail: Some("provider retry 6/10".to_owned()),
+            kind: UiModelRequestKind::Thinking,
+            detail: Some("Waiting for model response.".to_owned()),
+            transport: Some(UiModelTransportActivity {
+                kind: UiModelTransportKind::ProviderRetry,
+                detail: Some("provider retry 6/10".to_owned()),
+            }),
             slave_substream_card: false,
         });
     }
@@ -947,14 +951,488 @@ fn runtime_query_session_turns_preserves_live_provider_retry_activity() {
                 .model_request
                 .as_ref()
                 .expect("live provider retry must survive runtime query refresh");
-            assert_eq!(model_request.kind, UiModelRequestKind::ProviderRetry);
-            assert_eq!(model_request.detail.as_deref(), Some("provider retry 6/10"));
+            assert_eq!(model_request.kind, UiModelRequestKind::Thinking);
+            let transport = model_request
+                .transport
+                .as_ref()
+                .expect("provider retry transport activity");
+            assert_eq!(transport.kind, UiModelTransportKind::ProviderRetry);
+            assert_eq!(transport.detail.as_deref(), Some("provider retry 6/10"));
             assert!(turn.tool_activities.is_empty());
         }
         other => panic!("unexpected session query result: {other:?}"),
     }
 
     fs::remove_dir_all(runtime_home).expect("cleanup");
+}
+
+#[test]
+fn runtime_query_session_turns_projects_background_provider_retry_from_error_center() {
+    let runtime_home = temp_runtime_home();
+    let selected = live_selected_agent(
+        "http://127.0.0.1:1".to_owned(),
+        freehand_config::ProviderType::Anthropic,
+    );
+    let session_id = SessionId::new("background-provider-retry-session");
+    let turn_id = TurnId::new("runtime-turn-77-r6");
+    let trace_id = TraceId::new("master-parent-evaluate-trace-background-retry");
+    let agent_id = AgentId::new(selected.name.clone());
+    let persistence = ReasonPersistence::new(runtime_home.clone(), agent_id.clone());
+    persistence
+        .create_session_metadata(
+            session_id.clone(),
+            Some("Background retry session".to_owned()),
+            None,
+        )
+        .expect("persist session metadata");
+    let mut history = SessionHistory::new(session_id.clone(), Vec::new()).expect("session history");
+    let engine = ReasonTurnEngine::new();
+    let turn = engine
+        .start_turn(
+            &mut history,
+            TurnStartInput {
+                session_id: session_id.clone(),
+                turn_id: turn_id.clone(),
+                trace_id: trace_id.clone(),
+                feature_id: FeatureId::new("runtime.master-worker-loop"),
+                agent_id: agent_id.clone(),
+                user_text: "<freehand_parent_evaluation id=\"retry-test\">\ninternal prompt"
+                    .to_owned(),
+                planned_context_segments: Vec::new(),
+                tool_schema_fingerprint: None,
+                model: "master-model".to_owned(),
+            },
+        )
+        .expect("start background turn");
+    persistence
+        .record_turn_started(&history, &turn, 0)
+        .expect("persist active background turn");
+    write_error_center_retry_metadata(
+        &runtime_home,
+        &agent_id,
+        &session_id,
+        &turn_id,
+        &trace_id,
+        ErrorCenterRetryFixture {
+            recovery_action: "retry_same_step",
+            retry_index: 6,
+            retry_cap: 10,
+        },
+    );
+
+    let runtime = RuntimeCommandDispatcher::from_selected_agent_with_live(
+        &selected,
+        runtime_home.clone(),
+        false,
+    )
+    .expect("runtime bootstrap");
+    match runtime
+        .query_runtime(&UiCommand::QuerySessionTurns {
+            session_id: session_id.clone(),
+        })
+        .expect("runtime query")
+        .expect("runtime-owned session query")
+    {
+        UiQueryResult::SessionTurns(transcript) => {
+            assert_eq!(transcript.turns.len(), 1);
+            let turn = &transcript.turns[0];
+            assert_eq!(turn.user_text, None);
+            let model_request = turn
+                .model_request
+                .as_ref()
+                .expect("background provider retry must project as model request activity");
+            assert_eq!(model_request.kind, UiModelRequestKind::Thinking);
+            let transport = model_request
+                .transport
+                .as_ref()
+                .expect("background provider retry transport activity");
+            assert_eq!(transport.kind, UiModelTransportKind::ProviderRetry);
+            assert_eq!(
+                transport.detail.as_deref(),
+                Some(
+                    "provider retry 6/10: anthropic_http_status_500; error: internal_error: provider fixture 500; raw_hash=hash-only"
+                )
+            );
+        }
+        other => panic!("unexpected session query result: {other:?}"),
+    }
+    let session_list = runtime
+        .ui_state()
+        .lock()
+        .expect("lock ui")
+        .query(&UiCommand::QuerySessionList)
+        .expect("session list query");
+    match session_list {
+        UiQueryResult::SessionList(list) => {
+            let summary = list
+                .sessions
+                .iter()
+                .find(|summary| summary.session_id == session_id)
+                .expect("session summary");
+            assert_eq!(summary.active_turn_id.as_ref(), Some(&turn_id));
+            assert_eq!(summary.latest_status, "waiting_model");
+        }
+        other => panic!("unexpected session list result: {other:?}"),
+    }
+
+    fs::remove_dir_all(runtime_home).expect("cleanup");
+}
+
+#[test]
+fn runtime_query_session_turns_does_not_reactivate_terminal_error_center_retry() {
+    let runtime_home = temp_runtime_home();
+    let selected = live_selected_agent(
+        "http://127.0.0.1:1".to_owned(),
+        freehand_config::ProviderType::Anthropic,
+    );
+    let session_id = SessionId::new("terminal-provider-retry-session");
+    let turn_id = TurnId::new("runtime-turn-78");
+    let trace_id = TraceId::new("master-parent-evaluate-trace-terminal-retry");
+    let agent_id = AgentId::new(selected.name.clone());
+    let persistence = ReasonPersistence::new(runtime_home.clone(), agent_id.clone());
+    persistence
+        .create_session_metadata(
+            session_id.clone(),
+            Some("Terminal retry session".to_owned()),
+            None,
+        )
+        .expect("persist session metadata");
+    let mut history = SessionHistory::new(session_id.clone(), Vec::new()).expect("session history");
+    let engine = ReasonTurnEngine::new();
+    let mut turn = engine
+        .start_turn(
+            &mut history,
+            TurnStartInput {
+                session_id: session_id.clone(),
+                turn_id: turn_id.clone(),
+                trace_id: trace_id.clone(),
+                feature_id: FeatureId::new("runtime.master-worker-loop"),
+                agent_id: agent_id.clone(),
+                user_text: "<freehand_parent_evaluation id=\"terminal-test\">\ninternal prompt"
+                    .to_owned(),
+                planned_context_segments: Vec::new(),
+                tool_schema_fingerprint: None,
+                model: "master-model".to_owned(),
+            },
+        )
+        .expect("start terminal turn");
+    persistence
+        .record_turn_started(&history, &turn, 0)
+        .expect("persist active turn");
+    turn.terminal_event = Some(freehand_contracts::ReasonResp03TerminalEvent {
+        session_id: session_id.clone(),
+        turn_id: turn.request.turn_id.clone(),
+        trace_id: trace_id.clone(),
+        feature_id: FeatureId::new("runtime.master-worker-loop"),
+        agent_id: agent_id.clone(),
+        status: TerminalStatus::Success,
+        summary: "terminal evaluation already closed".to_owned(),
+    });
+    persistence
+        .record_turn_closed(&history, &turn, 0)
+        .expect("persist terminal turn");
+    write_error_center_retry_metadata(
+        &runtime_home,
+        &agent_id,
+        &session_id,
+        &turn_id,
+        &trace_id,
+        ErrorCenterRetryFixture {
+            recovery_action: "retry_same_step",
+            retry_index: 6,
+            retry_cap: 10,
+        },
+    );
+
+    let runtime = RuntimeCommandDispatcher::from_selected_agent_with_live(
+        &selected,
+        runtime_home.clone(),
+        false,
+    )
+    .expect("runtime bootstrap");
+    match runtime
+        .query_runtime(&UiCommand::QuerySessionTurns {
+            session_id: session_id.clone(),
+        })
+        .expect("runtime query")
+        .expect("runtime-owned session query")
+    {
+        UiQueryResult::SessionTurns(transcript) => {
+            assert_eq!(transcript.turns.len(), 1);
+            let turn = &transcript.turns[0];
+            assert_eq!(turn.terminal_status, Some(TerminalStatus::Success));
+            assert_eq!(turn.model_request, None);
+        }
+        other => panic!("unexpected session query result: {other:?}"),
+    }
+    let session_list = runtime
+        .ui_state()
+        .lock()
+        .expect("lock ui")
+        .query(&UiCommand::QuerySessionList)
+        .expect("session list query");
+    match session_list {
+        UiQueryResult::SessionList(list) => {
+            let summary = list
+                .sessions
+                .iter()
+                .find(|summary| summary.session_id == session_id)
+                .expect("session summary");
+            assert_eq!(summary.active_turn_id, None);
+            assert_eq!(summary.latest_status, "success");
+        }
+        other => panic!("unexpected session list result: {other:?}"),
+    }
+
+    fs::remove_dir_all(runtime_home).expect("cleanup");
+}
+
+#[test]
+fn runtime_query_session_turns_does_not_reactivate_historical_retry_before_later_terminal_round() {
+    let runtime_home = temp_runtime_home();
+    let selected = live_selected_agent(
+        "http://127.0.0.1:1".to_owned(),
+        freehand_config::ProviderType::Anthropic,
+    );
+    let session_id = SessionId::new("historical-provider-retry-session");
+    let retry_turn_id = TurnId::new("runtime-turn-79");
+    let terminal_turn_id = TurnId::new("runtime-turn-79-r2");
+    let retry_trace_id = TraceId::new("master-parent-evaluate-trace-historical-retry");
+    let terminal_trace_id = TraceId::new("master-parent-evaluate-trace-historical-terminal");
+    let agent_id = AgentId::new(selected.name.clone());
+    let persistence = ReasonPersistence::new(runtime_home.clone(), agent_id.clone());
+    persistence
+        .create_session_metadata(
+            session_id.clone(),
+            Some("Historical retry session".to_owned()),
+            None,
+        )
+        .expect("persist session metadata");
+    let mut history = SessionHistory::new(session_id.clone(), Vec::new()).expect("session history");
+    let engine = ReasonTurnEngine::new();
+    let retry_turn = engine
+        .start_turn(
+            &mut history,
+            TurnStartInput {
+                session_id: session_id.clone(),
+                turn_id: retry_turn_id.clone(),
+                trace_id: retry_trace_id.clone(),
+                feature_id: FeatureId::new("runtime.master-worker-loop"),
+                agent_id: agent_id.clone(),
+                user_text: "<freehand_parent_evaluation id=\"historical-retry\">\ninternal prompt"
+                    .to_owned(),
+                planned_context_segments: Vec::new(),
+                tool_schema_fingerprint: None,
+                model: "master-model".to_owned(),
+            },
+        )
+        .expect("start historical retry turn");
+    persistence
+        .record_turn_started(&history, &retry_turn, 0)
+        .expect("persist historical retry turn");
+    let mut terminal_turn = engine
+        .start_turn(
+            &mut history,
+            TurnStartInput {
+                session_id: session_id.clone(),
+                turn_id: terminal_turn_id.clone(),
+                trace_id: terminal_trace_id.clone(),
+                feature_id: FeatureId::new("runtime.master-worker-loop"),
+                agent_id: agent_id.clone(),
+                user_text:
+                    "<freehand_parent_evaluation id=\"historical-terminal\">\ninternal prompt"
+                        .to_owned(),
+                planned_context_segments: Vec::new(),
+                tool_schema_fingerprint: None,
+                model: "master-model".to_owned(),
+            },
+        )
+        .expect("start later terminal turn");
+    persistence
+        .record_turn_started(&history, &terminal_turn, 0)
+        .expect("persist later terminal turn");
+    terminal_turn.terminal_event = Some(freehand_contracts::ReasonResp03TerminalEvent {
+        session_id: session_id.clone(),
+        turn_id: terminal_turn.request.turn_id.clone(),
+        trace_id: terminal_trace_id.clone(),
+        feature_id: FeatureId::new("runtime.master-worker-loop"),
+        agent_id: agent_id.clone(),
+        status: TerminalStatus::Success,
+        summary: "later evaluation already closed".to_owned(),
+    });
+    persistence
+        .record_turn_closed(&history, &terminal_turn, 0)
+        .expect("persist later terminal turn");
+    write_error_center_retry_metadata(
+        &runtime_home,
+        &agent_id,
+        &session_id,
+        &retry_turn_id,
+        &retry_trace_id,
+        ErrorCenterRetryFixture {
+            recovery_action: "retry_same_step",
+            retry_index: 6,
+            retry_cap: 10,
+        },
+    );
+
+    let runtime = RuntimeCommandDispatcher::from_selected_agent_with_live(
+        &selected,
+        runtime_home.clone(),
+        false,
+    )
+    .expect("runtime bootstrap");
+    match runtime
+        .query_runtime(&UiCommand::QuerySessionTurns {
+            session_id: session_id.clone(),
+        })
+        .expect("runtime query")
+        .expect("runtime-owned session query")
+    {
+        UiQueryResult::SessionTurns(transcript) => {
+            assert_eq!(transcript.turns.len(), 2);
+            let retry_round = transcript
+                .turns
+                .iter()
+                .find(|turn| turn.turn_id == retry_turn_id)
+                .expect("retry round");
+            assert_eq!(retry_round.model_request, None);
+            let terminal_round = transcript
+                .turns
+                .iter()
+                .find(|turn| turn.turn_id == terminal_turn_id)
+                .expect("terminal round");
+            assert_eq!(
+                terminal_round.terminal_status,
+                Some(TerminalStatus::Success)
+            );
+            assert_eq!(terminal_round.model_request, None);
+        }
+        other => panic!("unexpected session query result: {other:?}"),
+    }
+    let session_list = runtime
+        .ui_state()
+        .lock()
+        .expect("lock ui")
+        .query(&UiCommand::QuerySessionList)
+        .expect("session list query");
+    match session_list {
+        UiQueryResult::SessionList(list) => {
+            let summary = list
+                .sessions
+                .iter()
+                .find(|summary| summary.session_id == session_id)
+                .expect("session summary");
+            assert_eq!(summary.latest_turn_id.as_ref(), Some(&terminal_turn_id));
+            assert_eq!(summary.active_turn_id, None);
+            assert_eq!(summary.latest_status, "success");
+        }
+        other => panic!("unexpected session list result: {other:?}"),
+    }
+
+    fs::remove_dir_all(runtime_home).expect("cleanup");
+}
+
+struct ErrorCenterRetryFixture<'a> {
+    recovery_action: &'a str,
+    retry_index: u64,
+    retry_cap: u64,
+}
+
+fn write_error_center_retry_metadata(
+    runtime_home: &Path,
+    agent_id: &AgentId,
+    session_id: &SessionId,
+    turn_id: &TurnId,
+    trace_id: &TraceId,
+    fixture: ErrorCenterRetryFixture<'_>,
+) {
+    let ledger_path = metadata_ledger_path(runtime_home, agent_id, session_id);
+    let mut center = MetadataCenter::with_ledger_path(&ledger_path).expect("metadata center");
+    center
+        .write(
+            MetadataEnvelope::new(
+                MetadataId::new(format!(
+                    "error.center:{}:{}:{}",
+                    trace_id.as_str(),
+                    turn_id.as_str(),
+                    fixture.recovery_action
+                )),
+                MetadataKind::RuntimeState,
+                MetadataWriteOwner {
+                    feature_id: FeatureId::new("error.center"),
+                    crate_name: "freehand-control".to_owned(),
+                    module_path: "freehand_control".to_owned(),
+                    symbol_path: "classify_error_center_failure".to_owned(),
+                },
+                MetadataWriteNode {
+                    pipeline_node: "RuntimeLive05ProviderError".to_owned(),
+                    runtime_node_id: None,
+                },
+                MetadataSubject {
+                    agent_id: Some(agent_id.clone()),
+                    session_id: Some(session_id.clone()),
+                    turn_id: Some(turn_id.clone()),
+                    trace_id: trace_id.clone(),
+                },
+                vec![
+                    MetadataEntry {
+                        key: "error.domain".to_owned(),
+                        value: json!("provider"),
+                    },
+                    MetadataEntry {
+                        key: "error.class".to_owned(),
+                        value: json!("system"),
+                    },
+                    MetadataEntry {
+                        key: "error.code".to_owned(),
+                        value: json!("anthropic_http_status_500"),
+                    },
+                    MetadataEntry {
+                        key: "error.source_owner".to_owned(),
+                        value: json!("provider.reason-live-bridge"),
+                    },
+                    MetadataEntry {
+                        key: "error.source_pipeline_node".to_owned(),
+                        value: json!("RuntimeLive05ProviderError"),
+                    },
+                    MetadataEntry {
+                        key: "error.recovery_action".to_owned(),
+                        value: json!(fixture.recovery_action),
+                    },
+                    MetadataEntry {
+                        key: "error.retry_index".to_owned(),
+                        value: json!(fixture.retry_index),
+                    },
+                    MetadataEntry {
+                        key: "error.retry_cap".to_owned(),
+                        value: json!(fixture.retry_cap),
+                    },
+                    MetadataEntry {
+                        key: "error.public_visibility".to_owned(),
+                        value: json!("internal"),
+                    },
+                    MetadataEntry {
+                        key: "error.owner_target".to_owned(),
+                        value: json!("provider.reason-live-bridge"),
+                    },
+                    MetadataEntry {
+                        key: "error.repair_fields".to_owned(),
+                        value: json!([]),
+                    },
+                    MetadataEntry {
+                        key: "error.raw_hash".to_owned(),
+                        value: json!("hash-only"),
+                    },
+                    MetadataEntry {
+                        key: "error.public_message".to_owned(),
+                        value: json!("internal_error: provider fixture 500"),
+                    },
+                ],
+            )
+            .expect("error-center envelope"),
+        )
+        .expect("write error-center metadata");
 }
 
 #[test]
@@ -2721,8 +3199,8 @@ fn live_bootstrap_restores_multiround_turns_as_separate_ui_cards() {
                 let final_turn = &transcript.turns[1];
                 assert_eq!(final_turn.turn_id, TurnId::new("runtime-turn-9-r2"));
                 assert_eq!(
-                    final_turn.user_text.as_deref(),
-                    Some("prompt for runtime-session-tool-restore")
+                    final_turn.user_text, None,
+                    "continuation rounds must not render the external user prompt again"
                 );
                 assert!(
                     final_turn.tool_activities.is_empty(),
@@ -2999,16 +3477,16 @@ fn provider_recovery_debug_updates_same_turn_activity() {
     let turn_id = TurnId::new("runtime-turn-provider-recovery");
     let trace_id = TraceId::new("trace-provider-recovery");
 
-    for (pipeline_node, status_text, expected_kind) in [
+    for (pipeline_node, status_text, expected_transport_kind) in [
         (
             "RuntimeLive05ProviderError",
-            "provider error retry scheduled",
-            UiModelRequestKind::ProviderRetry,
+            "provider retry 1/10: anthropic_http_status_500; wait 0ms before internal resend; error: internal_error: server exploded; raw_hash=hash",
+            UiModelTransportKind::ProviderRetry,
         ),
         (
             "RuntimeLive05ProviderFailover",
             "provider route switched to fallback",
-            UiModelRequestKind::ProviderFailover,
+            UiModelTransportKind::ProviderFailover,
         ),
     ] {
         let semantic = DebugSemanticPosition {
@@ -3055,8 +3533,10 @@ fn provider_recovery_debug_updates_same_turn_activity() {
         match query {
             UiQueryResult::Turn(Some(turn)) => {
                 let activity = turn.model_request.expect("provider recovery activity");
-                assert_eq!(activity.kind, expected_kind);
-                assert_eq!(activity.detail.as_deref(), Some(status_text));
+                assert_eq!(activity.kind, UiModelRequestKind::Thinking);
+                let transport = activity.transport.expect("provider transport activity");
+                assert_eq!(transport.kind, expected_transport_kind);
+                assert_eq!(transport.detail.as_deref(), Some(status_text));
                 assert!(turn.errors.is_empty());
             }
             other => panic!("unexpected query result: {other:?}"),
@@ -3479,6 +3959,20 @@ fn live_bridge_retries_recoverable_provider_errors_then_succeeds() {
     )
     .expect("provider retry should recover");
 
+    assert_eq!(
+        outcome.rounds, 1,
+        "provider retries must not start a new reason round"
+    );
+    assert_eq!(
+        outcome.turns.len(),
+        1,
+        "provider retries must stay inside one turn"
+    );
+    assert_eq!(outcome.turns[0].request.turn_id, TurnId::new("turn-live"));
+    assert_eq!(
+        outcome.turns[0].request.user_text, "reply exactly pong",
+        "provider resend must not synthesize another user input"
+    );
     assert!(
         outcome
             .turn
@@ -3490,10 +3984,14 @@ fn live_bridge_retries_recoverable_provider_errors_then_succeeds() {
     assert!(outcome.turn.error_events.is_empty());
     assert!(debug_events.iter().any(|event| {
         event.envelope.semantic.pipeline_node.as_deref() == Some("RuntimeLive05ProviderError")
-            && event
-                .snapshot
-                .as_ref()
-                .is_some_and(|snapshot| snapshot.status_text == "provider error retry scheduled")
+            && event.snapshot.as_ref().is_some_and(|snapshot| {
+                snapshot.status_text.contains("provider retry 1/10")
+                    && snapshot.status_text.contains("anthropic_http_status_500")
+                    && snapshot
+                        .status_text
+                        .contains("wait 0ms before internal resend")
+                    && snapshot.status_text.contains("api_error")
+            })
     }));
     assert_eq!(rx.iter().take(3).count(), 3);
     handle.join().expect("join provider");
@@ -3556,10 +4054,13 @@ fn live_bridge_publishes_provider_retry_before_next_attempt() {
     let outcome = runner.join().expect("join live runner");
     provider_handle.join().expect("join provider");
 
-    assert_eq!(
-        retry_status.as_deref(),
-        Ok("provider error retry scheduled"),
-        "provider retry status must be published while the retry is still pending"
+    let retry_status = retry_status.expect("provider retry status must be published");
+    assert!(
+        retry_status.contains("provider retry 1/10")
+            && retry_status.contains("anthropic_http_status_500")
+            && retry_status.contains("wait 0ms before internal resend")
+            && retry_status.contains("api_error"),
+        "provider retry status must expose attempt, code, wait, and error summary while pending: {retry_status}"
     );
     assert!(outcome.turn.error_events.is_empty());
     assert!(
@@ -8656,14 +9157,22 @@ fn live_bridge_writes_provider_error_metadata_on_executor_failure() {
                     && entry.value == json!(PROVIDER_EXECUTOR_RETRY_CAP)
             })
     }));
+    assert!(records.iter().any(|record| {
+        record.owner.feature_id.as_str() == "error.center"
+            && record.entries.iter().any(|entry| {
+                entry.key == "error.public_message"
+                    && entry.value == json!("internal_error: server exploded")
+            })
+    }));
     assert!(
         records
             .iter()
             .filter(|record| record.owner.feature_id.as_str() == "error.center")
             .all(|record| {
                 let encoded = serde_json::to_string(record).expect("metadata json");
-                !encoded.contains("server exploded")
-            })
+                !encoded.contains(r#""error":{"type":"internal_error""#)
+            }),
+        "error center may expose a sanitized public message, not the raw provider JSON body"
     );
 
     let restored = ReasonPersistence::new(&runtime_home, AgentId::new("agent-live"))

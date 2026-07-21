@@ -1,8 +1,8 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::fs::{self, OpenOptions};
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
 
@@ -13,16 +13,19 @@ use freehand_task::{
     TaskActor, TaskAppendRequest, TaskBoardQuery, TaskError, TaskEventInboxEntry,
     TaskEventInboxQuery, TaskId, TaskRuntime, TaskSnapshot, TaskStatus, TaskWatermark,
 };
+use freehand_ui_protocol::UiProtocolState;
 use fs2::FileExt;
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 use super::{
     DueTimerSchedule, LiveReasonTaskDecisionBoundary, LiveReasonTaskDecisionMode,
-    LiveReasonTurnRequest, RuntimeAgentBootstrapError, claim_due_timer_schedule,
-    complete_due_timer_schedule, fail_due_timer_schedule, load_default_runtime_agent,
-    now_unix_seconds, run_live_reason_turn, run_master_lifecycle_reason_turn,
-    runtime_turn_position, sanitize_identifier, ui_user_text_for_turn,
+    LiveReasonTurnRequest, RuntimeAgentBootstrapError, apply_runtime_debug_event,
+    apply_runtime_reason_broadcast, claim_due_timer_schedule, complete_due_timer_schedule,
+    fail_due_timer_schedule, load_default_runtime_agent, now_unix_seconds, run_live_reason_turn,
+    run_live_reason_turn_with_hooks, run_master_lifecycle_reason_turn,
+    run_master_lifecycle_reason_turn_with_hooks, runtime_turn_position, sanitize_identifier,
+    ui_user_text_for_turn,
 };
 
 #[cfg(test)]
@@ -235,7 +238,76 @@ trait MasterTurnExecutor: Send + Sync {
     ) -> Result<String, String>;
 }
 
-struct LiveMasterTurnExecutor;
+struct LiveMasterTurnExecutor {
+    ui_state: Option<Arc<Mutex<UiProtocolState>>>,
+}
+
+impl LiveMasterTurnExecutor {
+    fn new(ui_state: Option<Arc<Mutex<UiProtocolState>>>) -> Self {
+        Self { ui_state }
+    }
+
+    fn execute_reason_turn(
+        &self,
+        selected: &SelectedAgentConfig,
+        request: LiveReasonTurnRequest,
+        decision_boundary: Option<LiveReasonTaskDecisionBoundary>,
+    ) -> Result<super::LiveReasonTurnOutcome, super::RuntimeLiveBridgeError> {
+        let Some(ui_state) = self.ui_state.as_ref().map(Arc::clone) else {
+            return match decision_boundary {
+                Some(boundary) => run_master_lifecycle_reason_turn(selected, request, boundary),
+                None => run_live_reason_turn(selected, request),
+            };
+        };
+        let reason_agent_id = AgentId::new(selected.name.clone());
+        let master_node_id = selected.node_id.clone();
+        match decision_boundary {
+            Some(boundary) => run_master_lifecycle_reason_turn_with_hooks(
+                selected,
+                request,
+                boundary,
+                |event| {
+                    apply_runtime_reason_broadcast(
+                        &ui_state,
+                        &reason_agent_id,
+                        &master_node_id,
+                        event,
+                    );
+                },
+                |event| {
+                    apply_runtime_debug_event(&ui_state, &reason_agent_id, &master_node_id, event);
+                },
+                |projection| {
+                    ui_state
+                        .lock()
+                        .expect("lock ui state")
+                        .publish_task_list_projection(projection.clone());
+                },
+            ),
+            None => run_live_reason_turn_with_hooks(
+                selected,
+                request,
+                |event| {
+                    apply_runtime_reason_broadcast(
+                        &ui_state,
+                        &reason_agent_id,
+                        &master_node_id,
+                        event,
+                    );
+                },
+                |event| {
+                    apply_runtime_debug_event(&ui_state, &reason_agent_id, &master_node_id, event);
+                },
+                |projection| {
+                    ui_state
+                        .lock()
+                        .expect("lock ui state")
+                        .publish_task_list_projection(projection.clone());
+                },
+            ),
+        }
+    }
+}
 
 impl MasterTurnExecutor for LiveMasterTurnExecutor {
     fn execute(
@@ -244,7 +316,8 @@ impl MasterTurnExecutor for LiveMasterTurnExecutor {
         request: LiveReasonTurnRequest,
         decision_boundary: LiveReasonTaskDecisionBoundary,
     ) -> Result<String, String> {
-        let outcome = run_master_lifecycle_reason_turn(selected, request, decision_boundary)
+        let outcome = self
+            .execute_reason_turn(selected, request, Some(decision_boundary))
             .map_err(|error| error.to_string())?;
         let terminal = outcome
             .turn
@@ -259,7 +332,9 @@ impl MasterTurnExecutor for LiveMasterTurnExecutor {
         selected: &SelectedAgentConfig,
         request: LiveReasonTurnRequest,
     ) -> Result<String, String> {
-        let outcome = run_live_reason_turn(selected, request).map_err(|error| error.to_string())?;
+        let outcome = self
+            .execute_reason_turn(selected, request, None)
+            .map_err(|error| error.to_string())?;
         let terminal = outcome
             .turn
             .terminal_event
@@ -273,7 +348,9 @@ impl MasterTurnExecutor for LiveMasterTurnExecutor {
         selected: &SelectedAgentConfig,
         request: LiveReasonTurnRequest,
     ) -> Result<String, String> {
-        let outcome = run_live_reason_turn(selected, request).map_err(|error| error.to_string())?;
+        let outcome = self
+            .execute_reason_turn(selected, request, None)
+            .map_err(|error| error.to_string())?;
         let terminal = outcome
             .turn
             .terminal_event
@@ -541,7 +618,7 @@ fn process_is_alive(process_id: u32) -> bool {
         if result == 0 {
             return true;
         }
-        return std::io::Error::last_os_error().raw_os_error() == Some(libc::EPERM);
+        std::io::Error::last_os_error().raw_os_error() == Some(libc::EPERM)
     }
     #[cfg(not(unix))]
     {
@@ -737,7 +814,19 @@ impl ProductionMasterRunner {
         Self::from_selected_agent_with_executor(
             selected,
             runtime_home,
-            Arc::new(LiveMasterTurnExecutor),
+            Arc::new(LiveMasterTurnExecutor::new(None)),
+        )
+    }
+
+    pub fn from_selected_agent_with_ui_state(
+        selected: SelectedAgentConfig,
+        runtime_home: PathBuf,
+        ui_state: Arc<Mutex<UiProtocolState>>,
+    ) -> Result<Self, ProductionMasterRunnerError> {
+        Self::from_selected_agent_with_executor(
+            selected,
+            runtime_home,
+            Arc::new(LiveMasterTurnExecutor::new(Some(ui_state))),
         )
     }
 
@@ -1287,12 +1376,7 @@ impl ProductionMasterRunner {
             let Some(parent_session_id) = task.parent.session_id.as_ref() else {
                 continue;
             };
-            let parent_turn_id = task
-                .parent
-                .turn_id
-                .as_ref()
-                .map(TurnId::as_str)
-                .unwrap_or("<session>");
+            let parent_turn_id = parent_turn_group_key(task.parent.turn_id.as_ref());
             groups
                 .entry(format!("{}|{}", parent_session_id.as_str(), parent_turn_id))
                 .or_default()
@@ -1596,9 +1680,37 @@ fn parent_workset_children(
         .into_iter()
         .filter(|task| {
             task.parent.session_id.as_ref() == Some(parent_session_id)
-                && task.parent.turn_id.as_ref() == parent_turn_id
+                && parent_turns_share_logical_group(task.parent.turn_id.as_ref(), parent_turn_id)
         })
         .collect())
+}
+
+fn parent_turn_group_key(parent_turn_id: Option<&TurnId>) -> String {
+    let Some(parent_turn_id) = parent_turn_id else {
+        return "<session>".to_owned();
+    };
+    let (ordinal, _, raw) = runtime_turn_position(parent_turn_id);
+    if ordinal == 0 {
+        raw
+    } else {
+        format!("runtime-turn-{ordinal}")
+    }
+}
+
+fn parent_turns_share_logical_group(left: Option<&TurnId>, right: Option<&TurnId>) -> bool {
+    match (left, right) {
+        (None, None) => true,
+        (Some(left), Some(right)) => {
+            let (left_ordinal, _, left_raw) = runtime_turn_position(left);
+            let (right_ordinal, _, right_raw) = runtime_turn_position(right);
+            if left_ordinal != 0 && right_ordinal != 0 {
+                left_ordinal == right_ordinal
+            } else {
+                left_raw == right_raw
+            }
+        }
+        _ => false,
+    }
 }
 
 fn parent_evaluation_key(parent_session_id: &SessionId, children: &[TaskSnapshot]) -> String {

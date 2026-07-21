@@ -488,6 +488,9 @@ pub(crate) fn ui_user_text_for_turn(turn: &TurnRecord) -> String {
 }
 
 fn ui_user_text_projection_for_turn(turn: &TurnRecord) -> Option<String> {
+    if is_runtime_continuation_round(&turn.request.turn_id) {
+        return None;
+    }
     let user_text = ui_user_text_for_turn(turn);
     if ui_should_hide_user_text(&turn.request.session_id, &turn.request.user_text)
         || ui_should_hide_user_text(&turn.request.session_id, &user_text)
@@ -515,6 +518,11 @@ fn ui_should_hide_user_text(session_id: &SessionId, user_text: &str) -> bool {
             "You are the production Master starting a new follow-up turn injected by a due timer.",
         )
         || is_framework_worker_task_session(session_id)
+}
+
+fn is_runtime_continuation_round(turn_id: &TurnId) -> bool {
+    let (ordinal, round, _) = runtime_turn_position(turn_id);
+    ordinal > 0 && round > 1
 }
 
 fn is_framework_worker_task_session(session_id: &SessionId) -> bool {

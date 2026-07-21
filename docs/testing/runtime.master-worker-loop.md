@@ -60,13 +60,17 @@
 16. Retryable Master decision failures keep the same durable event cursor,
     back off, and retry without terminating the daemon. Task Center/state
     persistence failures remain fatal because owner truth is unavailable.
-17. Master attention processing is two-phase. Admission consumes EventInbox in
+17. Background lifecycle, parent-evaluation, and timer wakeup turns publish
+    reason/debug/task-list hooks into the same shared UI protocol state as
+    foreground submits, so retry/backoff/failover/schema repair has an owning
+    session id, turn id, and queryable model-waiting state before the next tick.
+18. Master attention processing is two-phase. Admission consumes EventInbox in
     source order and advances the cursor only after durable admission or
     explicit non-attention classification. Dequeue then uses deterministic
     weighted aging: blocked showstoppers and critical/high-priority work carry
     large weight, while admission sequence aging prevents low-priority
     starvation without wall-clock timing.
-18. Busy-Master continuation is cooperative and identity-bound. A foreground
+19. Busy-Master continuation is cooperative and identity-bound. A foreground
     `SuspendRequested` becomes `SuspendedByAttention` only when the exact
     foreground session/turn reaches an interruptible safe point. Provider,
     tool-effect, and terminal-persistence in-flight phases remain
@@ -83,6 +87,20 @@ explicit configured Worker identities in `~/.freehand/config.toml`. Every
 Worker runs in its own daemon process and may execute at most one claimed task
 at a time. Multiple independent BigTasks remain outside this slice.
 
+## Closed-Loop Lifecycle Contract
+
+Every lifecycle below must close through owner truth, not through UI state,
+model prose, or a user sending another message. A lifecycle branch is closed
+only when the table's owner truth, next action, and observation projection are
+all present.
+
+| lifecycle | owner truth | abnormal states | required closure action | observable projection | verification entrance |
+| --- | --- | --- | --- | --- | --- |
+| Task / execution | TaskRuntime task ledger, task snapshot, execution id, review state | `TaskInterrupted`, `TaskBlocked`, `TaskReviewRejected`, stale `TaskReviewSubmitted`, stale `Approved` without `Closed` | Master must reject/retry, reassign same task, append blocked decision, approve+close, or leave a deliberate blocked decision; Worker must not silently retry blocked/interrupted work | TaskBoard, TaskHistory, EventInbox, selected parent session | `cargo test -p freehand-runtime production_master_runner -- --nocapture --test-threads=1`; `scripts/verify-master-three-worker-e2e-online.sh` |
+| Worker process / agent resource | AgentLifecycle and AgentBoard process instance, pid, heartbeat, TTL-derived alive, current task/execution binding | heartbeat stale, `alive=false`, process restart, current binding after terminal task truth | launchd may restart the process; Master uses TaskHistory plus AgentBoard truth to choose same-task retry or cross-Worker takeover; terminal task truth must clear current binding | AgentBoard process fields, `restart_count`, `alive`, `current_task_id`, `current_execution_id`, `last_activity` | `cargo test -p freehand-task agent_process -- --nocapture`; `scripts/verify-master-three-worker-e2e-online.sh` offline/restart phase |
+| Master supervisor attention | Master loop state, EventInbox cursor, pending attention, lifecycle turn, target-task decision boundary | missing review decision, incomplete approval, blocked without append, interrupted without reassignment, provider retry/failover/schema repair | keep the same attention item retryable with bounded backoff until owner mutation closes the boundary; after retry cap, record explicit blocked-decision truth where applicable; never mark success without Task Center mutation | internal lifecycle session, ErrorCenter, SessionList active turn, TaskHistory cursor advance | `cargo test -p freehand-runtime production_master_runner -- --nocapture --test-threads=1`; `cargo test -p freehand-runtime runtime_query_session_turns_ -- --nocapture --test-threads=1` |
+| Parent user session / workset | reason persistence parent turn truth, Task parent links, parent evaluation marker keyed by parent session plus logical turn workset | child tasks still actionable, first closed exact-round child while siblings remain open, failed/interrupted/cancelled parent-evaluation turn | parent stays `waiting` while any same-logical-turn child is actionable; once all close, one idempotent parent evaluation approves final completion, creates next-round work, or records blocker; failed evaluation remains retryable | selected parent session turns, task tree, parent `runtime-turn-N` / `runtime-turn-N-rM` cards | `cargo test -p freehand-runtime production_master_runner_groups_parent_workset_by_logical_turn_rounds -- --nocapture --test-threads=1`; `scripts/verify-master-three-worker-e2e-online.sh` |
+
 | branch | required owner truth | required next action |
 | --- | --- | --- |
 | success | `TaskReviewSubmitted` with deliverables and evidence | Master approves and closes, or rejects with requirements |
@@ -98,6 +116,7 @@ at a time. Multiple independent BigTasks remain outside this slice.
 | daemon stopped before rejected retry | `TaskReviewRejected` is seeded through TaskRuntime owner API while Master and Worker daemons are offline | after restart, Worker uses a new execution and Master closes or rejects the new review |
 | daemon stopped before blocked decision | `TaskBlocked` is seeded through TaskRuntime owner API while Master daemon is offline | after restart, Master writes a persisted `blocked_decision` or reassignment |
 | Worker stopped while task is running | lease-backed `Running` is seeded through TaskRuntime owner API, then the Worker service is stopped long enough for lease expiry | after Worker/Master recovery, TaskHistory contains `TaskInterrupted`, a new execution, and terminal review/close or explicit blocked truth |
+| provider fixture verifier disables background lifecycle | `FREEHAND_TEST_DISABLE_MASTER_LIFECYCLE_RUNNER=1` is present only in the temporary verifier daemon env | WebUI/ADP live submit remains available, but background Master lifecycle runner is not started, so historical Task Center events cannot consume the temporary provider fixture; restore removes the env and restarts normal lifecycle service |
 
 Lifecycle closure must not rely on a user sending another chat message. The
 Master loop is event/board driven, and every retry/review decision must write
@@ -108,6 +127,7 @@ Task Center truth before another execution starts.
 - runner lifecycle tests live in `crates/freehand-runtime/src/worker_runner/tests.rs`
 - Master lifecycle tests live in `crates/freehand-runtime/src/master_runner/tests.rs`
 - lease renewal ownership lives in `crates/freehand-runtime/src/worker_runner/heartbeat.rs`
+- daemon host fixture isolation is covered by `cargo test -p freehand-daemon daemon_master_lifecycle_disable_env_is_explicit_test_only -- --nocapture`
 
 ### Positive
 
@@ -146,13 +166,17 @@ Task Center truth before another execution starts.
   with the same `parent_session_id` remains open; the provider gets repair
   feedback and may continue or return `claim="waiting"`, but the parent session
   must not project `TerminalStatus::Success`.
-- A child `task_closed` event whose parent has all same-session children closed
-  triggers exactly one parent-session evaluation turn in the original persisted
-  parent session. The evaluation must compare the original user objective,
-  each decomposed child task's goal/deliverables/acceptance, and accepted Worker
-  review truth. It may create and assign correction, improvement, or newly
-  discovered child tasks; it may claim final completion only when the overall
-  user objective is verified complete.
+- A child `task_closed` event whose parent has all same-logical-parent-turn
+  children closed triggers exactly one parent-session evaluation turn in the
+  original persisted parent session. Child tasks created by
+  `runtime-turn-N`, `runtime-turn-N-r2`, and later rounds of the same logical
+  Master request are one workset; parent evaluation must not start after the
+  first exact-round child closes while same-logical-turn siblings remain open.
+  The evaluation must compare the original user objective, each decomposed
+  child task's goal/deliverables/acceptance, and accepted Worker review truth.
+  It may create and assign correction, improvement, or newly discovered child
+  tasks; it may claim final completion only when the overall user objective is
+  verified complete.
 - A child `task_closed` event whose parent still has any open child task is a
   no-op for parent evaluation.
 - Replayed `task_closed` events or daemon restart after evaluation do not
@@ -256,6 +280,11 @@ Task Center truth before another execution starts.
   round instead of killing the lifecycle runner.
 - provider/executor failure during one Master lifecycle decision leaves the
   event cursor unchanged and is retried by the long-running runner.
+- provider retry/failover during a background Master lifecycle or parent
+  evaluation turn is visible through shared `UiProtocolState` and through
+  selected `QuerySessionTurns` recovery from ErrorCenter metadata, so UI/Android
+  can show which session/turn is retrying instead of only showing a stale
+  `waiting lifecycle` or `submitted` row.
 - provider/executor failure during a timer wakeup records timer failure truth,
   releases the timer to active retryable state, and surfaces a retryable Master
   execution error instead of leaving the schedule stuck in `running`.
@@ -328,6 +357,10 @@ Task Center truth before another execution starts.
   terminal success, even if the model emits a syntactically valid
   `claim="complete"` schema.
 - A closed child task with an open sibling must not trigger parent evaluation.
+- A closed child task whose siblings were created in later rounds of the same
+  logical `runtime-turn-N` must not trigger parent evaluation until all
+  same-logical-turn children are terminal closed; covered by
+  `cargo test -p freehand-runtime production_master_runner_groups_parent_workset_by_logical_turn_rounds -- --nocapture --test-threads=1`.
 - A closed child workset in a later parent turn must still trigger parent
   evaluation when older same-session child tasks from earlier turns are blocked
   and the durable EventInbox cursor has already advanced past the close event.
@@ -354,6 +387,8 @@ Task Center truth before another execution starts.
 - a `continue` response without a target-task decision cannot run forever;
   round-budget exhaustion closes the reason turn as blocked and leaves the
   lifecycle event cursor unchanged.
+- a background lifecycle ErrorCenter row for a terminal turn must not reactivate
+  the session as `waiting_model`; terminal reason truth remains authoritative.
 - Task Center and lifecycle-state read/write failures stop the Master runner
   explicitly instead of being treated as retryable model/provider failures.
 - stale historical EventInbox cursor or missing-task attention is not a current

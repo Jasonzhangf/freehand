@@ -234,6 +234,8 @@ const state = {
   pendingSubmitId: null,
   pendingSubmitSessionId: null,
   pendingSubmitError: null,
+  pendingCancelTurnId: null,
+  locallyCancelledTurnIds: new Set(),
   acceptedSubmitReceipt: null,
   ambiguousSubmitRecoveryTimer: null,
   ambiguousSubmitRecoveryStartedAt: null,
@@ -2259,27 +2261,40 @@ function buildModelRequestRenderRow(turn, lifecycle) {
   if (!turnIsWaitingForModelResponse(turn) || !turn.model_request) {
     return null;
   }
-  const label = modelRequestLabel(turn);
   return {
     kind: "system",
-    title: label.startsWith("provider ")
-      ? "Provider"
-      : label === "schema polishing"
-        ? "Schema"
-        : "Model",
-    body: [turn.model_request.detail || "Waiting for model response."],
+    title: modelRequestTitle(turn),
+    body: modelRequestDisplayLines(turn),
     status: lifecycle.isLive ? lifecycle.elapsed || "0s" : modelRequestStaticStatus(turn),
     identity: { turnId: turn.turn_id },
   };
 }
 
-function modelRequestStaticStatus(turn) {
-  const phase = modelRequestPhase(turn);
-  if (phase === "provider_retry") {
-    return "retrying";
+function modelRequestTitle(turn) {
+  return modelRequestPhase(turn) === "schema_retry" ? "Schema" : "Model";
+}
+
+function modelRequestDisplayLines(turn) {
+  const request = (turn && turn.model_request) || {};
+  const lines = [];
+  const mainDetail = request.detail || "Waiting for model response.";
+  if (mainDetail) {
+    lines.push(mainDetail);
   }
-  if (phase === "provider_failover") {
-    return "switching";
+  const transport = modelRequestTransport(turn);
+  if (transport && transport.detail) {
+    lines.push(`${modelRequestTransportLabel(transport)}: ${transport.detail}`);
+  }
+  return lines;
+}
+
+function modelRequestStaticStatus(turn) {
+  const transportPhase = modelRequestTransportPhase(turn);
+  if (transportPhase === "provider_retry") {
+    return "transport retrying";
+  }
+  if (transportPhase === "provider_failover") {
+    return "transport switching";
   }
   return "waiting";
 }
@@ -2421,12 +2436,6 @@ function modelRequestPhase(turn) {
   if (kind === "toolresultcontinuation" || kind === "tool_result_continuation") {
     return "tool_result_continuation";
   }
-  if (kind === "providerretry" || kind === "provider_retry") {
-    return "provider_retry";
-  }
-  if (kind === "providerfailover" || kind === "provider_failover") {
-    return "provider_failover";
-  }
   return "thinking";
 }
 
@@ -2434,8 +2443,7 @@ function modelRequestTimingKey(turn) {
   if (!turnIsWaitingForModelResponse(turn)) {
     return null;
   }
-  const request = turn.model_request || {};
-  return [turn.session_id || "", turn.turn_id || "", modelRequestKind(turn), request.detail || ""].join("|");
+  return [turn.session_id || "", turn.turn_id || "", modelRequestPhase(turn)].join("|");
 }
 
 function modelRequestLabel(turn) {
@@ -2446,13 +2454,38 @@ function modelRequestLabel(turn) {
   if (kind === "toolresultcontinuation" || kind === "tool_result_continuation") {
     return "thinking after tool result";
   }
+  return "thinking";
+}
+
+function modelRequestTransport(turn) {
+  const request = (turn && turn.model_request) || {};
+  if (request.transport && request.transport.kind) {
+    return request.transport;
+  }
+  return null;
+}
+
+function modelRequestTransportPhase(turn) {
+  const transport = modelRequestTransport(turn);
+  const kind = `${(transport && transport.kind) || ""}`.toLowerCase();
   if (kind === "providerretry" || kind === "provider_retry") {
-    return "provider retry";
+    return "provider_retry";
   }
   if (kind === "providerfailover" || kind === "provider_failover") {
-    return "provider failover";
+    return "provider_failover";
   }
-  return "thinking";
+  return "";
+}
+
+function modelRequestTransportLabel(transport) {
+  const kind = `${(transport && transport.kind) || ""}`.toLowerCase();
+  if (kind === "providerretry" || kind === "provider_retry") {
+    return "transport retry";
+  }
+  if (kind === "providerfailover" || kind === "provider_failover") {
+    return "transport switch";
+  }
+  return "transport";
 }
 
 function lifecycleClockStartedAt(key) {
@@ -2836,6 +2869,8 @@ function clearPendingUserInputIfMaterialized() {
   state.pendingSubmitId = null;
   state.pendingSubmitSessionId = null;
   state.pendingSubmitError = null;
+  state.pendingCancelTurnId = null;
+  state.locallyCancelledTurnIds.clear();
   state.pendingAttachments = [];
   state.ambiguousSubmitRecoveryStartedAt = null;
   stopAmbiguousSubmitRecoveryPolling();
@@ -2845,15 +2880,9 @@ function sameRenderableTurn(left, right) {
   if (!left || !right || left.turn_id !== right.turn_id) {
     return false;
   }
-  if (left.session_id && right.session_id && left.session_id !== right.session_id) {
-    return false;
-  }
-  const leftInternal = isInternalRuntimePrompt(left);
-  const rightInternal = isInternalRuntimePrompt(right);
-  if (leftInternal || rightInternal) {
-    return leftInternal && rightInternal;
-  }
-  return normalizeVisibleText(left.user_text) === normalizeVisibleText(right.user_text);
+  const leftSessionId = `${left.session_id || ""}`.trim();
+  const rightSessionId = `${right.session_id || ""}`.trim();
+  return !!leftSessionId && leftSessionId === rightSessionId;
 }
 
 function conversationTurnsForRender() {
@@ -3349,7 +3378,9 @@ function setSessionTranscript(projection) {
   if (projection && projection.session_id) {
     clearSessionRefreshState(projection.session_id);
   }
-  state.sessionTurns = logicalSessionTurns((projection && projection.turns) || []);
+  state.sessionTurns = logicalSessionTurns(
+    guardedTranscriptTurns((projection && projection.turns) || []),
+  );
   syncSelectedCwdFromProjection(projection);
   if (projection && projection.session_id) {
     setSelectedSessionId(projection.session_id);
@@ -3372,6 +3403,8 @@ function clearLocalConversationTruth(options = {}) {
   state.adpFailure = null;
   state.sessionRefreshInFlight = null;
   state.sessionRefreshError = null;
+  state.pendingCancelTurnId = null;
+  state.locallyCancelledTurnIds.clear();
   state.lifecycleClocks.clear();
   state.toolTimings.clear();
 }
@@ -3426,6 +3459,10 @@ function turnOrderKey(turnId) {
 }
 
 function setTurnProjection(turn, options = {}) {
+  if (shouldIgnoreCancelGuardedTurn(turn, options)) {
+    return;
+  }
+  clearCancelGuardForTerminalTruth(turn);
   if (turn && !sessionTruthAllowsTurn(turn)) {
     if (state.turn && state.turn.session_id === turn.session_id) {
       clearLocalConversationTruth({ preserveSelectedSession: true });
@@ -3455,6 +3492,110 @@ function setTurnProjection(turn, options = {}) {
   syncToolTimings(conversationTurnsForRender());
   syncRenderLifecycleClocks();
   clearPendingUserInputIfMaterialized();
+}
+
+function turnHasTerminalOutcome(turn) {
+  return !!(
+    turn &&
+    (turn.terminal_text || isTerminalStatus(turn.terminal_status))
+  );
+}
+
+function isCancelledTurn(turn) {
+  return `${(turn && turn.terminal_status) || ""}`.toLowerCase() === "cancelled";
+}
+
+function turnIsCancelGuarded(turnId) {
+  return !!(
+    turnId &&
+    (state.pendingCancelTurnId === turnId || state.locallyCancelledTurnIds.has(turnId))
+  );
+}
+
+function shouldIgnoreCancelGuardedTurn(turn, options = {}) {
+  if (!turn || options.allowCancelGuarded) {
+    return false;
+  }
+  if (!turnIsCancelGuarded(turn.turn_id)) {
+    return false;
+  }
+  return !turnHasTerminalOutcome(turn);
+}
+
+function clearCancelGuardForTerminalTruth(turn) {
+  if (!turn || !turn.turn_id || !turnHasTerminalOutcome(turn)) {
+    return;
+  }
+  if (state.pendingCancelTurnId === turn.turn_id) {
+    state.pendingCancelTurnId = null;
+  }
+  if (isCancelledTurn(turn)) {
+    state.locallyCancelledTurnIds.add(turn.turn_id);
+  } else {
+    state.locallyCancelledTurnIds.delete(turn.turn_id);
+  }
+}
+
+function guardedTranscriptTurns(turns) {
+  const currentCancelledTurn =
+    state.turn && isCancelledTurn(state.turn) ? state.turn : null;
+  return turns.map((turn) => {
+    if (
+      turn &&
+      currentCancelledTurn &&
+      turn.turn_id === currentCancelledTurn.turn_id &&
+      shouldIgnoreCancelGuardedTurn(turn)
+    ) {
+      return currentCancelledTurn;
+    }
+    clearCancelGuardForTerminalTruth(turn);
+    return turn;
+  });
+}
+
+function locallyCancelledProjection(turnId) {
+  const source =
+    conversationTurnsForRender().find((turn) => turn && turn.turn_id === turnId) ||
+    state.turn ||
+    null;
+  if (!source) {
+    return null;
+  }
+  const userText = source.user_text || state.pendingUserInput || null;
+  return {
+    ...source,
+    user_text: userText,
+    model_request: null,
+    tool_activities: (source.tool_activities || []).map((tool) => {
+      const status = `${tool.status || ""}`.toLowerCase();
+      if (status !== "waiting") {
+        return tool;
+      }
+      return {
+        ...tool,
+        status: "Failed",
+        result_summary: tool.result_summary || "cancelled by user",
+        error: tool.error || "cancelled by user",
+      };
+    }),
+    terminal_status: "Cancelled",
+    terminal_text: source.terminal_text || "live turn cancelled",
+  };
+}
+
+function publishLocalCancelledTurn(turnId) {
+  if (!turnId) {
+    return;
+  }
+  state.pendingCancelTurnId = turnId;
+  state.locallyCancelledTurnIds.add(turnId);
+  const projection = locallyCancelledProjection(turnId);
+  if (!projection) {
+    renderAll();
+    return;
+  }
+  setTurnProjection(projection, { allowCancelGuarded: true });
+  renderAll();
 }
 
 function applyAdpQueryResult(result) {
@@ -3789,11 +3930,14 @@ function cycleCardFromChatCards(meta, chatCards) {
 function cycleCardKey(meta) {
   const kind = `${(meta && meta.kind) || "turn"}`.trim() || "turn";
   const sessionId = `${(meta && meta.sessionId) || ""}`.trim();
+  const turnId = `${(meta && meta.turnId) || ""}`.trim();
+  if (kind === "turn" && turnId) {
+    return `turn:${sessionId}:${turnId}`;
+  }
   const submitId = `${(meta && meta.submitId) || ""}`.trim();
   if (submitId) {
     return `submit:${sessionId}:${submitId}`;
   }
-  const turnId = `${(meta && meta.turnId) || ""}`.trim();
   if (turnId) {
     return `${kind}:${sessionId}:${turnId}`;
   }
@@ -4133,6 +4277,115 @@ function currentSessionTaskStatusLabel(tasks = currentSessionTasks()) {
   return `${counts.activeCount} active · ${counts.reviewCount} review · ${counts.blockedCount} blocked · ${counts.closedCount} closed · ${counts.staleCount} stale`;
 }
 
+function sessionSummaryById(sessionId) {
+  const id = `${sessionId || ""}`.trim();
+  if (!id) {
+    return null;
+  }
+  return (state.sessions || []).find((session) => session.session_id === id) ||
+    workerChildSessionForSessionId(id) ||
+    null;
+}
+
+function sessionTurnsForSession(sessionId) {
+  const id = `${sessionId || ""}`.trim();
+  if (!id) {
+    return [];
+  }
+  return logicalSessionTurns(state.sessionTurns || []).filter((turn) => turn && turn.session_id === id);
+}
+
+function activeTurnForSession(sessionId) {
+  const id = `${sessionId || ""}`.trim();
+  if (!id) {
+    return null;
+  }
+  const summary = sessionSummaryById(id);
+  const activeTurnId = `${(summary && summary.active_turn_id) || ""}`.trim();
+  const candidates = [];
+  if (state.turn && state.turn.session_id === id) {
+    candidates.push(state.turn);
+  }
+  candidates.push(...sessionTurnsForSession(id));
+  if (activeTurnId) {
+    const exact = candidates.find((turn) => turn && turn.turn_id === activeTurnId);
+    if (exact) {
+      return exact;
+    }
+  }
+  return candidates
+    .slice()
+    .reverse()
+    .find((turn) => turn && turnIsWaitingForModelResponse(turn)) || null;
+}
+
+function sessionHasObservableActiveStatus(session) {
+  const status = `${(session && session.latest_status) || ""}`.toLowerCase();
+  return Boolean(
+    session &&
+      (session.active_turn_id ||
+        ["waiting_model", "waiting", "running", "toolpending", "tool_pending"].includes(status)),
+  );
+}
+
+function sessionLiveObservation(sessionId) {
+  const summary = sessionSummaryById(sessionId);
+  const turn = activeTurnForSession(sessionId);
+  if (!summary && !turn) {
+    return null;
+  }
+  if (!turn && !sessionHasObservableActiveStatus(summary)) {
+    return null;
+  }
+  const turnId = `${(turn && turn.turn_id) || (summary && summary.active_turn_id) || (summary && summary.latest_turn_id) || ""}`.trim();
+  const status = `${(summary && summary.latest_status) || ""}`.trim();
+  const label = turn && turnIsWaitingForModelResponse(turn)
+    ? modelRequestLabel(turn)
+    : statusLabel(status || "active");
+  const detail = turn && turn.model_request && turn.model_request.detail
+    ? turn.model_request.detail
+    : (summary && summary.latest_summary) || "";
+  return {
+    sessionId: `${(summary && summary.session_id) || (turn && turn.session_id) || sessionId || ""}`,
+    title: `${(summary && summary.title) || (summary && summary.session_id) || (turn && turn.session_id) || "session"}`,
+    turnId,
+    status: status || (turn && turnIsWaitingForModelResponse(turn) ? "waiting_model" : "active"),
+    label,
+    detail,
+    tone: turn && modelRequestTransportPhase(turn).startsWith("provider")
+      ? "phase2-running"
+      : phase2StatusClass(status || "running"),
+  };
+}
+
+function globalLiveSessionObservation() {
+  const selected = state.selectedSessionId ? sessionLiveObservation(state.selectedSessionId) : null;
+  if (selected) {
+    return { ...selected, scope: "selected" };
+  }
+  const selectedWorkerSession = workerChildSessionForSessionId(state.selectedSessionId);
+  const parentSessionId = selectedWorkerSession && selectedWorkerSession.parent_session_id;
+  const parent = parentSessionId ? sessionLiveObservation(parentSessionId) : null;
+  if (parent) {
+    return { ...parent, scope: "parent Master" };
+  }
+  const activeSummary = (state.sessions || []).find(sessionHasObservableActiveStatus);
+  const active = activeSummary ? sessionLiveObservation(activeSummary.session_id) : null;
+  return active ? { ...active, scope: "active Master" } : null;
+}
+
+function liveObservationLine(observation) {
+  if (!observation) {
+    return "";
+  }
+  return [
+    observation.scope,
+    observation.label,
+    observation.turnId,
+    observation.sessionId,
+  ].filter(Boolean).join(" · ");
+}
+
 function currentSessionAgents() {
   const tasks = currentSessionTasks();
   if (!tasks.length) {
@@ -4187,11 +4440,14 @@ function renderSessionItem(session) {
   const turnText = session.latest_turn_id
     ? `${session.latest_turn_id} · ${session.turn_count} turn(s)${cwdTail}`
     : `${session.turn_count} turn(s)${cwdTail}`;
+  const observation = sessionLiveObservation(session.session_id);
   appendSessionParts(
     button,
-    session.active_turn_id ? "active" : `${sessionKindLabel(session)} · ${session.latest_status || "session"}`,
+    observation ? `active · ${observation.label}` : `${sessionKindLabel(session)} · ${session.latest_status || "session"}`,
     session.title || session.session_id,
-    turnText,
+    observation
+      ? `${observation.turnId || session.active_turn_id || session.latest_turn_id} · ${observation.status} · ${session.turn_count} turn(s)${cwdTail}`
+      : turnText,
   );
 
   button.addEventListener("click", () => {
@@ -4413,13 +4669,16 @@ function buildMobileAgentDashboardModel() {
   const tasks = currentSessionTasks();
   const agents = currentSessionAgents();
   const counts = currentSessionTaskCounts(tasks);
+  const liveObservation = globalLiveSessionObservation();
   const selectedTurns = logicalSessionTurns(state.sessionTurns || []).filter((turn) =>
     !state.selectedSessionId || turn.session_id === state.selectedSessionId
   );
   const latestSelectedTurn = selectedTurns[selectedTurns.length - 1] || activeTurnForSelectedSession();
   const terminalStatus = `${latestSelectedTurn?.terminal_status || ""}`.toLowerCase();
   let tone = "unavailable";
-  if (taskBoard) {
+  if (liveObservation) {
+    tone = "active";
+  } else if (taskBoard) {
     if (tasks.some((task) => ["blocked", "failed", "cancelled"].includes(`${task.status || ""}`.toLowerCase()))) {
       tone = "blocked";
     } else if (tasks.some((task) => ["review_ready", "review_submitted"].includes(`${task.status || ""}`.toLowerCase()))) {
@@ -4442,6 +4701,7 @@ function buildMobileAgentDashboardModel() {
     counts,
     tasks,
     agents,
+    liveObservation,
   };
 }
 
@@ -4457,9 +4717,12 @@ function renderMobileAgentSummaryStrip(model = buildMobileAgentDashboardModel())
   const resourceSummary = Number.isFinite(workerLimit) && workerLimit > 0
     ? ` · limit ${workerLimit}`
     : "";
+  const liveObservation = model.liveObservation || null;
   setText(
     "mobile-agent-summary-title",
-    `${runningAgents.length} running · ${lifecycleSummary}${resourceSummary}`,
+    liveObservation
+      ? `${liveObservation.label} · ${liveObservation.turnId || "active turn"}`
+      : `${runningAgents.length} running · ${lifecycleSummary}${resourceSummary}`,
   );
   const activeTask =
     model.tasks.find((task) => taskLifecycleBucket(task.status) === "active") ||
@@ -4468,7 +4731,9 @@ function renderMobileAgentSummaryStrip(model = buildMobileAgentDashboardModel())
     model.tasks[0];
   setText(
     "mobile-agent-summary-copy",
-    activeTask
+    liveObservation
+      ? compactSentence(`${liveObservation.scope}: ${liveObservation.title} · ${liveObservation.sessionId}`, 96)
+      : activeTask
       ? compactSentence(`${statusLabel(activeTask.status)}: ${taskTitle(activeTask)}`, 72)
       : "No Worker task in this session",
   );
@@ -4484,7 +4749,13 @@ function renderMobileAgentSheet(model = buildMobileAgentDashboardModel()) {
     return;
   }
   mobileAgentSheet.dataset.tone = model.tone;
-  setText("mobile-agent-task-status", model.taskBoardStatus);
+  const liveObservation = model.liveObservation || null;
+  setText(
+    "mobile-agent-task-status",
+    liveObservation
+      ? `${liveObservation.label} · ${liveObservation.turnId || "active turn"} · ${liveObservation.sessionId}`
+      : model.taskBoardStatus,
+  );
   renderMobileAgentTaskList(model);
   applyMobileAgentSheetState();
 }
@@ -5056,6 +5327,7 @@ function renderSessionRelationHeader(model = buildMobileAgentDashboardModel()) {
   const tasks = parentSessionId ? workerChildSessionsForParent(parentSessionId) : [];
   const counts = currentSessionTaskCounts(model.tasks || []);
   const runningAgents = (model.agents || []).filter((agent) => agentIsActive(agent)).length;
+  const liveObservation = model.liveObservation || globalLiveSessionObservation();
   const workerLimit = Number(state.configStatus?.agent_resource_count);
   const workerLimitText = Number.isFinite(workerLimit) && workerLimit > 0 ? ` · limit ${workerLimit}` : "";
   const title = selectedWorkerSession
@@ -5069,18 +5341,26 @@ function renderSessionRelationHeader(model = buildMobileAgentDashboardModel()) {
     (model.tasks || []).find((task) => taskLifecycleBucket(task.status) === "blocked") ||
     (model.tasks || [])[0];
   const copy = selectedWorkerSession
-    ? `Parent Master: ${parentSession ? parentSession.title || parentSession.session_id : selectedWorkerSession.parent_session_id || "unavailable"}`
+    ? liveObservation
+      ? liveObservationLine(liveObservation)
+      : `Parent Master: ${parentSession ? parentSession.title || parentSession.session_id : selectedWorkerSession.parent_session_id || "unavailable"}`
     : activeTask
-      ? `${statusLabel(activeTask.status)}: ${taskTitle(activeTask)}`
+      ? liveObservation
+        ? liveObservationLine(liveObservation)
+        : `${statusLabel(activeTask.status)}: ${taskTitle(activeTask)}`
       : "Click to open session tree";
 
   sessionRelationHeader.dataset.open = state.sessionTreeOpen ? "true" : "false";
   sessionRelationHeader.dataset.selectedKind = selectedWorkerSession ? "worker" : "master";
+  sessionRelationHeader.dataset.liveSessionId = liveObservation ? liveObservation.sessionId : "";
+  sessionRelationHeader.dataset.liveTurnId = liveObservation ? liveObservation.turnId : "";
   setText("session-relation-kicker", selectedWorkerSession ? "Worker session" : "Master session");
   setText("session-relation-title", compactSentence(title, 96));
   setText(
     "session-relation-metrics",
-    `${counts.activeCount} running · ${counts.reviewCount} review · ${counts.blockedCount} blocked · ${counts.closedCount} closed · ${runningAgents} agents${workerLimitText}`,
+    liveObservation
+      ? `${liveObservation.label} · ${liveObservation.turnId || "active turn"} · ${runningAgents} agents${workerLimitText}`
+      : `${counts.activeCount} running · ${counts.reviewCount} review · ${counts.blockedCount} blocked · ${counts.closedCount} closed · ${runningAgents} agents${workerLimitText}`,
   );
   setText("session-relation-copy", compactSentence(copy, 132));
   if (sessionRelationToggleButton) {
@@ -5115,7 +5395,8 @@ function renderSessionTree(parentSession, workerSessions, selectedWorkerSession)
       sessionId: parentSession.session_id,
       title: parentSession.title || parentSession.session_id,
       meta: [parentSession.session_id, normalizeCwd(parentSession.cwd)].filter(Boolean).join(" · "),
-      status: selectedWorkerSession ? "Back" : "Selected",
+      status: sessionLiveObservation(parentSession.session_id)?.label || (selectedWorkerSession ? "Back" : "Selected"),
+      statusClass: sessionLiveObservation(parentSession.session_id)?.tone || "phase2-muted",
       selected: state.selectedSessionId === parentSession.session_id,
       onClick: () => switchConversationSession(parentSession.session_id),
     }),
@@ -5254,7 +5535,7 @@ function phase2StatusClass(status) {
   if (["review_ready", "approved", "closed", "completed"].includes(normalized)) {
     return "phase2-success";
   }
-  if (["running", "recovering", "assigned", "waiting_agent", "paused"].includes(normalized)) {
+  if (["running", "recovering", "assigned", "waiting_agent", "paused", "waiting_model", "waiting"].includes(normalized)) {
     return "phase2-running";
   }
   return "phase2-muted";
@@ -6214,12 +6495,21 @@ async function cancelActiveTurn() {
     ? { CancelTurn: { turn_id: turnId } }
     : { CancelLatestActiveTurn: {} };
   setCommandStatus(`cancelling ${turnId || "latest active turn"}...`);
+  if (turnId) {
+    state.pendingCancelTurnId = turnId;
+  }
   let payload;
   try {
     payload = await adpCommand(command);
   } catch (error) {
+    if (turnId && state.pendingCancelTurnId === turnId) {
+      state.pendingCancelTurnId = null;
+    }
     setCommandStatus(`cancel failed: ${error.message}`);
     return;
+  }
+  if (turnId) {
+    publishLocalCancelledTurn(turnId);
   }
   state.pendingUserInput = null;
   state.pendingSubmitId = null;
@@ -6232,8 +6522,8 @@ async function cancelActiveTurn() {
   state.submitInFlight = false;
   composerInput.value = "";
   setCommandStatus(commandReceiptStatus(payload));
-  await refreshTurn().catch((error) => {
-    setCommandStatus(`${commandReceiptStatus(payload)} (refresh failed: ${error.message})`);
+  refreshCheckpoints().catch((error) => {
+    setCommandStatus(`${commandReceiptStatus(payload)} (checkpoint refresh failed: ${error.message})`);
   });
 }
 

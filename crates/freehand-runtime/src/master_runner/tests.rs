@@ -2313,6 +2313,72 @@ fn production_master_runner_does_not_evaluate_while_sibling_open() {
 }
 
 #[test]
+fn production_master_runner_groups_parent_workset_by_logical_turn_rounds() {
+    let runtime_home = temp_path("parent-evaluation-logical-rounds");
+    bootstrap_runner(&runtime_home);
+    let parent_session_id = SessionId::new("parent-session-logical-rounds");
+    persist_parent_user_objective_with_turn_id(
+        &runtime_home,
+        &parent_session_id,
+        &TurnId::new("runtime-turn-1"),
+        "Overall goal requires alpha, beta, and gamma before parent evaluation.",
+        TerminalStatus::ToolPending,
+        "waiting for delegated children",
+    );
+    let child_ids = seed_parent_children_with_turn_ids(
+        &runtime_home,
+        &parent_session_id,
+        &[
+            ("alpha", TurnId::new("runtime-turn-1"), true),
+            ("beta", TurnId::new("runtime-turn-1-r3"), false),
+            ("gamma", TurnId::new("runtime-turn-1-r5"), false),
+        ],
+    );
+    let observed_request = Arc::new(Mutex::new(None::<LiveReasonTurnRequest>));
+    let request_out = Arc::clone(&observed_request);
+    let executor = Arc::new(StubMasterExecutor::new(move |request| {
+        *request_out.lock().expect("request lock") = Some(request.clone());
+        Ok("all logical-round child results evaluated".to_owned())
+    }));
+    let runner = test_runner(runtime_home.clone(), executor.clone());
+
+    assert_eq!(
+        runner.run_once().expect("alpha closed while siblings open"),
+        ProductionMasterTickOutcome::Idle
+    );
+    assert_eq!(executor.calls.load(Ordering::Relaxed), 0);
+
+    let runtime = TaskRuntime::boot(&runtime_home, AgentId::new("master")).expect("runtime");
+    close_parent_child(&runtime, &child_ids[1], "beta");
+    close_parent_child(&runtime, &child_ids[2], "gamma");
+
+    let outcome = runner
+        .run_once()
+        .expect("all logical-round children closed");
+    assert!(matches!(
+        outcome,
+        ProductionMasterTickOutcome::ParentEvaluated {
+            parent_session_id: ref outcome_parent,
+            evaluated_child_task_ids: ref outcome_children,
+            ref summary,
+        } if outcome_parent == &parent_session_id
+            && outcome_children == &child_ids
+            && summary == "all logical-round child results evaluated"
+    ));
+    assert_eq!(executor.calls.load(Ordering::Relaxed), 1);
+    let request = observed_request
+        .lock()
+        .expect("request lock")
+        .clone()
+        .expect("parent evaluation request");
+    for name in ["alpha", "beta", "gamma"] {
+        assert!(request.prompt.contains(&format!("{name} review summary")));
+    }
+
+    fs::remove_dir_all(runtime_home).expect("cleanup");
+}
+
+#[test]
 fn production_master_runner_rejects_parent_evaluation_without_persisted_goal_truth() {
     let runtime_home = temp_path("parent-evaluation-missing-goal");
     bootstrap_runner(&runtime_home);
@@ -2871,10 +2937,22 @@ fn seed_parent_children_for_turn(
     parent_turn_id: &TurnId,
     children: &[(&str, bool)],
 ) -> Vec<TaskId> {
+    let children = children
+        .iter()
+        .map(|(name, close)| (*name, parent_turn_id.clone(), *close))
+        .collect::<Vec<_>>();
+    seed_parent_children_with_turn_ids(runtime_home, parent_session_id, &children)
+}
+
+fn seed_parent_children_with_turn_ids(
+    runtime_home: &Path,
+    parent_session_id: &SessionId,
+    children: &[(&str, TurnId, bool)],
+) -> Vec<TaskId> {
     let runtime = TaskRuntime::boot(runtime_home, AgentId::new("master")).expect("runtime");
     ensure_test_worker(&runtime);
     let mut task_ids = Vec::new();
-    for (index, (name, close)) in children.iter().enumerate() {
+    for (index, (name, parent_turn_id, close)) in children.iter().enumerate() {
         let task_id = TaskId::new(format!(
             "task-parent-{}-{name}",
             sanitize_identifier(parent_session_id.as_str())
@@ -2902,50 +2980,83 @@ fn seed_parent_children_for_turn(
             })
             .expect("create child task");
         if *close {
-            let execution_id = format!("exec-parent-{name}-{}", now_unix_nanos());
-            runtime
-                .claim_next_task(TaskClaimRequest {
-                    agent_id: AgentId::new("worker"),
-                    execution_id: execution_id.clone(),
-                    ttl_seconds: 300,
-                    actor: test_actor("worker"),
-                    watermark: test_watermark("parent-claim"),
-                })
-                .expect("claim child");
-            runtime
-                .apply_execution_fact(ExecutionFact {
-                    execution_id,
-                    task_id: task_id.clone(),
-                    agent_id: AgentId::new("worker"),
-                    turn_id: Some(TurnId::new(format!("worker-turn-{name}"))),
-                    occurred_at: now_unix_seconds(),
-                    kind: ExecutionFactKind::ReviewReady {
-                        summary: format!("{name} review summary"),
-                        deliverables: vec![format!("{name}.md")],
-                        evidence: vec![format!("{name} evidence")],
-                    },
-                    watermark: test_watermark("parent-review-ready"),
-                })
-                .expect("review child");
-            runtime
-                .approve_review(TaskMutationRequest {
-                    task_id: task_id.clone(),
-                    actor: test_actor("master"),
-                    watermark: test_watermark("parent-approve"),
-                })
-                .expect("approve child");
-            runtime
-                .close_task(TaskMutationRequest {
-                    task_id: task_id.clone(),
-                    actor: test_actor("master"),
-                    watermark: test_watermark("parent-close"),
-                })
-                .expect("close child");
+            close_parent_child(&runtime, &task_id, name);
         }
         task_ids.push(task_id);
     }
     task_ids.sort();
     task_ids
+}
+
+fn close_parent_child(runtime: &TaskRuntime, task_id: &TaskId, name: &str) {
+    let execution_id = format!("exec-parent-{name}-{}", now_unix_nanos());
+    let mut claim = runtime
+        .claim_next_task(TaskClaimRequest {
+            agent_id: AgentId::new("worker"),
+            execution_id: execution_id.clone(),
+            ttl_seconds: 300,
+            actor: test_actor("worker"),
+            watermark: test_watermark("parent-claim"),
+        })
+        .expect("claim child");
+    if claim.task.is_none() {
+        let task = runtime
+            .query_task(task_id)
+            .expect("query child before assign");
+        if task.status != TaskStatus::Assigned {
+            runtime
+                .assign_task(freehand_task::TaskAssignRequest {
+                    task_id: task_id.clone(),
+                    agent_id: AgentId::new("worker"),
+                    actor: test_actor("master"),
+                    watermark: test_watermark("parent-assign-before-close"),
+                })
+                .expect("assign child before close");
+        }
+        claim = runtime
+            .claim_next_task(TaskClaimRequest {
+                agent_id: AgentId::new("worker"),
+                execution_id: execution_id.clone(),
+                ttl_seconds: 300,
+                actor: test_actor("worker"),
+                watermark: test_watermark("parent-claim-after-assign"),
+            })
+            .expect("claim child after assign");
+    }
+    assert_eq!(
+        claim.task.as_ref().map(|task| &task.task_id),
+        Some(task_id),
+        "claim_next_task selected an unexpected child task"
+    );
+    runtime
+        .apply_execution_fact(ExecutionFact {
+            execution_id,
+            task_id: task_id.clone(),
+            agent_id: AgentId::new("worker"),
+            turn_id: Some(TurnId::new(format!("worker-turn-{name}"))),
+            occurred_at: now_unix_seconds(),
+            kind: ExecutionFactKind::ReviewReady {
+                summary: format!("{name} review summary"),
+                deliverables: vec![format!("{name}.md")],
+                evidence: vec![format!("{name} evidence")],
+            },
+            watermark: test_watermark("parent-review-ready"),
+        })
+        .expect("review child");
+    runtime
+        .approve_review(TaskMutationRequest {
+            task_id: task_id.clone(),
+            actor: test_actor("master"),
+            watermark: test_watermark("parent-approve"),
+        })
+        .expect("approve child");
+    runtime
+        .close_task(TaskMutationRequest {
+            task_id: task_id.clone(),
+            actor: test_actor("master"),
+            watermark: test_watermark("parent-close"),
+        })
+        .expect("close child");
 }
 
 fn seed_parent_blocked_child_for_turn(

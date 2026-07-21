@@ -7546,3 +7546,122 @@ Current real root cause split:
   - `cargo check -p freehand-cli`, `cargo fmt --check`, `cargo run -p xtask -- mainlines check`, `cargo run -p xtask -- gates check`, and `git diff --check` passed.
 - residual:
   - Worktree remains broadly dirty with unrelated Android/relay/runtime/doc changes and untracked `output/`; this closeout did not revert or clean unrelated state.
+
+# 2026-07-20 Master/Worker closed-loop lifecycle proof
+
+- marker:
+  - `closed-loop-lifecycle-20260720`
+- trigger:
+  - Jason要求任务、Worker、retry/failure/recovery、Master监督各自都闭环，不能因为状态不可感知导致Master死等。
+- root cause fixed in this slice:
+  - Parent workset previously grouped children by exact `runtime-turn-N-rM`; a child closed from the first exact round could start parent evaluation while later same-logical-turn sibling tasks were still open.
+  - Background Master lifecycle/provider retry visibility needed shared UI-state hooks and query-time ErrorCenter recovery so retry has owning session/turn evidence.
+- implementation:
+  - `runtime.master-worker-loop` groups parent children by logical Master turn ordinal: `runtime-turn-N`, `runtime-turn-N-r2`, and later rounds from the same user request are one workset.
+  - Master mode wires `ProductionMasterRunner` to the same `UiProtocolState` as the runtime dispatcher, so background lifecycle, parent evaluation, and timer wakeup turns can publish reason/debug/task-list state.
+  - `QuerySessionTurns` restores background provider retry/failover/schema waiting from ErrorCenter metadata only for the latest nonterminal turn and refuses to reactivate terminal or historical retry rows.
+  - Added closed-loop lifecycle contract to `docs/testing/runtime.master-worker-loop.md`: Task/Execution, Worker process/Agent resource, Master supervisor attention, and Parent user session/workset each require owner truth, next action, observable projection, and verification entrance.
+- online proof:
+  - Provider recovery WebUI verifier passed at `artifacts/webui-online/provider-recovery-20260720T143541-39583/summary.json`: fixed session `webui-session-20260720143617-e5783025`, turn `runtime-turn-463`, `requestCount=3`, `retryObserved=true`, final `Success`, no persistent error card, no live rows.
+  - Three-Worker online verifier passed on isolated `ws://127.0.0.1:4142/adp`: session `online-master-three-worker-evaluation-1784558664`, final `master_three_worker_e2e_ok`, final `runtime-turn-3 Success`.
+  - Online task proof: alpha closed normally; beta history included `TaskReviewRejected -> TaskAssigned -> TaskResumed -> TaskReviewSubmitted -> TaskReviewApproved -> TaskClosed`; gamma stayed same task through `TaskInterrupted -> TaskAssigned(worker-alpha) -> TaskResumed -> TaskReviewSubmitted -> TaskReviewApproved -> TaskClosed`; integration task closed after first parent evaluation created next-round work.
+  - Online AgentBoard proof: all Workers finished `idle` with `current_task_id=null`; worker-gamma showed `alive=false` after TTL in offline phase, then restarted with new pid `8730` and `restart_count=1`.
+- local proof:
+  - `cargo test -p freehand-runtime production_master_runner -- --nocapture --test-threads=1` passed 27/27.
+  - `cargo test -p freehand-runtime runtime_query_session_turns_ -- --nocapture --test-threads=1` passed 7/7.
+  - `cargo test -p freehand-runtime provider_retry -- --nocapture --test-threads=1` passed 4/4.
+  - `cargo test -p freehand-runtime live_bridge_retries_recoverable_provider_errors_then_succeeds -- --nocapture --test-threads=1` passed.
+  - `cargo test -p freehand-task agent_process -- --nocapture` passed 2/2.
+  - `cargo build -p freehand-daemon`, `node --check` for WebUI/provider verifier, `cargo fmt --check`, `cargo run -p xtask -- mainlines generate/check`, `cargo run -p xtask -- gates check`, and `git diff --check` passed.
+- restoration:
+  - S-profile final config: `provider=cc`, `fallback_provider=minimax`, `provider_type=openai`, `provider_protocol=responses`, `base_url_host=api.anyint.ai`, `default_model=gpt-5.5`, `auth_source=env`.
+  - Fixture env grep for provider recovery/retry/live-tool/autonomy markers returned zero matches.
+  - Health `http://127.0.0.1:4042/health` returned `ok`.
+- residual:
+  - Worktree remains broadly dirty with unrelated prior changes and untracked `.agent-collab/`, `.DS_Store`, `output/`, and `scripts/__pycache__/`; this slice did not clean or commit them.
+
+# 2026-07-20 Closed-loop lifecycle verification refresh
+
+- marker:
+  - `closed-loop-lifecycle-20260720-refresh`
+- verifier hardening:
+  - A fresh provider recovery run first exposed a verifier gap: ADP already returned `Success`, but the captured DOM still had `selectedTerminalStatus=""`, stale `provider retry` text, and `liveCount=2`.
+  - `scripts/verify-provider-recovery-webui-online.mjs` now treats DOM terminal success and zero `[data-live="true"]` rows as hard acceptance gates, not informational fields.
+- online proof:
+  - Hardened provider recovery verifier passed at `artifacts/webui-online/provider-recovery-20260720T164050-67308/summary.json`.
+  - Provider recovery session `webui-session-20260720164106-bb045bf4`, turn `runtime-turn-466`, `requestCount=3`, `retryObserved=true`, ADP `Success`, DOM `selectedTerminalStatus=success`, `liveCount=0`, no persistent provider retry or error text.
+  - Three-Worker verifier passed with `master_three_worker_e2e_ok url=ws://127.0.0.1:4142/adp session=online-master-three-worker-evaluation-1784565725`.
+  - Initial child tasks: `task-three-worker-1781784565725-alpha:worker-alpha`, `task-three-worker-1781784565725-beta:worker-beta`, `task-three-worker-1781784565725-gamma:worker-gamma`.
+  - Next-round integration task: `task-three-worker-1781784565725-integration:worker-alpha`.
+  - Beta history included `TaskReviewRejected -> TaskAssigned -> TaskResumed -> TaskReviewSubmitted -> TaskReviewApproved -> TaskClosed`.
+  - Gamma stayed same task id and recovered through `TaskInterrupted -> TaskAssigned -> TaskResumed -> TaskReviewSubmitted -> TaskReviewApproved -> TaskClosed`, with takeover assignee `worker-alpha`.
+  - Final parent turn `runtime-turn-3` was `Success` and final text contained all four worker result markers.
+  - AgentBoard final state had `worker-alpha`, `worker-beta`, and `worker-gamma` all `idle` with `current_task_id=null` and `current_execution_id=null`; gamma offline phase showed `alive=false` and restart phase showed new pid `93535` with `restart_count=1`.
+  - Final idempotency evidence: `final_evaluation_count=1`, `final_evaluation_turn_id=runtime-turn-3`, `restart_idempotent=true`.
+- local proof:
+  - `cargo test -p freehand-runtime production_master_runner_groups_parent_workset_by_logical_turn_rounds -- --nocapture --test-threads=1` passed.
+  - `cargo test -p freehand-ui-protocol session_list_active_turn_id_tracks_only_nonterminal_turns -- --nocapture --test-threads=1` passed.
+  - `cargo test -p freehand-task agent_process -- --nocapture` passed 2/2.
+  - `cargo test -p freehand-runtime production_master_runner -- --nocapture --test-threads=1` passed 27/27.
+  - `cargo test -p freehand-runtime runtime_query_session_turns_ -- --nocapture --test-threads=1` passed 7/7.
+  - `cargo test -p freehand-runtime provider_retry -- --nocapture --test-threads=1` passed 4/4.
+  - `cargo test -p freehand-runtime live_bridge_retries_recoverable_provider_errors_then_succeeds -- --nocapture --test-threads=1` passed.
+  - `cargo test -p freehand-runtime production_worker_runner -- --nocapture --test-threads=1` passed 20/20.
+  - `node --check apps/freehand-server/assets/webui.js` and `node --check scripts/verify-provider-recovery-webui-online.mjs` passed.
+  - `cargo fmt --check`, `cargo clippy --workspace --all-targets -- -D warnings`, `cargo run -p xtask -- mainlines check`, `cargo run -p xtask -- gates check`, `jq empty` for touched mainline JSON, and `git diff --check` passed.
+- restoration:
+  - `http://127.0.0.1:4042/health` returned `ok`.
+  - S-profile config restored to `provider=cc`, `fallback_provider=minimax`, `provider_type=openai`, `provider_protocol=responses`, `base_url_host=api.anyint.ai`, `default_model=gpt-5.5`, `auth_source=env`, registry `cc,minimax`.
+  - Fixture env grep over existing S env files returned zero matches for provider recovery/retry/backoff/live-tool/autonomy/three-worker markers.
+- residual:
+  - Full `cargo test --workspace` was not rerun in this refresh; previous known blockers remain separate owner issues: `freehand-blocks` harness hang and stale daemon checkpoint tests against the Master framework-only tool contract.
+  - Android true-device was not rerun for this lifecycle refresh.
+  - Untracked `.agent-collab/`, `.DS_Store`, `output/`, and `scripts/__pycache__/` remain untouched.
+
+# 2026-07-21 Provider retry same-turn UI flow audit
+
+- trigger:
+  - Jason clarified provider retry is only an internal provider resend, not a new user request.
+- diagnosis:
+  - Runtime retry loop stays inside one `TurnRecord`; `retry_index` increments inside the provider executor loop and does not call `ReasonTurnEngine::start_turn`.
+  - `runtime-turn-N-rM` is only created for actual model continuation rounds such as tool result/schema repair/continue, not for provider wire resend.
+  - WebUI had an invalid local merge contract: `sameRenderableTurn()` required matching `turn_id` and matching visible `user_text`.
+  - A live debug retry projection may arrive before transcript restore and therefore has `model_request` but no `user_text`; the later transcript projection for the same `turn_id` has the user text. The extra `user_text` equality can make one provider retry turn render as two local render turns/cards.
+- owner:
+  - First polluted node: WebUI local render merge for selected session projections.
+  - Unique owner: `app.webui-smoke` thin protocol consumer, `apps/freehand-server/assets/webui.js`.
+  - Runtime/protocol remain truth owners for retry state; WebUI must not classify retry from raw provider text.
+- planned fix:
+  - Merge local render turns by stable `session_id + turn_id` identity only.
+  - Keep continuation-round hidden user text owned by runtime projection, not WebUI text guessing.
+  - Add a server/webui static regression asserting same-turn merge no longer depends on `user_text`.
+
+# 2026-07-21 Provider retry transport-substate closeout
+
+- trigger:
+  - Jason clarified that provider resend is only provider transport retry; it is unreasonable for it to appear as a reasoning-flow step.
+- fix:
+  - `UiModelRequestActivity` now carries provider retry/failover as `transport` substate while the main `kind` remains `Thinking`.
+  - WebUI renders the current model request row as `Model`; retry details appear only as `transport retry: provider retry ...` inside the same turn card, and `modelRequestTimingKey` no longer includes retry attempt/detail.
+  - WebUI verifier now fails if a selected retry turn renders a standalone `Provider` flow label.
+- local proof:
+  - `node --check apps/freehand-server/assets/webui.js` passed.
+  - `node --check scripts/verify-provider-recovery-webui-online.mjs` passed.
+  - `cargo test -p freehand-ui-protocol provider_recovery_activity_updates_in_place_and_clears_on_response -- --nocapture --test-threads=1` passed.
+  - `cargo test -p freehand-ui-protocol session_refresh_preserves_active_model_request_activity -- --nocapture --test-threads=1` passed.
+  - `cargo test -p freehand-ui-protocol terminal_session_refresh_drops_stale_live_activity -- --nocapture --test-threads=1` passed.
+  - `cargo test -p freehand-runtime runtime_query_session_turns_preserves_live_provider_retry_activity -- --nocapture --test-threads=1` passed.
+  - `cargo test -p freehand-runtime runtime_query_session_turns_projects_background_provider_retry_from_error_center -- --nocapture --test-threads=1` passed.
+  - `cargo test -p freehand-runtime runtime_query_session_turns_does_not_reactivate_terminal_error_center_retry -- --nocapture --test-threads=1` passed.
+  - `cargo test -p freehand-runtime runtime_query_session_turns_does_not_reactivate_historical_retry_before_later_terminal_round -- --nocapture --test-threads=1` passed.
+  - `cargo test -p freehand-runtime provider_recovery_debug_updates_same_turn_activity -- --nocapture --test-threads=1` passed.
+  - `cargo test -p freehand-server root_and_asset_routes_return_webui_shell_files -- --nocapture` passed.
+  - `cargo check -p freehand-cli`, `cargo fmt --check`, `cargo run -p xtask -- mainlines generate`, `cargo run -p xtask -- mainlines check`, `cargo run -p xtask -- gates check`, and `git diff --check` passed.
+- online proof:
+  - `FREEHAND_PROVIDER_RECOVERY_BACKOFF_MS=750 node scripts/verify-provider-recovery-webui-online.mjs` passed on S-profile `ws://127.0.0.1:4042/adp`.
+  - Artifact: `artifacts/webui-online/provider-recovery-20260721T091025-29669/summary.json`.
+  - Fixed session: `webui-provider-recovery-fixed`; selected turn: `runtime-turn-477`; fixture requests: `requestCount=3`.
+  - Retry DOM proof: `selectedTurnCycleCount=1`, `selectedTurnUserCardCount=1`, `duplicateCycleKeys=[]`, `providerRetryFlowLabelPresent=false`, detail row text contains `Model` plus `transport retry: provider retry 1/10 ... wait 750ms before internal resend ... raw_hash=88a4753071b254a4`.
+  - Final DOM/ADP proof: selected terminal status `success`, ADP terminal `Success`, `liveCount=0`, no final provider retry text, no ADP errors.
+  - ErrorCenter turn query for `runtime-turn-477` returned `count=2` with two provider `retry_same_step` rows for `openai_http_status_500`.
+  - Final S config restored to `provider=minimax fallback_provider=cc provider_protocol=messages base_url_host=api.minimaxi.com default_model=MiniMax-M3 auth_source=inline`; fixture/test env grep returned 0 matches; health returned `ok`.
