@@ -45,7 +45,7 @@
       "identity": "installed Android package versionCode plus daemon update manifest URL",
       "truth_store": "daemon-hosted /android/update.json plus Android app cache apk-updates/ for downloaded installer artifacts",
       "operations": ["check_manifest", "download_apk", "request_install"],
-      "projections": ["FreehandApkUpdate logcat rows", "Android system package installer intent", "downloaded APK cache file"]
+      "projections": ["FreehandApkUpdate logcat rows", "WebUI Settings Android APK update status card", "Android system package installer intent", "downloaded APK cache file"]
     },
     {
       "resource_type": "session",

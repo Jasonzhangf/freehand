@@ -50,10 +50,13 @@ class MainActivity : AppCompatActivity() {
     private var fileChooserCallback: ValueCallback<Array<Uri>>? = null
     private var nativeAttachmentKind: String? = null
     private lateinit var fileChooserLauncher: ActivityResultLauncher<Intent>
+    private lateinit var apkUpdater: AndroidApkUpdater
+    private var lastApkUpdateStatus: ApkUpdateStatus? = null
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
         val host = loadHostConfigFromStartupIntent()
+        apkUpdater = AndroidApkUpdater(applicationContext, host)
 
         fileChooserLauncher = registerForActivityResult(
             ActivityResultContracts.StartActivityForResult(),
@@ -87,11 +90,13 @@ class MainActivity : AppCompatActivity() {
             settings.loadWithOverviewMode = false
             settings.textZoom = 100
             addJavascriptInterface(AndroidFilePickerBridge(), "FreehandAndroidFilePicker")
+            addJavascriptInterface(AndroidApkUpdateBridge(), "FreehandAndroidApkUpdate")
             webChromeClient = AndroidWebChromeClient()
             webViewClient = object : WebViewClient() {
                 override fun onPageFinished(view: WebView?, url: String?) {
                     super.onPageFinished(view, url)
                     reportCanonicalWebUiLayout(view)
+                    lastApkUpdateStatus?.let { emitAndroidApkUpdateStatus(it) }
                 }
 
                 override fun onReceivedError(
@@ -128,7 +133,7 @@ class MainActivity : AppCompatActivity() {
                 handleAndroidBackPressed()
             }
         })
-        AndroidApkUpdater(applicationContext, host).checkForUpdateAsync()
+        startAndroidApkUpdateCheck()
         webView.loadUrl(host.webUiUrl)
     }
 
@@ -207,6 +212,49 @@ class MainActivity : AppCompatActivity() {
         fun request(kind: String) {
             runOnUiThread { openAndroidAttachmentPicker(kind) }
         }
+    }
+
+    private inner class AndroidApkUpdateBridge {
+        @JavascriptInterface
+        fun check() {
+            runOnUiThread { startAndroidApkUpdateCheck() }
+        }
+    }
+
+    private fun startAndroidApkUpdateCheck() {
+        if (!::apkUpdater.isInitialized) {
+            recordAndroidApkUpdateStatus(
+                ApkUpdateStatus(
+                    phase = "failed",
+                    message = "APK updater is not initialized",
+                ),
+            )
+            return
+        }
+        apkUpdater.checkForUpdateAsync { status ->
+            runOnUiThread { recordAndroidApkUpdateStatus(status) }
+        }
+    }
+
+    private fun recordAndroidApkUpdateStatus(status: ApkUpdateStatus) {
+        lastApkUpdateStatus = status
+        emitAndroidApkUpdateStatus(status)
+    }
+
+    private fun emitAndroidApkUpdateStatus(status: ApkUpdateStatus) {
+        if (!::webView.isInitialized || isFinishing) return
+        val payload = JSONObject()
+            .put("phase", status.phase)
+            .put("message", status.message)
+        status.versionCode?.let { payload.put("versionCode", it) }
+        status.versionName?.let { payload.put("versionName", it) }
+        status.apkUrl?.let { payload.put("apkUrl", it) }
+        status.bytes?.let { payload.put("bytes", it) }
+        webView.evaluateJavascript(
+            "window.__freehandAndroidApkUpdateStatus && " +
+                "window.__freehandAndroidApkUpdateStatus($payload);",
+            null,
+        )
     }
 
     private fun openAndroidAttachmentPicker(kind: String) {

@@ -4,7 +4,7 @@
 - owner crate: `apps/freehand-android`
 - owner module: `apps/freehand-android/app/src/main/java/com/freehand/android/`
 - product UI owner: daemon-hosted WebUI from `app.webui-smoke`
-- Android scope: thin WebView host plus platform file-picker bridge plus APK update system-installer handoff
+- Android scope: thin WebView host plus platform file-picker bridge plus APK update status bridge and system-installer handoff
 - reference design: `docs/design/multi-platform-ui-architecture.md`
 - resource map: `docs/resource-maps/core.json`
 - test design: `docs/testing/app.android-client.md`
@@ -26,6 +26,8 @@
 - `MainActivity` immediately loads the canonical daemon WebUI URL from `HostConfig.webUiUrl`: `http://<host>:<port>/?client=android-webview`; daemon HTML and no-store asset URLs own WebUI versioning, not a hardcoded Android query parameter.
 - If startup intent is `ACTION_VIEW` with a supported daemon import deep link, `MainActivity` imports the bootstrap bundle into app-owned config before WebView navigation.
 - `AndroidApkUpdater::checkForUpdateAsync` checks `HostConfig.updateManifestUrl` in the background against the installed `BuildConfig.VERSION_CODE`; current or missing updates do not block canonical WebUI loading.
+- `MainActivity.AndroidApkUpdateBridge::check` exposes a single Android-only Settings trigger to the daemon WebUI; the bridge starts the same updater path and never implements version comparison, download, or install policy in JavaScript.
+- `MainActivity` records the latest APK update status and replays it after page load so startup auto-check and manual Settings checks remain observable in the WebUI.
 - `MainActivity` renders a neutral native startup overlay before WebView navigation and removes it only after `WebUiStartupGate` accepts the canonical Android WebUI shell plus stylesheet and module-JavaScript readiness probe.
 - WebUI itself owns ADP query/subscribe/command, settings, lifecycle dashboard, transcript, composer, and error rendering.
 - Android physical Back invokes the daemon WebUI-owned `window.__freehandHandleAndroidBack` hook first, so focused fields and WebUI dialogs/drawers close before the Activity exits or WebView history is navigated; Android must not implement native settings/session fallback behavior.
@@ -36,6 +38,7 @@
 - Successful page load renders the same daemon WebUI shell as browser WebUI, with `client=android-webview` layout hints.
 - Remote registry import persists the scanned account, daemon, active endpoint, endpoint candidates, and one-time credential in the app-owned config file for subsequent launches.
 - A daemon manifest with positive higher `versionCode` and a relative/http(s) APK URL downloads its APK into app cache and opens Android's system package installer through the app FileProvider URI; install remains Android/user-confirmed rather than silent.
+- APK update status phases (`checking`, `current`, `available`, `downloading`, `downloaded`, `installer_started`, `failed`, `already_checking`) are pushed into `window.__freehandAndroidApkUpdateStatus` for the WebUI Settings card.
 - Android logs `FreehandWebUiLayout` from canonical WebUI DOM selectors, applied stylesheet state, and WebUI module-JavaScript readiness for true-device validation.
 - The startup overlay shows loading/error state until the canonical Android WebUI shell is verified; page-finished alone is not success.
 - Android Back returns a WebUI-handled result when the canonical page closes a focused form, dialog, Header tree, Agent sheet, or mobile drawer; otherwise Android may navigate WebView history or exit.
@@ -46,6 +49,7 @@
 - Config parse/load errors are fatal Android startup errors.
 - Unknown or removed config fields are errors; Android does not ignore or migrate them.
 - APK update manifest parse errors, non-positive versions, non-http absolute APK URLs, HTTP failures, empty APK downloads, or installer handoff errors are explicit `FreehandApkUpdate` logcat failures and do not pretend the app upgraded.
+- A concurrent Settings click while an update check is already running returns `already_checking` instead of launching a duplicate check; the last recorded status remains replayable to the WebUI.
 - Unsupported bootstrap kind/schema, malformed base64/JSON, expired bootstrap, missing credential, unknown daemon endpoint, relay endpoint without account relay URL, or unsupported endpoint kind is an explicit Android startup/import error.
 - Network/WebView load failures remain WebView failures. Android does not render native fallback UI.
 - Missing WebUI layout probe is a failed/blocked device validation result, not acceptance evidence.
@@ -69,7 +73,9 @@
 | 09 | `generate_launcher_icons` | `apps/freehand-android/scripts/generate-launcher-icons.sh` | derive Android launcher mipmaps from `assets/logo.png` | source logo | launcher PNGs | maintainer | ImageMagick | bound |
 | 10 | `verify_launcher_icons` | `apps/freehand-android/scripts/verify-launcher-icons.sh` | verify launcher dimensions and source pixels | source logo + launcher PNGs | success or explicit drift failure | maintainer | ImageMagick | bound |
 | 11 | `verify_device_ui` | `apps/freehand-android/scripts/verify-device-ui.sh` | install/start APK and verify canonical WebUI is foreground with layout evidence | adb serial + APK | passed/blocked/failed artifact directory | operator | adb install/start/dumpsys/logcat/screencap | bound |
-| 12 | `com.freehand.android.ui.AndroidApkUpdater::checkForUpdateAsync` | `apps/freehand-android/app/src/main/java/com/freehand/android/ui/AndroidApkUpdater.kt` | check selected daemon update manifest against installed version and reject non-positive versions or non-http absolute APK URLs | `HostConfig.updateManifestUrl` + `BuildConfig.VERSION_CODE` | no-op current log or valid higher-version update plan | `MainActivity::onCreate` | `ApkUpdateManifest::parse`, `ApkUpdateManifest::updatePlan` | bound |
+| 12 | `com.freehand.android.ui.AndroidApkUpdater::checkForUpdateAsync` | `apps/freehand-android/app/src/main/java/com/freehand/android/ui/AndroidApkUpdater.kt` | check selected daemon update manifest against installed version, reject non-positive versions or non-http absolute APK URLs, and emit stable update phases to the caller | `HostConfig.updateManifestUrl` + `BuildConfig.VERSION_CODE` | status callbacks plus current-version no-op log or valid higher-version update plan | `MainActivity::startAndroidApkUpdateCheck` | `ApkUpdateManifest::parse`, `ApkUpdateManifest::updatePlan` | bound |
+| 12a | `com.freehand.android.ui.MainActivity.AndroidApkUpdateBridge::check` | `apps/freehand-android/app/src/main/java/com/freehand/android/ui/MainActivity.kt` | let daemon WebUI Settings request a manual Android APK update check through the same updater owner | WebUI JavaScript bridge call | updater check started or explicit unavailable status | daemon WebUI JS bridge | `MainActivity::startAndroidApkUpdateCheck` | bound |
+| 12b | `com.freehand.android.ui.MainActivity::recordAndroidApkUpdateStatus` / `emitAndroidApkUpdateStatus` | `apps/freehand-android/app/src/main/java/com/freehand/android/ui/MainActivity.kt` | record the latest APK update status and push it to the daemon WebUI status callback, including replay after page load | `ApkUpdateStatus` | `window.__freehandAndroidApkUpdateStatus(payload)` | `AndroidApkUpdater::checkForUpdateAsync`, `WebViewClient::onPageFinished` | WebView JavaScript | bound |
 | 13 | `com.freehand.android.ui.AndroidApkUpdater::downloadApk` | `apps/freehand-android/app/src/main/java/com/freehand/android/ui/AndroidApkUpdater.kt` | download manifest-selected higher-version APK into app cache | resolved relative/http(s) APK URL + target versionCode | non-empty cached APK file | `AndroidApkUpdater::checkForUpdateAsync` | `HttpURLConnection` + app cache | bound |
 | 14 | `com.freehand.android.ui.AndroidApkUpdater::buildInstallIntent` | `apps/freehand-android/app/src/main/java/com/freehand/android/ui/AndroidApkUpdater.kt` | hand cached APK to Android system package installer | cached APK file | `ACTION_VIEW` package-installer intent with FileProvider URI | `AndroidApkUpdater::checkForUpdateAsync` | Android `FileProvider` / package installer | bound |
 
@@ -79,4 +85,4 @@
 - `bridge.html`, Android ADP/SSE/HTTP command transports, native projector, native drawer/composer/topbar/status components, and Android mock route/assets are removed.
 - App-owned config no longer carries ADP/query/command/subscription paths or top-level relay routing.
 - Android can import `remote_registry` bootstrap links and load a declared Tailscale/IPv4/IPv6/relay WebUI endpoint, but it does not own account directory truth, route scoring, live health probing, Tailscale OS connection, or relay tunnel semantics.
-- Android APK update route remains daemon release distribution truth; Android now owns only manifest check, APK cache download, and system package-installer handoff, not a native update panel or silent install path.
+- Android APK update route remains daemon release distribution truth; Android now owns only manifest check, APK cache download, status bridge, and system package-installer handoff, not a native update panel or silent install path.

@@ -1,4 +1,4 @@
-import { initializeThemeToggle } from "/assets/theme.js?v=20260719-request-cycle-cards";
+import { initializeThemeToggle } from "/assets/theme.js?v=20260722-android-apk-update";
 
 initializeThemeToggle(document);
 
@@ -122,6 +122,10 @@ const settingsProviderUrlInput = document.getElementById("settings-provider-url-
 const settingsProviderModelInput = document.getElementById("settings-provider-model-input");
 const settingsProviderEnvInput = document.getElementById("settings-provider-env-input");
 const settingsProviderSaveButton = document.getElementById("settings-provider-save-button");
+const settingsApkUpdateSummary = document.getElementById("settings-apk-update-summary");
+const settingsApkUpdateSource = document.getElementById("settings-apk-update-source");
+const settingsApkUpdateStatus = document.getElementById("settings-apk-update-status");
+const settingsApkUpdateCheckButton = document.getElementById("settings-apk-update-check-button");
 const newConversationButton = document.getElementById("new-conversation-button");
 const newTaskButton = document.getElementById("new-task-button");
 const taskCwdInput = document.getElementById("task-cwd-input");
@@ -227,6 +231,8 @@ const state = {
   agentResourceSaveInFlight: false,
   agentResourceSaveMessage: null,
   agentResourceSaveError: null,
+  androidApkUpdateStatus: null,
+  androidApkUpdateInFlight: false,
   sessionTreeOpen: false,
   toolTimings: new Map(),
   lifecycleClocks: new Map(),
@@ -273,6 +279,10 @@ const state = {
   renderedCycleSessionId: null,
   foregroundRefreshInFlight: false,
   foregroundRefreshLastAt: 0,
+};
+
+window.__freehandAndroidApkUpdateStatus = (payload) => {
+  receiveAndroidApkUpdateStatus(payload);
 };
 
 function shellConfig() {
@@ -5821,7 +5831,141 @@ function renderSettingsShell() {
   syncSettingsProviderForm();
   renderSettingsProviderRegistry();
   renderSystemAgentResourceConfig();
+  renderAndroidApkUpdateSettings();
   showInspectorPanel(state.inspectorPanel);
+}
+
+function androidApkUpdateManifestUrlForDisplay() {
+  try {
+    return new URL("android/update.json", window.location.href).toString();
+  } catch (_) {
+    return "daemon /android/update.json";
+  }
+}
+
+function androidApkUpdateBridge() {
+  const bridge = window.FreehandAndroidApkUpdate;
+  if (bridge && typeof bridge.check === "function") {
+    return bridge;
+  }
+  return null;
+}
+
+function androidApkUpdateBridgeAvailable() {
+  return layoutClient() === "android-webview" && !!androidApkUpdateBridge();
+}
+
+function androidApkUpdatePhaseInFlight(phase) {
+  return ["checking", "available", "downloading", "downloaded", "already_checking"].includes(`${phase || ""}`);
+}
+
+function optionalAndroidApkUpdateNumber(value) {
+  if (value === undefined || value === null || `${value}`.trim() === "") {
+    return null;
+  }
+  const parsed = Number(value);
+  return Number.isFinite(parsed) ? parsed : null;
+}
+
+function normalizeAndroidApkUpdateStatus(payload = {}) {
+  const phase = `${payload.phase || "unknown"}`.trim() || "unknown";
+  const message = `${payload.message || phase}`.trim() || phase;
+  return {
+    phase,
+    message,
+    versionCode: optionalAndroidApkUpdateNumber(payload.versionCode),
+    versionName: `${payload.versionName || ""}`.trim(),
+    apkUrl: `${payload.apkUrl || ""}`.trim(),
+    bytes: optionalAndroidApkUpdateNumber(payload.bytes),
+  };
+}
+
+function receiveAndroidApkUpdateStatus(payload = {}) {
+  const status = normalizeAndroidApkUpdateStatus(payload);
+  state.androidApkUpdateStatus = status;
+  state.androidApkUpdateInFlight = androidApkUpdatePhaseInFlight(status.phase);
+  renderAndroidApkUpdateSettings();
+  setCommandStatus(`APK update: ${status.message}`, { stickyMs: 7000 });
+}
+
+function androidApkUpdateStatusText() {
+  const status = state.androidApkUpdateStatus;
+  if (!status) {
+    if (layoutClient() !== "android-webview") {
+      return "Open this Settings page inside the Android app to check and download a newer APK.";
+    }
+    if (!androidApkUpdateBridge()) {
+      return "Android APK update bridge is unavailable; reload the Android app after installing the latest APK.";
+    }
+    return "Ready to check this daemon's Android update manifest.";
+  }
+  const parts = [status.message];
+  if (status.versionName) {
+    parts.push(`versionName=${status.versionName}`);
+  }
+  if (status.bytes !== null) {
+    parts.push(`bytes=${status.bytes}`);
+  }
+  if (status.apkUrl) {
+    parts.push(status.apkUrl);
+  }
+  return parts.join(" · ");
+}
+
+function renderAndroidApkUpdateSettings() {
+  const bridgeAvailable = androidApkUpdateBridgeAvailable();
+  const phase = state.androidApkUpdateStatus?.phase || "";
+  const summary = bridgeAvailable
+    ? phase
+      ? phase.replace(/_/g, " ")
+      : "ready"
+    : layoutClient() === "android-webview"
+      ? "bridge unavailable"
+      : "Android app only";
+  setText("settings-apk-update-summary", summary);
+  setText("settings-apk-update-source", androidApkUpdateManifestUrlForDisplay());
+  setText("settings-apk-update-status", androidApkUpdateStatusText());
+  if (settingsApkUpdateCheckButton) {
+    settingsApkUpdateCheckButton.disabled = !bridgeAvailable || state.androidApkUpdateInFlight;
+    settingsApkUpdateCheckButton.textContent = state.androidApkUpdateInFlight
+      ? "Checking APK update..."
+      : "Check APK update";
+  }
+  if (settingsApkUpdateSummary) {
+    settingsApkUpdateSummary.dataset.phase = phase || summary;
+  }
+  if (settingsApkUpdateStatus) {
+    settingsApkUpdateStatus.dataset.phase = phase || summary;
+  }
+}
+
+function requestAndroidApkUpdateCheck() {
+  const bridge = androidApkUpdateBridge();
+  if (layoutClient() !== "android-webview" || !bridge) {
+    receiveAndroidApkUpdateStatus({
+      phase: "failed",
+      message: "APK update check is available only inside the Freehand Android app.",
+    });
+    return;
+  }
+  state.androidApkUpdateInFlight = true;
+  state.androidApkUpdateStatus = {
+    phase: "checking",
+    message: "Checking update manifest...",
+    versionCode: null,
+    versionName: "",
+    apkUrl: "",
+    bytes: null,
+  };
+  renderAndroidApkUpdateSettings();
+  try {
+    bridge.check();
+  } catch (error) {
+    receiveAndroidApkUpdateStatus({
+      phase: "failed",
+      message: error && error.message ? error.message : "Android APK update bridge call failed",
+    });
+  }
 }
 
 function settingsAuthTypeLabel(authType) {
@@ -6906,6 +7050,11 @@ if (settingsProviderSwitchButton) {
     });
   });
 }
+if (settingsApkUpdateCheckButton) {
+  settingsApkUpdateCheckButton.addEventListener("click", () => {
+    requestAndroidApkUpdateCheck();
+  });
+}
 if (closeDetailDrawerButton) {
   closeDetailDrawerButton.addEventListener("click", closeMobileDrawer);
 }
@@ -7207,6 +7356,13 @@ function installWebUiTestHooks() {
     },
     refreshAfterAmbiguousSubmitFailure(message) {
       return refreshAfterAmbiguousSubmitFailure(new Error(message || "simulated submit failure"));
+    },
+    receiveAndroidApkUpdateStatus(payload) {
+      receiveAndroidApkUpdateStatus(payload || {});
+      return {
+        inFlight: state.androidApkUpdateInFlight,
+        status: state.androidApkUpdateStatus,
+      };
     },
     markPendingSubmitError(message) {
       state.pendingSubmitError = message;

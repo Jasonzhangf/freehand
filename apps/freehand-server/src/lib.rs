@@ -1280,6 +1280,10 @@ mod tests {
         assert!(html.contains("id=\"settings-provider-switch-button\""));
         assert!(html.contains("id=\"settings-provider-registry-list\""));
         assert!(html.contains("Add/update provider"));
+        assert!(html.contains("Android APK update"));
+        assert!(html.contains("id=\"settings-apk-update-check-button\""));
+        assert!(html.contains("id=\"settings-apk-update-status\""));
+        assert!(html.contains("Check APK update"));
         assert!(!html.contains("Skill settings pending"));
         assert!(!html.contains("Task settings pending"));
         assert!(!html.contains("Active agent"));
@@ -1801,6 +1805,18 @@ mod tests {
         assert!(js_body.contains("UpdateAgentProviderSelection"));
         assert!(js_body.contains("function submitProviderConfigUpdate"));
         assert!(js_body.contains("function submitProviderSelectionUpdate"));
+        assert!(js_body.contains("function requestAndroidApkUpdateCheck"));
+        assert!(js_body.contains("function receiveAndroidApkUpdateStatus"));
+        assert!(js_body.contains("function optionalAndroidApkUpdateNumber"));
+        assert!(js_body.contains("\"already_checking\""));
+        assert!(js_body.contains("window.__freehandAndroidApkUpdateStatus"));
+        assert!(js_body.contains("window.FreehandAndroidApkUpdate"));
+        assert!(js_body.contains("bridge.check();"));
+        assert!(js_body.contains("settings-apk-update-check-button"));
+        assert!(js_body.contains("settings-apk-update-status"));
+        assert!(
+            js_body.contains("APK update check is available only inside the Freehand Android app.")
+        );
         assert!(js_body.contains("function providerConfigReceiptStatus"));
         assert!(js_body.contains("function providerConfigUpsertReceiptStatus"));
         assert!(js_body.contains("function providerSelectionReceiptStatus"));

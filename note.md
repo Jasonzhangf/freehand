@@ -7665,3 +7665,24 @@ Current real root cause split:
   - Final DOM/ADP proof: selected terminal status `success`, ADP terminal `Success`, `liveCount=0`, no final provider retry text, no ADP errors.
   - ErrorCenter turn query for `runtime-turn-477` returned `count=2` with two provider `retry_same_step` rows for `openai_http_status_500`.
   - Final S config restored to `provider=minimax fallback_provider=cc provider_protocol=messages base_url_host=api.minimaxi.com default_model=MiniMax-M3 auth_source=inline`; fixture/test env grep returned 0 matches; health returned `ok`.
+
+# 2026-07-22 Android APK update Settings bridge
+
+- trigger:
+  - Settings had no user-facing APK update entry, while the Android updater already checked `/android/update.json` only on app startup.
+- owner path:
+  - `android_apk_update` remains `app.android-client` truth for manifest comparison, APK cache download, and FileProvider system-installer handoff.
+  - `app.webui-smoke` owns only the daemon WebUI Settings card, native bridge call, status rendering, and asset version bump.
+- implementation:
+  - WebUI Settings now renders `Android APK update` with `Check APK update`, update source, phase/status text, desktop/browser unavailable state, and Android-WebView bridge callback handling.
+  - Android `MainActivity` exposes `FreehandAndroidApkUpdate.check`, reuses the single `AndroidApkUpdater`, records the latest `ApkUpdateStatus`, and replays status after page load so startup and manual checks stay observable.
+  - `AndroidApkUpdater` emits stable phases: `checking`, `current`, `available`, `downloading`, `downloaded`, `installer_started`, `failed`, and `already_checking`; duplicate checks are blocked by one `AtomicBoolean`.
+  - WebUI asset version was bumped to `20260722-android-apk-update` so Android WebView cannot keep the previous Settings JS.
+- proof:
+  - `node --check apps/freehand-server/assets/webui.js` passed.
+  - `cd apps/freehand-android && JAVA_HOME="/Applications/Android Studio.app/Contents/jbr/Contents/Home" ./gradlew testDebugUnitTest assembleDebug` passed.
+  - `cargo test -p freehand-server --lib -- --nocapture` passed 15/15; the dispatch-worker panic is the intentional join-failure negative test.
+  - `cargo run -p xtask -- mainlines generate`, `cargo fmt --check`, `cargo run -p xtask -- mainlines check`, `cargo run -p xtask -- gates check`, and `git diff --check` passed.
+  - Local Chrome/CDP Android-WebView bridge simulation passed with artifact `artifacts/android-apk-update-settings-local/2026-07-21T23-18-28-865Z/summary.json`: button enabled, script `webui.js?v=20260722-android-apk-update`, one bridge call, final card `installer_started`, status contained `versionName=0.4.2` and `bytes=123456`.
+- blocker:
+  - True-device closure is not complete because `adb devices` is empty; `adb connect 100.104.163.65:5555` timed out and `adb connect 100.107.194.67:33039` was refused.
