@@ -7686,3 +7686,23 @@ Current real root cause split:
   - Local Chrome/CDP Android-WebView bridge simulation passed with artifact `artifacts/android-apk-update-settings-local/2026-07-21T23-18-28-865Z/summary.json`: button enabled, script `webui.js?v=20260722-android-apk-update`, one bridge call, final card `installer_started`, status contained `versionName=0.4.2` and `bytes=123456`.
 - blocker:
   - True-device closure is not complete because `adb devices` is empty; `adb connect 100.104.163.65:5555` timed out and `adb connect 100.107.194.67:33039` was refused.
+
+# 2026-07-22 Android install-time file-access prompt
+
+- user contract:
+  - File/media and broad external-storage permissions must be requested centrally on the first app start after every install or update, not lazily when a later file operation runs.
+- owner and implementation:
+  - `app.android-client` owns `android_file_access`.
+  - `MainActivity::requestInstallFileAccessIfNeeded` runs before APK update checking and WebView navigation.
+  - Prompt admission keys off package `lastUpdateTime`, not `versionCode`; a same-version reinstall therefore creates a new install marker while ordinary app starts do not repeat the prompt.
+  - Android 11+ all-files access is handed to package-scoped system settings because a normal application cannot silently grant `MANAGE_EXTERNAL_STORAGE`.
+  - `FreehandFileAccess` logcat rows carry phase, versionCode, installMarker, runtime permission state, and all-files state.
+- local proof:
+  - Android `testDebugUnitTest assembleDebug` passed.
+  - WebUI and verifier JavaScript syntax checks passed.
+  - `freehand-ui-protocol` passed 64/64 and `freehand-server --lib` passed 15/15.
+  - `cargo fmt --check`, mainlines check, gates check, and `git diff --check` passed.
+- online/restoration:
+  - S-profile config remained `minimax/MiniMax-M3` with fallback `cc`; fixture env grep returned zero matches.
+- blocker:
+  - True-device install/permission closure is not complete: `adb devices` is empty, `100.107.194.67:45099` refused connection, and `100.104.163.65:5555` timed out.

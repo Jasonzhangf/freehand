@@ -48,6 +48,15 @@
       "projections": ["FreehandApkUpdate logcat rows", "WebUI Settings Android APK update status card", "Android system package installer intent", "downloaded APK cache file"]
     },
     {
+      "resource_type": "android_file_access",
+      "owner_feature_id": "app.android-client",
+      "owner_crate": "apps/freehand-android",
+      "identity": "installed Android package install/update marker plus package permission state",
+      "truth_store": "Android package permission manager plus app-owned shared preferences recording the last package install marker that launched the centralized first-start permission prompt",
+      "operations": ["request_startup_permissions", "open_all_files_settings", "project_status"],
+      "projections": ["FreehandFileAccess logcat rows", "Android runtime permission dialog", "Android all-files-access settings intent", "startup permission status"]
+    },
+    {
       "resource_type": "session",
       "owner_feature_id": "reason.persistence",
       "owner_crate": "crates/freehand-reason",
@@ -464,6 +473,33 @@
       "binding_status": "bound"
     },
     {
+      "operation_id": "android_file_access.request_startup_permissions",
+      "owner_feature_id": "app.android-client",
+      "source_resource": "android_file_access",
+      "target_resource": "android_file_access",
+      "effect": "on first startup for the current package install/update marker, request supported runtime file/media permissions up front instead of waiting until a later file action",
+      "mainline_call_doc": "docs/mainline-calls/app.android-client.json",
+      "binding_status": "bound"
+    },
+    {
+      "operation_id": "android_file_access.open_all_files_settings",
+      "owner_feature_id": "app.android-client",
+      "source_resource": "android_file_access",
+      "target_resource": "android_file_access",
+      "effect": "on Android 11 and newer, open the package-scoped all-files-access settings page once during startup when broad external storage access is not yet granted",
+      "mainline_call_doc": "docs/mainline-calls/app.android-client.json",
+      "binding_status": "bound"
+    },
+    {
+      "operation_id": "android_file_access.project_status",
+      "owner_feature_id": "app.android-client",
+      "source_resource": "android_file_access",
+      "target_resource": "android_file_access",
+      "effect": "record granted, restricted, requested, or settings-unavailable permission status in logcat for true-device verification",
+      "mainline_call_doc": "docs/mainline-calls/app.android-client.json",
+      "binding_status": "bound"
+    },
+    {
       "operation_id": "node_pairing.project_to_ui",
       "owner_feature_id": "node.master-slave",
       "source_resource": "node_pairing",
@@ -812,6 +848,39 @@
       "binding_status": "bound"
     },
     {
+      "edge_id": "app.android-client#15",
+      "operation_id": "android_file_access.request_startup_permissions",
+      "source_resource": "android_file_access",
+      "target_resource": "android_file_access",
+      "mainline_call_doc": "docs/mainline-calls/app.android-client.json",
+      "call_table_step": "15",
+      "file_path": "apps/freehand-android/app/src/main/java/com/freehand/android/ui/MainActivity.kt",
+      "symbol_path": "com.freehand.android.ui.MainActivity::requestInstallFileAccessIfNeeded / currentInstallMarker",
+      "binding_status": "bound"
+    },
+    {
+      "edge_id": "app.android-client#15a",
+      "operation_id": "android_file_access.open_all_files_settings",
+      "source_resource": "android_file_access",
+      "target_resource": "android_file_access",
+      "mainline_call_doc": "docs/mainline-calls/app.android-client.json",
+      "call_table_step": "15a",
+      "file_path": "apps/freehand-android/app/src/main/java/com/freehand/android/ui/MainActivity.kt",
+      "symbol_path": "com.freehand.android.ui.MainActivity::openAllFilesAccessSettingsIfNeeded",
+      "binding_status": "bound"
+    },
+    {
+      "edge_id": "app.android-client#15b",
+      "operation_id": "android_file_access.project_status",
+      "source_resource": "android_file_access",
+      "target_resource": "android_file_access",
+      "mainline_call_doc": "docs/mainline-calls/app.android-client.json",
+      "call_table_step": "15b",
+      "file_path": "apps/freehand-android/app/src/main/java/com/freehand/android/ui/MainActivity.kt",
+      "symbol_path": "com.freehand.android.ui.MainActivity::logFileAccessStatus",
+      "binding_status": "bound"
+    },
+    {
       "edge_id": "node.master-slave#08",
       "operation_id": "node_pairing.project_to_ui",
       "source_resource": "node_pairing",
@@ -1021,6 +1090,14 @@
       "allowed_direct": true,
       "via_resources": [],
       "reason": "Android owns only package update checking, APK cache download, and system-installer handoff for its installed package; daemon release distribution remains served by the selected endpoint."
+    },
+    {
+      "rule_id": "android-file-access-self-owned-direct",
+      "source_resource": "android_file_access",
+      "target_resource": "android_file_access",
+      "allowed_direct": true,
+      "via_resources": [],
+      "reason": "Android owns only its package runtime permission request, all-files settings handoff, and startup permission status logging; file operation semantics remain with their existing owners."
     },
     {
       "rule_id": "node-pairing-through-ui-projection",

@@ -97,7 +97,7 @@ This table is the feature-map backlink for `docs/resource-maps/core.json`. The r
 | `runtime.checkpoint-rewind` | `checkpoint` | `docs/resource-maps/core.json` |
 | `node.master-slave` | `node_pairing`, `remote_daemon_directory` | `docs/resource-maps/core.json` |
 | `app.runtime-daemon` | `remote_relay_transport` | `docs/resource-maps/core.json` |
-| `app.android-client` | `android_apk_update` | `docs/resource-maps/core.json` |
+| `app.android-client` | `android_apk_update`, `android_file_access` | `docs/resource-maps/core.json` |
 | `instruction.capability-loader` | `instruction_capability` | `docs/resource-maps/core.json` |
 
 ## Architecture Gap Registry

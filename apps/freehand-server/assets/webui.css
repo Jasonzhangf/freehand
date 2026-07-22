@@ -3746,6 +3746,18 @@ body[data-layout-shape="tablet_portrait"] .tool-chat-line-secondary {
   display: none;
 }
 
+body[data-layout-shape="phone_portrait"] .tool-chat-line-secondary.tool-chat-line-success,
+body[data-layout-shape="tall_phone"] .tool-chat-line-secondary.tool-chat-line-success,
+body[data-layout-shape="tablet_portrait"] .tool-chat-line-secondary.tool-chat-line-success,
+body[data-layout-shape="phone_portrait"] .tool-chat-line-secondary.tool-chat-line-failed,
+body[data-layout-shape="tall_phone"] .tool-chat-line-secondary.tool-chat-line-failed,
+body[data-layout-shape="tablet_portrait"] .tool-chat-line-secondary.tool-chat-line-failed,
+body[data-layout-shape="phone_portrait"] .tool-chat-line-secondary.tool-chat-line-running,
+body[data-layout-shape="tall_phone"] .tool-chat-line-secondary.tool-chat-line-running,
+body[data-layout-shape="tablet_portrait"] .tool-chat-line-secondary.tool-chat-line-running {
+  display: block;
+}
+
 /* Mobile v3: phone-first chat. This is intentionally stronger than the desktop card system. */
 body[data-layout-shape="phone_portrait"],
 body[data-layout-shape="tall_phone"],

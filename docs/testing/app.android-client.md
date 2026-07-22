@@ -14,14 +14,15 @@
 5. `DaemonConnectionConfig::activeHostConfig` selects the already-declared active daemon endpoint; Android does not score routes.
 6. `MainActivity::onCreate` renders a native neutral startup overlay before WebView navigation and loads canonical `HostConfig.webUiUrl` immediately; daemon HTML and no-store asset URLs own WebUI versioning.
 7. Canonical daemon WebUI owns transcript, composer, settings, status, lifecycle dashboard, ADP, command dispatch, and WebUI errors.
-8. Android `WebChromeClient::onShowFileChooser` and `FreehandAndroidFilePicker.request` open Android system picker for WebUI attachment controls.
-9. `MainActivity::injectAndroidAttachmentSelection` returns selected Android URI metadata to WebUI.
-10. `MainActivity::reportCanonicalWebUiLayout` logs canonical WebUI DOM, stylesheet, and module-JavaScript evidence and removes the startup overlay only after the canonical Android WebUI readiness probe succeeds.
-11. `MainActivity::handleAndroidBackPressed` routes physical Back into canonical WebUI `window.__freehandHandleAndroidBack` first; only an unhandled result may navigate WebView history or finish the Activity.
-12. `generate-launcher-icons.sh` and `verify-launcher-icons.sh` keep launcher assets source-derived from `assets/logo.png`.
-13. `verify-device-ui.sh <adb-serial>` installs/starts APK and accepts only canonical WebUI layout evidence; local `apkanalyzer` failures are blocker evidence (`apkanalyzer_failed`), not proof that the APK is missing the launcher activity.
-14. `AndroidApkUpdater::checkForUpdateAsync` checks the selected daemon endpoint's APK update manifest, accepts only positive higher `versionCode` values and relative/http(s) APK URLs, emits stable status phases, downloads the APK into app cache, and hands the cached APK to Android's system installer through FileProvider.
-15. `MainActivity.AndroidApkUpdateBridge::check` lets daemon WebUI Settings trigger the same updater path, while `MainActivity::recordAndroidApkUpdateStatus` replays startup or manual status to `window.__freehandAndroidApkUpdateStatus`.
+8. `MainActivity::requestInstallFileAccessIfNeeded` runs once per package install/update marker during startup, requests supported runtime file/media permissions, opens Android 11+ all-files-access settings when needed, and logs `FreehandFileAccess` status instead of waiting for later file actions.
+9. Android `WebChromeClient::onShowFileChooser` and `FreehandAndroidFilePicker.request` open Android system picker for WebUI attachment controls.
+10. `MainActivity::injectAndroidAttachmentSelection` returns selected Android URI metadata to WebUI.
+11. `MainActivity::reportCanonicalWebUiLayout` logs canonical WebUI DOM, stylesheet, and module-JavaScript evidence and removes the startup overlay only after the canonical Android WebUI readiness probe succeeds.
+12. `MainActivity::handleAndroidBackPressed` routes physical Back into canonical WebUI `window.__freehandHandleAndroidBack` first; only an unhandled result may navigate WebView history or finish the Activity.
+13. `generate-launcher-icons.sh` and `verify-launcher-icons.sh` keep launcher assets source-derived from `assets/logo.png`.
+14. `verify-device-ui.sh <adb-serial>` installs/starts APK and accepts only canonical WebUI layout evidence; local `apkanalyzer` failures are blocker evidence (`apkanalyzer_failed`), not proof that the APK is missing the launcher activity.
+15. `AndroidApkUpdater::checkForUpdateAsync` checks the selected daemon endpoint's APK update manifest, accepts only positive higher `versionCode` values and relative/http(s) APK URLs, emits stable status phases, downloads the APK into app cache, and hands the cached APK to Android's system installer through FileProvider.
+16. `MainActivity.AndroidApkUpdateBridge::check` lets daemon WebUI Settings trigger the same updater path, while `MainActivity::recordAndroidApkUpdateStatus` replays startup or manual status to `window.__freehandAndroidApkUpdateStatus`.
 
 ## Resource Operation Test Coverage
 
@@ -30,6 +31,9 @@
 | `android_apk_update.check_manifest` | bound | `./gradlew testDebugUnitTest` covers manifest parsing, unknown-field rejection, positive version validation, non-http absolute URL rejection, current-version no-op, higher-version plan creation, and stable WebUI bridge status phases | `./gradlew assembleDebug` compiles the startup/manual caller and updater wiring into the APK | `bash apps/freehand-android/scripts/verify-device-ui.sh <adb-serial>` remains the device entrypoint; install-prompt proof uses a staged higher-version APK, Settings click evidence, and manual Android installer confirmation |
 | `android_apk_update.download_apk` | bound | `./gradlew testDebugUnitTest` covers daemon/relay APK URL resolution from manifest truth and rejects non-http absolute APK URLs before download | `./gradlew assembleDebug` compiles the cache download owner and FileProvider authority | `bash apps/freehand-android/scripts/verify-device-ui.sh <adb-serial>` is the device smoke; full staged old-to-new APK replacement proof uses a release artifact newer than the installed build |
 | `android_apk_update.request_install` | bound | `./gradlew testDebugUnitTest` covers higher-version plan admission before installer handoff | `./gradlew assembleDebug` verifies `REQUEST_INSTALL_PACKAGES`, FileProvider metadata, and updater code package together | `bash apps/freehand-android/scripts/verify-device-ui.sh <adb-serial>` is the device smoke; Android system package installer confirmation is user-controlled and cannot be silently completed by the app |
+| `android_file_access.request_startup_permissions` | bound | `./gradlew testDebugUnitTest` covers SDK-specific runtime file/media permission lists and once-per-install-marker prompt admission, including same-version reinstall markers | `./gradlew assembleDebug` compiles `READ_EXTERNAL_STORAGE`, `READ_MEDIA_*`, and `MANAGE_EXTERNAL_STORAGE` manifest wiring plus the ActivityResult permission launcher | `bash apps/freehand-android/scripts/verify-device-ui.sh <adb-serial>` must include `FreehandFileAccess` logcat rows showing granted, requested, or restricted startup status |
+| `android_file_access.open_all_files_settings` | bound | `./gradlew testDebugUnitTest` covers Android 11+ all-files settings eligibility and pre-Android 11 exclusion | `./gradlew assembleDebug` compiles the package-scoped `ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION` handoff | `bash apps/freehand-android/scripts/verify-device-ui.sh <adb-serial>` must observe Android settings handoff when all-files access is not already granted; a normal app cannot silently grant it |
+| `android_file_access.project_status` | bound | `./gradlew testDebugUnitTest` covers stable policy decisions used by `FreehandFileAccess` status logging | `./gradlew assembleDebug` compiles startup status logging | `bash apps/freehand-android/scripts/verify-device-ui.sh <adb-serial>` reads `FreehandFileAccess` logcat rows; denial remains restricted evidence, not success |
 
 ## Negative Contract
 
@@ -49,6 +53,7 @@
 - `HostConfigTest` covers daemon origin plus canonical Android WebUI URL construction without an APK-hardcoded asset version query.
 - `ApkUpdateManifestTest` covers APK update manifest strict parsing, positive version validation, non-http absolute APK URL rejection, version comparison, direct endpoint URL resolution, and relay namespace URL resolution.
 - `ApkUpdateStatusTest` covers the stable status phase vocabulary consumed by the WebUI Settings bridge.
+- `FileAccessPermissionPolicyTest` covers runtime permission selection, all-files settings eligibility, and once-per-install-marker prompt admission.
 - `WebUiStartupGateTest` positively accepts only `webuiShell=true` plus `layoutClient=android-webview` plus `webuiCssApplied=true` plus `webuiJsReady=true`, and negatively rejects false, malformed, null, wrong-client, missing-stylesheet, and missing-JavaScript probes.
 - `DaemonConnectionConfigTest` covers bundled config bootstrap, strict schema validation, app-owned persistence, rejection of removed transport/top-level relay fields, remote registry Tailscale/relay endpoint selection, bootstrap deep-link import, expiry rejection, and relay endpoint account binding.
 - Server asset smoke locks that WebUI exposes `window.__freehandHandleAndroidBack`; Android compile verifies `MainActivity::handleAndroidBackPressed` calls that hook instead of owning native drawer/session/settings state.
@@ -59,12 +64,13 @@
 
 - `cd apps/freehand-android && JAVA_HOME="/Applications/Android Studio.app/Contents/jbr/Contents/Home" ./gradlew testDebugUnitTest assembleDebug`
 - APK inspection must show `com.freehand.android.ui.MainActivity` is packaged and `assets/bridge.html` is absent.
-- APK inspection must show `REQUEST_INSTALL_PACKAGES` and `${applicationId}.apkupdate.fileprovider` are packaged for the system installer handoff.
+- APK inspection must show `REQUEST_INSTALL_PACKAGES`, file/media storage permissions, `MANAGE_EXTERNAL_STORAGE`, and `${applicationId}.apkupdate.fileprovider` are packaged for the system installer handoff and startup permission prompt.
 - Server test must prove `/mock/android` and `/assets/mocks/android/mobile-mock.css` return 404 while `/?client=android-webview` returns the canonical WebUI shell.
 
 ## Project Black-Box Impact
 
 - True-device closure requires a connected/unlocked explicit ADB serial.
+- File-access closure requires a fresh install/update marker not yet recorded in app preferences, launch evidence for `FreehandFileAccess` including that marker, runtime permission dialog/settings handoff when permissions are missing, and final granted/restricted status after returning to the app.
 - Full auto-upgrade closure requires installing an older APK, staging a higher-version APK at the selected daemon endpoint, observing `FreehandApkUpdate` logcat update-plan/download/install-intent evidence, manually confirming Android's system installer if prompted, and reading back the upgraded package `versionCode`.
 - Manual Settings closure requires opening Config inside the Android WebView, tapping `Check APK update`, observing the status card move through check/download/install phases or current-version/no-update, and preserving the daemon WebUI as the only visible product UI.
 - Remote daemon bootstrap closure requires opening or scanning a `freehand://daemon/import?payload=...` link on the device, then reading back app-owned `files/daemon-connection.json` before WebUI acceptance.
@@ -78,3 +84,4 @@
 - Attachment picker still needs true-device proof after the WebUI-only shell change.
 - The Android slice does not implement relay signaling/tunnel IO or Tailscale OS auto-connect; it imports config-owned route/bootstrap truth and loads the selected daemon-hosted WebUI endpoint only.
 - Silent background package replacement is not implemented because Android package installation remains system/user controlled for a normal non-device-owner app.
+- Silent all-files permission grant is not implemented because Android 11+ requires user confirmation in system settings for a normal non-device-owner app.

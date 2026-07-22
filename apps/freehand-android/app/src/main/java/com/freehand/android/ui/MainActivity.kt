@@ -2,12 +2,18 @@ package com.freehand.android.ui
 
 import android.animation.AnimatorSet
 import android.animation.ObjectAnimator
+import android.content.ActivityNotFoundException
+import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.content.res.ColorStateList
 import android.graphics.Color
 import android.net.Uri
+import android.os.Build
 import android.os.Bundle
+import android.os.Environment
 import android.provider.OpenableColumns
+import android.provider.Settings
 import android.util.Log
 import android.view.Gravity
 import android.view.View
@@ -28,8 +34,10 @@ import androidx.activity.OnBackPressedCallback
 import androidx.activity.result.ActivityResultLauncher
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
+import androidx.core.content.ContextCompat
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
+import com.freehand.android.BuildConfig
 import com.freehand.android.data.ClientConfig
 import com.freehand.android.data.DaemonConnectionConfigException
 import org.json.JSONArray
@@ -50,6 +58,8 @@ class MainActivity : AppCompatActivity() {
     private var fileChooserCallback: ValueCallback<Array<Uri>>? = null
     private var nativeAttachmentKind: String? = null
     private lateinit var fileChooserLauncher: ActivityResultLauncher<Intent>
+    private lateinit var fileAccessPermissionLauncher: ActivityResultLauncher<Array<String>>
+    private lateinit var allFilesAccessSettingsLauncher: ActivityResultLauncher<Intent>
     private lateinit var apkUpdater: AndroidApkUpdater
     private var lastApkUpdateStatus: ApkUpdateStatus? = null
 
@@ -58,6 +68,23 @@ class MainActivity : AppCompatActivity() {
         val host = loadHostConfigFromStartupIntent()
         apkUpdater = AndroidApkUpdater(applicationContext, host)
 
+        fileAccessPermissionLauncher = registerForActivityResult(
+            ActivityResultContracts.RequestMultiplePermissions(),
+        ) { grants ->
+            val denied = grants.filterValues { granted -> !granted }.keys.sorted()
+            logFileAccessStatus(
+                phase = if (denied.isEmpty()) "runtime_permissions_granted" else "runtime_permissions_restricted",
+                extra = if (denied.isEmpty()) "" else "denied=${denied.joinToString("|")}",
+            )
+            openAllFilesAccessSettingsIfNeeded("runtime_permissions")
+        }
+        allFilesAccessSettingsLauncher = registerForActivityResult(
+            ActivityResultContracts.StartActivityForResult(),
+        ) {
+            logFileAccessStatus(
+                phase = if (needsAllFilesAccess()) "all_files_restricted" else "all_files_granted",
+            )
+        }
         fileChooserLauncher = registerForActivityResult(
             ActivityResultContracts.StartActivityForResult(),
         ) { result ->
@@ -133,6 +160,7 @@ class MainActivity : AppCompatActivity() {
                 handleAndroidBackPressed()
             }
         })
+        requestInstallFileAccessIfNeeded()
         startAndroidApkUpdateCheck()
         webView.loadUrl(host.webUiUrl)
     }
@@ -219,6 +247,117 @@ class MainActivity : AppCompatActivity() {
         fun check() {
             runOnUiThread { startAndroidApkUpdateCheck() }
         }
+    }
+
+    private fun requestInstallFileAccessIfNeeded() {
+        val missingRuntimePermissions = missingRuntimeFilePermissions()
+        val needsAllFilesAccess = needsAllFilesAccess()
+        val preferences = getSharedPreferences(
+            FileAccessPermissionPolicy.PREFS_NAME,
+            Context.MODE_PRIVATE,
+        )
+        val promptedInstallMarker = preferences.getLong(
+            FileAccessPermissionPolicy.PROMPTED_INSTALL_MARKER_KEY,
+            -1L,
+        )
+        val currentInstallMarker = currentInstallMarker()
+        val shouldPrompt = FileAccessPermissionPolicy.shouldPromptForInstall(
+            promptedInstallMarker = promptedInstallMarker,
+            currentInstallMarker = currentInstallMarker,
+            missingRuntimePermissionCount = missingRuntimePermissions.size,
+            needsAllFilesAccess = needsAllFilesAccess,
+        )
+        if (!shouldPrompt) {
+            logFileAccessStatus(
+                phase = if (missingRuntimePermissions.isEmpty() && !needsAllFilesAccess) {
+                    "already_granted"
+                } else {
+                    "previously_requested_restricted"
+                },
+                missingRuntimePermissions = missingRuntimePermissions,
+                needsAllFilesAccess = needsAllFilesAccess,
+            )
+            return
+        }
+        preferences.edit()
+            .putLong(FileAccessPermissionPolicy.PROMPTED_INSTALL_MARKER_KEY, currentInstallMarker)
+            .apply()
+        logFileAccessStatus(
+            phase = "startup_request",
+            missingRuntimePermissions = missingRuntimePermissions,
+            needsAllFilesAccess = needsAllFilesAccess,
+        )
+        if (missingRuntimePermissions.isNotEmpty()) {
+            fileAccessPermissionLauncher.launch(missingRuntimePermissions.toTypedArray())
+            return
+        }
+        openAllFilesAccessSettingsIfNeeded("startup")
+    }
+
+    private fun missingRuntimeFilePermissions(): List<String> =
+        FileAccessPermissionPolicy.runtimePermissionsForSdk(Build.VERSION.SDK_INT).filter { permission ->
+            ContextCompat.checkSelfPermission(this, permission) != PackageManager.PERMISSION_GRANTED
+        }
+
+    private fun needsAllFilesAccess(): Boolean =
+        FileAccessPermissionPolicy.allFilesSettingsAvailableForSdk(Build.VERSION.SDK_INT) &&
+            !Environment.isExternalStorageManager()
+
+    private fun currentInstallMarker(): Long =
+        packageManager.getPackageInfo(packageName, 0).lastUpdateTime
+
+    private fun openAllFilesAccessSettingsIfNeeded(source: String) {
+        if (!needsAllFilesAccess()) {
+            logFileAccessStatus(phase = "all_files_not_needed_after_$source")
+            return
+        }
+        val intent = Intent(
+            Settings.ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION,
+            Uri.parse("package:$packageName"),
+        )
+        logFileAccessStatus(phase = "all_files_settings_request_after_$source")
+        try {
+            allFilesAccessSettingsLauncher.launch(intent)
+        } catch (error: ActivityNotFoundException) {
+            logFileAccessStatus(
+                phase = "all_files_settings_unavailable",
+                extra = error.message ?: "activity_not_found",
+            )
+        } catch (error: SecurityException) {
+            logFileAccessStatus(
+                phase = "all_files_settings_unavailable",
+                extra = error.message ?: "security_exception",
+            )
+        }
+    }
+
+    private fun logFileAccessStatus(
+        phase: String,
+        missingRuntimePermissions: List<String> = missingRuntimeFilePermissions(),
+        needsAllFilesAccess: Boolean = needsAllFilesAccess(),
+        extra: String = "",
+    ) {
+        val allFilesState = when {
+            !FileAccessPermissionPolicy.allFilesSettingsAvailableForSdk(Build.VERSION.SDK_INT) -> "not_applicable"
+            needsAllFilesAccess -> "missing"
+            else -> "granted"
+        }
+        val runtimeState = if (missingRuntimePermissions.isEmpty()) {
+            "granted"
+        } else {
+            missingRuntimePermissions.joinToString("|")
+        }
+        val parts = mutableListOf(
+            "phase=$phase",
+            "versionCode=${BuildConfig.VERSION_CODE}",
+            "installMarker=${currentInstallMarker()}",
+            "runtime=$runtimeState",
+            "allFiles=$allFilesState",
+        )
+        if (extra.isNotBlank()) {
+            parts.add(extra)
+        }
+        Log.i(FILE_ACCESS_TAG, parts.joinToString(" "))
     }
 
     private fun startAndroidApkUpdateCheck() {
@@ -475,5 +614,6 @@ class MainActivity : AppCompatActivity() {
     companion object {
         private const val LOG_TAG = "FreehandAndroid"
         private const val WEBUI_LAYOUT_TAG = "FreehandWebUiLayout"
+        private const val FILE_ACCESS_TAG = "FreehandFileAccess"
     }
 }

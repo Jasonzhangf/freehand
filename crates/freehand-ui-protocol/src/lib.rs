@@ -2307,16 +2307,50 @@ pub fn public_conversation_items(projection: &UiTurnProjection) -> Vec<UiConvers
 
 fn tool_public_body(activity: &UiToolActivity) -> String {
     let semantic_body = activity.display.as_ref().and_then(tool_display_public_body);
-    match activity.status {
-        UiToolActivityStatus::Waiting => semantic_body
-            .or_else(|| activity.detail.clone())
-            .unwrap_or_else(|| "waiting".to_owned()),
-        UiToolActivityStatus::Completed => semantic_body
-            .or_else(|| activity.detail.clone())
-            .unwrap_or_else(|| "completed".to_owned()),
-        UiToolActivityStatus::Failed => semantic_body
-            .or_else(|| activity.detail.clone())
-            .unwrap_or_else(|| "failed".to_owned()),
+    let detail = match activity.status {
+        UiToolActivityStatus::Waiting if semantic_body.is_some() => None,
+        UiToolActivityStatus::Waiting => activity.detail.as_deref(),
+        UiToolActivityStatus::Completed | UiToolActivityStatus::Failed => {
+            activity.detail.as_deref()
+        }
+    };
+    tool_public_body_with_detail(
+        semantic_body,
+        detail,
+        tool_status_fallback_body(activity.status),
+    )
+}
+
+fn tool_public_body_with_detail(
+    semantic_body: Option<String>,
+    detail: Option<&str>,
+    fallback: &str,
+) -> String {
+    let mut lines = Vec::new();
+    if let Some(body) = semantic_body {
+        let trimmed = body.trim();
+        if !trimmed.is_empty() {
+            lines.push(trimmed.to_owned());
+        }
+    }
+    if let Some(detail) = detail {
+        let trimmed = detail.trim();
+        if !trimmed.is_empty() && lines.iter().all(|line| line != trimmed) {
+            lines.push(trimmed.to_owned());
+        }
+    }
+    if lines.is_empty() {
+        fallback.to_owned()
+    } else {
+        lines.join("\n")
+    }
+}
+
+fn tool_status_fallback_body(status: UiToolActivityStatus) -> &'static str {
+    match status {
+        UiToolActivityStatus::Waiting => "waiting",
+        UiToolActivityStatus::Completed => "completed",
+        UiToolActivityStatus::Failed => "failed",
     }
 }
 
@@ -3984,7 +4018,10 @@ mod tests {
             .expect("completed tool item");
         assert_eq!(completed_tool.status, "completed");
         assert_eq!(completed_tool.title, "Search text");
-        assert_eq!(completed_tool.body, "pattern=needle");
+        assert_eq!(
+            completed_tool.body,
+            "pattern=needle\nresult: result body rendered in public summary"
+        );
         assert_eq!(
             completed_tool
                 .display
@@ -4187,7 +4224,10 @@ mod tests {
         assert_eq!(tool_cards.len(), 1);
         assert_eq!(tool_cards[0].status, "failed");
         assert_eq!(tool_cards[0].title, "Read file");
-        assert_eq!(tool_cards[0].body, "path=missing.txt");
+        assert_eq!(
+            tool_cards[0].body,
+            "path=missing.txt\nfailure: failure body rendered in public summary"
+        );
         assert!(
             cards
                 .iter()
@@ -4244,7 +4284,7 @@ mod tests {
             .expect("tool item");
         assert_eq!(tool.status, "failed");
         assert_eq!(tool.title, "List directory");
-        assert_eq!(tool.body, "path=.");
+        assert_eq!(tool.body, "path=.\ntool failed explicitly");
     }
 
     #[test]

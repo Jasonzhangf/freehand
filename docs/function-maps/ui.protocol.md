@@ -116,6 +116,7 @@
   clients to render per-message local-time labels without becoming timestamp
   owners
 - public conversation projection strips raw completion schema blocks and excludes reasoning, usage, provider payload, debug details, and verbose tool term text from the main user-visible stream
+- public conversation tool summaries preserve owner-projected `UiToolActivity.detail` even when `UiToolActivity.display` is present, so failed tool cards show the actual execution error instead of only display parameters
 - public conversation projection preserves the user prompt while still stripping raw completion schema blocks and excluding reasoning, usage, provider payload, debug details, and verbose tool term text from the main user-visible stream
 - public conversation session selection stays explicit: submit can target a selected session id, and session-level transcript queries stay separate from the global latest turn
 - session list and transcript projections expose session `cwd`, and turn projections carry `cwd` when the runtime owner has bound a session to a workspace
@@ -149,6 +150,7 @@
 - `ui.protocol` may ingest observation-only debug events from `debug.core` receivers and materialize only the snapshot projection into protocol state
 - `ui.protocol` may ingest shared semantic/tool/usage/terminal/error contracts incrementally and update one turn projection without depending on `freehand-reason`
 - tool-call lifecycle is projected as `UiToolActivity` inside `UiTurnProjection`: `ReasonReq04ToolCall` upserts a `waiting` activity, matching `ReasonReq05ToolResultReentry` marks the same activity `completed` or `failed`, and failed terminal truth only marks still-waiting tool activities `failed`
+- `public_conversation_items` combines structured `UiToolActivity.display` with `UiToolActivity.detail` instead of letting display suppress the raw execution result/error detail
 - `UiToolActivity.display` is produced by `freehand-blocks::project_tool_call_display` and updated by `freehand-blocks::project_tool_result_display`; UI apps must not reimplement tool classification
 - slave turn may surface as WebUI-only separate card while staying in one protocol truth
 - client-specific projection gating stays inside the protocol owner, not in apps

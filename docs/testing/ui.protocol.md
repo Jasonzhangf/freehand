@@ -57,6 +57,7 @@
   - session list active identity is latest-nonterminal-only: a latest terminal turn keeps its terminal status/summary but cannot keep `UiSessionSummary.active_turn_id` populated, and a later nonterminal model wait can become active again
   - tool-call projection stays lifecycle-aware: requested tool calls remain `waiting` until a matching `ReasonReq05ToolResultReentry` marks the activity `completed`, or failed terminal truth marks still-waiting activities `failed`
   - tool display projection is attached to `UiToolActivity` from the `tool.display` parser owner and is preserved in public conversation tool summaries
+  - public tool summaries preserve `UiToolActivity.detail` alongside structured display fields, so failed tool results expose the actual owner-projected execution error instead of only tool parameters
   - terminal events preserve both terminal text and terminal status in UI projection
   - debug receiver drain ingests observation-only debug events into protocol state
   - source identity and stream kind stay explicit
@@ -91,6 +92,7 @@
   - completion-schema mismatch waiting projection with `kind=SchemaRetry` and compact `schema polishing #N: issue` detail
   - tool activity projection from `ReasonReq04ToolCall` plus matching `ReasonReq05ToolResultReentry`
   - structured tool display projection from read/search/write/plan/shell/generic parser output
+  - public tool body projection covers failed result detail when structured display is present
   - duplicate same-`tool_call_id` tool-call projection upserts one activity and one public tool card
   - debug-event ingestion and receiver-drain behavior
   - ADP frame serialization and failure-frame shape

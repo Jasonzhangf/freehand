@@ -1,4 +1,4 @@
-import { initializeThemeToggle } from "/assets/theme.js?v=20260722-android-apk-update";
+import { initializeThemeToggle } from "/assets/theme.js?v=20260722-worker-transcript-file-access-detail";
 
 initializeThemeToggle(document);
 
@@ -174,6 +174,7 @@ const foregroundRefreshMinIntervalMs = 1500;
 const adpReconnectBaseDelayMs = 1000;
 const adpReconnectMaxDelayMs = 10000;
 const liveTruthWatchdogIntervalMs = 10000;
+const workerTranscriptRefreshRetryDelayMs = 3000;
 const shortcutHelp =
   "Shortcuts: Cmd/Ctrl+Enter send · Esc cancel · Cmd/Ctrl+R refresh · Cmd/Ctrl+K focus · Cmd/Ctrl+1 success · Cmd/Ctrl+2 failure. Slash: /help /new /task /settings /cwd /sessions /reload /success /failure /cancel /clear /attachments /model";
 const initialSelectedSessionId = window.localStorage.getItem(selectedSessionStorageKey) || null;
@@ -247,6 +248,7 @@ const state = {
   ambiguousSubmitRecoveryStartedAt: null,
   sessionRefreshInFlight: null,
   sessionRefreshError: null,
+  sessionRefreshRetryTimer: null,
   pendingAttachments: [],
   inputHistory: [],
   inputHistoryIndex: null,
@@ -1409,6 +1411,38 @@ function failureChatBubble(message) {
   );
 }
 
+function workerTranscriptWaitingBubble(error) {
+  const detail = error || {};
+  const body = [
+    "Worker transcript is not persisted yet; TaskBoard still shows this Worker task as active.",
+  ];
+  const taskLine = [detail.task_id, detail.task_status, detail.assignee_agent_id]
+    .filter(Boolean)
+    .join(" · ");
+  if (taskLine) {
+    body.push(`TaskBoard: ${taskLine}`);
+  }
+  if (detail.session_id) {
+    body.push(`Worker session: ${detail.session_id}`);
+  }
+  if (detail.message) {
+    body.push(`Last refresh: ${compactSentence(detail.message, 180)}`);
+  }
+  body.push("Refreshing the same owner-projected Worker session; this is not a task dispatch failure.");
+  return assistantChatBubble(
+    {
+      turnId: "worker-transcript-waiting",
+      lifecycle: { className: "running", label: "worker transcript waiting", isLive: true },
+    },
+    [{
+      kind: "system",
+      title: "Worker transcript",
+      body,
+      status: "waiting",
+    }],
+  );
+}
+
 function loadingConversationBubble() {
   return assistantChatBubble(
     {
@@ -1943,7 +1977,7 @@ function toolSemanticLines(row) {
     .filter(Boolean)
     .map((line) => ({
       text: line,
-      tone: /^result:/i.test(line) ? toolStateClass(row.status) : "",
+      tone: /^(result|failure):/i.test(line) ? toolStateClass(row.status) : "",
     }));
   return rendered.length > 0 ? rendered : [{ text: row.status || "tool activity" }];
 }
@@ -2154,7 +2188,10 @@ function buildConversationRenderModel() {
       : null,
     acceptedSubmitReceipt: acceptedSubmitReceiptForRender(),
     sessionLoading: selectedSessionIsLoading(),
-    adpFailure: state.adpFailure ? { message: state.adpFailure } : null,
+    sessionRefreshError: selectedSessionRefreshErrorForRender(),
+    adpFailure: state.adpFailure
+      ? { message: state.adpFailure }
+      : selectedSessionRefreshFailureForRender(),
   };
 }
 
@@ -2173,11 +2210,31 @@ function acceptedSubmitReceiptForRender() {
   return receipt;
 }
 
+function selectedSessionRefreshErrorForRender() {
+  if (
+    state.sessionRefreshError &&
+    state.selectedSessionId &&
+    state.sessionRefreshError.session_id === state.selectedSessionId
+  ) {
+    return state.sessionRefreshError;
+  }
+  return null;
+}
+
+function selectedSessionRefreshFailureForRender() {
+  const error = selectedSessionRefreshErrorForRender();
+  if (!error || selectedWorkerTranscriptRefreshRetryable(error.session_id)) {
+    return null;
+  }
+  return { message: error.message || "selected session refresh failed" };
+}
+
 function selectedSessionIsLoading() {
   return Boolean(
     state.selectedSessionId &&
-      state.sessionRefreshInFlight === state.selectedSessionId &&
-      (!state.sessionRefreshError || state.sessionRefreshError.session_id !== state.selectedSessionId),
+      ((state.sessionRefreshInFlight === state.selectedSessionId &&
+        (!state.sessionRefreshError || state.sessionRefreshError.session_id !== state.selectedSessionId)) ||
+        selectedWorkerTranscriptRefreshRetryable(state.selectedSessionId)),
   );
 }
 
@@ -2939,6 +2996,7 @@ function setSelectedSessionId(sessionId) {
 }
 
 function clearConversationForSessionSwitch(sessionId) {
+  clearSessionRefreshRetryTimer();
   setSelectedSessionId(sessionId);
   state.sessionTurns = [];
   state.turn = null;
@@ -2962,12 +3020,111 @@ function switchConversationSession(sessionId) {
   });
 }
 
+function clearSessionRefreshRetryTimer() {
+  if (state.sessionRefreshRetryTimer) {
+    window.clearTimeout(state.sessionRefreshRetryTimer);
+  }
+  state.sessionRefreshRetryTimer = null;
+}
+
+function workerTranscriptMissingRefreshMessage(message) {
+  return /Worker session [`'"]?[^`'"]+[`'"]? has no persisted transcript/.test(`${message || ""}`);
+}
+
+function taskForWorkerSessionId(sessionId) {
+  const id = `${sessionId || ""}`.trim();
+  if (!id || !state.taskBoard) {
+    return null;
+  }
+  return ((state.taskBoard && state.taskBoard.tasks) || []).find((task) =>
+    workerSessionIdForTask(task) === id
+  ) || null;
+}
+
+function taskStatusAllowsTranscriptRetry(task) {
+  if (!task) {
+    return false;
+  }
+  return !terminalTaskStatus(task.status);
+}
+
+function workerTranscriptRetryContext(sessionId, message) {
+  if (!workerTranscriptMissingRefreshMessage(message)) {
+    return null;
+  }
+  const task = taskForWorkerSessionId(sessionId);
+  if (!taskStatusAllowsTranscriptRetry(task)) {
+    return null;
+  }
+  return {
+    task,
+    session_id: sessionId || "",
+    task_id: task.task_id || "",
+    task_status: task.status || "",
+    assignee_agent_id: task.assignee_agent_id || "",
+    message,
+  };
+}
+
+function selectedWorkerTranscriptRefreshRetryable(sessionId = state.selectedSessionId) {
+  const error = state.sessionRefreshError;
+  if (!error || !error.retryable || error.kind !== "worker_transcript_pending") {
+    return false;
+  }
+  const id = `${sessionId || ""}`.trim();
+  if (!id || error.session_id !== id) {
+    return false;
+  }
+  return Boolean(workerTranscriptRetryContext(id, error.message));
+}
+
+function scheduleSessionRefreshRetry(delayMs = workerTranscriptRefreshRetryDelayMs) {
+  if (state.sessionRefreshRetryTimer || !selectedWorkerTranscriptRefreshRetryable()) {
+    return;
+  }
+  const sessionId = state.selectedSessionId;
+  state.sessionRefreshRetryTimer = window.setTimeout(() => {
+    state.sessionRefreshRetryTimer = null;
+    if (!sessionId || state.selectedSessionId !== sessionId || !selectedWorkerTranscriptRefreshRetryable(sessionId)) {
+      return;
+    }
+    state.sessionRefreshInFlight = sessionId;
+    renderAll();
+    refreshSelectedSession().catch((error) => {
+      renderSessionRefreshFailure(error, sessionId);
+    });
+  }, delayMs);
+}
+
 function renderSessionRefreshFailure(error, requestedSessionId = state.selectedSessionId) {
   if (requestedSessionId && state.selectedSessionId !== requestedSessionId) {
     return;
   }
   const message = `session refresh failed: ${error && error.message ? error.message : error}`;
+  const retryContext = workerTranscriptRetryContext(requestedSessionId || state.selectedSessionId, message);
   state.sessionRefreshInFlight = null;
+  if (retryContext) {
+    state.sessionRefreshError = {
+      kind: "worker_transcript_pending",
+      retryable: true,
+      session_id: retryContext.session_id,
+      task_id: retryContext.task_id,
+      task_status: retryContext.task_status,
+      assignee_agent_id: retryContext.assignee_agent_id,
+      message,
+    };
+    if (`${state.adpFailure || ""}`.startsWith("session refresh failed:")) {
+      state.adpFailure = null;
+    }
+    setCommandStatus(
+      `Worker transcript not ready · task ${retryContext.task_id || "unknown"} is ${retryContext.task_status || "active"}; retrying`,
+      { stickyMs: 6000 },
+    );
+    scheduleSessionRefreshRetry();
+    renderAll();
+    return;
+  }
+  clearSessionRefreshRetryTimer();
   state.sessionRefreshError = {
     session_id: requestedSessionId || state.selectedSessionId || "",
     message,
@@ -2983,6 +3140,7 @@ function clearSessionRefreshState(sessionId) {
   }
   if (!sessionId || (state.sessionRefreshError && state.sessionRefreshError.session_id === sessionId)) {
     state.sessionRefreshError = null;
+    clearSessionRefreshRetryTimer();
     if (`${state.adpFailure || ""}`.startsWith("session refresh failed:")) {
       state.adpFailure = null;
     }
@@ -3152,6 +3310,7 @@ function newDraftSessionId() {
 }
 
 function resetLocalConversationState(sessionId) {
+  clearSessionRefreshRetryTimer();
   state.draftSessionId = sessionId;
   state.sessionTurns = [];
   state.turn = null;
@@ -3403,6 +3562,7 @@ function setSessionTranscript(projection) {
 }
 
 function clearLocalConversationTruth(options = {}) {
+  clearSessionRefreshRetryTimer();
   if (!options.preserveSelectedSession) {
     setSelectedSessionId(null);
   }
@@ -3780,15 +3940,26 @@ function renderMessages() {
   });
 
   if (fragments.length === 0 && renderModel.sessionLoading) {
+    const waitingForWorkerTranscript =
+      renderModel.sessionRefreshError &&
+      renderModel.sessionRefreshError.kind === "worker_transcript_pending";
     fragments.push(cycleCardFromChatCards(
       {
         kind: "loading",
-        turnId: "session-refresh-loading",
+        turnId: waitingForWorkerTranscript ? "worker-transcript-waiting" : "session-refresh-loading",
         sessionId: state.selectedSessionId || "",
-        lifecycle: { className: "running", label: "loading conversation", isLive: true },
+        lifecycle: {
+          className: "running",
+          label: waitingForWorkerTranscript ? "worker transcript waiting" : "loading conversation",
+          isLive: true,
+        },
         terminal: false,
       },
-      [loadingConversationBubble()],
+      [
+        waitingForWorkerTranscript
+          ? workerTranscriptWaitingBubble(renderModel.sessionRefreshError)
+          : loadingConversationBubble(),
+      ],
     ));
   }
 
@@ -5744,6 +5915,9 @@ async function refreshPhase2Status() {
     }
     state.phase2LastRefreshAt = Date.now();
     state.phase2StatusError = null;
+    if (selectedWorkerTranscriptRefreshRetryable()) {
+      scheduleSessionRefreshRetry(0);
+    }
   } catch (error) {
     state.phase2StatusError = error.message;
     setCommandStatus(`task status refresh failed: ${error.message}`, { stickyMs: 9000 });
@@ -6306,6 +6480,9 @@ function hasNonTerminalProtocolActivity() {
   if (state.submitInFlight || !!state.pendingUserInput) {
     return true;
   }
+  if (selectedWorkerTranscriptRefreshRetryable()) {
+    return true;
+  }
   return conversationTurnsForRender().some((turn) => {
     if (!turn || turn.terminal_text || isTerminalStatus(turn.terminal_status) || isToolPendingStatus(turn.terminal_status)) {
       return false;
@@ -6353,6 +6530,7 @@ async function refreshSelectedSession() {
     return;
   }
   const requestedSessionId = state.selectedSessionId;
+  state.sessionRefreshInFlight = requestedSessionId;
   const result = await adpQuery({
     QuerySessionTurns: { session_id: requestedSessionId },
   });
@@ -6398,7 +6576,11 @@ async function refreshConfigStatus() {
 
 async function refreshAllProtocolState() {
   await refreshSessions();
-  await refreshSelectedSession();
+  try {
+    await refreshSelectedSession();
+  } catch (error) {
+    renderSessionRefreshFailure(error, state.selectedSessionId);
+  }
   if (!state.selectedSessionId && !state.sessionListLoaded) {
     await refreshTurn();
   }
@@ -7164,7 +7346,14 @@ refreshSessionButton.addEventListener("click", () => {
   refreshSelectedSession()
     .then(() => refreshPhase2Status())
     .then(() => setCommandStatus("selected session refreshed", { stickyMs: 4000 }))
-    .catch((error) => setCommandStatus(`selected session refresh failed: ${error.message}`, { stickyMs: 8000 }));
+    .catch((error) => {
+      renderSessionRefreshFailure(error, state.selectedSessionId);
+      if (selectedWorkerTranscriptRefreshRetryable()) {
+        setCommandStatus("Worker transcript not ready; retrying selected session refresh", { stickyMs: 6000 });
+      } else {
+        setCommandStatus(`selected session refresh failed: ${error.message}`, { stickyMs: 8000 });
+      }
+    });
 });
 if (workerControlList) {
   workerControlList.addEventListener("click", (event) => {

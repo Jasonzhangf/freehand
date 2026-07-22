@@ -4,7 +4,7 @@
 - owner crate: `apps/freehand-android`
 - owner module: `apps/freehand-android/app/src/main/java/com/freehand/android/`
 - product UI owner: daemon-hosted WebUI from `app.webui-smoke`
-- Android scope: thin WebView host plus platform file-picker bridge plus APK update status bridge and system-installer handoff
+- Android scope: thin WebView host plus platform file-picker bridge, first-start file-access permission prompt, APK update status bridge, and system-installer handoff
 - reference design: `docs/design/multi-platform-ui-architecture.md`
 - resource map: `docs/resource-maps/core.json`
 - test design: `docs/testing/app.android-client.md`
@@ -13,9 +13,9 @@
 
 ## Resource Map Binding
 
-- owned resources: Android app bootstrap/config, platform WebView host, and `android_apk_update`
+- owned resources: Android app bootstrap/config, platform WebView host, `android_file_access`, and `android_apk_update`
 - touched resources: daemon WebUI URL, daemon APK update manifest URL, app-owned daemon endpoint bootstrap config, Android launcher assets
-- resource operations: `android_apk_update.check_manifest` (`android_apk_update` -> `android_apk_update`), `android_apk_update.download_apk` (`android_apk_update` -> `android_apk_update`), `android_apk_update.request_install` (`android_apk_update` -> `android_apk_update`)
+- resource operations: `android_file_access.request_startup_permissions` (`android_file_access` -> `android_file_access`), `android_file_access.open_all_files_settings` (`android_file_access` -> `android_file_access`), `android_file_access.project_status` (`android_file_access` -> `android_file_access`), `android_apk_update.check_manifest` (`android_apk_update` -> `android_apk_update`), `android_apk_update.download_apk` (`android_apk_update` -> `android_apk_update`), `android_apk_update.request_install` (`android_apk_update` -> `android_apk_update`)
 - forbidden shortcuts: Android must not own a second conversation UI, settings UI, native task/status projector, ADP command transport, SSE transport, local HTML bridge, Android mock page, native update panel, remote daemon account directory truth, route scoring, or relay protocol/tunnel semantics
 
 ## Request Mainline
@@ -29,6 +29,7 @@
 - `MainActivity.AndroidApkUpdateBridge::check` exposes a single Android-only Settings trigger to the daemon WebUI; the bridge starts the same updater path and never implements version comparison, download, or install policy in JavaScript.
 - `MainActivity` records the latest APK update status and replays it after page load so startup auto-check and manual Settings checks remain observable in the WebUI.
 - `MainActivity` renders a neutral native startup overlay before WebView navigation and removes it only after `WebUiStartupGate` accepts the canonical Android WebUI shell plus stylesheet and module-JavaScript readiness probe.
+- `MainActivity::requestInstallFileAccessIfNeeded` runs once per package install/update marker during startup, requests supported runtime file/media permissions, opens Android 11+ package all-files-access settings when broad storage access is not granted, and records the result as `FreehandFileAccess` logcat truth instead of deferring permission prompts until later file actions.
 - WebUI itself owns ADP query/subscribe/command, settings, lifecycle dashboard, transcript, composer, and error rendering.
 - Android physical Back invokes the daemon WebUI-owned `window.__freehandHandleAndroidBack` hook first, so focused fields and WebUI dialogs/drawers close before the Activity exits or WebView history is navigated; Android must not implement native settings/session fallback behavior.
 - Android exposes only `FreehandAndroidFilePicker` so WebUI attachment controls can invoke Android's system picker.
@@ -40,6 +41,7 @@
 - A daemon manifest with positive higher `versionCode` and a relative/http(s) APK URL downloads its APK into app cache and opens Android's system package installer through the app FileProvider URI; install remains Android/user-confirmed rather than silent.
 - APK update status phases (`checking`, `current`, `available`, `downloading`, `downloaded`, `installer_started`, `failed`, `already_checking`) are pushed into `window.__freehandAndroidApkUpdateStatus` for the WebUI Settings card.
 - Android logs `FreehandWebUiLayout` from canonical WebUI DOM selectors, applied stylesheet state, and WebUI module-JavaScript readiness for true-device validation.
+- Android logs `FreehandFileAccess` status for startup permission requests, all-files settings handoff, granted state, restricted state, and settings-unavailable failures for true-device validation.
 - The startup overlay shows loading/error state until the canonical Android WebUI shell is verified; page-finished alone is not success.
 - Android Back returns a WebUI-handled result when the canonical page closes a focused form, dialog, Header tree, Agent sheet, or mobile drawer; otherwise Android may navigate WebView history or exit.
 - File picker selections are returned to WebUI through `window.__freehandAndroidAttachmentSelected`.
@@ -54,6 +56,7 @@
 - Network/WebView load failures remain WebView failures. Android does not render native fallback UI.
 - Missing WebUI layout probe is a failed/blocked device validation result, not acceptance evidence.
 - Missing, malformed, wrong-client, stylesheet-not-applied, or WebUI-JavaScript-not-ready startup probe leaves the native startup state visible instead of pretending the app is ready.
+- Runtime permission denial or Android all-files settings denial remains visible as `FreehandFileAccess` restricted status; Android does not repeatedly prompt during later file actions in the same package install marker.
 - Missing or false WebUI back-hook handling falls through to normal Android exit/navigation; Android must not fabricate local drawer state.
 
 ## Function Call Table
@@ -72,12 +75,15 @@
 | 08b | `com.freehand.android.ui.MainActivity::handleAndroidBackPressed` | `apps/freehand-android/app/src/main/java/com/freehand/android/ui/MainActivity.kt` | ask canonical WebUI to handle focused field/dialog/drawer back intent before native exit/navigation | Android physical Back | WebUI-handled no-op, WebView history navigation, or Activity finish | Android back dispatcher | `window.__freehandHandleAndroidBack`, `WebView::canGoBack`, `WebView::goBack`, `Activity::finish` | bound |
 | 09 | `generate_launcher_icons` | `apps/freehand-android/scripts/generate-launcher-icons.sh` | derive Android launcher mipmaps from `assets/logo.png` | source logo | launcher PNGs | maintainer | ImageMagick | bound |
 | 10 | `verify_launcher_icons` | `apps/freehand-android/scripts/verify-launcher-icons.sh` | verify launcher dimensions and source pixels | source logo + launcher PNGs | success or explicit drift failure | maintainer | ImageMagick | bound |
-| 11 | `verify_device_ui` | `apps/freehand-android/scripts/verify-device-ui.sh` | install/start APK and verify canonical WebUI is foreground with layout evidence | adb serial + APK | passed/blocked/failed artifact directory | operator | adb install/start/dumpsys/logcat/screencap | bound |
+| 11 | `verify_device_ui` | `apps/freehand-android/scripts/verify-device-ui.sh` | install/start APK and verify canonical WebUI is foreground with layout evidence plus `FreehandFileAccess` startup permission evidence | adb serial + APK | passed/blocked/failed artifact directory | operator | adb install/start/dumpsys/logcat/screencap | bound |
 | 12 | `com.freehand.android.ui.AndroidApkUpdater::checkForUpdateAsync` | `apps/freehand-android/app/src/main/java/com/freehand/android/ui/AndroidApkUpdater.kt` | check selected daemon update manifest against installed version, reject non-positive versions or non-http absolute APK URLs, and emit stable update phases to the caller | `HostConfig.updateManifestUrl` + `BuildConfig.VERSION_CODE` | status callbacks plus current-version no-op log or valid higher-version update plan | `MainActivity::startAndroidApkUpdateCheck` | `ApkUpdateManifest::parse`, `ApkUpdateManifest::updatePlan` | bound |
 | 12a | `com.freehand.android.ui.MainActivity.AndroidApkUpdateBridge::check` | `apps/freehand-android/app/src/main/java/com/freehand/android/ui/MainActivity.kt` | let daemon WebUI Settings request a manual Android APK update check through the same updater owner | WebUI JavaScript bridge call | updater check started or explicit unavailable status | daemon WebUI JS bridge | `MainActivity::startAndroidApkUpdateCheck` | bound |
 | 12b | `com.freehand.android.ui.MainActivity::recordAndroidApkUpdateStatus` / `emitAndroidApkUpdateStatus` | `apps/freehand-android/app/src/main/java/com/freehand/android/ui/MainActivity.kt` | record the latest APK update status and push it to the daemon WebUI status callback, including replay after page load | `ApkUpdateStatus` | `window.__freehandAndroidApkUpdateStatus(payload)` | `AndroidApkUpdater::checkForUpdateAsync`, `WebViewClient::onPageFinished` | WebView JavaScript | bound |
 | 13 | `com.freehand.android.ui.AndroidApkUpdater::downloadApk` | `apps/freehand-android/app/src/main/java/com/freehand/android/ui/AndroidApkUpdater.kt` | download manifest-selected higher-version APK into app cache | resolved relative/http(s) APK URL + target versionCode | non-empty cached APK file | `AndroidApkUpdater::checkForUpdateAsync` | `HttpURLConnection` + app cache | bound |
 | 14 | `com.freehand.android.ui.AndroidApkUpdater::buildInstallIntent` | `apps/freehand-android/app/src/main/java/com/freehand/android/ui/AndroidApkUpdater.kt` | hand cached APK to Android system package installer | cached APK file | `ACTION_VIEW` package-installer intent with FileProvider URI | `AndroidApkUpdater::checkForUpdateAsync` | Android `FileProvider` / package installer | bound |
+| 15 | `com.freehand.android.ui.MainActivity::requestInstallFileAccessIfNeeded` / `currentInstallMarker` | `apps/freehand-android/app/src/main/java/com/freehand/android/ui/MainActivity.kt` | request supported runtime file/media permissions once per package install/update marker during startup | package permission state + prompted install-marker preference | runtime permission dialog or all-files settings handoff or already-granted status | `MainActivity::onCreate` | `FileAccessPermissionPolicy`, Android permission launcher | bound |
+| 15a | `com.freehand.android.ui.MainActivity::openAllFilesAccessSettingsIfNeeded` | `apps/freehand-android/app/src/main/java/com/freehand/android/ui/MainActivity.kt` | open Android 11+ package all-files-access settings when broad storage access is not granted | package name + all-files permission state | settings activity result or settings-unavailable status | runtime permission result / startup permission request | Android Settings intent | bound |
+| 15b | `com.freehand.android.ui.MainActivity::logFileAccessStatus` | `apps/freehand-android/app/src/main/java/com/freehand/android/ui/MainActivity.kt` | project file-access startup permission state to logcat for device verification | phase + runtime/all-files status | `FreehandFileAccess` logcat row | startup permission request / settings result | Android Logcat | bound |
 
 ## Sync Status Against Code
 
@@ -86,3 +92,4 @@
 - App-owned config no longer carries ADP/query/command/subscription paths or top-level relay routing.
 - Android can import `remote_registry` bootstrap links and load a declared Tailscale/IPv4/IPv6/relay WebUI endpoint, but it does not own account directory truth, route scoring, live health probing, Tailscale OS connection, or relay tunnel semantics.
 - Android APK update route remains daemon release distribution truth; Android now owns only manifest check, APK cache download, status bridge, and system package-installer handoff, not a native update panel or silent install path.
+- Android file access startup prompting is landed as package permission truth plus logcat projection; it does not add a native product UI, does not silently grant permissions, and does not move daemon/Worker filesystem semantics into Android.

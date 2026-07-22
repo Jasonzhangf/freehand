@@ -76,21 +76,24 @@ try {
     () => {
       const title = document.getElementById('mobile-agent-summary-title')?.textContent || '';
       const copy = document.getElementById('mobile-agent-summary-copy')?.textContent || '';
-      return /task/i.test(`${title} ${copy}`) && !/unavailable/i.test(title);
+      const cardCount = document.querySelectorAll('#mobile-agent-task-list .mobile-agent-card').length;
+      return cardCount > 0 && !/unavailable/i.test(title) && !/Waiting for Task Center truth/i.test(copy);
     },
     20_000,
-    'mobile agent summary loaded',
+    'mobile agent task projection loaded',
   );
   if (expectedTaskCount !== null) {
     await waitForFunction(
       cdp,
-      () => {
+      (expectedCount) => {
         const title = document.getElementById('mobile-agent-summary-title')?.textContent || '';
         const copy = document.getElementById('mobile-agent-summary-copy')?.textContent || '';
-        return /task/i.test(`${title} ${copy}`) && !/unavailable/i.test(title);
+        const cardCount = document.querySelectorAll('#mobile-agent-task-list .mobile-agent-card').length;
+        return cardCount === expectedCount && !/unavailable/i.test(title) && !/Waiting for Task Center truth/i.test(copy);
       },
       30_000,
       'mobile agent projected task summary before exact card-count check',
+      expectedTaskCount,
     );
   }
 

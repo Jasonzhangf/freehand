@@ -84,6 +84,10 @@ capture_webui_layout_logcat() {
   adb -s "$serial" logcat -d -s FreehandWebUiLayout:I '*:S' 2>/dev/null || true
 }
 
+capture_file_access_logcat() {
+  adb -s "$serial" logcat -d -s FreehandFileAccess:I '*:S' 2>/dev/null || true
+}
+
 capture_activity_and_window() {
   adb -s "$serial" shell dumpsys activity activities >"$artifact_dir/dumpsys-activity.txt" 2>&1 || true
   adb -s "$serial" shell dumpsys window >"$artifact_dir/dumpsys-window.txt" 2>&1 || true
@@ -106,6 +110,11 @@ freehand_is_foreground() {
 
 system_file_picker_is_foreground() {
   grep -Eq 'topResumedActivity=.*(OPEN_DOCUMENT|filemanager|photopicker|PickerActivity)|mCurrentFocus=.*(filemanager|photopicker|PickerActivity)' \
+    "$artifact_dir/dumpsys-activity.txt" "$artifact_dir/dumpsys-window.txt" 2>/dev/null
+}
+
+system_file_access_settings_is_foreground() {
+  grep -Eq 'topResumedActivity=.*(ManageExternalStorage|AllFilesAccess|MANAGE_APP_ALL_FILES_ACCESS_PERMISSION|com\.android\.settings)|mCurrentFocus=.*(ManageExternalStorage|AllFilesAccess|com\.android\.settings)' \
     "$artifact_dir/dumpsys-activity.txt" "$artifact_dir/dumpsys-window.txt" 2>/dev/null
 }
 
@@ -153,7 +162,7 @@ verify_device_ui() {
   wait_for_webui_layout_probe || true
 
   capture_activity_and_window
-  if ! capture_webui_layout_logcat | grep -F 'FreehandWebUiLayout' >/dev/null && system_file_picker_is_foreground; then
+  if ! capture_webui_layout_logcat | grep -F 'FreehandWebUiLayout' >/dev/null && { system_file_picker_is_foreground || system_file_access_settings_is_foreground; }; then
     adb -s "$serial" shell input keyevent KEYCODE_BACK || true
     adb -s "$serial" shell am start -n "${package_name}/${activity_name}" >>"$artifact_dir/am-start.txt" 2>&1 || true
     wait_for_webui_layout_probe || true
@@ -162,6 +171,7 @@ verify_device_ui() {
 
   adb -s "$serial" logcat -d >"$artifact_dir/logcat.txt" 2>&1 || true
   capture_webui_layout_logcat >"$artifact_dir/webui-layout-logcat.txt" || true
+  capture_file_access_logcat >"$artifact_dir/file-access-logcat.txt" || true
   adb -s "$serial" exec-out screencap -p >"$artifact_dir/screenshot.png" 2>"$artifact_dir/screencap.stderr" || true
 
   local fatal_pattern
@@ -189,6 +199,12 @@ verify_device_ui() {
   if ! grep -F 'FreehandWebUiLayout' "$artifact_dir/webui-layout-logcat.txt" >/dev/null; then
     write_summary "failed" "missing_webui_layout_probe"
     echo "[freehand-android-device] failed: missing WebUI layout probe; see $artifact_dir" >&2
+    exit 1
+  fi
+
+  if ! grep -F 'FreehandFileAccess' "$artifact_dir/file-access-logcat.txt" >/dev/null; then
+    write_summary "failed" "missing_file_access_probe"
+    echo "[freehand-android-device] failed: missing file-access startup probe; see $artifact_dir" >&2
     exit 1
   fi
 

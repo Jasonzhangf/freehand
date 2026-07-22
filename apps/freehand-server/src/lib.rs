@@ -1607,6 +1607,8 @@ mod tests {
         assert!(webui_css_body.contains(".turn-action-button"));
         assert!(webui_css_body.contains(".tool-field-grid"));
         assert!(webui_css_body.contains(".tool-raw-details"));
+        assert!(webui_css_body.contains(".tool-chat-line-secondary.tool-chat-line-success"));
+        assert!(webui_css_body.contains(".tool-chat-line-secondary.tool-chat-line-failed"));
         assert!(
             webui_css_body.contains("body[data-mobile-agent-sheet=\"open\"] .mobile-agent-sheet")
         );
@@ -1707,7 +1709,14 @@ mod tests {
         assert!(js_body.contains("sessionRefreshInFlight"));
         assert!(js_body.contains("function selectedSessionIsLoading"));
         assert!(js_body.contains("function loadingConversationBubble"));
+        assert!(js_body.contains("function workerTranscriptWaitingBubble"));
+        assert!(js_body.contains("function workerTranscriptRetryContext"));
+        assert!(js_body.contains("function selectedWorkerTranscriptRefreshRetryable"));
+        assert!(js_body.contains("function scheduleSessionRefreshRetry"));
         assert!(js_body.contains("Loading selected session transcript from runtime truth."));
+        assert!(js_body.contains("Worker transcript is not persisted yet; TaskBoard still shows this Worker task as active."));
+        assert!(js_body.contains("Refreshing the same owner-projected Worker session; this is not a task dispatch failure."));
+        assert!(js_body.contains("const workerTranscriptRefreshRetryDelayMs = 3000"));
         assert!(js_body.contains("function renderSessionRefreshFailure"));
         assert!(js_body.contains("clearConversationForSessionSwitch"));
         assert!(js_body.contains("const adpRequestTimeoutMs = 45000"));
@@ -2210,6 +2219,7 @@ mod tests {
         assert!(js_body.contains("display.result_summary"));
         assert!(js_body.contains("compact-tool-state"));
         assert!(js_body.contains("display.fields"));
+        assert!(js_body.contains("/^(result|failure):/i.test(line)"));
         assert!(js_body.contains("function assistantSectionHeadingLabel"));
         assert!(js_body.contains("if (row.kind === \"final\")"));
         assert!(js_body.contains("if (row.kind === \"system\")"));
@@ -2674,7 +2684,8 @@ mod tests {
         let completed_body = read_next_sse_event(&mut turn_sse, &mut turn_buffer).await;
         assert!(completed_body.contains("\"status\":\"completed\""));
         assert!(completed_body.contains("\"title\":\"Read file\""));
-        assert!(completed_body.contains("\"body\":\"path=src/lib.rs\""));
+        assert!(completed_body.contains("path=src/lib.rs"));
+        assert!(completed_body.contains("visible result body"));
         assert!(completed_body.contains("\"kind\":\"ReadFile\""));
 
         drop(turn_sse);
