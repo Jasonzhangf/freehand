@@ -23,6 +23,7 @@ pub(crate) fn publish_live_pending_user_projection(
                 session_id: session_id.clone(),
                 turn_id: derived_turn_id(base_turn_id, 1),
                 created_at: Some(now_unix_seconds()),
+                timing: None,
                 cwd: Some(cwd.to_string_lossy().into_owned()),
                 user_text: ui_user_text_projection_for_session_user_text(session_id, user_text),
                 semantic_events: Vec::new(),
@@ -53,6 +54,7 @@ pub(crate) fn publish_live_cancelled_projection(
                 session_id: active.session_id.clone(),
                 turn_id: active.turn_id.clone(),
                 created_at: Some(now_unix_seconds()),
+                timing: None,
                 cwd: Some(active.cwd.to_string_lossy().into_owned()),
                 user_text: ui_user_text_projection_for_session_user_text(
                     &active.session_id,
@@ -94,6 +96,7 @@ pub(crate) fn project_runtime_turn_history(
             session_id: turn.request.session_id.clone(),
             turn_id: turn.request.turn_id.clone(),
             created_at: (turn.created_at != 0).then_some(turn.created_at),
+            timing: ui_turn_timing_from_turn(turn),
             cwd: cwd.or_else(|| turn.cwd.clone()),
             user_text: ui_user_text_projection_for_turn(turn),
             semantic_events: turn.semantic_events.clone(),
@@ -106,6 +109,19 @@ pub(crate) fn project_runtime_turn_history(
         }),
         UiClientKind::WebUi,
     )
+}
+
+fn ui_turn_timing_from_turn(turn: &TurnRecord) -> Option<UiTurnTimingProjection> {
+    if turn.timing.is_empty() {
+        return None;
+    }
+    Some(UiTurnTimingProjection {
+        turn_started_at_ms: turn.timing.turn_started_at_ms,
+        first_response_at_ms: turn.timing.first_response_at_ms,
+        completed_at_ms: turn.timing.completed_at_ms,
+        time_to_first_response_ms: turn.timing.time_to_first_response_ms,
+        total_elapsed_ms: turn.timing.total_elapsed_ms,
+    })
 }
 
 pub(crate) fn current_runtime_turn_for_projection(

@@ -269,6 +269,8 @@ pub struct UiTurnProjection {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub created_at: Option<u64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub timing: Option<UiTurnTimingProjection>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cwd: Option<String>,
     pub user_text: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -282,6 +284,20 @@ pub struct UiTurnProjection {
     pub terminal_text: Option<String>,
     pub errors: Vec<String>,
     pub slave_substream_card: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct UiTurnTimingProjection {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub turn_started_at_ms: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub first_response_at_ms: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub completed_at_ms: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub time_to_first_response_ms: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub total_elapsed_ms: Option<u64>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -955,6 +971,7 @@ pub struct TurnProjectionInput {
     pub session_id: SessionId,
     pub turn_id: TurnId,
     pub created_at: Option<u64>,
+    pub timing: Option<UiTurnTimingProjection>,
     pub cwd: Option<String>,
     pub user_text: Option<String>,
     pub semantic_events: Vec<ReasonResp01SemanticEvent>,
@@ -1757,6 +1774,7 @@ impl UiProtocolState {
                 session_id: session_id.clone(),
                 turn_id: turn_id.clone(),
                 created_at: None,
+                timing: None,
                 cwd: self.session_cwds.get(session_id).cloned(),
                 user_text: None,
                 model_request: None,
@@ -2910,6 +2928,7 @@ pub fn turn_projection_from_events(input: TurnProjectionInput) -> UiTurnProjecti
         session_id: input.session_id,
         turn_id: input.turn_id,
         created_at: input.created_at,
+        timing: input.timing,
         cwd: input.cwd,
         user_text: input.user_text,
         model_request: None,
@@ -2983,6 +3002,13 @@ mod tests {
             session_id: SessionId::new("session-1"),
             turn_id: TurnId::new("turn-1"),
             created_at: Some(10),
+            timing: Some(UiTurnTimingProjection {
+                turn_started_at_ms: Some(10_000),
+                first_response_at_ms: Some(11_250),
+                completed_at_ms: Some(12_500),
+                time_to_first_response_ms: Some(1_250),
+                total_elapsed_ms: Some(2_500),
+            }),
             cwd: None,
             user_text: Some("run the task".to_owned()),
             semantic_events: vec![
@@ -3068,6 +3094,7 @@ mod tests {
             session_id: session_id.clone(),
             turn_id: turn_id.clone(),
             created_at: Some(90),
+            timing: None,
             cwd: None,
             user_text: Some("run active work".to_owned()),
             semantic_events: Vec::new(),
@@ -3091,6 +3118,7 @@ mod tests {
             session_id: session_id.clone(),
             turn_id: turn_id.clone(),
             created_at: Some(91),
+            timing: None,
             cwd: None,
             user_text: Some("run active work".to_owned()),
             semantic_events: Vec::new(),
@@ -3649,6 +3677,7 @@ mod tests {
             session_id: session_id.clone(),
             turn_id: TurnId::new("turn-cwd-1"),
             created_at: Some(11),
+            timing: None,
             cwd: Some("/tmp/freehand-cwd".to_owned()),
             user_text: Some("run in cwd".to_owned()),
             semantic_events: Vec::new(),
@@ -3702,6 +3731,7 @@ mod tests {
             session_id: user_session_id.clone(),
             turn_id: TurnId::new("turn-visible-1"),
             created_at: Some(12),
+            timing: None,
             cwd: None,
             user_text: Some("visible user turn".to_owned()),
             semantic_events: Vec::new(),
@@ -3718,6 +3748,7 @@ mod tests {
             session_id: lifecycle_session_id.clone(),
             turn_id: TurnId::new("turn-lifecycle-1"),
             created_at: Some(13),
+            timing: None,
             cwd: None,
             user_text: Some("internal lifecycle decision".to_owned()),
             semantic_events: Vec::new(),
@@ -3734,6 +3765,7 @@ mod tests {
             session_id: timer_session_id.clone(),
             turn_id: TurnId::new("turn-timer-1"),
             created_at: Some(14),
+            timing: None,
             cwd: None,
             user_text: Some("internal timer wakeup".to_owned()),
             semantic_events: Vec::new(),
@@ -3750,6 +3782,7 @@ mod tests {
             session_id: worker_session_id.clone(),
             turn_id: TurnId::new("turn-worker-1"),
             created_at: Some(15),
+            timing: None,
             cwd: None,
             user_text: Some("internal worker execution".to_owned()),
             semantic_events: Vec::new(),
@@ -3821,6 +3854,7 @@ mod tests {
                 session_id,
                 turn_id: TurnId::new(format!("turn-metadata-only-{index}")),
                 created_at: Some(20 + index as u64),
+                timing: None,
                 cwd: None,
                 user_text: Some("turn text".to_owned()),
                 semantic_events: Vec::new(),
@@ -3976,6 +4010,7 @@ mod tests {
             session_id: SessionId::new("session-1"),
             turn_id: TurnId::new("turn-1"),
             created_at: Some(30),
+            timing: None,
             cwd: None,
             user_text: Some("run the task".to_owned()),
             semantic_events: Vec::new(),
@@ -4039,6 +4074,7 @@ mod tests {
             session_id: SessionId::new("session-framework-tools"),
             turn_id: TurnId::new("runtime-turn-framework-tools"),
             created_at: Some(40),
+            timing: None,
             cwd: None,
             user_text: Some("delegate work and schedule a check".to_owned()),
             semantic_events: Vec::new(),
@@ -4172,6 +4208,7 @@ mod tests {
             session_id: SessionId::new("session-1"),
             turn_id: TurnId::new("turn-1"),
             created_at: Some(50),
+            timing: None,
             cwd: None,
             user_text: Some("run the task".to_owned()),
             semantic_events: Vec::new(),
@@ -4243,6 +4280,7 @@ mod tests {
             session_id: SessionId::new("session-1"),
             turn_id: TurnId::new("turn-1"),
             created_at: Some(60),
+            timing: None,
             cwd: None,
             user_text: Some("run the task".to_owned()),
             semantic_events: Vec::new(),
@@ -4294,6 +4332,7 @@ mod tests {
             session_id: SessionId::new("session-1"),
             turn_id: TurnId::new("turn-1"),
             created_at: Some(70),
+            timing: None,
             cwd: None,
             user_text: Some("run the task".to_owned()),
             model_request: None,
@@ -4309,6 +4348,22 @@ mod tests {
         };
 
         assert_eq!(session_latest_status(&projection), "active");
+    }
+
+    #[test]
+    fn turn_projection_preserves_durable_timing() {
+        let projection = sample_turn_projection(false);
+        let timing = projection.timing.as_ref().expect("turn timing projection");
+
+        assert_eq!(timing.turn_started_at_ms, Some(10_000));
+        assert_eq!(timing.first_response_at_ms, Some(11_250));
+        assert_eq!(timing.completed_at_ms, Some(12_500));
+        assert_eq!(timing.time_to_first_response_ms, Some(1_250));
+        assert_eq!(timing.total_elapsed_ms, Some(2_500));
+
+        let encoded = serde_json::to_string(&projection).expect("serialize projection");
+        assert!(encoded.contains("time_to_first_response_ms"));
+        assert!(encoded.contains("total_elapsed_ms"));
     }
 
     #[test]
@@ -4332,6 +4387,7 @@ mod tests {
             session_id: SessionId::new("session-1"),
             turn_id: TurnId::new("turn-1"),
             created_at: Some(80),
+            timing: None,
             cwd: None,
             user_text: Some("run the task".to_owned()),
             semantic_events: Vec::new(),

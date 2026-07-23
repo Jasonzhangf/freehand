@@ -6,7 +6,7 @@ use std::collections::HashMap;
 use std::convert::Infallible;
 use std::fs;
 use std::net::SocketAddr;
-use std::path::PathBuf;
+use std::path::{Path as FsPath, PathBuf};
 use std::sync::{Arc, Mutex};
 
 use axum::body::Body;
@@ -160,27 +160,87 @@ async fn handle_root(Query(params): Query<HashMap<String, String>>) -> impl Into
     )
 }
 
-async fn handle_android_update_manifest() -> Result<impl IntoResponse, StatusCode> {
-    let version_code = std::env::var("FREEHAND_ANDROID_VERSION_CODE")
-        .ok()
+async fn handle_android_update_manifest() -> Result<Response, StatusCode> {
+    let body = android_update_manifest_body()?;
+    Response::builder()
+        .status(StatusCode::OK)
+        .header(
+            header::CONTENT_TYPE,
+            HeaderValue::from_static("application/json; charset=utf-8"),
+        )
+        .header(
+            header::CACHE_CONTROL,
+            HeaderValue::from_static("no-store, max-age=0"),
+        )
+        .body(Body::from(body))
+        .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)
+}
+
+fn android_update_manifest_body() -> Result<String, StatusCode> {
+    if let Some(body) = android_update_manifest_env_body()? {
+        return Ok(body);
+    }
+    read_android_update_manifest_file(&android_update_manifest_path())
+}
+
+fn android_update_manifest_env_body() -> Result<Option<String>, StatusCode> {
+    let version_code = std::env::var("FREEHAND_ANDROID_VERSION_CODE").ok();
+    let version_name = std::env::var("FREEHAND_ANDROID_VERSION_NAME").ok();
+    if version_code.is_none() && version_name.is_none() {
+        return Ok(None);
+    }
+    let version_code = version_code
         .and_then(|value| value.parse::<u64>().ok())
-        .unwrap_or(1);
-    let version_name =
-        std::env::var("FREEHAND_ANDROID_VERSION_NAME").unwrap_or_else(|_| "0.1.0".to_owned());
+        .filter(|value| *value > 0)
+        .ok_or(StatusCode::INTERNAL_SERVER_ERROR)?;
+    let version_name = version_name
+        .map(|value| value.trim().to_owned())
+        .filter(|value| !value.is_empty())
+        .ok_or(StatusCode::INTERNAL_SERVER_ERROR)?;
     let body = serde_json::json!({
         "versionCode": version_code,
         "versionName": version_name,
         "apkUrl": "/android/freehand-android.apk",
         "releaseNotes": "Freehand Android release artifact served by the current daemon.",
         "required": false
-    });
-    Ok((
-        [(
-            header::CONTENT_TYPE,
-            HeaderValue::from_static("application/json; charset=utf-8"),
-        )],
-        body.to_string(),
-    ))
+    })
+    .to_string();
+    Ok(Some(body))
+}
+
+fn read_android_update_manifest_file(path: &FsPath) -> Result<String, StatusCode> {
+    let body = fs::read_to_string(path).map_err(|_| StatusCode::NOT_FOUND)?;
+    validate_android_update_manifest_body(&body)?;
+    Ok(body)
+}
+
+fn validate_android_update_manifest_body(body: &str) -> Result<(), StatusCode> {
+    let value: serde_json::Value =
+        serde_json::from_str(body).map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
+    let version_code = value
+        .get("versionCode")
+        .and_then(serde_json::Value::as_u64)
+        .filter(|value| *value > 0)
+        .ok_or(StatusCode::INTERNAL_SERVER_ERROR)?;
+    if version_code == 0 {
+        return Err(StatusCode::INTERNAL_SERVER_ERROR);
+    }
+    let apk_url = value
+        .get("apkUrl")
+        .and_then(serde_json::Value::as_str)
+        .map(str::trim)
+        .filter(|value| *value == "/android/freehand-android.apk")
+        .ok_or(StatusCode::INTERNAL_SERVER_ERROR)?;
+    if apk_url.is_empty() {
+        return Err(StatusCode::INTERNAL_SERVER_ERROR);
+    }
+    Ok(())
+}
+
+fn android_update_manifest_path() -> PathBuf {
+    std::env::var_os("FREEHAND_ANDROID_UPDATE_MANIFEST_PATH")
+        .map(PathBuf::from)
+        .unwrap_or_else(|| default_android_update_dist_path("update.json"))
 }
 
 async fn handle_android_update_apk() -> Result<Response, StatusCode> {
@@ -192,6 +252,10 @@ async fn handle_android_update_apk() -> Result<Response, StatusCode> {
             header::CONTENT_TYPE,
             "application/vnd.android.package-archive",
         )
+        .header(
+            header::CACHE_CONTROL,
+            HeaderValue::from_static("no-store, max-age=0"),
+        )
         .body(Body::from(body))
         .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR)?;
     Ok(response)
@@ -200,7 +264,16 @@ async fn handle_android_update_apk() -> Result<Response, StatusCode> {
 fn android_update_apk_path() -> PathBuf {
     std::env::var_os("FREEHAND_ANDROID_APK_PATH")
         .map(PathBuf::from)
-        .unwrap_or_else(|| PathBuf::from("dist/android/freehand-android-release-unsigned.apk"))
+        .unwrap_or_else(|| default_android_update_dist_path("freehand-android-release.apk"))
+}
+
+fn default_android_update_dist_path(file_name: &str) -> PathBuf {
+    let runtime_home = std::env::var_os("FREEHAND_RUNTIME_HOME")
+        .or_else(|| std::env::var_os("FREEHAND_DAEMON_WORKDIR"))
+        .map(PathBuf::from)
+        .or_else(|| std::env::var_os("HOME").map(|home| PathBuf::from(home).join(".freehand")))
+        .unwrap_or_else(|| PathBuf::from(".freehand"));
+    runtime_home.join("dist").join("android").join(file_name)
 }
 
 async fn handle_asset(Path(path): Path<String>) -> Result<impl IntoResponse, StatusCode> {
@@ -823,6 +896,7 @@ fn sample_slave_turn_projection() -> UiTurnProjection {
         session_id: SessionId::new("session-webui-smoke"),
         turn_id: TurnId::new("turn-webui-smoke"),
         created_at: Some(10),
+        timing: None,
         cwd: None,
         user_text: Some("inspect slave status".to_owned()),
         semantic_events: vec![
@@ -919,11 +993,61 @@ mod tests {
     };
     use futures_util::{SinkExt, StreamExt};
     use reqwest::Client;
+    use std::ffi::OsString;
+    use std::sync::OnceLock;
     use std::time::Duration;
     use tokio::sync::oneshot;
     use tokio::time::timeout;
     use tokio_tungstenite::connect_async;
     use tokio_tungstenite::tungstenite::Message as WsMessage;
+
+    fn android_update_env_lock() -> &'static Mutex<()> {
+        static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
+        LOCK.get_or_init(|| Mutex::new(()))
+    }
+
+    #[tokio::test]
+    async fn asset_response_serves_shared_logo_png() {
+        let response = assets::asset_response("logo.png").expect("logo asset response");
+        assert_eq!(response.headers().get("content-type").unwrap(), "image/png");
+        assert_eq!(
+            response.headers().get("cache-control").unwrap(),
+            "no-store, max-age=0"
+        );
+        let body = axum::body::to_bytes(response.into_body(), usize::MAX)
+            .await
+            .expect("logo asset body");
+        assert!(body.starts_with(b"\x89PNG\r\n\x1a\n"));
+        assert!(body.len() > 1024);
+    }
+
+    struct EnvSnapshot {
+        values: Vec<(&'static str, Option<OsString>)>,
+    }
+
+    impl EnvSnapshot {
+        fn capture(keys: &[&'static str]) -> Self {
+            Self {
+                values: keys
+                    .iter()
+                    .map(|key| (*key, std::env::var_os(key)))
+                    .collect(),
+            }
+        }
+    }
+
+    impl Drop for EnvSnapshot {
+        fn drop(&mut self) {
+            for (key, value) in &self.values {
+                unsafe {
+                    match value {
+                        Some(value) => std::env::set_var(key, value),
+                        None => std::env::remove_var(key),
+                    }
+                }
+            }
+        }
+    }
 
     struct TestServer {
         base_url: String,
@@ -1263,6 +1387,7 @@ mod tests {
         assert!(!html.contains("data-layout-shape=\"tablet_portrait\""));
         assert!(html.contains("/assets/theme.css"));
         assert!(html.contains("/assets/webui.css"));
+        assert!(html.contains("/assets/logo.png"));
         assert!(html.contains("/assets/webui.js"));
         assert!(html.contains("data-adp-endpoint=\"/adp\""));
         assert!(html.contains("data-selected-session=\"\""));
@@ -1435,6 +1560,7 @@ mod tests {
         assert!(!root_body.contains("data-layout-client=\"android-webview\""));
         assert!(!root_body.contains("data-layout-shape=\"tablet_portrait\""));
         assert!(root_body.contains("/assets/theme.css"));
+        assert!(root_body.contains("/assets/logo.png"));
         assert!(root_body.contains("data-adp-endpoint=\"/adp\""));
         assert!(root_body.contains("id=\"session-list\""));
         assert!(root_body.contains("id=\"new-conversation-button\""));
@@ -1538,6 +1664,14 @@ mod tests {
                 .expect("theme body")
                 .contains("body.theme-dark")
         );
+        let logo = client
+            .get(format!("{}/assets/logo.png", server.base_url))
+            .send()
+            .await
+            .expect("logo response");
+        assert_eq!(logo.status(), StatusCode::OK);
+        assert_eq!(logo.headers().get("content-type").unwrap(), "image/png");
+        assert!(logo.bytes().await.expect("logo body").len() > 1024);
         let webui_css = client
             .get(format!("{}/assets/webui.css", server.base_url))
             .send()
@@ -1549,6 +1683,8 @@ mod tests {
         assert!(webui_css_body.contains("@keyframes toolPulse"));
         assert!(webui_css_body.contains(".chat-empty-title"));
         assert!(webui_css_body.contains(".turn-cycle-card"));
+        assert!(webui_css_body.contains(".turn-cycle-header"));
+        assert!(webui_css_body.contains(".turn-cycle-header-pill"));
         assert!(webui_css_body.contains(".turn-cycle-card[data-live=\"true\"]"));
         assert!(webui_css_body.contains(".chat-message-user"));
         assert!(webui_css_body.contains(".chat-message-assistant"));
@@ -1683,6 +1819,11 @@ mod tests {
         assert!(js_body.contains("function viewportDimensionsForLayout"));
         assert!(js_body.contains("function setMobileDrawer"));
         assert!(js_body.contains("function handleBackNavigationIntent"));
+        assert!(js_body.contains("function turnTimingProjection"));
+        assert!(js_body.contains("function turnTimingLine"));
+        assert!(js_body.contains("first response"));
+        assert!(js_body.contains("total_elapsed_ms"));
+        assert!(js_body.contains("turn-cycle-header-pill"));
         assert!(
             js_body.contains("window.__freehandHandleAndroidBack = handleBackNavigationIntent")
         );
@@ -1963,11 +2104,27 @@ mod tests {
         assert!(js_body.contains("function timelineItemCycleCard"));
         assert!(js_body.contains("function renderConversationFragments"));
         assert!(js_body.contains("function reconcileCycleCardFragments"));
+        assert!(js_body.contains("function frozenCycleCardNeedsAuthoritativeMetadataRefresh"));
+        assert!(js_body.contains("existing.dataset.frozen === \"true\""));
+        assert!(
+            js_body
+                .contains("!frozenCycleCardNeedsAuthoritativeMetadataRefresh(existing, nextCard)")
+        );
+        assert!(
+            js_body
+                .contains("!existing.dataset.totalElapsedMs && !!nextCard.dataset.totalElapsedMs")
+        );
         assert!(js_body.contains("function cycleCardFromChatCards"));
         assert!(js_body.contains("function cycleCardKey"));
         assert!(js_body.contains("function cycleCardKeyFromNode"));
+        assert!(js_body.contains("function latestClosedTurnForSession"));
+        assert!(js_body.contains("function closedTurnObsoletesSessionSummary"));
+        assert!(js_body.contains("closedTurnObsoletesSessionSummary(latestClosedTurn, summary)"));
         assert!(js_body.contains("function sessionLiveObservation"));
         assert!(js_body.contains("function globalLiveSessionObservation"));
+        assert!(
+            js_body.contains("return parent ? { ...parent, scope: \"parent Master\" } : null;")
+        );
         assert!(js_body.contains("function liveObservationLine"));
         assert!(js_body.contains("function cycleCardMetaForTimelineItem"));
         assert!(js_body.contains("function cycleCardIsTerminal"));
@@ -1987,6 +2144,10 @@ mod tests {
         assert!(js_body.contains("function isToolPendingStatus"));
         assert!(js_body.contains("function terminalTurnStatusLabel"));
         assert!(js_body.contains("isToolPendingStatus(turn.terminal_status)"));
+        assert!(js_body.contains("function turnRequiresLifecycleTruthRefresh"));
+        assert!(
+            js_body.contains("turnRequiresLifecycleTruthRefresh(activeTurnForSelectedSession())")
+        );
         assert!(js_body.contains("title: isToolPending ? \"Lifecycle\" : \"Final\""));
         assert!(js_body.contains("? terminalTurnStatusLabel(turn.terminal_status)"));
         assert!(!js_body.contains("turn.terminal_text\n    ? \"completed\""));
@@ -2048,7 +2209,7 @@ mod tests {
         assert!(js_body.contains("sessionRelationHeader.dataset.liveSessionId"));
         assert!(js_body.contains("sessionRelationHeader.dataset.liveTurnId"));
         assert!(js_body.contains("active · ${observation.label}"));
-        assert!(js_body.contains("if (existing && existing.dataset.frozen === \"true\")"));
+        assert!(js_body.contains("existing.dataset.frozen === \"true\""));
         assert!(js_body.contains("return `submit:${sessionId}:${submitId}`"));
         assert!(js_body.contains("state.renderedCycleSessionId"));
         assert!(!js_body.contains("messageList.replaceChildren();"));
@@ -2313,9 +2474,13 @@ mod tests {
 
     #[tokio::test]
     async fn android_update_routes_return_manifest_and_explicit_missing_apk() {
-        let previous_version_code = std::env::var_os("FREEHAND_ANDROID_VERSION_CODE");
-        let previous_version_name = std::env::var_os("FREEHAND_ANDROID_VERSION_NAME");
-        let previous_apk_path = std::env::var_os("FREEHAND_ANDROID_APK_PATH");
+        let _env_guard = android_update_env_lock().lock().expect("env lock");
+        let _snapshot = EnvSnapshot::capture(&[
+            "FREEHAND_ANDROID_VERSION_CODE",
+            "FREEHAND_ANDROID_VERSION_NAME",
+            "FREEHAND_ANDROID_APK_PATH",
+            "FREEHAND_ANDROID_UPDATE_MANIFEST_PATH",
+        ]);
         unsafe {
             std::env::set_var("FREEHAND_ANDROID_VERSION_CODE", "42");
             std::env::set_var("FREEHAND_ANDROID_VERSION_NAME", "0.4.2");
@@ -2323,6 +2488,7 @@ mod tests {
                 "FREEHAND_ANDROID_APK_PATH",
                 "/tmp/freehand-missing-test-android.apk",
             );
+            std::env::remove_var("FREEHAND_ANDROID_UPDATE_MANIFEST_PATH");
         }
 
         let server = TestServer::spawn_empty().await;
@@ -2334,6 +2500,10 @@ mod tests {
             .await
             .expect("manifest response");
         assert_eq!(manifest.status(), StatusCode::OK);
+        assert_eq!(
+            manifest.headers().get(header::CACHE_CONTROL),
+            Some(&HeaderValue::from_static("no-store, max-age=0"))
+        );
         let manifest_json: serde_json::Value = manifest.json().await.expect("manifest json");
         assert_eq!(manifest_json["versionCode"], 42);
         assert_eq!(manifest_json["versionName"], "0.4.2");
@@ -2350,20 +2520,126 @@ mod tests {
         assert_eq!(apk.status(), StatusCode::NOT_FOUND);
 
         server.stop().await;
+    }
+
+    #[tokio::test]
+    async fn android_update_manifest_uses_compiled_sidecar_without_env_override() {
+        let _env_guard = android_update_env_lock().lock().expect("env lock");
+        let _snapshot = EnvSnapshot::capture(&[
+            "FREEHAND_ANDROID_VERSION_CODE",
+            "FREEHAND_ANDROID_VERSION_NAME",
+            "FREEHAND_ANDROID_APK_PATH",
+            "FREEHAND_ANDROID_UPDATE_MANIFEST_PATH",
+        ]);
+        let temp_dir = std::env::temp_dir().join(format!(
+            "freehand-android-update-sidecar-{}",
+            std::process::id()
+        ));
+        fs::create_dir_all(&temp_dir).expect("temp dir");
+        let manifest_path = temp_dir.join("update.json");
+        fs::write(
+            &manifest_path,
+            r#"{"versionCode":7,"versionName":"0.7.0","apkUrl":"/android/freehand-android.apk","releaseNotes":"sidecar","required":false}"#,
+        )
+        .expect("write sidecar");
         unsafe {
-            match previous_version_code {
-                Some(value) => std::env::set_var("FREEHAND_ANDROID_VERSION_CODE", value),
-                None => std::env::remove_var("FREEHAND_ANDROID_VERSION_CODE"),
-            }
-            match previous_version_name {
-                Some(value) => std::env::set_var("FREEHAND_ANDROID_VERSION_NAME", value),
-                None => std::env::remove_var("FREEHAND_ANDROID_VERSION_NAME"),
-            }
-            match previous_apk_path {
-                Some(value) => std::env::set_var("FREEHAND_ANDROID_APK_PATH", value),
-                None => std::env::remove_var("FREEHAND_ANDROID_APK_PATH"),
-            }
+            std::env::remove_var("FREEHAND_ANDROID_VERSION_CODE");
+            std::env::remove_var("FREEHAND_ANDROID_VERSION_NAME");
+            std::env::set_var("FREEHAND_ANDROID_UPDATE_MANIFEST_PATH", &manifest_path);
+            std::env::set_var(
+                "FREEHAND_ANDROID_APK_PATH",
+                "/tmp/freehand-missing-test-android.apk",
+            );
         }
+
+        let server = TestServer::spawn_empty().await;
+        let client = Client::builder().build().expect("client");
+        let manifest = client
+            .get(format!("{}/android/update.json", server.base_url))
+            .send()
+            .await
+            .expect("manifest response");
+        assert_eq!(manifest.status(), StatusCode::OK);
+        assert_eq!(
+            manifest.headers().get(header::CACHE_CONTROL),
+            Some(&HeaderValue::from_static("no-store, max-age=0"))
+        );
+        let manifest_json: serde_json::Value = manifest.json().await.expect("manifest json");
+        assert_eq!(manifest_json["versionCode"], 7);
+        assert_eq!(manifest_json["versionName"], "0.7.0");
+        assert_eq!(manifest_json["releaseNotes"], "sidecar");
+
+        server.stop().await;
+        fs::remove_dir_all(&temp_dir).expect("remove temp dir");
+    }
+
+    #[tokio::test]
+    async fn android_update_manifest_missing_sidecar_does_not_report_false_current_version() {
+        let _env_guard = android_update_env_lock().lock().expect("env lock");
+        let _snapshot = EnvSnapshot::capture(&[
+            "FREEHAND_ANDROID_VERSION_CODE",
+            "FREEHAND_ANDROID_VERSION_NAME",
+            "FREEHAND_ANDROID_APK_PATH",
+            "FREEHAND_ANDROID_UPDATE_MANIFEST_PATH",
+        ]);
+        let missing_path = std::env::temp_dir().join(format!(
+            "freehand-missing-update-sidecar-{}-update.json",
+            std::process::id()
+        ));
+        unsafe {
+            std::env::remove_var("FREEHAND_ANDROID_VERSION_CODE");
+            std::env::remove_var("FREEHAND_ANDROID_VERSION_NAME");
+            std::env::set_var("FREEHAND_ANDROID_UPDATE_MANIFEST_PATH", &missing_path);
+        }
+
+        let server = TestServer::spawn_empty().await;
+        let client = Client::builder().build().expect("client");
+        let manifest = client
+            .get(format!("{}/android/update.json", server.base_url))
+            .send()
+            .await
+            .expect("manifest response");
+        assert_eq!(manifest.status(), StatusCode::NOT_FOUND);
+
+        server.stop().await;
+    }
+
+    #[test]
+    fn android_update_default_paths_use_runtime_home_not_process_cwd() {
+        let _env_guard = android_update_env_lock().lock().expect("env lock");
+        let _snapshot = EnvSnapshot::capture(&[
+            "FREEHAND_ANDROID_VERSION_CODE",
+            "FREEHAND_ANDROID_VERSION_NAME",
+            "FREEHAND_ANDROID_APK_PATH",
+            "FREEHAND_ANDROID_UPDATE_MANIFEST_PATH",
+            "FREEHAND_RUNTIME_HOME",
+            "FREEHAND_DAEMON_WORKDIR",
+        ]);
+        let runtime_home = std::env::temp_dir().join(format!(
+            "freehand-android-update-runtime-home-{}",
+            std::process::id()
+        ));
+        unsafe {
+            std::env::remove_var("FREEHAND_ANDROID_APK_PATH");
+            std::env::remove_var("FREEHAND_ANDROID_UPDATE_MANIFEST_PATH");
+            std::env::set_var("FREEHAND_RUNTIME_HOME", &runtime_home);
+            std::env::remove_var("FREEHAND_DAEMON_WORKDIR");
+        }
+
+        assert_eq!(
+            android_update_manifest_path(),
+            runtime_home
+                .join("dist")
+                .join("android")
+                .join("update.json")
+        );
+        assert_eq!(
+            android_update_apk_path(),
+            runtime_home
+                .join("dist")
+                .join("android")
+                .join("freehand-android-release.apk")
+        );
     }
 
     #[tokio::test]
@@ -2394,6 +2670,7 @@ mod tests {
                 session_id: SessionId::new("session-webui-smoke"),
                 turn_id: TurnId::new("turn-webui-smoke-2"),
                 created_at: Some(20),
+                timing: None,
                 cwd: None,
                 user_text: Some("second prompt".to_owned()),
                 semantic_events: vec![ReasonResp01SemanticEvent {
@@ -2493,6 +2770,7 @@ mod tests {
                 session_id: SessionId::new("session-webui-smoke"),
                 turn_id: TurnId::new("turn-webui-first"),
                 created_at: Some(30),
+                timing: None,
                 cwd: None,
                 user_text: Some("first prompt".to_owned()),
                 semantic_events: vec![ReasonResp01SemanticEvent {
@@ -2538,6 +2816,7 @@ mod tests {
                 session_id: SessionId::new("session-webui-smoke"),
                 turn_id: TurnId::new("turn-debug-late"),
                 created_at: Some(40),
+                timing: None,
                 cwd: None,
                 user_text: Some("debug should arrive later".to_owned()),
                 semantic_events: vec![ReasonResp01SemanticEvent {

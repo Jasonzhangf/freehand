@@ -2253,6 +2253,8 @@ function buildRenderTurn(turn) {
     sessionId: turn.session_id || "",
     submitId: turn.submit_id || "",
     createdAt: turn.created_at || null,
+    timing: turnTimingProjection(turn),
+    sourceTurn: turn,
     orderKey: turnOrderKey(turn.turn_id),
     lifecycle,
     rows: buildRenderRows(turn, lifecycle),
@@ -2348,6 +2350,10 @@ function modelRequestDisplayLines(turn) {
   if (mainDetail) {
     lines.push(mainDetail);
   }
+  const timingLine = turnTimingLine(turn, { includeLiveWait: true });
+  if (timingLine) {
+    lines.push(`timing: ${timingLine}`);
+  }
   const transport = modelRequestTransport(turn);
   if (transport && transport.detail) {
     lines.push(`${modelRequestTransportLabel(transport)}: ${transport.detail}`);
@@ -2362,6 +2368,10 @@ function modelRequestStaticStatus(turn) {
   }
   if (transportPhase === "provider_failover") {
     return "transport switching";
+  }
+  const timing = turnTimingProjection(turn);
+  if (timing && Number.isFinite(timing.timeToFirstResponseMs)) {
+    return `wait ${formatDuration(timing.timeToFirstResponseMs)}`;
   }
   return "waiting";
 }
@@ -2553,6 +2563,59 @@ function modelRequestTransportLabel(transport) {
     return "transport switch";
   }
   return "transport";
+}
+
+function turnTimingProjection(turn) {
+  const raw = (turn && turn.timing) || null;
+  if (!raw || typeof raw !== "object") {
+    return null;
+  }
+  const timing = {
+    turnStartedAtMs: numberOrNull(raw.turn_started_at_ms ?? raw.turnStartedAtMs),
+    firstResponseAtMs: numberOrNull(raw.first_response_at_ms ?? raw.firstResponseAtMs),
+    completedAtMs: numberOrNull(raw.completed_at_ms ?? raw.completedAtMs),
+    timeToFirstResponseMs: numberOrNull(raw.time_to_first_response_ms ?? raw.timeToFirstResponseMs),
+    totalElapsedMs: numberOrNull(raw.total_elapsed_ms ?? raw.totalElapsedMs),
+  };
+  return Object.values(timing).some((value) => Number.isFinite(value)) ? timing : null;
+}
+
+function numberOrNull(value) {
+  const number = Number(value);
+  return Number.isFinite(number) && number >= 0 ? number : null;
+}
+
+function turnTimingLine(turn, options = {}) {
+  const timing = turnTimingProjection(turn);
+  if (!timing) {
+    return "";
+  }
+  const parts = [];
+  const waitMs = turnWaitDurationMs(turn, timing, options);
+  if (Number.isFinite(waitMs)) {
+    parts.push(`wait ${formatDuration(waitMs)}`);
+  }
+  if (Number.isFinite(timing.timeToFirstResponseMs)) {
+    parts.push(`first response ${formatDuration(timing.timeToFirstResponseMs)}`);
+  }
+  if (Number.isFinite(timing.totalElapsedMs)) {
+    parts.push(`total ${formatDuration(timing.totalElapsedMs)}`);
+  }
+  return parts.join(" · ");
+}
+
+function turnWaitDurationMs(turn, timing, options = {}) {
+  if (Number.isFinite(timing.timeToFirstResponseMs)) {
+    return timing.timeToFirstResponseMs;
+  }
+  if (
+    options.includeLiveWait &&
+    turnIsWaitingForModelResponse(turn) &&
+    Number.isFinite(timing.turnStartedAtMs)
+  ) {
+    return Math.max(0, Date.now() - timing.turnStartedAtMs);
+  }
+  return null;
 }
 
 function lifecycleClockStartedAt(key) {
@@ -4014,7 +4077,11 @@ function reconcileCycleCardFragments(nextCards) {
   const desiredCards = nextCards.map((nextCard) => {
     const key = cycleCardKeyFromNode(nextCard);
     const existing = key ? existingByKey.get(key) : null;
-    if (existing && existing.dataset.frozen === "true") {
+    if (
+      existing &&
+      existing.dataset.frozen === "true" &&
+      !frozenCycleCardNeedsAuthoritativeMetadataRefresh(existing, nextCard)
+    ) {
       return existing;
     }
     return nextCard;
@@ -4034,6 +4101,19 @@ function reconcileCycleCardFragments(nextCards) {
       child.remove();
     }
   });
+}
+
+function frozenCycleCardNeedsAuthoritativeMetadataRefresh(existing, nextCard) {
+  if (!existing || !nextCard) {
+    return false;
+  }
+  const existingCreatedAt = existing.dataset.createdAt || "";
+  const nextCreatedAt = nextCard.dataset.createdAt || "";
+  return (
+    (!existing.dataset.timeToFirstResponseMs && !!nextCard.dataset.timeToFirstResponseMs) ||
+    (!existing.dataset.totalElapsedMs && !!nextCard.dataset.totalElapsedMs) ||
+    (!existingCreatedAt && !!nextCreatedAt)
+  );
 }
 
 function conversationTimelineItems(renderModel) {
@@ -4103,9 +4183,50 @@ function cycleCardFromChatCards(meta, chatCards) {
     article.dataset.terminal = "true";
     article.dataset.frozen = "true";
   }
+  const timing = meta && meta.timing;
+  if (timing) {
+    if (Number.isFinite(timing.timeToFirstResponseMs)) {
+      article.dataset.timeToFirstResponseMs = `${timing.timeToFirstResponseMs}`;
+    }
+    if (Number.isFinite(timing.totalElapsedMs)) {
+      article.dataset.totalElapsedMs = `${timing.totalElapsedMs}`;
+    }
+  }
   article.setAttribute("aria-label", `request cycle ${kind} ${lifecycle.label || ""}`.trim());
+  const header = cycleCardHeader(meta);
+  if (header) {
+    article.appendChild(header);
+  }
   (chatCards || []).forEach((card) => article.appendChild(card));
   return article;
+}
+
+function cycleCardHeader(meta) {
+  if (!meta) {
+    return null;
+  }
+  const items = [];
+  const createdAtMs = timestampToMilliseconds(meta.createdAt);
+  if (createdAtMs) {
+    items.push({ label: "time", value: localChatTimeLabel(createdAtMs) });
+  }
+  const timingLine = turnTimingLine(meta.sourceTurn || null, { includeLiveWait: true });
+  if (timingLine) {
+    items.push({ label: "timing", value: timingLine });
+  }
+  if (items.length === 0) {
+    return null;
+  }
+  const header = document.createElement("div");
+  header.className = "turn-cycle-header";
+  items.forEach((item) => {
+    const pill = document.createElement("span");
+    pill.className = "turn-cycle-header-pill";
+    pill.dataset.label = item.label;
+    pill.textContent = item.value;
+    header.appendChild(pill);
+  });
+  return header;
 }
 
 function cycleCardKey(meta) {
@@ -4142,6 +4263,8 @@ function cycleCardMetaForTimelineItem(item) {
       sessionId: renderTurn.sessionId || "",
       submitId: renderTurn.submitId || "",
       createdAt: renderTurn.createdAt || "",
+      timing: renderTurn.timing || null,
+      sourceTurn: renderTurn.sourceTurn || null,
       lifecycle: renderTurn.lifecycle,
       terminal: !((renderTurn.lifecycle && renderTurn.lifecycle.isLive) || false) &&
         !((renderTurn.lifecycle && renderTurn.lifecycle.neutral) || false),
@@ -4476,6 +4599,95 @@ function sessionTurnsForSession(sessionId) {
   return logicalSessionTurns(state.sessionTurns || []).filter((turn) => turn && turn.session_id === id);
 }
 
+function compareTurnIdOrder(leftTurnId, rightTurnId) {
+  const left = turnOrderKey(leftTurnId);
+  const right = turnOrderKey(rightTurnId);
+  if (left.prefix === right.prefix) {
+    if (left.ordinal !== right.ordinal) {
+      return left.ordinal - right.ordinal;
+    }
+    if (left.round !== right.round) {
+      return left.round - right.round;
+    }
+  }
+  return left.raw.localeCompare(right.raw);
+}
+
+function compareSessionTurnPosition(left, right) {
+  if (!left && !right) {
+    return 0;
+  }
+  if (!left) {
+    return -1;
+  }
+  if (!right) {
+    return 1;
+  }
+  const turnOrder = compareTurnIdOrder(left.turn_id, right.turn_id);
+  if (turnOrder !== 0) {
+    return turnOrder;
+  }
+  const leftCreatedAt = timestampToMilliseconds(left.created_at) || 0;
+  const rightCreatedAt = timestampToMilliseconds(right.created_at) || 0;
+  return leftCreatedAt - rightCreatedAt;
+}
+
+function sessionTurnCandidates(sessionId) {
+  const id = `${sessionId || ""}`.trim();
+  if (!id) {
+    return [];
+  }
+  const candidates = [];
+  if (state.turn && state.turn.session_id === id) {
+    candidates.push(state.turn);
+  }
+  candidates.push(...sessionTurnsForSession(id));
+  return logicalSessionTurns(candidates);
+}
+
+function latestSessionTurnMatching(sessionId, predicate) {
+  return sessionTurnCandidates(sessionId).reduce((latest, turn) => {
+    if (!turn || (predicate && !predicate(turn))) {
+      return latest;
+    }
+    return compareSessionTurnPosition(turn, latest) > 0 ? turn : latest;
+  }, null);
+}
+
+function turnHasObservableSessionActivity(turn) {
+  if (!turn || isTerminalStatus(turn.terminal_status)) {
+    return false;
+  }
+  const waitingTools = (turn.tool_activities || []).some(
+    (tool) => tool.status === "Waiting" || tool.status === "waiting",
+  );
+  return isToolPendingStatus(turn.terminal_status) || turnIsWaitingForModelResponse(turn) || waitingTools;
+}
+
+function latestClosedTurnForSession(sessionId) {
+  return latestSessionTurnMatching(sessionId, (turn) => isTerminalStatus(turn.terminal_status));
+}
+
+function closedTurnObsoletesObservableTurn(closedTurn, observableTurn) {
+  return !!(
+    closedTurn &&
+    observableTurn &&
+    compareSessionTurnPosition(closedTurn, observableTurn) >= 0
+  );
+}
+
+function closedTurnObsoletesSessionSummary(closedTurn, summary) {
+  if (!closedTurn || !summary || !sessionHasObservableActiveStatus(summary)) {
+    return false;
+  }
+  const activeTurnId = `${summary.active_turn_id || ""}`.trim();
+  if (activeTurnId) {
+    return compareTurnIdOrder(closedTurn.turn_id, activeTurnId) >= 0;
+  }
+  const latestTurnId = `${summary.latest_turn_id || ""}`.trim();
+  return latestTurnId ? compareTurnIdOrder(closedTurn.turn_id, latestTurnId) >= 0 : false;
+}
+
 function activeTurnForSession(sessionId) {
   const id = `${sessionId || ""}`.trim();
   if (!id) {
@@ -4483,21 +4695,18 @@ function activeTurnForSession(sessionId) {
   }
   const summary = sessionSummaryById(id);
   const activeTurnId = `${(summary && summary.active_turn_id) || ""}`.trim();
-  const candidates = [];
-  if (state.turn && state.turn.session_id === id) {
-    candidates.push(state.turn);
-  }
-  candidates.push(...sessionTurnsForSession(id));
+  const candidates = sessionTurnCandidates(id);
+  const latestClosedTurn = latestClosedTurnForSession(id);
   if (activeTurnId) {
     const exact = candidates.find((turn) => turn && turn.turn_id === activeTurnId);
-    if (exact) {
+    if (exact && turnHasObservableSessionActivity(exact) && !closedTurnObsoletesObservableTurn(latestClosedTurn, exact)) {
       return exact;
     }
   }
-  return candidates
-    .slice()
-    .reverse()
-    .find((turn) => turn && turnIsWaitingForModelResponse(turn)) || null;
+  return latestSessionTurnMatching(id, (turn) =>
+    turnHasObservableSessionActivity(turn) &&
+      !closedTurnObsoletesObservableTurn(latestClosedTurn, turn)
+  );
 }
 
 function sessionHasObservableActiveStatus(session) {
@@ -4515,7 +4724,11 @@ function sessionLiveObservation(sessionId) {
   if (!summary && !turn) {
     return null;
   }
-  if (!turn && !sessionHasObservableActiveStatus(summary)) {
+  const latestClosedTurn = latestClosedTurnForSession(sessionId);
+  if (
+    !turn &&
+    (!sessionHasObservableActiveStatus(summary) || closedTurnObsoletesSessionSummary(latestClosedTurn, summary))
+  ) {
     return null;
   }
   const turnId = `${(turn && turn.turn_id) || (summary && summary.active_turn_id) || (summary && summary.latest_turn_id) || ""}`.trim();
@@ -4540,15 +4753,15 @@ function sessionLiveObservation(sessionId) {
 }
 
 function globalLiveSessionObservation() {
-  const selected = state.selectedSessionId ? sessionLiveObservation(state.selectedSessionId) : null;
-  if (selected) {
-    return { ...selected, scope: "selected" };
-  }
-  const selectedWorkerSession = workerChildSessionForSessionId(state.selectedSessionId);
-  const parentSessionId = selectedWorkerSession && selectedWorkerSession.parent_session_id;
-  const parent = parentSessionId ? sessionLiveObservation(parentSessionId) : null;
-  if (parent) {
-    return { ...parent, scope: "parent Master" };
+  if (state.selectedSessionId) {
+    const selected = sessionLiveObservation(state.selectedSessionId);
+    if (selected) {
+      return { ...selected, scope: "selected" };
+    }
+    const selectedWorkerSession = workerChildSessionForSessionId(state.selectedSessionId);
+    const parentSessionId = selectedWorkerSession && selectedWorkerSession.parent_session_id;
+    const parent = parentSessionId ? sessionLiveObservation(parentSessionId) : null;
+    return parent ? { ...parent, scope: "parent Master" } : null;
   }
   const activeSummary = (state.sessions || []).find(sessionHasObservableActiveStatus);
   const active = activeSummary ? sessionLiveObservation(activeSummary.session_id) : null;
@@ -6483,6 +6696,9 @@ function hasNonTerminalProtocolActivity() {
   if (selectedWorkerTranscriptRefreshRetryable()) {
     return true;
   }
+  if (turnRequiresLifecycleTruthRefresh(activeTurnForSelectedSession())) {
+    return true;
+  }
   return conversationTurnsForRender().some((turn) => {
     if (!turn || turn.terminal_text || isTerminalStatus(turn.terminal_status) || isToolPendingStatus(turn.terminal_status)) {
       return false;
@@ -6492,6 +6708,10 @@ function hasNonTerminalProtocolActivity() {
     );
     return waitingTools || !!turn.model_request;
   });
+}
+
+function turnRequiresLifecycleTruthRefresh(turn) {
+  return !!(turn && isToolPendingStatus(turn.terminal_status));
 }
 
 function renderAll() {

@@ -85,7 +85,7 @@ This table is the feature-map backlink for `docs/resource-maps/core.json`. The r
 | `reason.context-planner` | `request_context` | `docs/resource-maps/core.json` |
 | `provider.reason-live-bridge` | `provider_request` | `docs/resource-maps/core.json` |
 | `provider.semantic` | `provider_response` | `docs/resource-maps/core.json` |
-| `tool.registry` | `tool_call`, `workspace_path` | `docs/resource-maps/core.json` |
+| `tool.registry` | `tool_call`, `workspace_path`, `external_http_resource` | `docs/resource-maps/core.json` |
 | `task.orchestration` | `task` | `docs/resource-maps/core.json` |
 | `agent.lifecycle` | `agent` | `docs/resource-maps/core.json` |
 | `runtime.master-worker-loop` | `timer`, `master_work` | `docs/resource-maps/core.json` |
@@ -1562,7 +1562,9 @@ Non-violation pending items live in `docs/architecture/architecture-gaps.md`. Ea
   - `cargo run -p xtask -- mainlines check`
   - `cargo run -p xtask -- gates check`
 - required_white_box_tests:
-  - worker tool schema includes workspace and shell tools but excludes recursive `task`
+- worker tool schema exposes the exact worker-safe surface, including governed
+  workspace tools, while excluding recursive `task`, timers, unrestricted shell,
+  and unimplemented/invented names
   - no assigned task returns an explicit idle outcome without mutating task truth
   - assigned task claims exactly once with one execution id and lease heartbeat
   - successful worker turn records `review_ready` against the claimed task/execution/agent

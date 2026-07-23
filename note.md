@@ -7706,3 +7706,168 @@ Current real root cause split:
   - S-profile config remained `minimax/MiniMax-M3` with fallback `cc`; fixture env grep returned zero matches.
 - blocker:
   - True-device install/permission closure is not complete: `adb devices` is empty, `100.107.194.67:45099` refused connection, and `100.104.163.65:5555` timed out.
+
+# 2026-07-22 Worker tool failure guidance diagnosis
+
+- trigger:
+  - Jason reviewed currently running Worker tasks and saw many tool failures. The expected behavior is that the model should receive enough framework/tool/path guidance to make correct first calls instead of probing formats or inventing tools.
+- live evidence:
+  - S-profile `ws://127.0.0.1:4042/adp` currently lists selected session `webui-session-20260721052724-8fab5f9e` as `toolpending`.
+  - Worker reason ledger `~/.freehand/ledgers/reason/worker/worker-task-task-1784612160.jsonl` has `70 Success / 2 Failed`; failed calls were external-parent `ls` attempts on `/Users/fanzhang` and `/Users/fanzhang/Documents/github`.
+  - Worker reason ledger `~/.freehand/ledgers/reason/worker/worker-task-task-1784694444.jsonl` has `142 Success / 20 Failed`; failed calls include external-parent `ls`, repeated missing `reports` reads/lists, directory-as-file `read_file`, missing guessed files, unknown `shell`, and unknown `readlink`.
+- SOP/model flow:
+  - Known flow: `provider.reason-live-bridge` builds Worker live context and exports `tool.registry` Worker schemas; provider output tool calls re-enter `BuiltinToolRegistry::execute`; failed tool results are paired back to the model for continuation.
+  - Resource edges: `request_context -> provider_request -> provider_response -> tool_call -> workspace_path -> tool_result`.
+  - Forbidden shortcut: Worker may not escape locked task cwd for read/search/write path tools; Master/Worker lifecycle should not be repaired by prompt-only fallback or UI hiding.
+- hypotheses:
+  - H1 confirmed: Worker runtime guidance says read-only tools may inspect external paths, but `tool.registry` `resolve_read_path` rejects external absolute paths after canonical/symlink resolution. Boundary error text repeats the same false external-read allowance and labels read/list failures as `Write boundary denied`.
+  - H2 supporting: Worker guidance says shell is unavailable, but does not list the exact Worker tool surface or explicitly forbid invented `shell/readlink/pwd/cat/find`; unknown-tool error gives no recovery pattern.
+  - H3 supporting: repeated directory-as-file and guessed-report reads show schema/guidance needs stronger `ls` before `read_file` and missing generated-output handling.
+- first divergence:
+  - `crates/freehand-runtime/src/live_context.rs::worker_execution_guidance` is the first polluted model-visible instruction.
+  - `crates/freehand-runtime/src/lib.rs::registry_error_text` is the downstream polluted re-entry text after the tool owner returns boundary/unknown-tool truth.
+- unique owner and allowed paths:
+  - `provider.reason-live-bridge`: `crates/freehand-runtime/src/live_context.rs`, `crates/freehand-runtime/src/lib.rs`, focused runtime tests, function map/test design/mainline docs.
+  - `tool.registry`: `crates/freehand-tools/src/lib.rs`, focused schema/export tests, function map/test design/mainline docs.
+- required verification:
+  - Red/green tests must prove Worker guidance no longer permits external reads, names exact Worker tools, forbids `shell/readlink`, and teaches `ls` before `read_file`.
+  - Runtime failed-tool tests must prove Worker unknown-tool and boundary re-entry text gives exact recovery guidance without saying external read/query is allowed.
+  - Online S-profile proof must inspect real provider/Worker ledgers, not just static tests.
+
+# 2026-07-22 turn timing observability request
+
+- Jason requested that every turn records and displays wait duration and first-token/first-byte time, including historical turns after completion. Route as a separate UI/protocol observability feature: owner likely ui.protocol + reason.persistence projection for durable timing fields, with WebUI rendering after owner map/test design review. Do not mix into the current Worker tool-guidance fix.
+
+# 2026-07-22 turn timing and Master/Worker state unification resume diagnosis
+
+- trigger:
+  - Jason requested per-turn wait/first-response timing to remain recorded and visible after completion, and called out that Master and subagent/Worker state are still not unified.
+- current source/truth evidence:
+  - `webui-path-diagnostic-state-sync-fixed` now has parent turns `runtime-turn-511,runtime-turn-511-r2,runtime-turn-511-r3,runtime-turn-512` and selected status `blocked`.
+  - Task `task-webui-path-diagnostic-1784719186046` history is `TaskCreated,TaskWaitingAgent,TaskAssigned,TaskResumed,TaskHeartbeat,TaskBlocked,TaskProgressed`.
+  - Parent follow-up turn `runtime-turn-512` closed `Blocked`; reason ledger rows record `time_to_first_response_ms=325900` and `total_elapsed_ms=326176`.
+  - Prior active-turn snapshot for `runtime-turn-512` no longer exists; current divergence is not a permanently dangling parent turn.
+- remaining risk:
+  - The parent blocked follow-up took over 5 minutes before first response, so the online verifier must prove that the UI remains observable during that wait and final DOM state is blocked with timing, not stale lifecycle waiting.
+  - Daemon stderr still contains historical `parent session ... has no persisted user objective truth` runner stops and one `persisted cursor is inconsistent` stop; source changes appear to convert missing objective into a skipped evaluation, but focused tests and a fresh S-profile run must prove runner state no longer wedges.
+- diagnosis lock:
+  - SOP/model flow: `runtime.master-worker-loop` parent workset reconciliation plus `reason.persistence` parent turn truth plus `app.webui-smoke` render projection.
+  - First divergence under current evidence: pending until focused tests and fresh verifier; existing current-run truth no longer supports the earlier "parent follow-up never terminalized" hypothesis.
+  - Required proof: focused Master blocked-parent tests, UI timing projection tests, and `scripts/verify-webui-path-diagnostic-online.mjs` on fixed S-profile session with DOM timing/blocked checks.
+
+# 2026-07-22 effective session-history rollback diagnosis
+
+- symptom:
+  - Fixed-session WebUI path-diagnostic reset removed effective UI turns, but
+    the next Master provider request was classified as a stale parent-blocked
+    follow-up before the new task was created.
+- evidence:
+  - `artifacts/webui-online/path-diagnostic-1784728929941/failure.json`
+    records the first Master request as
+    `parent_blocked_follow_up_before_blocked_decision_append` and zero Worker
+    requests.
+  - `~/.freehand/state/turns/master/webui-path-diagnostic-state-sync-fixed/session-history.json`
+    still contains `session-memory-runtime-turn-515-r3` and
+    `session-memory-runtime-turn-516`, including the stale
+    `<freehand_parent_blocked_follow_up>` prompt.
+- confirmed first divergence:
+  - `ReasonPersistence::load_authoritative_state` applies rollback markers to
+    closed turns but not `SessionHistory.base_context_segments`.
+  - `ReasonPersistence::persist_row_locked` then persists the unfiltered
+    history after rollback, so UI transcript and model-visible context disagree.
+- owner and scope:
+  - unique owner `reason.persistence`.
+  - allowed source paths:
+    `crates/freehand-reason/src/persistence.rs`,
+    `crates/freehand-reason/src/session_history.rs`, and owner-bound
+    docs/tests.
+  - forbidden workaround paths: WebUI, TaskBoard, provider fixture, or verifier
+    classification changes.
+- required proof:
+  - red/green owner test retaining ordinary/effective memory while rejecting
+    rolled-back and orphan `historical_turn:*` segments.
+  - focused rollback/restore/runtime regressions.
+  - exact fixed-session S-profile WebUI path-diagnostic replay.
+
+# 2026-07-22 Android APK update distribution verification
+
+- trigger:
+  - Jason saw the Android Settings update check report no upgrade and asked to verify whether the APK update package actually changed.
+- root cause fixed in current worktree:
+  - `/android/update.json` had previously been able to fall back to hardcoded `versionCode=1`, `versionName=0.1.0`.
+  - Android Gradle defaults also stayed at `versionCode=1`, `versionName=0.1.0` unless properties were set.
+  - launchd daemon workdir is `~/.freehand`, so a relative default `dist/android/...` path points at runtime home, not the repo checkout.
+- implementation evidence:
+  - `apps/freehand-server/src/lib.rs` now serves `/android/update.json` from valid explicit env override or runtime-home sidecar `~/.freehand/dist/android/update.json`; missing sidecar returns 404 and invalid sidecar returns 500 instead of a false current-version manifest, and successful manifest/APK responses carry `Cache-Control: no-store, max-age=0`.
+  - `AndroidApkUpdater.httpGetText` disables `HttpURLConnection` caches and sends `Cache-Control: no-cache` / `Pragma: no-cache` for manifest reads.
+  - `scripts/release.sh` writes `dist/android/update.json` from `aapt dump badging` on the built release APK.
+  - `scripts/install-launchd.sh` and `scripts/install-global.sh` stage `update.json` plus signed `freehand-android-release.apk` into `~/.freehand/dist/android`.
+  - `apps/freehand-android/gradle.properties` now sets `freehandVersionCode=3` and `freehandVersionName=0.2.1`, after an intermediate v2 build was insufficient to prove an update if the phone was already on v2.
+  - `apps/freehand-android/app/build.gradle.kts` signs release builds with the debug signing config for the current internal update channel; this keeps the signer compatible with the installed debug-channel app and avoids vivo rejecting `*-unsigned.apk` as missing a developer certificate.
+- online proof:
+  - `curl -i http://127.0.0.1:4042/android/update.json` returned `{"versionCode":3,"versionName":"0.2.1",...}` with `cache-control: no-store, max-age=0`.
+  - `curl -i http://100.66.1.82:44042/relay/daemon/studio-host/android/update.json` returned the same `versionCode=3`, `versionName=0.2.1` and `cache-control: no-store, max-age=0`.
+  - `aapt dump badging dist/android/freehand-android-release.apk` reported `versionCode='3' versionName='0.2.1'`.
+  - `apksigner verify --verbose --print-certs` passed for the built and relay-downloaded APK; signer certificate is Android Debug with SHA-256 `ecd63a2c2070970735cc079b0bb090427ca0b59200da0ebc07c80b50a1dfffda`.
+  - repo APK, runtime staged APK, and relay-downloaded APK all had SHA256 `d11fcba7e92e39229779ba6f6efd0e30404617d85c69cdeac0262e6c291a0c41`.
+  - direct and relay ADP smoke both passed; final S config stayed `provider=minimax`, `fallback_provider=cc`, `provider_protocol=messages`, `default_model=MiniMax-M3`, `auth_source=inline`.
+- local proof:
+  - `cargo fmt --check`, `cargo check -p freehand-server --lib`, focused `cargo test -p freehand-server --lib android_update -- --nocapture --test-threads=1` 4/4, Android `testDebugUnitTest assembleRelease`, `bash -n` for release/install scripts, `cargo run -p xtask -- mainlines generate/check`, `cargo run -p xtask -- gates check`, and `git diff --check` passed.
+- remaining gap:
+  - `adb devices -l` returned no connected devices during this verification, so the installed phone package `versionCode` and Settings click/logcat update flow were not true-device closed here. If the phone already has `versionCode>=3`, "no update" is expected; if it has lower version with the same debug signer, the signed relay APK should open Android's installer instead of vivo's missing-certificate rejection.
+
+# 2026-07-23 shared logo replacement
+
+- request:
+  - Jason asked to replace the Freehand logo with the uploaded PNG.
+- implementation:
+  - `assets/logo.png` is the shared logo truth and was regenerated as a 1024x1024 RGBA PNG from the uploaded image.
+  - Android launcher square/round mipmaps were regenerated from `assets/logo.png`.
+  - WebUI now serves `/assets/logo.png` from the shared asset and renders it in the rail brand instead of text `FH`; the WebUI asset version was bumped to `20260723-logo-refresh`.
+  - `app.webui-smoke` function map, test design, mainline call source, and generated wiki were synced for the shared logo asset route.
+- evidence:
+  - `assets/logo.png` SHA256 `7c89e6ef0cd2054afd593cfc11463bb8f43dde2e962d39b559f066aaf373fa2a`.
+  - `apps/freehand-android/scripts/verify-launcher-icons.sh` passed.
+  - `cargo test -p freehand-server --lib asset_response_serves_shared_logo_png -- --nocapture --test-threads=1` passed.
+  - Android debug APK built at `apps/freehand-android/app/build/outputs/apk/debug/app-debug.apk` with SHA256 `78b6e816b65f75d03d8f2025bcebb2577067cefedee2d1ba317be54a5be2387b`.
+  - `cargo fmt --check`, `cargo run -p xtask -- mainlines check`, `cargo run -p xtask -- gates check`, and `git diff --check` passed after the logo change.
+- gap:
+  - `adb devices -l` showed no connected device, so no true-device install/screenshot closure is claimed for this logo replacement slice.
+
+# 2026-07-23 web_fetch online verifier closeout
+
+- trigger:
+  - Continue the Master network/search capability slice and prove online that the model can call `web_fetch` and receives the fetched result in the next provider request.
+- pre-provider failure root cause:
+  - Previous verifier `artifacts/webui-online/web-fetch-tool-20260723T044345-74876/failure/failure.json` had `requestCount=0` and metadata stopped at `instruction-capability:started`; the script treated synchronous ADP command timeout as failure and then restored/restarted S, interrupting the live turn.
+  - Fresh run proved `instruction-capability` itself is not hanging: runtime metadata for `runtime-turn-528` recorded `instruction-capability` completed in `16ms`, `task-space-snapshot` in `352ms`, provider request built, and two-round closure.
+- verifier fix:
+  - `scripts/verify-web-fetch-tool-online.mjs` now allows `SubmitUserInput` receipt timeout as non-terminal harness state, keeps provider/page fixtures alive, polls the fixed session's new turn ids and request evidence, writes `live-observation.json`, and restores only after terminal owner truth or final diagnosis timeout.
+- online proof:
+  - `node scripts/verify-web-fetch-tool-online.mjs` passed on S-profile `ws://127.0.0.1:4042/adp`.
+  - Artifact: `artifacts/webui-online/web-fetch-tool-20260723T061519-41129/summary.json`.
+  - Fixed session `web-fetch-tool-online-fixed`; current-run turns `runtime-turn-528,runtime-turn-528-r2`; terminal `Success`.
+  - Provider requests: `requestCount=2`; page fixture requests: `pageRequestCount=1`.
+  - First request tools included `delete_range,edit_file,glob,grep,ls,multi_edit,read_file,task,timer,web_fetch,write_file`.
+  - First request context included Master network guidance and configured Worker capability surface; second request contained `function_call_output` and `WEB_FETCH_TOOL_ONLINE_BODY web-fetch-tool-20260723T061519-41129 fetched-content`.
+  - ADP retained `web_fetch` tool activity and fetched body; final marker visible.
+  - Restore proof: final script output returned `provider=minimax`, `provider_protocol=messages`, `base_url_host=api.minimaxi.com`, `default_model=MiniMax-M3`, `auth_source=inline`.
+- local proof:
+  - `node --check scripts/verify-web-fetch-tool-online.mjs` passed.
+  - `cargo test -p freehand-instructions renders_current_repo_instruction_capability_without_scanning_outside_roots -- --nocapture` passed.
+  - `cargo test -p freehand-runtime live_bridge_admits_instruction_capability_manifest_as_typed_context -- --nocapture` passed.
+
+# 2026-07-23 web_search provider-native follow-up
+
+- trigger:
+  - Jason pointed out that the next direction should be provider-adapted `web_search` for MiniMax and GPT-family providers, avoiding overuse of `web_fetch`.
+- current research read:
+  - OpenAI Responses exposes hosted web search as a provider-side tool surface.
+  - MiniMax public docs expose `web_search` through Token Plan MCP/CLI surfaces; the current Freehand minimax path is Anthropic-compatible Messages, so native search support must be verified against the exact MiniMax wire before implementation.
+- architecture constraint:
+  - Do not fake broad search through `web_fetch`; `web_fetch` remains one concrete URL fetch.
+  - Next implementation should start from resource map: add a `web_search_resource` / provider-hosted-search operation, then route through provider-specific wire drivers.
+  - OpenAI Responses should use its hosted search tool declaration/result semantics; MiniMax needs a separate wire adapter if the selected provider/protocol supports native search, otherwise the model-visible tool must be absent or explicitly blocked.
+- required future proof:
+  - Provider-request black-box fixtures for OpenAI Responses and MiniMax-selected protocol.
+  - Online S-profile proof that the model can request broad search, provider receives native search declaration, results return through the provider response chain, and no `web_fetch` concrete-URL substitute is used.

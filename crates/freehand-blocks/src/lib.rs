@@ -112,7 +112,11 @@ pub fn completion_schema_guidance() -> CompletionSchemaGuidance {
             "}\n",
             "</freehand_completion>\n",
             "Do not omit the tag. Invalid or missing schema will be rejected with field-level feedback.\n",
+            "The block content must be valid JSON only: double-quoted keys, double-quoted string values, no comments, no trailing commas, and no markdown fence inside the tag.\n",
+            "Do not explain schema repair in prose instead of emitting the fixed JSON block. A sentence such as `I need to fix the JSON syntax...` is not a valid completion by itself.\n",
             "Use plain string values for required text fields; do not emit arrays or objects for those fields.\n",
+            "Valid blocked example: <freehand_completion>\n{\"claim\":\"blocked\",\"blocked_reason\":\"missing required capability after checking Master and Worker tool surfaces\"}\n</freehand_completion>\n",
+            "Valid waiting example: <freehand_completion>\n{\"claim\":\"waiting\",\"next_step\":\"Worker task is assigned; re-check TaskBoard and review the result before final synthesis\"}\n</freehand_completion>\n",
             "Claim semantics: `continue` means Freehand should immediately run another model round in this same turn. ",
             "Do not use `continue` to wait for a Worker, timer, user, or external future event. ",
             "`complete` means the user's requested outcome is actually finished with evidence. ",
@@ -970,6 +974,11 @@ mod tests {
         assert!(guidance.contains("Dispatching a Worker task"));
         assert!(guidance.contains("is not user-task completion"));
         assert!(guidance.contains("claim=\"waiting\""));
+        assert!(guidance.contains("valid JSON only"));
+        assert!(guidance.contains("no trailing commas"));
+        assert!(guidance.contains("Do not explain schema repair in prose"));
+        assert!(guidance.contains("Valid blocked example"));
+        assert!(guidance.contains("Valid waiting example"));
     }
 
     #[test]

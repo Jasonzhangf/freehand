@@ -3079,6 +3079,51 @@ fn runtime_dispatches_session_rollback_into_effective_ui_projection() {
             .expect("persist turn");
     }
 
+    let task_runtime =
+        TaskRuntime::boot(&runtime_home, AgentId::new("agent-live")).expect("task runtime");
+    let rolled_back_child = task_runtime
+        .create_task(TaskCreateRequest {
+            task_id: Some(TaskId::new("rollback-child-turn-2")),
+            title: "Rolled back child".to_owned(),
+            content: "child created by the rolled back turn".to_owned(),
+            goal: "must not survive session rollback as active truth".to_owned(),
+            deliverables: vec!["rolled-back.md".to_owned()],
+            acceptance: vec!["child cancelled on rollback".to_owned()],
+            priority: 90,
+            target_cwd: Some(runtime_home.display().to_string()),
+            dispatch: TaskDispatchRequest::None,
+            parent: TaskParentRef {
+                session_id: Some(session_id.clone()),
+                turn_id: Some(TurnId::new("runtime-turn-2")),
+                trace_id: None,
+            },
+            actor: lifecycle_test_actor(),
+            watermark: lifecycle_test_watermark("rollback-child-turn-2"),
+        })
+        .expect("create rolled back child")
+        .task;
+    let retained_child = task_runtime
+        .create_task(TaskCreateRequest {
+            task_id: Some(TaskId::new("retained-child-turn-1")),
+            title: "Retained child".to_owned(),
+            content: "child created by the retained turn".to_owned(),
+            goal: "must remain because its parent turn was not rolled back".to_owned(),
+            deliverables: vec!["retained.md".to_owned()],
+            acceptance: vec!["child remains attached".to_owned()],
+            priority: 80,
+            target_cwd: Some(runtime_home.display().to_string()),
+            dispatch: TaskDispatchRequest::None,
+            parent: TaskParentRef {
+                session_id: Some(session_id.clone()),
+                turn_id: Some(TurnId::new("runtime-turn-1")),
+                trace_id: None,
+            },
+            actor: lifecycle_test_actor(),
+            watermark: lifecycle_test_watermark("retained-child-turn-1"),
+        })
+        .expect("create retained child")
+        .task;
+
     let runtime = RuntimeCommandDispatcher::from_selected_agent_with_live(
         &live_selected_agent(
             "http://127.0.0.1:1".to_owned(),
@@ -3098,6 +3143,22 @@ fn runtime_dispatches_session_rollback_into_effective_ui_projection() {
         receipt
             .dispatch_status
             .contains("session_turn_rolled_back:runtime-turn-2")
+    );
+    let task_runtime =
+        TaskRuntime::boot(&runtime_home, AgentId::new("agent-live")).expect("reload task runtime");
+    assert_eq!(
+        task_runtime
+            .query_task(&rolled_back_child.task_id)
+            .expect("rolled back child")
+            .status,
+        TaskStatus::Cancelled
+    );
+    assert_eq!(
+        task_runtime
+            .query_task(&retained_child.task_id)
+            .expect("retained child")
+            .status,
+        TaskStatus::WaitingAgent
     );
 
     match runtime
@@ -5474,6 +5535,21 @@ fn assert_master_task_request_contract(
     assert!(raw_request.contains("Do not use `continue` to wait for a Worker, timer"));
     assert!(raw_request.contains("you are the master agent"));
     assert!(raw_request.contains("Dispatch when"));
+    assert!(raw_request.contains("Master local tool surface"));
+    assert!(raw_request.contains("Master network tool surface"));
+    assert!(raw_request.contains("current selected session cwd"));
+    assert!(raw_request.contains("Use them directly for local repository analysis"));
+    assert!(raw_request.contains("Do not dispatch when"));
+    assert!(raw_request.contains("`web_fetch` fetches known HTTP/HTTPS URLs"));
+    assert!(raw_request.contains("Configured Worker capability surface"));
+    assert!(raw_request.contains("configured_worker_capabilities"));
+    assert!(raw_request.contains("network_tools"));
+    assert!(raw_request.contains("If your own Master surface cannot complete a slice directly"));
+    assert!(raw_request.contains("Finish blocked only when neither Master nor any configured Worker has the required capability"));
+    assert!(!raw_request.contains("no web tool is exposed"));
+    assert!(
+        !raw_request.contains("Do not create a Worker task for pure web/current-news research")
+    );
     assert!(raw_request.contains("Multi-agent dispatch"));
     assert!(raw_request.contains("Concurrency control"));
     assert!(raw_request.contains("Flow control"));
@@ -5490,19 +5566,18 @@ fn assert_master_task_request_contract(
             "converts the Worker completion schema into TaskReviewSubmitted or TaskBlocked"
         )
     );
-    assert!(raw_request.contains("framework-only: task and timer"));
-    assert!(raw_request.contains("Do not try read_file, ls, grep, glob"));
-    assert!(raw_request.contains("external repository analysis"));
-    assert!(raw_request.contains("must be delegated"));
-    assert!(raw_request.contains("Every call must include top-level op"));
+    assert!(raw_request.contains("Master framework tool surface"));
+    assert!(raw_request.contains("Do not call shell/bash"));
+    assert!(raw_request.contains("Workspace boundary"));
+    assert!(raw_request.contains("top-level JSON object must include \\\"op\\\""));
     assert!(raw_request.contains("Never omit op"));
     assert!(raw_request.contains("expanded absolute path"));
     assert!(raw_request.contains("leading-~/symlink aliases are valid target_cwd values"));
     assert!(raw_request.contains("target_cwd_path_diagnostic"));
     assert!(raw_request.contains("\\\"target_cwd\\\":\\\"/absolute/existing/workspace"));
     assert!(raw_request.contains("assign only useful independent subtasks"));
-    assert!(raw_request.contains("task(op=\\\"list_agents\\\")"));
-    assert!(raw_request.contains("timer(op=\\\"schedule\\\")"));
+    assert!(raw_request.contains("{\\\"op\\\":\\\"list_agents\\\"}"));
+    assert!(raw_request.contains("{\\\"op\\\":\\\"schedule\\\""));
     assert!(raw_request.contains("A timer is not scheduled until the timer tool returns"));
     assert!(raw_request.contains("do not claim or imply that a timer was scheduled"));
     assert!(raw_request.contains(
@@ -5519,6 +5594,8 @@ fn assert_master_task_request_contract(
     assert!(raw_request.contains("known_tasks"));
     assert!(raw_request.contains("Do not call status=\\\"all\\\""));
     assert!(raw_request.contains("Master task orchestration examples"));
+    assert!(raw_request.contains("Local workspace sample"));
+    assert!(raw_request.contains("Web fetch sample"));
     assert!(raw_request.contains("Cross-workspace sample"));
     assert!(raw_request.contains("~/work/repo-a"));
     assert!(raw_request.contains("~/work/repo-b"));
@@ -5528,7 +5605,8 @@ fn assert_master_task_request_contract(
     assert!(raw_request.contains("Worker retry sample"));
     assert!(raw_request.contains("\"name\":\"task\""));
     assert!(raw_request.contains("\"name\":\"timer\""));
-    for forbidden in [
+    assert!(raw_request.contains("\"name\":\"web_fetch\""));
+    for local_tool in [
         "\"name\":\"read_file\"",
         "\"name\":\"ls\"",
         "\"name\":\"grep\"",
@@ -5536,8 +5614,17 @@ fn assert_master_task_request_contract(
         "\"name\":\"write_file\"",
         "\"name\":\"edit_file\"",
         "\"name\":\"multi_edit\"",
+        "\"name\":\"delete_range\"",
+    ] {
+        assert!(
+            raw_request.contains(local_tool),
+            "master request must expose local workspace tool schema {local_tool}"
+        );
+    }
+    for forbidden in [
         "\"name\":\"complete_step\"",
         "\"name\":\"todo_write\"",
+        "\"name\":\"bash\"",
     ] {
         assert!(
             !raw_request.contains(forbidden),
@@ -5926,6 +6013,12 @@ fn worker_live_bridge_returns_injected_shell_as_failed_tool_result() {
     assert!(second_request.contains("\"tool_use_id\":\"toolu_bash_1\""));
     assert!(second_request.contains("\"is_error\":true"));
     assert!(second_request.contains("shell execution is not available"));
+    assert!(second_request.contains("Available Worker tools are exactly"));
+    assert!(second_request.contains("Do not call shell, bash, readlink"));
+    assert!(
+        !second_request.contains("external inspection"),
+        "failed shell result must not invite external probing"
+    );
     assert_eq!(outcome.rounds, 2);
     assert_eq!(outcome.tool_executions, 1);
     assert!(
@@ -8529,8 +8622,9 @@ fn live_bridge_returns_tool_execution_failure_to_model_for_next_round() {
     assert!(second_request.contains("\"type\":\"tool_result\""));
     assert!(second_request.contains("\"tool_use_id\":\"toolu_missing_read_1\""));
     assert!(second_request.contains("\"is_error\":true"));
-    assert!(second_request.contains("Master capability boundary"));
-    assert!(second_request.contains("task(op=\\\"create\\\""));
+    assert!(second_request.contains("Tool execution failed"));
+    assert!(second_request.contains("cannot resolve"));
+    assert!(second_request.contains("path_diagnostic"));
     assert_eq!(outcome.rounds, 2);
     assert_eq!(outcome.tool_executions, 1);
     assert_eq!(
@@ -8577,7 +8671,7 @@ fn live_bridge_returns_tool_execution_failure_to_model_for_next_round() {
 }
 
 #[test]
-fn live_bridge_rejects_injected_master_read_then_accepts_worker_dispatch() {
+fn live_bridge_rejects_cross_cwd_master_read_then_accepts_worker_dispatch() {
     let _cwd_lock = cwd_lock()
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner());
@@ -8635,17 +8729,20 @@ fn live_bridge_rejects_injected_master_read_then_accepts_worker_dispatch() {
                     "agent_id": agent_id
                 }),
             ),
-            complete_single_response("delegated external workspace"),
+            waiting_single_response(
+                "worker task assigned for external workspace; inspect TaskHistory and Worker review before final answer",
+            ),
         ],
     );
     let mut request = live_request(false);
     request.runtime_home = runtime_home.clone();
-    request.cwd = Some(external_workspace.clone());
+    request.cwd = Some(runtime_home.clone());
 
     let mut selected = live_selected_agent(base_url, freehand_config::ProviderType::Anthropic);
     set_single_worker_peer(&mut selected, agent_id);
-    let outcome = run_live_reason_turn(&selected, request)
-        .expect("injected master read failure must return to model and still permit task dispatch");
+    let outcome = run_live_reason_turn(&selected, request).expect(
+        "cross-cwd master read failure must return to model and still permit task dispatch",
+    );
     let requests = (0..5)
         .map(|_| rx.recv().expect("provider request"))
         .collect::<Vec<_>>();
@@ -8653,15 +8750,15 @@ fn live_bridge_rejects_injected_master_read_then_accepts_worker_dispatch() {
 
     assert!(!requests[0].contains("\"name\":\"bash\""));
     assert!(requests[0].contains("\"name\":\"task\""));
-    assert!(!requests[0].contains("\"name\":\"read_file\""));
-    assert!(!requests[0].contains("\"name\":\"ls\""));
-    assert!(!requests[0].contains("\"name\":\"grep\""));
-    assert!(!requests[0].contains("\"name\":\"glob\""));
+    assert!(requests[0].contains("\"name\":\"read_file\""));
+    assert!(requests[0].contains("\"name\":\"ls\""));
+    assert!(requests[0].contains("\"name\":\"grep\""));
+    assert!(requests[0].contains("\"name\":\"glob\""));
     assert!(requests[1].contains("\"type\":\"tool_result\""));
     assert!(requests[1].contains("\"tool_use_id\":\"toolu_external_read\""));
     assert!(requests[1].contains("\"is_error\":true"));
-    assert!(requests[1].contains("Master capability boundary"));
-    assert!(requests[1].contains("task(op=\\\"create\\\""));
+    assert!(requests[1].contains("Workspace boundary denied"));
+    assert!(requests[1].contains("task({\\\"op\\\":\\\"create\\\""));
     assert!(
         !requests[1].contains("must-not-be-read"),
         "forbidden master read must not leak external file content"
@@ -8677,7 +8774,7 @@ fn live_bridge_rejects_injected_master_read_then_accepts_worker_dispatch() {
             .terminal_event
             .as_ref()
             .map(|event| event.status.clone()),
-        Some(TerminalStatus::Success)
+        Some(TerminalStatus::ToolPending)
     );
 
     let task_runtime =
@@ -8761,6 +8858,75 @@ fn live_bridge_returns_external_write_boundary_as_tool_result_guidance() {
 }
 
 #[test]
+fn live_bridge_returns_worker_external_read_boundary_with_locked_workspace_guidance() {
+    let _cwd_lock = cwd_lock()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    let runtime_home = temp_runtime_home();
+    let external_workspace = runtime_home.with_file_name(format!(
+        "{}-external-read-repo",
+        runtime_home
+            .file_name()
+            .expect("runtime home file name")
+            .to_string_lossy()
+    ));
+    fs::create_dir_all(&runtime_home).expect("create runtime home");
+    fs::create_dir_all(&external_workspace).expect("create external workspace");
+    assert!(!external_workspace.starts_with(&runtime_home));
+    fs::write(external_workspace.join("visible.txt"), "must-not-be-read")
+        .expect("write external fixture");
+    let (base_url, rx, handle) = spawn_sequence_server(
+        "application/json",
+        vec![
+            tool_use_named_response(
+                "toolu_external_ls",
+                "ls",
+                json!({"path": external_workspace.to_string_lossy().to_string()}),
+            ),
+            complete_single_response("external read boundary observed"),
+        ],
+    );
+    let mut request = live_request(false);
+    request.runtime_home = runtime_home.clone();
+    request.cwd = Some(runtime_home.clone());
+
+    let outcome = run_worker_live_reason_turn(
+        &live_selected_worker_agent(base_url, freehand_config::ProviderType::Anthropic),
+        request,
+    )
+    .expect("external read boundary should return to model");
+    let _first_request = rx.recv().expect("first provider request");
+    let second_request = rx.recv().expect("second provider request");
+    handle.join().expect("join");
+
+    assert!(second_request.contains("\"type\":\"tool_result\""));
+    assert!(second_request.contains("\"tool_use_id\":\"toolu_external_ls\""));
+    assert!(second_request.contains("\"is_error\":true"));
+    assert!(second_request.contains("Workspace boundary denied"));
+    assert!(second_request.contains("ls.path"));
+    assert!(second_request.contains("Worker path tools are locked"));
+    assert!(second_request.contains("Use relative paths inside the task cwd"));
+    assert!(second_request.contains("path_diagnostic"));
+    assert!(
+        !second_request.contains("Read/query operations may inspect external paths"),
+        "failed read/list tool result must not invite external probing"
+    );
+    assert!(
+        !second_request.contains("must-not-be-read"),
+        "external read boundary must not leak external file content"
+    );
+    assert_eq!(outcome.rounds, 2);
+    assert_eq!(outcome.tool_executions, 1);
+
+    let _ = fs::remove_dir_all(runtime_home);
+    let _ = fs::remove_dir_all(
+        external_workspace
+            .parent()
+            .expect("external workspace parent"),
+    );
+}
+
+#[test]
 fn live_bridge_returns_unknown_tool_as_failed_tool_result_without_terminalizing() {
     let _cwd_lock = cwd_lock()
         .lock()
@@ -8791,6 +8957,11 @@ fn live_bridge_returns_unknown_tool_as_failed_tool_result_without_terminalizing(
     assert!(second_request.contains("\"tool_use_id\":\"toolu_unknown_1\""));
     assert!(second_request.contains("\"is_error\":true"));
     assert!(second_request.contains("unknown tool `totally_unknown_tool`"));
+    assert!(second_request.contains("Available Worker tools are exactly"));
+    assert!(second_request.contains("read_file"));
+    assert!(second_request.contains("write_file"));
+    assert!(second_request.contains("complete_step"));
+    assert!(second_request.contains("Do not call shell, bash, readlink"));
     assert_eq!(outcome.rounds, 2);
     assert_eq!(outcome.tool_executions, 1);
     assert_eq!(
@@ -10372,6 +10543,105 @@ fn runtime_live_submit_materializes_cancelled_turn_before_provider_request() {
             .expect("prepared next")
     };
     assert_eq!(next_prepared.turn_id, TurnId::new("runtime-turn-3"));
+}
+
+#[test]
+fn cancel_latest_active_live_turn_materializes_pre_provider_terminal_truth() {
+    let _cwd_lock = cwd_lock()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    let runtime_home = temp_runtime_home();
+    fs::create_dir_all(&runtime_home).expect("create runtime home");
+    let session_id = SessionId::new("pre-provider-dispatch-cancel");
+    let runtime = RuntimeCommandDispatcher::from_selected_agent_with_live(
+        &live_selected_agent(
+            "http://127.0.0.1:9".to_owned(),
+            freehand_config::ProviderType::Anthropic,
+        ),
+        runtime_home.clone(),
+        false,
+    )
+    .expect("runtime");
+    {
+        let mut state = runtime.state.lock().expect("lock runtime state");
+        runtime
+            .prepare_live_submit_user_input(
+                &mut state,
+                "cancel while request context is still preparing".to_owned(),
+                Some(session_id.clone()),
+                Some(runtime_home.to_string_lossy().into_owned()),
+            )
+            .expect("prepare")
+            .expect("prepared live submit");
+        assert_eq!(state.active_turns.len(), 1);
+    }
+
+    let receipt = runtime
+        .dispatch(
+            build_command_dispatch_envelope(&UiCommand::CancelLatestActiveTurn {})
+                .expect("cancel latest envelope"),
+        )
+        .expect("cancel latest receipt");
+    assert_eq!(receipt.dispatch_status, "reason_live_turn_cancel_requested");
+    {
+        let state = runtime.state.lock().expect("lock runtime state");
+        assert!(
+            state.active_turns.is_empty(),
+            "cancel command must not wait for a stuck pre-provider context builder to clear active_turns"
+        );
+    }
+    assert!(
+        master_runner::load_master_active_work(&runtime_home, &AgentId::new("agent-live"))
+            .expect("load active work")
+            .is_none(),
+        "cancel command must immediately release the Master active-work checkpoint"
+    );
+
+    let turns = runtime
+        .query_runtime(&UiCommand::QuerySessionTurns {
+            session_id: session_id.clone(),
+        })
+        .expect("query")
+        .expect("session turns");
+    match turns {
+        UiQueryResult::SessionTurns(projection) => {
+            assert_eq!(projection.turns.len(), 1);
+            assert_eq!(projection.turns[0].turn_id, TurnId::new("runtime-turn-1"));
+            assert_eq!(
+                projection.turns[0].terminal_status,
+                Some(TerminalStatus::Cancelled)
+            );
+            assert_eq!(
+                projection.turns[0].user_text.as_deref(),
+                Some("cancel while request context is still preparing")
+            );
+        }
+        other => panic!("unexpected query result: {other:?}"),
+    }
+
+    let recovered = RuntimeCommandDispatcher::from_selected_agent_with_live(
+        &live_selected_agent(
+            "http://127.0.0.1:9".to_owned(),
+            freehand_config::ProviderType::Anthropic,
+        ),
+        runtime_home,
+        false,
+    )
+    .expect("recovered runtime");
+    let recovered_turns = recovered
+        .query_runtime(&UiCommand::QuerySessionTurns { session_id })
+        .expect("query recovered")
+        .expect("recovered session turns");
+    match recovered_turns {
+        UiQueryResult::SessionTurns(projection) => {
+            assert_eq!(projection.turns.len(), 1);
+            assert_eq!(
+                projection.turns[0].terminal_status,
+                Some(TerminalStatus::Cancelled)
+            );
+        }
+        other => panic!("unexpected recovered query result: {other:?}"),
+    }
 }
 
 #[test]

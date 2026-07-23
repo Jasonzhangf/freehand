@@ -7,16 +7,17 @@
   "mainline_call_doc": "docs/mainline-calls/tool.registry.json",
   "generated_wiki_doc": "docs/wiki/tool.registry.md",
   "resource_operations": [
-    "tool_call.execute_workspace_path"
+    "tool_call.execute_workspace_path",
+    "tool_call.execute_external_http"
   ],
   "request_mainline": [
     "runtime asks the tool owner for a per-run registry",
     "registry exports provider-neutral tool definitions without importing provider adapter DTOs",
-    "registry can export generic and master-safe stable implemented-tool schema fingerprints for planner/cache diagnostics without leaking provider DTOs into reason owners",
+    "registry can export generic, master-safe, and worker-safe stable implemented-tool schema fingerprints for planner/cache diagnostics without leaking provider DTOs into reason owners",
     "registry keeps Reasonix-aligned tool names, schemas, and `read_only` metadata in one owner",
     "registry exposes `timer` as a standard internal framework tool for durable wakeups and keeps timer semantics out of task lifecycle operations",
     "registry classifies registered tools as framework, workspace, shell, or network execution scope",
-    "the master-safe export excludes unrestricted shell scope while retaining framework and workspace-scoped tools",
+    "the master-safe export exposes locked local workspace tools, concrete-URL `web_fetch`, plus `task` and `timer`; the worker-safe export exposes exactly the implemented Worker tool surface including `web_fetch` and excludes shell/task/timer/unimplemented names",
     "relative path-based tools resolve from one owner-supplied current workspace root",
     "`glob` accepts relative patterns, expands leading `~`, and accepts absolute patterns only when they remain under the locked workspace root after canonical/symlink resolution; it rejects `..` and external absolute patterns",
     "read-only path tools remain locked to the current workspace root after canonical/symlink resolution and reject existing external absolute paths",
@@ -28,10 +29,12 @@
     "completed provider tool calls enter `BuiltinToolRegistry::execute`",
     "first real foreground command execution set is: `bash`",
     "first real read-only execution set is: `read_file`, `glob`, `grep`, `ls`; `ls` can list directories or report one file entry for existence checks",
-    "first real file-mutation execution set is: `write_file`, `edit_file`, `multi_edit`",
-    "first internal timer execution surface is `timer(op=\"schedule\"|\"cancel\"|\"list\")` with relative, absolute, local-time recurring, and local-time cron schedule fields plus a persisted prompt and examples",
+    "first real file-mutation execution set is: `write_file`, `edit_file`, `multi_edit`, `delete_range`",
+    "first real network execution set is: `web_fetch` for bounded concrete HTTP/HTTPS URL text fetches",
+    "worker model-visible execution set is exactly: `complete_step`, `delete_range`, `edit_file`, `glob`, `grep`, `ls`, `multi_edit`, `read_file`, `todo_write`, `web_fetch`, `write_file`",
+    "first internal timer execution surface uses strict timer JSON `op` values `schedule`, `cancel`, and `list` with relative, absolute, local-time recurring, and local-time cron schedule fields plus a persisted prompt and examples",
     "implemented tools return user/model-visible tool result text",
-    "foreground `bash` remains generically executable for non-master owners and tests but is absent from the master-safe export",
+    "foreground `bash` remains generically executable for owner tests but is absent from both master-safe and worker-safe live provider exports",
     "runtime may bind one explicit per-call workspace root through `with_workspace_root` without mutating process-global cwd or environment",
     "unsupported or unimplemented tools fail explicitly and do not become successful tool-result truth"
   ],
@@ -192,7 +195,7 @@
     {
       "symbol": "BuiltinToolRegistry::master_implemented_definitions / BuiltinToolRegistry::master_implemented_schema_fingerprint",
       "owner": "crates/freehand-tools/src/lib.rs",
-      "purpose": "export the master-safe schema surface and matching deterministic fingerprint without unrestricted shell scope",
+      "purpose": "export the exact local-workspace-plus-network-plus-framework master-safe schema surface and matching deterministic fingerprint",
       "allowed_callers": [
         "runtime master live bridge",
         "tests"
@@ -202,6 +205,33 @@
         "runtime planner diagnostics tests"
       ],
       "why_shared": "keeps master exposure policy in the registry owner instead of runtime-local filtering"
+    },
+    {
+      "symbol": "BuiltinToolRegistry::worker_implemented_definitions / BuiltinToolRegistry::worker_implemented_schema_fingerprint",
+      "owner": "crates/freehand-tools/src/lib.rs",
+      "purpose": "export the exact Worker-safe model-visible schema surface including `web_fetch` and matching deterministic fingerprint without shell/task/timer/unimplemented names",
+      "allowed_callers": [
+        "runtime Worker live bridge",
+        "tests"
+      ],
+      "related_tests": [
+        "worker tool-surface exclusion test",
+        "Worker guidance prompt-guard tests"
+      ],
+      "why_shared": "keeps Worker tool availability in the registry owner so runtime guidance cannot drift or invent shell/readlink-style tools"
+    },
+    {
+      "symbol": "execute_web_fetch",
+      "owner": "crates/freehand-tools/src/lib.rs",
+      "purpose": "execute one bounded concrete HTTP/HTTPS URL text fetch and return status/content-type/body text or explicit HTTP/network/decode failure",
+      "allowed_callers": [
+        "BuiltinToolRegistry::execute"
+      ],
+      "related_tests": [
+        "web_fetch local HTTP fixture execution test",
+        "web_fetch invalid argument tests"
+      ],
+      "why_shared": "keeps network fetch semantics in the tool owner instead of provider/runtime prompt patches"
     },
     {
       "symbol": "BuiltinToolRegistry::execution_scope",
@@ -259,7 +289,7 @@
       "step": "03",
       "symbol_path": "BuiltinToolRegistry::master_implemented_definitions",
       "file_path": "crates/freehand-tools/src/lib.rs",
-      "responsibility": "export master-safe provider-neutral tool schemas without unrestricted shell scope",
+      "responsibility": "export master-safe provider-neutral tool schemas with local workspace tools, concrete-URL `web_fetch`, `task`, and `timer`, without unrestricted shell scope",
       "input_semantic": "registry",
       "output_semantic": "master provider tool definitions",
       "caller": "runtime live bridge",
@@ -273,6 +303,28 @@
       "responsibility": "export deterministic master-safe tool schema fingerprint for planner/cache diagnostics",
       "input_semantic": "registry",
       "output_semantic": "stable master tool-schema fingerprint string",
+      "caller": "runtime live bridge",
+      "callee": "tool owner",
+      "binding_status": "bound"
+    },
+    {
+      "step": "04a",
+      "symbol_path": "BuiltinToolRegistry::worker_implemented_definitions",
+      "file_path": "crates/freehand-tools/src/lib.rs",
+      "responsibility": "export exact Worker-safe provider-neutral tool schemas without shell/task/timer/unimplemented names",
+      "input_semantic": "registry",
+      "output_semantic": "Worker provider tool definitions",
+      "caller": "runtime live bridge",
+      "callee": "tool owner",
+      "binding_status": "bound"
+    },
+    {
+      "step": "04b",
+      "symbol_path": "BuiltinToolRegistry::worker_implemented_schema_fingerprint",
+      "file_path": "crates/freehand-tools/src/lib.rs",
+      "responsibility": "export deterministic Worker-safe tool schema fingerprint for planner/cache diagnostics",
+      "input_semantic": "registry",
+      "output_semantic": "stable Worker tool-schema fingerprint string",
       "caller": "runtime live bridge",
       "callee": "tool owner",
       "binding_status": "bound"
@@ -380,6 +432,20 @@
       "binding_status": "bound"
     },
     {
+      "step": "13a",
+      "symbol_path": "execute_web_fetch",
+      "file_path": "crates/freehand-tools/src/lib.rs",
+      "responsibility": "fetch one concrete HTTP/HTTPS URL with timeout and byte limit",
+      "input_semantic": "url plus optional timeout_seconds plus optional limit",
+      "output_semantic": "fetched text result or explicit HTTP/network/decode error",
+      "caller": "registry execute",
+      "callee": "network fetch tool owner",
+      "source_resource": "tool_call",
+      "target_resource": "external_http_resource",
+      "resource_operation": "tool_call.execute_external_http",
+      "binding_status": "bound"
+    },
+    {
       "step": "14",
       "symbol_path": "reasonix_aligned_builtin_specs",
       "file_path": "crates/freehand-tools/src/lib.rs",
@@ -393,9 +459,9 @@
   ],
   "sync_status": [
     "Reasonix-aligned built-in names and schemas are bound in `freehand-tools`",
-    "current implemented tool set is: `bash`, `read_file`, `write_file`, `edit_file`, `multi_edit`, `glob`, `grep`, `ls`, `todo_write`, `complete_step`, `timer`",
-    "generic and master-safe implemented tool schema fingerprints are bound in `freehand-tools`; the runtime master bridge consumes only the master-safe fingerprint",
-    "tool execution scopes are bound in the registry owner and master exposure excludes shell scope",
+    "current implemented tool set is: `bash`, `read_file`, `write_file`, `edit_file`, `multi_edit`, `delete_range`, `glob`, `grep`, `ls`, `web_fetch`, `todo_write`, `complete_step`, `timer`",
+    "generic, master-safe, and worker-safe implemented tool schema fingerprints are bound in `freehand-tools`; the runtime master bridge consumes the master-safe fingerprint and Worker live bridge consumes the worker-safe fingerprint",
+    "tool execution scopes are bound in the registry owner and master exposure includes concrete-URL `web_fetch` while excluding shell/browser/broad `web_search` scope",
     "read-only path tools use the owner-supplied workspace root as the locked boundary for relative, absolute, and leading-`~` paths after canonical/symlink resolution, and report owner path diagnostics on resolution failures",
     "file-mutation tools are locked to the owner-supplied workspace root and return typed workspace-boundary violations on write escape",
     "first-version `bash` is foreground-only, starts in the locked workspace root, defaults to a 900-second timeout, and does not claim filesystem/network sandboxing",
@@ -403,6 +469,6 @@
     "checkpointed live writable execution now depends on the code-bound `tool.preview` and `runtime.checkpoint-rewind` owner paths instead of runtime-local mutation shortcuts",
     "`timer` is implemented as a framework tool: `freehand-tools` owns schema exposure while `freehand-runtime` owns durable schedule execution and Master wakeup routing",
     "timer daily, weekly, and cron fields use local-time semantics; cron is a strict 5-field expression: minute hour day-of-month month weekday",
-    "`bg_jobs`, `kill_shell`, `wait_job`, web, notebook, and symbol-aware mutation tools remain registered but explicitly unimplemented until their lifecycle/gates are designed"
+    "`web_fetch` is implemented as a bounded concrete-URL network tool; `bg_jobs`, `kill_shell`, `wait_job`, broad `web_search`, browser, notebook, and symbol-aware mutation tools remain unimplemented until their lifecycle/gates are designed"
   ]
 }

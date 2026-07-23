@@ -484,6 +484,7 @@ dependencies = [
  "freehand-provider-core",
  "glob",
  "regex",
+ "reqwest",
  "serde_json",
  "thiserror",
  "walkdir",

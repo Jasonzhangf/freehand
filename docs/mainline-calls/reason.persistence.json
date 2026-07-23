@@ -22,8 +22,10 @@
     "reason persistence appends a reason-ledger row together with current session-history truth, then refreshes authoritative snapshots and derived sidecars",
     "reason persistence appends provider raw debug-ledger rows under `~/.freehand/ledgers/providers/<family>/<agent>/<session>/<turn>.jsonl` without mutating authoritative session truth",
     "reason persistence returns deterministic restore state from snapshot plus reason-ledger tail replay, or from reason-ledger-only rebuild when snapshots are missing or invalid",
+    "reason persistence filters provider-visible `historical_turn:*` session-memory segments to the same effective active/closed logical turn set used by rollback-aware transcript truth, while preserving ordinary stable memory",
     "reason persistence returns non-UI turn-start snapshots from authoritative reason-ledger TurnStarted rows, respecting rollback markers, so owner workflows can recover first-round user intent even when effective UI snapshots coalesce later repair rounds",
     "reason persistence returns authoritative-only UI restore snapshots for daemon bootstrap without replaying historical reason ledgers; selected transcript queries preserve exact runtime-turn-N / runtime-turn-N-rM rounds and backfill incomplete authoritative snapshots from reason-ledger truth",
+    "authoritative closed-turn restore consumes only `*.json` turn snapshots; leftover atomic temp files such as `*.tmp-*` are write artifacts, not session truth, and must not wedge daemon bootstrap",
     "terminal turn persistence yields immutable per-turn truth plus updated session cursor truth",
     "derived UI and index sidecars are regenerated from authoritative reason truth after durable writes complete",
     "session display metadata (`title`, `archived`) is persisted as reason-owned sidecar truth for multi-UI session management and stays separate from provider-visible session history",
@@ -31,6 +33,7 @@
   ],
   "error_mainline": [
     "invalid persisted snapshot JSON is rejected explicitly",
+    "invalid closed-turn `*.json` payloads are rejected explicitly with the file path in the parse error, while non-`.json` atomic temp files in the turns directory are ignored as non-authoritative write artifacts",
     "invalid persisted snapshot coherence is rejected explicitly",
     "reason-ledger sequence gaps or duplicate sequence numbers must block recovery",
     "provider raw payload availability alone must not mask missing authoritative reason truth",
@@ -144,15 +147,31 @@
     {
       "symbol": "ReasonPersistence::restore_authoritative_turn_snapshots_for_ui",
       "owner": "crates/freehand-reason/src/persistence.rs",
-      "purpose": "expose authoritative UI turn snapshots for daemon bootstrap without parsing historical reason ledgers",
+      "purpose": "expose authoritative UI turn snapshots for daemon bootstrap without parsing historical reason ledgers or atomic temp files",
       "allowed_callers": [
         "runtime UI bootstrap",
         "owner-crate tests"
       ],
       "related_tests": [
-        "live_bootstrap_does_not_replay_incomplete_historical_reason_ledgers"
+        "live_bootstrap_does_not_replay_incomplete_historical_reason_ledgers",
+        "restore_ignores_leftover_atomic_tmp_turn_files"
       ],
       "why_shared": "global startup must remain bounded by authoritative snapshot files, while selected transcript queries own heavier ledger backfill"
+    },
+    {
+      "symbol": "filter_history_context_to_effective_turns",
+      "owner": "crates/freehand-reason/src/persistence.rs",
+      "purpose": "remove rolled-back or orphan `historical_turn:*` session-memory segments before restored session truth can feed a future provider request",
+      "allowed_callers": [
+        "persistence restore",
+        "ledger replay",
+        "durable row materialization",
+        "owner-crate tests"
+      ],
+      "related_tests": [
+        "rollback_filters_model_visible_history_to_effective_turn_truth"
+      ],
+      "why_shared": "snapshot restore, ledger-only rebuild, and rollback persistence must use one effective-turn filter instead of drifting independently"
     }
   ],
   "call_table": [
@@ -292,6 +311,17 @@
       "binding_status": "bound"
     },
     {
+      "step": "12h",
+      "symbol_path": "filter_history_context_to_effective_turns",
+      "file_path": "crates/freehand-reason/src/persistence.rs",
+      "responsibility": "filter model-visible historical-turn session memory to effective active/closed logical turn truth",
+      "input_semantic": "restored session history plus active/closed turns",
+      "output_semantic": "session history without rolled-back or orphan historical-turn memory",
+      "caller": "restore / ledger replay / row persistence",
+      "callee": "persistence owner",
+      "binding_status": "bound"
+    },
+    {
       "step": "13",
       "symbol_path": "ReasonPersistence::restore_turn_start_snapshots",
       "file_path": "crates/freehand-reason/src/persistence.rs",
@@ -306,7 +336,7 @@
       "step": "14",
       "symbol_path": "ReasonPersistence::restore_authoritative_turn_snapshots_for_ui",
       "file_path": "crates/freehand-reason/src/persistence.rs",
-      "responsibility": "restore derived UI snapshots from authoritative closed/active turn files plus rollback-marker sidecar truth without replaying the reason ledger",
+      "responsibility": "restore derived UI snapshots from authoritative closed/active `*.json` turn files plus rollback-marker sidecar truth without replaying the reason ledger or parsing leftover atomic temp files",
       "input_semantic": "authoritative turn snapshots plus rollback markers",
       "output_semantic": "lightweight exact-per-file UI snapshots with created-time truth",
       "caller": "runtime bootstrap",
@@ -348,7 +378,7 @@
     }
   ],
   "sync_status": [
-    "current code baseline now binds session-history JSON/file round-trip, reason-ledger append, provider-raw debug-ledger append, active-turn refresh, terminal turn materialization, derived sidecar writes, snapshot-plus-tail / ledger-only recovery, turn-start snapshot recovery, authoritative-only UI bootstrap restore, and selected transcript exact-round ledger backfill",
+    "current code baseline now binds session-history JSON/file round-trip, reason-ledger append, provider-raw debug-ledger append, active-turn refresh, terminal turn materialization, derived sidecar writes, snapshot-plus-tail / ledger-only recovery, effective historical-turn session-memory filtering, turn-start snapshot recovery, authoritative-only UI bootstrap restore, selected transcript exact-round ledger backfill, and atomic temp exclusion from closed-turn truth",
     "CLI and shared-harness smoke both bind to the persistence owner path without duplicating persistence semantics in the app layer",
     "live Anthropic `reason-live` path now persists start/output/rejection/terminal events plus provider raw debug bodies/events through `ReasonPersistence`",
     "generated wiki must be regenerated from `docs/mainline-calls/reason.persistence.json` when this function-map truth changes"

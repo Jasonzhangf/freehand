@@ -137,6 +137,24 @@ impl SessionHistory {
         &self.base_context_segments
     }
 
+    pub(crate) fn retain_base_context_segments(
+        &mut self,
+        mut keep: impl FnMut(&ContextSegment) -> bool,
+    ) -> Result<(), SessionHistoryError> {
+        let retained = self
+            .base_context_segments
+            .iter()
+            .filter(|segment| keep(segment))
+            .cloned()
+            .collect::<Vec<_>>();
+        if retained == self.base_context_segments {
+            return Ok(());
+        }
+        self.base_context_segments = validate_rewrite_base_segments(&retained)
+            .map_err(|err| SessionHistoryError::InvalidPersistedCoherence(err.to_string()))?;
+        Ok(())
+    }
+
     pub fn rewrite_ledger(&self) -> &[SessionRewriteRecord] {
         &self.rewrite_ledger
     }

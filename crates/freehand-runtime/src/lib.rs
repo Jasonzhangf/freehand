@@ -117,7 +117,7 @@ use freehand_reason::{
     PersistedSessionMetadataEntry, ProviderRawLedgerWrite, ProviderRawScenePosition,
     ReasonBroadcastEvent, ReasonPersistence, ReasonPersistenceError,
     ReasonResp04CompletionSchemaRejected, ReasonResp05ModelContinuationWaiting, ReasonTurnEngine,
-    SessionHistory, TurnRecord, TurnStartInput,
+    SessionHistory, SessionRollbackMarker, TurnRecord, TurnStartInput,
 };
 use freehand_task::{
     AgentCreateRequest, AgentLifecycleActivity, AgentLifecycleSnapshot, AgentLifecycleState,
@@ -150,9 +150,9 @@ use freehand_ui_protocol::{
     UiTaskEventInboxEntryProjection, UiTaskEventInboxProjection, UiTaskHistoryProjection,
     UiTaskLedgerEventProjection, UiTaskListProjection, UiTaskReviewCommand,
     UiTaskReviewRejectionCommand, UiTaskSnapshotProjection, UiTurnProjection,
-    UiWorkerControlCommand, UiWorkerControlEventProjection, UiWorkerControlProjection,
-    checkpoint_projection_from_runtime_summary, turn_projection_for_client,
-    turn_projection_from_events,
+    UiTurnTimingProjection, UiWorkerControlCommand, UiWorkerControlEventProjection,
+    UiWorkerControlProjection, checkpoint_projection_from_runtime_summary,
+    turn_projection_for_client, turn_projection_from_events,
 };
 use serde_json::{Map, Value, json};
 use thiserror::Error;
@@ -1580,7 +1580,7 @@ where
                                 source_owner: "tool.registry".to_owned(),
                                 source_pipeline_node: "RuntimeLive03ToolExecuted".to_owned(),
                                 code: "tool_result_failed".to_owned(),
-                                message: tool_result.tool_result.output.clone(),
+                                message: "tool_result_failed: model-visible recovery text is stored only in reason tool-result truth".to_owned(),
                                 retry_index: 0,
                                 retry_cap: 0,
                             },
@@ -3716,12 +3716,50 @@ impl RuntimeCommandDispatcher {
             .cloned()
         {
             active.cancel_token.store(true, Ordering::SeqCst);
-            publish_live_cancelled_projection(
-                &self.ui_state,
-                &state.config.reason_agent_id,
-                &state.config.master_node_id,
-                &active,
-            );
+            if let Some(live) = state.config.live.clone() {
+                let prepared = PreparedLiveSubmit {
+                    live,
+                    reason_agent_id: state.config.reason_agent_id.clone(),
+                    master_node_id: state.config.master_node_id.clone(),
+                    session_id: active.session_id.clone(),
+                    cwd: active.cwd.clone(),
+                    turn_id: active.turn_id.clone(),
+                    trace_id: active.trace_id.clone(),
+                    prompt: active.user_text.clone(),
+                    cancel_token: Arc::clone(&active.cancel_token),
+                };
+                let current_turn = restore_or_materialize_cancelled_live_submit(
+                    state,
+                    &prepared,
+                    "cancelled by ui command",
+                )?;
+                let clear_result = master_runner::clear_master_active_work_if_current(
+                    &prepared.live.runtime_home,
+                    &prepared.reason_agent_id,
+                    &prepared.turn_id,
+                );
+                remove_active_turn(&mut state.active_turns, &prepared.turn_id);
+                let projection = project_runtime_turn_history(
+                    &state.config.reason_agent_id,
+                    &state.config.master_node_id,
+                    std::slice::from_ref(&current_turn),
+                    Some(prepared.cwd.to_string_lossy().into_owned()),
+                );
+                self.ui_state
+                    .lock()
+                    .expect("lock ui state")
+                    .apply_turn_projection(projection);
+                if let Err(error) = clear_result {
+                    return Err(UiCommandDispatchPortError::DispatchFailed(error));
+                }
+            } else {
+                publish_live_cancelled_projection(
+                    &self.ui_state,
+                    &state.config.reason_agent_id,
+                    &state.config.master_node_id,
+                    &active,
+                );
+            }
             return Ok(UiCommandDispatchReceipt {
                 ingress: envelope.ingress,
                 target_feature_id: envelope.target_feature_id,
@@ -3824,6 +3862,11 @@ impl RuntimeCommandDispatcher {
                 let marker = persistence
                     .rollback_latest_session_turn(&session_id)
                     .map_err(map_session_metadata_dispatch_error)?;
+                cancel_tasks_for_session_rollback(
+                    &live.runtime_home,
+                    &state.config.reason_agent_id,
+                    &marker,
+                )?;
                 let effective_turns = persistence
                     .restore_turn_snapshots_for_ui(&session_id)
                     .map_err(map_session_metadata_dispatch_error)?;
@@ -3988,6 +4031,65 @@ fn resolve_session_cwd(
     };
     state.session_cwds.insert(session_id.clone(), cwd.clone());
     Ok(cwd)
+}
+
+fn cancel_tasks_for_session_rollback(
+    runtime_home: &Path,
+    agent_id: &AgentId,
+    marker: &SessionRollbackMarker,
+) -> Result<(), UiCommandDispatchPortError> {
+    let runtime =
+        TaskRuntime::boot(runtime_home, agent_id.clone()).map_err(map_task_query_error)?;
+    let board = runtime
+        .query_task_board(TaskBoardQuery {
+            status: None,
+            assignee: None,
+            include_terminal: true,
+        })
+        .map_err(map_task_query_error)?;
+    for task in board.tasks.into_iter().filter(|task| {
+        task.parent.session_id.as_ref() == Some(&marker.session_id)
+            && task.parent.turn_id.as_ref().is_some_and(|turn_id| {
+                rollback_turns_share_logical_group(
+                    turn_id,
+                    &marker.target_turn_id,
+                    &marker.target_logical_turn_key,
+                )
+            })
+            && !matches!(
+                task.status,
+                TaskStatus::Closed | TaskStatus::Cancelled | TaskStatus::Failed
+            )
+    }) {
+        runtime
+            .cancel_task(TaskMutationRequest {
+                task_id: task.task_id.clone(),
+                actor: ui_task_actor(
+                    agent_id,
+                    Some(marker.session_id.clone()),
+                    Some(marker.target_turn_id.clone()),
+                ),
+                watermark: ui_task_watermark("rollback_cancel_child_task"),
+            })
+            .map_err(map_task_query_error)?;
+    }
+    Ok(())
+}
+
+fn rollback_turns_share_logical_group(
+    task_turn_id: &TurnId,
+    target_turn_id: &TurnId,
+    target_logical_turn_key: &str,
+) -> bool {
+    if task_turn_id.as_str() == target_turn_id.as_str() {
+        return true;
+    }
+    let (task_ordinal, _, task_raw) = runtime_turn_position(task_turn_id);
+    if task_ordinal == 0 {
+        task_raw == target_logical_turn_key
+    } else {
+        format!("runtime-turn-{task_ordinal}") == target_logical_turn_key
+    }
 }
 
 fn session_cwds_from_turns(turns: &[TurnRecord]) -> BTreeMap<SessionId, PathBuf> {
@@ -7320,43 +7422,22 @@ fn execute_registry_tool_call(
                     tool_call,
                 );
             }
-            if tool_name != "timer" {
-                return Ok(master_capability_boundary_result(
-                    turn,
-                    tool_call,
-                    configured_worker_set,
-                ));
-            }
-            let mut root = fs::canonicalize(runtime_home).map_err(|err| {
-                RuntimeLiveBridgeError::ToolExecutionFailed(format!(
-                    "cannot canonicalize master runtime home `{}`: {err}",
-                    runtime_home.display()
-                ))
-            })?;
-            if registry.execution_scope(tool_name) == Some(BuiltinToolExecutionScope::Workspace)
-                && let Some(requested_workspace_root) = workspace_root
-            {
-                let requested_workspace_root =
-                    fs::canonicalize(requested_workspace_root).map_err(|err| {
-                        RuntimeLiveBridgeError::ToolExecutionFailed(format!(
-                            "cannot canonicalize requested workspace `{}`: {err}",
-                            requested_workspace_root.display()
-                        ))
-                    })?;
-                if !registry.read_only(tool_name).unwrap_or(false)
-                    && !requested_workspace_root.starts_with(&root)
-                {
-                    return Ok(master_workspace_denied_result(
+            match registry.execution_scope(tool_name) {
+                Some(BuiltinToolExecutionScope::Workspace) => workspace_root
+                    .map(Path::to_path_buf)
+                    .unwrap_or_else(|| runtime_home.to_path_buf()),
+                Some(BuiltinToolExecutionScope::Framework) if tool_name == "timer" => {
+                    runtime_home.to_path_buf()
+                }
+                Some(BuiltinToolExecutionScope::Network) => runtime_home.to_path_buf(),
+                _ => {
+                    return Ok(master_capability_boundary_result(
                         turn,
                         tool_call,
-                        &root,
-                        Some(&requested_workspace_root),
-                        "requested workspace is outside the master runtime home",
+                        configured_worker_set,
                     ));
                 }
-                root = requested_workspace_root;
             }
-            root
         }
         LiveReasonExecutionRole::Worker => {
             if tool_name == "task" {
@@ -7370,14 +7451,28 @@ fn execute_registry_tool_call(
                     task_truth_changed: false,
                 });
             }
+            if tool_name == "timer" {
+                return Ok(ExecutedToolResult {
+                    result: tool_result_reentry(
+                        turn,
+                        tool_call,
+                        ToolResultStatus::Failed,
+                        "Worker capability boundary: internal timer scheduling is only available to the Master."
+                            .to_owned(),
+                    ),
+                    task_truth_changed: false,
+                });
+            }
             if registry.execution_scope(tool_name) == Some(BuiltinToolExecutionScope::Shell) {
                 return Ok(ExecutedToolResult {
                     result: tool_result_reentry(
                         turn,
                         tool_call,
                         ToolResultStatus::Failed,
-                        "Worker capability boundary: shell execution is not available because write intent cannot be reliably bounded to the worker task cwd. Use governed read/query tools for external inspection and governed file-mutation tools only inside the task cwd."
-                            .to_owned(),
+                        format!(
+                            "Worker capability boundary: shell execution is not available because write intent cannot be reliably bounded to the worker task cwd. Available Worker tools are exactly: {}. Do not call shell, bash, readlink, pwd, cat, find, python, or any unlisted tool. Use governed workspace tools only inside the locked task cwd.",
+                            worker_tool_surface_label()
+                        ),
                     ),
                     task_truth_changed: false,
                 });
@@ -7392,6 +7487,12 @@ fn execute_registry_tool_call(
             })?
         }
     };
+    let root = fs::canonicalize(&root).map_err(|err| {
+        RuntimeLiveBridgeError::ToolExecutionFailed(format!(
+            "cannot canonicalize workspace `{}`: {err}",
+            root.display()
+        ))
+    })?;
     with_workspace_root(&root, || {
         execute_registry_tool_call_with_workspace(
             registry,
@@ -7418,7 +7519,7 @@ fn master_capability_boundary_result(
             tool_call,
             ToolResultStatus::Failed,
             format!(
-                "Master capability boundary: `{}` is not available to the Master live tool surface. The Master may use only task and timer. For external repository analysis, search, read, write, or report generation, create a Worker task with task(op=\"create\", target_cwd=\"<existing repository cwd>\", dispatch={{\"mode\":\"none\"}}), then task(op=\"assign\", agent_id=\"{worker}\"). No file content was read or written by this Master call.",
+                "Master capability boundary: `{}` is not available to the Master live tool surface. The Master may use local workspace tools (`ls`, `read_file`, `grep`, `glob`, `write_file`, `edit_file`, `multi_edit`, `delete_range`), network tool `web_fetch`, plus `task` and `timer`; shell, browser, broad web_search, todo_write, and complete_step are not available. For a different cwd, isolated long-running work, or parallel work, create a Worker task with task({{\"op\":\"create\", \"target_cwd\":\"<existing repository cwd>\", \"dispatch\":{{\"mode\":\"none\"}}}}), then task({{\"op\":\"assign\", \"agent_id\":\"{worker}\"}}). If a configured Worker has the needed capability, dispatch instead of blocking. No file content was read or written by this rejected Master call.",
                 tool_call.tool_call.tool_name
             ),
         ),
@@ -7426,38 +7527,53 @@ fn master_capability_boundary_result(
     }
 }
 
-fn master_workspace_denied_result(
-    turn: &TurnRecord,
-    tool_call: &ReasonReq04ToolCall,
-    allowed_root: &Path,
-    requested_root: Option<&Path>,
-    reason: &str,
-) -> ExecutedToolResult {
-    let requested = requested_root
-        .map(|path| path.display().to_string())
-        .unwrap_or_else(|| "(tool request)".to_owned());
-    ExecutedToolResult {
-        result: tool_result_reentry(
-            turn,
-            tool_call,
-            ToolResultStatus::Failed,
-            format!(
-                "Master workspace boundary denied direct access: {reason}. allowed_root={} requested_target={requested}. This is a Master scope/permission boundary, not evidence that the external path is missing. Preserve the requested path and delegate with task(op=\"create_agent\") when no worker exists, task(op=\"create\", target_cwd=\"{requested}\"), and task(op=\"assign\") so a worker performs the external work.",
-                allowed_root.display()
-            ),
-        ),
-        task_truth_changed: false,
-    }
+fn worker_tool_surface_label() -> String {
+    BuiltinToolRegistry::reasonix_aligned()
+        .worker_implemented_definitions()
+        .into_iter()
+        .map(|definition| format!("`{}`", definition.name))
+        .collect::<Vec<_>>()
+        .join(", ")
 }
 
 fn registry_error_text(role: LiveReasonExecutionRole, error: &ToolRegistryError) -> String {
     match error {
-        ToolRegistryError::WorkspaceBoundaryViolation { root, target, .. } => match role {
+        ToolRegistryError::UnknownTool(name) => match role {
             LiveReasonExecutionRole::Master => format!(
-                "Write boundary denied: tool attempted to write `{target}` outside the current agent cwd `{root}`. This is a workspace write-permission boundary, not evidence that `{target}` is missing. Read/query operations may inspect external paths, but writes must be performed by an agent whose task cwd is the target workspace. Confirm the correct existing cwd for that work, then delegate with task(op=\"create_agent\") when no worker exists, task(op=\"create\", target_cwd=\"<existing target workspace cwd>\"), and task(op=\"assign\")."
+                "Tool execution failed: unknown tool `{name}` for Master. The Master live tool surface is local workspace tools (`ls`, `read_file`, `grep`, `glob`, `write_file`, `edit_file`, `multi_edit`, `delete_range`), `web_fetch` for known HTTP/HTTPS URLs, plus `task` and `timer`; shell, browser, broad web_search, todo_write, and complete_step are not available. Use `web_fetch` for concrete URLs, local workspace tools for the current selected cwd, or delegate different-cwd/isolated/capability-matched work through exact task JSON: task({{\"op\":\"create\",\"target_cwd\":\"/absolute/existing/workspace\",\"dispatch\":{{\"mode\":\"none\"}}}}) plus task({{\"op\":\"assign\",\"task_id\":\"...\",\"agent_id\":\"<configured Worker>\"}})."
             ),
             LiveReasonExecutionRole::Worker => format!(
-                "Write boundary denied: tool attempted to write `{target}` outside the worker task cwd `{root}`. This is a workspace write-permission boundary, not evidence that `{target}` is missing. Read/query operations may inspect external paths, but this worker cannot mutate outside its task cwd. Report the required target workspace cwd back to the master so the master can delegate a task to an agent whose cwd is that workspace."
+                "Tool execution failed: unknown tool `{name}` for Worker. Available Worker tools are exactly: {}. Do not call shell, bash, readlink, pwd, cat, find, python, or any unlisted tool. Use `ls`, `read_file`, `grep`, and `glob` for repository inspection; use owner-rendered `path_diagnostic` for symlink or missing-path evidence.",
+                worker_tool_surface_label()
+            ),
+        },
+        ToolRegistryError::UnimplementedTool(name) => match role {
+            LiveReasonExecutionRole::Master => format!(
+                "Tool execution failed: `{name}` is not implemented for the Master. The Master live tool surface is local workspace tools plus `web_fetch`, `task`, and `timer`; dispatch to a configured Worker when its advertised capability surface can complete the slice."
+            ),
+            LiveReasonExecutionRole::Worker => format!(
+                "Tool execution failed: `{name}` is registered but not implemented for Worker use. Available Worker tools are exactly: {}. Do not switch to shell/readlink; continue with the implemented workspace tools or return blocked with evidence.",
+                worker_tool_surface_label()
+            ),
+        },
+        ToolRegistryError::WorkspaceBoundaryViolation {
+            tool,
+            field,
+            root,
+            target,
+        } => match role {
+            LiveReasonExecutionRole::Master => format!(
+                "Workspace boundary denied: `{tool}.{field}` targeted `{target}` outside the current agent cwd `{root}`. This is a Master scope/permission boundary, not evidence that `{target}` is missing. Confirm the correct existing cwd for that work, then delegate with exact task JSON: task({{\"op\":\"create_agent\",\"agent_id\":\"<new-worker-id>\",\"capabilities\":[\"repository\"]}}) only when no configured Worker exists, task({{\"op\":\"create\",\"target_cwd\":\"<existing target workspace cwd>\",\"dispatch\":{{\"mode\":\"none\"}}}}), and task({{\"op\":\"assign\",\"task_id\":\"...\",\"agent_id\":\"<configured Worker>\"}})."
+            ),
+            LiveReasonExecutionRole::Worker
+                if matches!(tool.as_str(), "read_file" | "grep" | "glob" | "ls") =>
+            {
+                format!(
+                    "Workspace boundary denied: `{tool}.{field}` targeted `{target}` outside the worker task cwd `{root}`. Worker path tools are locked to the task cwd after absolute-normalization and symlink/canonical resolution. Use relative paths inside the task cwd; absolute or leading-~ paths are valid only when they canonicalize under that cwd. Do not probe `/Users`, home directories, parent directories, `/tmp`, sibling repos, or external roots. For symlink or missing-path evidence, use the owner-rendered path_diagnostic from path tools, not readlink or shell. If the required path is outside this task cwd, return blocked with the required target workspace cwd so the Master can delegate correctly."
+                )
+            }
+            LiveReasonExecutionRole::Worker => format!(
+                "Write boundary denied: `{tool}.{field}` targeted `{target}` outside the worker task cwd `{root}`. Worker mutation tools are locked to the task cwd after absolute-normalization and symlink/canonical resolution. Use relative paths inside the task cwd; if the required write target is outside this task cwd, return blocked with the required target workspace cwd so the Master can delegate correctly."
             ),
         },
         _ => format!("Tool execution failed: {error}"),

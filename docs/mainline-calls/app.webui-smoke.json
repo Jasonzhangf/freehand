@@ -31,6 +31,7 @@
     "front-end submit timeout or transport failure first refreshes owner truth for sessions, selected transcript, latest turn, and lifecycle projections before deciding whether the submit receipt is still unverified",
     "transport-facing app routes expose HTTP query for latest active turn and per-turn debug snapshot",
     "transport-facing app routes expose HTTP query for runtime-owned checkpoint summary projection",
+    "transport-facing app routes expose daemon-hosted Android update distribution: /android/update.json consumes explicit runtime env override or compiled dist/android/update.json sidecar truth, and /android/freehand-android.apk serves the staged APK artifact",
     "transport-facing ADP query route can call an injected protocol-owned runtime query port for read-only owner projections such as task list/history and error-center metadata before using protocol-state snapshots",
     "front-end Phase 2D status drawer queries TaskBoard, AgentBoard, EventInbox, TaskHistory, and WorkerControl through the existing ADP/runtime query path; the browser only caches transient render data and must not persist task/control truth",
     "front-end Worker labels derive from Worker-only resource ordinals; the Master AgentBoard row must not offset configured Worker labels",
@@ -58,6 +59,7 @@
     "WebUI composer control strip renders low-noise controls below the composer without creating a second protocol or truth source",
     "WebUI provider registry renders configured providers, provider definition save and provider selection switch render field-level validation errors, disable duplicate actions while in flight, re-query owner-backed config status, preserve owner fallback selection until an explicit selector edit, and show restart-required after a successful owner-backed save",
     "WebUI Android APK update card shows daemon update source, disables duplicate clicks while native update phases are in flight, and displays current, available, downloading, downloaded, installer_started, already_checking, or failed status returned by the Android bridge",
+    "Android update manifest route returns env override or compiled sidecar JSON, while missing or invalid manifest truth is explicit and never reports a hardcoded old current version",
     "WebUI Phase 2D status drawer renders compact TaskBoard, AgentBoard, EventInbox, task history, and WorkerControl cards from owner query results; worker-control buttons submit WorkerControl commands and then re-query owner truth before updating the drawer",
     "WebUI forwards selected cwd through SubmitUserInput.cwd and keeps draft-session empty state out of the chat stream",
     "WebUI selected empty sessions render a clean empty prompt and ignore latest-active turns from other sessions until the selected session has its own transcript or live turn",
@@ -80,7 +82,7 @@
     "front-end script preserves the operator's manual scroll position when the transcript is not near bottom and does not call scrollIntoView from ordinary render updates",
     "front-end script renders a neutral non-animated waiting state when a turn has no terminal status, no waiting tool activity, and no protocol-projected model request; it must not invent streaming from text-only or restored inactive state",
     "front-end script renders runtime-turn-N plus later runtime-turn-N-rM round projections as chronological per-round lifecycle cards instead of merging the whole execution into one summary card; each request/model round is wrapped by one .turn-cycle-card parent whose child chat messages show user, model waiting, tool calls, tool results, and final rows; pending/accepted receipts reconcile by submit id, every real protocol turn reconciles by session id plus turn id even when several rounds share one submit id, and terminal cards freeze by reusing the existing DOM node",
-    "front-end Header, session list, and Agent observation surfaces derive active session/turn identity from persisted SessionList active-turn status plus selected transcript model_request truth, so waiting/retry state names its owning session and turn; selecting an inactive Worker child may still show its parent Master's live observation without relabeling that retry as Worker-owned",
+    "front-end Header, session list, and Agent observation surfaces derive active session/turn identity from persisted SessionList active-turn status plus selected transcript model_request truth, so waiting/retry state names its owning session and turn; a later same-session terminal transcript turn invalidates an older active_turn_id or ToolPending observation; when a session is selected, observation may use only that selected session or its parent Master and must not fall back to an unrelated globally active session; selecting an inactive Worker child may still show its parent Master's live observation without relabeling that retry as Worker-owned",
     "front-end script projects checkpoint summaries into a secondary inspector card and sends explicit rewind commands through command ingress",
     "main conversation cards render only `public_conversation`; internal reasoning, usage, raw completion schema, provider payload, and debug lines stay outside the public stream while the user prompt remains visible",
     "theme module owns white and black theme switching and is separated from WebUI layout/runtime scripts",
@@ -110,7 +112,7 @@
     "task/error-center subscription initial query failures surface explicit ADP failure frames instead of app-owned fallback state",
     "Phase 2D query and WorkerControl command failures render explicit user-visible status errors and must not backfill task/control state from local browser guesses",
     "settings provider definition upsert and provider selection failures render explicit user-visible config errors and must not update local Settings state as if save succeeded",
-    "Android APK update bridge absence, desktop/browser use, malformed payloads, or JavaScript bridge call failures render explicit Settings status and must not pretend an update check started"
+    "Android APK update bridge absence, desktop/browser use, malformed payloads, JavaScript bridge call failures, missing update sidecar truth, or missing staged APK artifacts render explicit failures and must not pretend an update check started or that the APK is current"
   ],
   "shared_functions": [
     {
@@ -157,9 +159,9 @@
       "step": "02",
       "symbol_path": "assets::asset_response",
       "file_path": "apps/freehand-server/src/assets.rs",
-      "responsibility": "serve version-addressed split CSS and JS assets with explicit content type and no-store cache policy so Android WebView cannot retain stale dashboard code",
+      "responsibility": "serve version-addressed split CSS, JS, and shared logo assets with explicit content type and no-store cache policy so Android WebView cannot retain stale dashboard code or stale branding",
       "input_semantic": "asset path",
-      "output_semantic": "CSS or JS response or 404",
+      "output_semantic": "CSS, JS, or logo response or 404",
       "caller": "app asset route",
       "callee": "embedded assets",
       "binding_status": "bound"
@@ -173,6 +175,17 @@
       "output_semantic": "router with root, assets, query, subscribe, command, and ADP routes",
       "caller": "app entrypoint, tests, or runtime host",
       "callee": "app router",
+      "binding_status": "bound"
+    },
+    {
+      "step": "03a",
+      "symbol_path": "handle_android_update_manifest / android_update_manifest_body / read_android_update_manifest_file / handle_android_update_apk / android_update_apk_path",
+      "file_path": "apps/freehand-server/src/lib.rs",
+      "responsibility": "serve Android APK update distribution from explicit runtime env override or compiled sidecar truth plus staged APK artifact truth",
+      "input_semantic": "GET /android/update.json or GET /android/freehand-android.apk plus FREEHAND_ANDROID_* env and dist/android/update.json or staged APK path",
+      "output_semantic": "validated update manifest JSON, APK bytes, or explicit 404/500 for missing or invalid distribution truth",
+      "caller": "Android updater or operator",
+      "callee": "process env and filesystem",
       "binding_status": "bound"
     },
     {
@@ -276,9 +289,9 @@
     },
     {
       "step": "11e",
-      "symbol_path": "timelineItemCycleCard / cycleCardFromChatCards / cycleCardKey / reconcileCycleCardFragments / cycleCardMetaForTimelineItem / cycleCardIsTerminal",
+      "symbol_path": "timelineItemCycleCard / cycleCardFromChatCards / cycleCardKey / reconcileCycleCardFragments / frozenCycleCardNeedsAuthoritativeMetadataRefresh / cycleCardMetaForTimelineItem / cycleCardIsTerminal",
       "file_path": "apps/freehand-server/assets/webui.js",
-      "responsibility": "wrap every conversation timeline item in exactly one chronological .turn-cycle-card parent, key pending/accepted receipts by submit id but every real protocol turn by session plus turn id, update only the same nonterminal turn cycle in place, and freeze only terminal cycles by reusing their existing DOM node so later turns append as new cards instead of mutating old cycles",
+      "responsibility": "wrap every conversation timeline item in exactly one chronological .turn-cycle-card parent, key pending/accepted receipts by submit id but every real protocol turn by session plus turn id, update only the same nonterminal turn cycle in place, freeze terminal cycles by reusing their existing DOM node so later turns append as new cards instead of mutating old cycles, and allow same-key frozen replacement only to fill missing owner created_at, first-response timing, or total-elapsed timing independently",
       "input_semantic": "RenderConversation timeline item with protocol turn, pending submit, accepted receipt, loading, or failure state",
       "output_semantic": "one uniquely keyed parent request-cycle card containing existing user, assistant, model-waiting, tool-call, tool-result, and final chat-message rows plus order/freeze data attributes",
       "caller": "WebUI shell",
@@ -309,9 +322,9 @@
     },
     {
       "step": "11d",
-      "symbol_path": "turnLifecycleForRender / liveTurnStatus / renderTurnMeta / turnIsCurrentLiveTurn / turnIsWaitingForModelResponse / buildModelRequestRenderRow / modelRequestStaticStatus / modelRequestTransport / modelRequestTransportPhase / modelRequestTransportLabel",
+      "symbol_path": "turnLifecycleForRender / liveTurnStatus / renderTurnMeta / hasNonTerminalProtocolActivity / turnRequiresLifecycleTruthRefresh / turnIsCurrentLiveTurn / turnIsWaitingForModelResponse / buildModelRequestRenderRow / modelRequestStaticStatus / modelRequestTransport / modelRequestTransportPhase / modelRequestTransportLabel",
       "file_path": "apps/freehand-server/assets/webui.js",
-      "responsibility": "render every protocol-projected model/tool activity round, keep selected transcript model_request rows statically visible when they are not current live, render provider retry/failover only as model-request transport substate, and make terminal or ToolPending truth override outstanding submit, tool, or model activity",
+      "responsibility": "render every protocol-projected model/tool activity round, keep selected transcript model_request rows statically visible when they are not current live, keep the latest selected ToolPending lifecycle turn under owner-truth refresh, render provider retry/failover only as model-request transport substate, and make terminal or ToolPending truth override outstanding submit, tool, or model activity",
       "input_semantic": "UiTurnProjection lifecycle, model_request, model_request.transport, tool activity, and render state",
       "output_semantic": "visible per-round tool/model rows without historical animation, terminal responses mislabeled as dispatching, or provider retry displayed as its own reasoning-flow row",
       "caller": "WebUI shell",
@@ -320,9 +333,9 @@
     },
     {
       "step": "11c",
-      "symbol_path": "applyPhase2QueryResult / refreshPhase2Status / renderPhase2Dashboard / sessionSummaryById / activeTurnForSession / sessionLiveObservation / globalLiveSessionObservation / liveObservationLine / buildMobileAgentDashboardModel / renderMobileAgentSummaryStrip / renderMobileAgentSheet / renderMobileAgentTaskList / renderSystemAgentResourceConfig / submitAgentResourceConfigUpdate / setMobileAgentSheetOpen / renderWorkerSessionNavigation / switchConversationSession / selectedSessionIsLoading / loadingConversationBubble / workerTranscriptWaitingBubble / clearSessionRefreshState / renderSessionRefreshFailure / selectedWorkerTranscriptRefreshRetryable / scheduleSessionRefreshRetry / returnToParentSession / renderTaskBoardProjection / renderAgentBoardProjection / phase2AgentLabel / workerOrdinalFromAgentId / openWorkerTaskSession / renderEventInboxProjection / renderTaskHistoryProjection / renderWorkerControlProjection / sendWorkerControl",
+      "symbol_path": "applyPhase2QueryResult / refreshPhase2Status / renderPhase2Dashboard / sessionSummaryById / compareTurnIdOrder / compareSessionTurnPosition / sessionTurnCandidates / latestSessionTurnMatching / latestClosedTurnForSession / closedTurnObsoletesObservableTurn / closedTurnObsoletesSessionSummary / activeTurnForSession / sessionLiveObservation / globalLiveSessionObservation / liveObservationLine / buildMobileAgentDashboardModel / renderMobileAgentSummaryStrip / renderMobileAgentSheet / renderMobileAgentTaskList / renderSystemAgentResourceConfig / submitAgentResourceConfigUpdate / setMobileAgentSheetOpen / renderWorkerSessionNavigation / switchConversationSession / selectedSessionIsLoading / loadingConversationBubble / workerTranscriptWaitingBubble / clearSessionRefreshState / renderSessionRefreshFailure / selectedWorkerTranscriptRefreshRetryable / scheduleSessionRefreshRetry / returnToParentSession / renderTaskBoardProjection / renderAgentBoardProjection / phase2AgentLabel / workerOrdinalFromAgentId / openWorkerTaskSession / renderEventInboxProjection / renderTaskHistoryProjection / renderWorkerControlProjection / sendWorkerControl",
       "file_path": "apps/freehand-server/assets/webui.js",
-      "responsibility": "query TaskBoard, AgentBoard, EventInbox, TaskHistory, WorkerControl, ConfigStatus, SessionList, and selected transcript truth through the existing ADP/runtime owner path; render compact read-only status cards; expose live waiting/retry identity as owning session plus turn in the Header/session/Agent surfaces, including the parent Master observation while an inactive Worker child is selected; derive mobile Header lifecycle buckets from selected-session TaskBoard/AgentBoard truth plus config-owned resource capacity; label Worker resources using Worker-only ordinals so the Master AgentBoard row cannot shift Worker labels; keep the mobile Agents sheet read-only as the current-session complete Worker child-task list with no fixed cap or global-history fallback; expose each Worker task card's data-task-id and owner-projected data-worker-session-id for one-by-one inspection; click a child task through its owner-projected worker_session_id, clear the previous Agent transcript, render an explicit loading state while the pinned QuerySessionTurns request is in flight, treat TaskBoard-confirmed active Worker transcript-not-yet-persisted misses as retryable waiting with task id/status/assignee evidence instead of a persistent connection-failure card, consume reason-persistence logical-turn transcript projections without browser-side semantic trimming, discard late transcript responses for a previous selected session, render non-retryable refresh failures explicitly, and open the Worker conversation without deriving a session id in the browser; expose explicit return to the exact parent Master plus sibling Worker switching; require Header tree Worker rows to be keyed by UiTaskSnapshotProjection.worker_session_id and task_id rather than UI copy, id prefix, or DOM order; render Worker-capacity mutation only in system Config and route it through the config-owner protocol command",
+      "responsibility": "query TaskBoard, AgentBoard, EventInbox, TaskHistory, WorkerControl, ConfigStatus, SessionList, and selected transcript truth through the existing ADP/runtime owner path; render compact read-only status cards; expose live waiting/retry identity as owning session plus turn in the Header/session/Agent surfaces, including the parent Master observation while an inactive Worker child is selected, while a later same-session terminal transcript turn invalidates stale active_turn_id or ToolPending observation and selected sessions never fall back to unrelated global active sessions; derive mobile Header lifecycle buckets from selected-session TaskBoard/AgentBoard truth plus config-owned resource capacity; label Worker resources using Worker-only ordinals so the Master AgentBoard row cannot shift Worker labels; keep the mobile Agents sheet read-only as the current-session complete Worker child-task list with no fixed cap or global-history fallback; expose each Worker task card's data-task-id and owner-projected data-worker-session-id for one-by-one inspection; click a child task through its owner-projected worker_session_id, clear the previous Agent transcript, render an explicit loading state while the pinned QuerySessionTurns request is in flight, treat TaskBoard-confirmed active Worker transcript-not-yet-persisted misses as retryable waiting with task id/status/assignee evidence instead of a persistent connection-failure card, consume reason-persistence logical-turn transcript projections without browser-side semantic trimming, discard late transcript responses for a previous selected session, render non-retryable refresh failures explicitly, and open the Worker conversation without deriving a session id in the browser; expose explicit return to the exact parent Master plus sibling Worker switching; require Header tree Worker rows to be keyed by UiTaskSnapshotProjection.worker_session_id and task_id rather than UI copy, id prefix, or DOM order; render Worker-capacity mutation only in system Config and route it through the config-owner protocol command",
       "input_semantic": "UiQueryResult Phase 2 projections plus SessionList active-turn projection plus selected-session turn/model-request projection plus config status projection plus worker-control/resource button intent plus Worker-task/parent-return click intent plus mobile sheet open/close intent",
       "output_semantic": "detail-drawer status cards, live session/turn identity, mobile Agent header/task sheet, explicit Worker/Master navigation, selected Agent transcript, selected-session loading state, retryable Worker transcript waiting state, or explicit refresh-failure card, system Config resource control, and user-safe worker-control/resource receipt/status text",
       "caller": "WebUI detail drawer, system Config, mobile Agent task sheet, and session relationship Header",

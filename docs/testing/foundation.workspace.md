@@ -8,11 +8,11 @@
   - required hooks and CI files exist
   - `make ci` is the canonical full local gate and includes mainline freshness before architecture gates
   - pre-push, CI, and release paths consume the same full gate instead of drifting into partial gate stacks
-  - release script runs full regression, Rust release build, Android JVM regression, Android release build, and artifact staging
+  - release script runs full regression, Rust release build, Android JVM regression, Android release build, extracts APK version truth, and stages APK plus `update.json` artifacts
   - Android release artifact packaging disables Android release lint checks in Gradle config; release regression truth is `make ci` plus Android JVM tests, not the failing Android Lint Vital task
-  - global install script installs release host binaries into the configured prefix
+  - global install script installs release host binaries into the configured prefix and Android update artifacts into runtime-home distribution truth
   - symlink install script builds debug host binaries, exposes S-suffixed development commands, and installs a prefix-local launchd wrapper without replacing global release commands
-  - launchd install script installs release host binaries, writes `~/Library/LaunchAgents/com.freehand.daemon.plist`, writes `~/.freehand/daemon.env` with explicit daemon binary path, starts the user service, and exposes fixed logs/WebUI
+  - launchd install script installs release host binaries, stages Android update artifacts, writes `~/Library/LaunchAgents/com.freehand.daemon.plist`, writes `~/.freehand/daemon.env` with explicit daemon binary and Android update paths, starts the user service, and exposes fixed logs/WebUI
   - launchd symlink profile writes `~/Library/LaunchAgents/com.freehand.daemonS.plist`, writes `~/.freehand/daemonS.env`, uses `freehand-daemonS-bin` for launchd execution, refreshes that debug binary copy during `restartS`, rewrites the plist, reloads only the service-scoped launchd label so new ProgramArguments/env sourcing are active, health-checks the env-backed bind, and exposes `127.0.0.1:4042` plus separate `daemonS.*.log` files
   - launchd Worker profiles write `com.freehand.worker` / `com.freehand.workerS`,
     source the matching master profile pair token, omit `--bind`, use
@@ -38,13 +38,13 @@
   - mainline manifest cross-link logic between JSON, feature map, function map, test design, and generated wiki path
   - mainline call-table file and symbol binding logic for migrated `bound` rows
   - CI/CD and local hook command-alignment logic
-  - release script prerequisite and artifact path logic
+  - release script prerequisite, APK version extraction, sidecar generation, and artifact path logic
   - WebUI online verification wrapper checks fixed-port health before invoking the real browser verifier
   - Android release packaging config disables Android release lint checks explicitly
-  - global install prefix logic
+  - global install prefix and runtime Android update artifact staging logic
   - symlink install S-suffix command, symlink target logic, and prefix-local launchd wrapper copy
   - launchd daemon binary prefix mismatch rejection
-  - launchd S-profile label/env/bin/bind/log separation, including fixed loopback `127.0.0.1:4042` defaults and env-backed health checks on restart
+  - launchd S-profile label/env/bin/bind/log/Android-update-artifact separation, including fixed loopback `127.0.0.1:4042` defaults and env-backed health checks on restart
   - launchd `restartS` debug daemon binary refresh, plist refresh, service-scoped launchd reload, and env-file sourcing before health check
   - launchd Worker profile command, shared-token, no-bind, stable-PID, and
     separate env/log path checks
@@ -76,12 +76,12 @@
   - loop governance doc smoke validates required files are present and owner-bound through `foundation.workspace`
 - project black-box impact:
   - full workspace `make ci` gate smoke, including `cargo run -p xtask -- mainlines check`
-  - `scripts/release.sh` stages host and Android release artifacts under `dist/`
-  - `scripts/install-global.sh` installs `freehand-cli`, `freehand-server`, and `freehand-daemon`
+  - `scripts/release.sh` stages host and Android release artifacts plus `dist/android/update.json` under `dist/`
+  - `scripts/install-global.sh` installs `freehand-cli`, `freehand-server`, `freehand-daemon`, and runtime-home Android update artifacts
   - `scripts/install-symlink.sh` installs `freehand-cliS`, `freehand-serverS`, `freehand-daemonS`, and `freehand-daemon-launchdS` as symlinks
-  - `scripts/install-launchd.sh` starts `com.freehand.daemon` with `RunAtLoad`, `KeepAlive`, explicit daemon binary path, fixed `127.0.0.1:4041`, and logs under `~/.freehand/logs`
-  - `scripts/install-launchd.sh installS` starts `com.freehand.daemonS` without replacing the global service, fixed at `127.0.0.1:4042`
-  - `scripts/install-launchd.sh restartS` refreshes S debug binaries, rewrites the env-sourcing plist, reloads only `com.freehand.daemonS`, reads the existing env bind for health checks, and restarts only that label
+  - `scripts/install-launchd.sh` starts `com.freehand.daemon` with `RunAtLoad`, `KeepAlive`, explicit daemon binary path, explicit Android update manifest/APK paths, fixed `127.0.0.1:4041`, and logs under `~/.freehand/logs`
+  - `scripts/install-launchd.sh installS` starts `com.freehand.daemonS` without replacing the global service, fixed at `127.0.0.1:4042`, with Android update env paths pointing at runtime-home staged artifacts
+  - `scripts/install-launchd.sh restartS` refreshes S debug binaries, stages current repo Android update artifacts when present, rewrites the env-sourcing plist, reloads only `com.freehand.daemonS`, reads the existing env bind for health checks, and restarts only that label
   - `scripts/freehand-file-permission-preflight.sh` records macOS runtime/workdir/protected-folder permission preflight status under `~/.freehand/state/file-permission-preflight.json`; denial opens Full Disk Access settings and fails install/restart unless explicitly run with `FREEHAND_FILE_PERMISSION_PREFLIGHT=warn`
   - `scripts/install-launchd.sh installWorkerS` starts
     `com.freehand.workerS` from the same debug binary and pair token without a

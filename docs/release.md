@@ -13,22 +13,26 @@ It runs:
 5. artifact staging under `dist/`
 
 Android release packaging disables Android release lint checks in `apps/freehand-android/app/build.gradle.kts`.
-The release regression truth remains `make ci` plus Android JVM unit tests; APK packaging must produce the unsigned artifact and must not depend on the currently failing Android Lint Vital task.
+The release regression truth remains `make ci` plus Android JVM unit tests; APK packaging must produce the signed internal release artifact and must not depend on the currently failing Android Lint Vital task.
 
 Release artifacts:
 
 - `dist/bin/freehand-cli`
 - `dist/bin/freehand-server`
 - `dist/bin/freehand-daemon`
-- `dist/android/freehand-android-release-unsigned.apk`
+- `dist/android/freehand-android-release.apk`
+- `dist/android/update.json`
 
 Android update serving truth:
 
 - the daemon serves `GET /android/update.json`
 - the daemon serves `GET /android/freehand-android.apk`
-- default APK source path is `dist/android/freehand-android-release-unsigned.apk`
+- default APK source path is `dist/android/freehand-android-release.apk`
+- default update manifest source path is `dist/android/update.json`
 - override APK path with runtime env `FREEHAND_ANDROID_APK_PATH`
+- override manifest path with runtime env `FREEHAND_ANDROID_UPDATE_MANIFEST_PATH`
 - override manifest version fields with runtime env `FREEHAND_ANDROID_VERSION_CODE` and `FREEHAND_ANDROID_VERSION_NAME`
+- if no explicit runtime version override is set, `/android/update.json` reads the compiled sidecar; missing or invalid sidecar truth is an explicit update-check failure, not a hardcoded old `versionCode`
 - Android clients may auto-check and auto-download this APK, but installation still goes through the Android system installer and requires user confirmation and any one-time unknown-sources permission
 
 The GitHub release workflow calls the same script after the full gate, then uploads `dist/bin/*` and `dist/android/*`.

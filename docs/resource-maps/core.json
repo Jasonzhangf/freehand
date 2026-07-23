@@ -107,7 +107,7 @@
       "owner_crate": "crates/freehand-tools",
       "identity": "turn_id plus provider tool_call_id",
       "truth_store": "reason turn event plus tool owner execution state",
-      "operations": ["declare_schema", "classify_scope", "execute", "execute_workspace_path"],
+      "operations": ["declare_schema", "classify_scope", "execute", "execute_workspace_path", "execute_external_http"],
       "projections": ["tool result text", "tool display semantics"]
     },
     {
@@ -120,12 +120,21 @@
       "projections": ["tool result text", "checkpoint preview"]
     },
     {
+      "resource_type": "external_http_resource",
+      "owner_feature_id": "tool.registry",
+      "owner_crate": "crates/freehand-tools",
+      "identity": "absolute http or https URL plus bounded fetch options",
+      "truth_store": "remote HTTP response observed during one web_fetch tool execution; not persisted business truth",
+      "operations": ["fetch_text"],
+      "projections": ["tool result text", "explicit HTTP fetch error"]
+    },
+    {
       "resource_type": "task",
       "owner_feature_id": "task.orchestration",
       "owner_crate": "crates/freehand-task",
       "identity": "task_id",
       "truth_store": "~/.freehand/state/tasks and ~/.freehand/ledgers/tasks",
-      "operations": ["create", "attach_session", "assign", "record_execution", "submit_review", "approve_review", "reject_review", "close", "recover_interrupted", "project_to_ui"],
+      "operations": ["create", "attach_session", "assign", "cancel", "record_execution", "submit_review", "approve_review", "reject_review", "close", "recover_interrupted", "project_to_ui"],
       "projections": ["TaskBoard", "TaskSpaceSnapshot", "ui_task_snapshot", "current session attachment", "current assignment/lease/execution attachment", "canonical Worker transcript session identity"]
     },
     {
@@ -275,6 +284,15 @@
       "binding_status": "bound"
     },
     {
+      "operation_id": "tool_call.execute_external_http",
+      "owner_feature_id": "tool.registry",
+      "source_resource": "tool_call",
+      "target_resource": "external_http_resource",
+      "effect": "execute one bounded HTTP/HTTPS text fetch for a concrete URL through the tool registry owner",
+      "mainline_call_doc": "docs/mainline-calls/tool.registry.json",
+      "binding_status": "bound"
+    },
+    {
       "operation_id": "task.project_to_ui",
       "owner_feature_id": "ui.protocol",
       "source_resource": "task",
@@ -298,6 +316,15 @@
       "source_resource": "task",
       "target_resource": "agent",
       "effect": "bind one schedulable task to one available agent through a replaceable assignment while preserving task and parent session identity",
+      "mainline_call_doc": "docs/mainline-calls/task.orchestration.json",
+      "binding_status": "bound"
+    },
+    {
+      "operation_id": "task.cancel",
+      "owner_feature_id": "task.orchestration",
+      "source_resource": "task",
+      "target_resource": "task",
+      "effect": "move a non-terminal task to Cancelled and release any temporary agent assignment",
       "mainline_call_doc": "docs/mainline-calls/task.orchestration.json",
       "binding_status": "bound"
     },
@@ -584,6 +611,17 @@
       "binding_status": "bound"
     },
     {
+      "edge_id": "tool.registry#13a",
+      "operation_id": "tool_call.execute_external_http",
+      "source_resource": "tool_call",
+      "target_resource": "external_http_resource",
+      "mainline_call_doc": "docs/mainline-calls/tool.registry.json",
+      "call_table_step": "13a",
+      "file_path": "crates/freehand-tools/src/lib.rs",
+      "symbol_path": "execute_web_fetch",
+      "binding_status": "bound"
+    },
+    {
       "edge_id": "ui.protocol#26",
       "operation_id": "task.project_to_ui",
       "source_resource": "task",
@@ -614,6 +652,17 @@
       "call_table_step": "13",
       "file_path": "crates/freehand-task/src/lib.rs",
       "symbol_path": "TaskRuntime::assign_task",
+      "binding_status": "bound"
+    },
+    {
+      "edge_id": "task.orchestration#16",
+      "operation_id": "task.cancel",
+      "source_resource": "task",
+      "target_resource": "task",
+      "mainline_call_doc": "docs/mainline-calls/task.orchestration.json",
+      "call_table_step": "16",
+      "file_path": "crates/freehand-task/src/lib.rs",
+      "symbol_path": "TaskRuntime::cancel_task",
       "binding_status": "bound"
     },
     {
@@ -956,6 +1005,14 @@
       "reason": "Tool registry owner may execute governed workspace path operations for a tool call."
     },
     {
+      "rule_id": "tool-call-executes-external-http-direct",
+      "source_resource": "tool_call",
+      "target_resource": "external_http_resource",
+      "allowed_direct": true,
+      "via_resources": [],
+      "reason": "Tool registry owner may execute a bounded HTTP/HTTPS fetch for a concrete URL and return only tool-result text/error truth."
+    },
+    {
       "rule_id": "task-projects-to-ui-direct",
       "source_resource": "task",
       "target_resource": "ui_projection",
@@ -978,6 +1035,14 @@
       "allowed_direct": true,
       "via_resources": [],
       "reason": "Task orchestration may create or replace a temporary assignment to an available agent while the agent remains a reusable pool resource."
+    },
+    {
+      "rule_id": "task-cancels-own-lifecycle-direct",
+      "source_resource": "task",
+      "target_resource": "task",
+      "allowed_direct": true,
+      "via_resources": [],
+      "reason": "Task orchestration owns task lifecycle mutation and may cancel a non-terminal task without routing through another resource."
     },
     {
       "rule_id": "session-agent-attachment-through-task",

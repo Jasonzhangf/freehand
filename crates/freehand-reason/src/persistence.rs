@@ -1,10 +1,10 @@
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use freehand_blocks::CompletionSchemaRejection;
-use freehand_contracts::{AgentId, SessionId, TraceId, TurnId};
+use freehand_contracts::{AgentId, ContextSegment, SessionId, TraceId, TurnId};
 use freehand_provider_core::{ProviderFamily, ProviderSemanticOutput};
 use fs2::FileExt;
 use serde::{Deserialize, Serialize};
@@ -702,8 +702,15 @@ impl ReasonPersistence {
             });
         }
 
+        let mut restored_history = history.clone();
+        filter_history_context_to_effective_turns(
+            &mut restored_history,
+            active_turn.as_ref(),
+            &closed_turns,
+        )?;
+
         let restored = RestoredReasonSession {
-            history: history.clone(),
+            history: restored_history,
             cursor: cursor_after.clone(),
             active_turn,
             closed_turns,
@@ -827,7 +834,7 @@ impl ReasonPersistence {
                 "authoritative snapshots require both session-history and cursor files".to_owned(),
             ));
         }
-        let history = SessionHistory::load_from_path(self.session_history_path(session_id))
+        let mut history = SessionHistory::load_from_path(self.session_history_path(session_id))
             .map_err(|err| ReasonPersistenceError::JsonParseFailed(err.to_string()))?;
         let cursor: ReasonPersistenceCursor = read_json_file(&self.cursor_path(session_id))?;
         let active_turn = if active_exists {
@@ -843,6 +850,11 @@ impl ReasonPersistence {
             &mut closed_turns,
             &self.load_session_rollback_markers(session_id)?,
         );
+        filter_history_context_to_effective_turns(
+            &mut history,
+            active_turn.as_ref(),
+            &closed_turns,
+        )?;
         validate_cursor(&cursor, active_turn.as_ref(), &closed_turns)?;
         Ok(Some(RestoredReasonSession {
             history,
@@ -891,6 +903,9 @@ impl ReasonPersistence {
                 .unwrap_or(false)
             {
                 let path = entry.path();
+                if !is_closed_turn_snapshot_path(&path) {
+                    continue;
+                }
                 let mut turn = read_json_file::<TurnRecord>(&path)?;
                 ensure_turn_created_at(&mut turn, file_modified_unix_seconds(&path)?);
                 turns.push(turn);
@@ -1329,6 +1344,11 @@ fn apply_ledger_row(
         }
         ReasonLedgerPayload::RewriteStateUpdated => {}
     }
+    filter_history_context_to_effective_turns(
+        &mut restored.history,
+        restored.active_turn.as_ref(),
+        &restored.closed_turns,
+    )?;
     validate_cursor(
         &restored.cursor,
         restored.active_turn.as_ref(),
@@ -1354,6 +1374,37 @@ fn logical_turn_key(turn_id: &TurnId) -> String {
     } else {
         raw.to_owned()
     }
+}
+
+fn filter_history_context_to_effective_turns(
+    history: &mut SessionHistory,
+    active_turn: Option<&ActiveTurnSnapshot>,
+    closed_turns: &[TurnRecord],
+) -> Result<(), ReasonPersistenceError> {
+    let mut effective_logical_keys = BTreeSet::new();
+    for turn in closed_turns {
+        effective_logical_keys.insert(logical_turn_key(&turn.request.turn_id));
+    }
+    if let Some(active) = active_turn {
+        effective_logical_keys.insert(logical_turn_key(&active.turn.request.turn_id));
+    }
+
+    history
+        .retain_base_context_segments(|segment| {
+            historical_turn_reference_logical_key(segment)
+                .map(|key| effective_logical_keys.contains(&key))
+                .unwrap_or(true)
+        })
+        .map_err(|err| ReasonPersistenceError::InvalidCursorCoherence(err.to_string()))
+}
+
+fn historical_turn_reference_logical_key(segment: &ContextSegment) -> Option<String> {
+    segment
+        .provenance
+        .reference
+        .as_ref()
+        .and_then(|reference| reference.strip_prefix("historical_turn:"))
+        .map(|turn_id| logical_turn_key(&TurnId::new(turn_id)))
 }
 
 fn logical_turn_round(turn_id: &TurnId) -> u64 {
@@ -1483,8 +1534,13 @@ fn write_json_atomic<T: Serialize>(path: &Path, value: &T) -> Result<(), ReasonP
 fn read_json_file<T: for<'de> Deserialize<'de>>(path: &Path) -> Result<T, ReasonPersistenceError> {
     let payload = fs::read_to_string(path)
         .map_err(|err| ReasonPersistenceError::FileIoFailed(err.to_string()))?;
-    serde_json::from_str(&payload)
-        .map_err(|err| ReasonPersistenceError::JsonParseFailed(err.to_string()))
+    serde_json::from_str(&payload).map_err(|err| {
+        ReasonPersistenceError::JsonParseFailed(format!("{}: {err}", path.display()))
+    })
+}
+
+fn is_closed_turn_snapshot_path(path: &Path) -> bool {
+    path.extension().and_then(|extension| extension.to_str()) == Some("json")
 }
 
 fn ensure_parent_dir(path: &Path) -> Result<(), ReasonPersistenceError> {
@@ -1568,6 +1624,12 @@ mod tests {
                 reference: None,
             },
         }
+    }
+
+    fn historical_turn_segment(id: &str, turn_id: &str, content: &str) -> ContextSegment {
+        let mut segment = stable_segment(id, ContextSegmentKind::SessionMemory, content);
+        segment.provenance.reference = Some(format!("historical_turn:{turn_id}"));
+        segment
     }
 
     fn session_history() -> SessionHistory {
@@ -1708,6 +1770,45 @@ mod tests {
                 .closed_turn_path(history.session_id(), &TurnId::new("turn-1"))
                 .is_file()
         );
+
+        fs::remove_dir_all(runtime_home).expect("cleanup");
+    }
+
+    #[test]
+    fn restore_ignores_leftover_atomic_tmp_turn_files() {
+        let runtime_home = temp_runtime_home();
+        let coordinator = ReasonPersistence::new(&runtime_home, AgentId::new("agent-1"));
+        let mut history = session_history();
+        let mut turn = started_turn(&mut history);
+        turn.terminal_event = Some(freehand_contracts::ReasonResp03TerminalEvent {
+            session_id: SessionId::new("session-1"),
+            turn_id: TurnId::new("turn-1"),
+            trace_id: TraceId::new("trace-1"),
+            feature_id: FeatureId::new("reason.persistence"),
+            agent_id: AgentId::new("agent-1"),
+            status: TerminalStatus::Success,
+            summary: "done".to_owned(),
+        });
+
+        coordinator
+            .record_turn_closed(&history, &turn, 0)
+            .expect("close persist");
+        let temp_path = coordinator
+            .turns_dir(history.session_id())
+            .join("turn-2.tmp-1784723820102497000");
+        fs::write(&temp_path, "").expect("write leftover atomic temp file");
+
+        let restored = coordinator.restore(history.session_id()).expect("restore");
+        assert_eq!(restored.closed_turns.len(), 1);
+        assert_eq!(
+            restored.closed_turns[0].request.turn_id,
+            TurnId::new("turn-1")
+        );
+        let ui_turns = coordinator
+            .restore_authoritative_turn_snapshots_for_ui(history.session_id())
+            .expect("restore authoritative ui turns");
+        assert_eq!(ui_turns.len(), 1);
+        assert_eq!(ui_turns[0].request.turn_id, TurnId::new("turn-1"));
 
         fs::remove_dir_all(runtime_home).expect("cleanup");
     }
@@ -2442,6 +2543,81 @@ mod tests {
             rows.iter()
                 .any(|row| matches!(row.payload, ReasonLedgerPayload::SessionRollback { .. }))
         );
+
+        fs::remove_dir_all(runtime_home).expect("cleanup");
+    }
+
+    #[test]
+    fn rollback_filters_model_visible_history_to_effective_turn_truth() {
+        let runtime_home = temp_runtime_home();
+        let coordinator = ReasonPersistence::new(&runtime_home, AgentId::new("agent-1"));
+        let mut history = SessionHistory::new(
+            SessionId::new("session-1"),
+            vec![
+                stable_segment(
+                    "memory-1",
+                    ContextSegmentKind::SessionMemory,
+                    "ordinary stable memory",
+                ),
+                historical_turn_segment(
+                    "session-memory-runtime-turn-1",
+                    "runtime-turn-1",
+                    "effective historical turn",
+                ),
+                historical_turn_segment(
+                    "session-memory-runtime-turn-2",
+                    "runtime-turn-2",
+                    "rolled-back historical turn",
+                ),
+                historical_turn_segment(
+                    "session-memory-runtime-turn-99",
+                    "runtime-turn-99",
+                    "orphan historical turn",
+                ),
+            ],
+        )
+        .expect("history");
+
+        for (turn_id, trace_id) in [("runtime-turn-1", "trace-1"), ("runtime-turn-2", "trace-2")] {
+            let mut turn = started_turn_with_id(&mut history, turn_id, trace_id);
+            turn.terminal_event = Some(freehand_contracts::ReasonResp03TerminalEvent {
+                session_id: history.session_id().clone(),
+                turn_id: TurnId::new(turn_id),
+                trace_id: TraceId::new(trace_id),
+                feature_id: FeatureId::new("reason.persistence"),
+                agent_id: AgentId::new("agent-1"),
+                status: TerminalStatus::Success,
+                summary: format!("{turn_id} done"),
+            });
+            coordinator
+                .record_turn_closed(&history, &turn, 0)
+                .expect("persist closed turn");
+        }
+
+        coordinator
+            .rollback_latest_session_turn(history.session_id())
+            .expect("rollback latest");
+
+        let assert_effective_history = |restored: &RestoredReasonSession| {
+            assert_eq!(
+                restored
+                    .history
+                    .base_context_segments()
+                    .iter()
+                    .map(|segment| segment.segment_id.as_str())
+                    .collect::<Vec<_>>(),
+                vec!["memory-1", "session-memory-runtime-turn-1"]
+            );
+        };
+        let restored = coordinator.restore(history.session_id()).expect("restore");
+        assert_effective_history(&restored);
+
+        fs::remove_dir_all(coordinator.session_dir(history.session_id()))
+            .expect("remove authoritative snapshots for ledger-only rebuild");
+        let rebuilt = coordinator
+            .restore(history.session_id())
+            .expect("ledger-only restore");
+        assert_effective_history(&rebuilt);
 
         fs::remove_dir_all(runtime_home).expect("cleanup");
     }

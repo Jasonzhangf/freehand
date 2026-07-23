@@ -1274,6 +1274,7 @@ port = 4041
             session_id: SessionId::new("session-1"),
             turn_id: TurnId::new("turn-1"),
             created_at: Some(10),
+            timing: None,
             cwd: None,
             user_text: Some("delegate to slave".to_owned()),
             semantic_events: vec![

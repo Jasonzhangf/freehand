@@ -5,6 +5,7 @@ use std::collections::BTreeMap;
 use std::env;
 use std::ffi::OsString;
 use std::fs;
+use std::io::Read;
 use std::path::{Component, Path, PathBuf};
 use std::process::{Command, Stdio};
 use std::thread;
@@ -192,6 +193,8 @@ const BASH_DEFAULT_TIMEOUT_SECONDS: usize = 900;
 const BASH_POLL_INTERVAL_MILLIS: u64 = 20;
 const GLOB_MAX_RESULTS: usize = 1_000;
 const GREP_MAX_MATCHES: usize = 200;
+const WEB_FETCH_DEFAULT_TIMEOUT_SECONDS: usize = 20;
+const WEB_FETCH_MAX_BYTES: usize = 64_000;
 
 #[derive(Debug, Clone)]
 pub struct BuiltinToolRegistry {
@@ -232,7 +235,12 @@ impl BuiltinToolRegistry {
         self.tools
             .values()
             .filter(|spec| {
-                spec.implemented && matches!(spec.definition.name.as_str(), "task" | "timer")
+                spec.implemented
+                    && (matches!(spec.definition.name.as_str(), "task" | "timer")
+                        || self.execution_scope(&spec.definition.name)
+                            == Some(BuiltinToolExecutionScope::Workspace)
+                        || self.execution_scope(&spec.definition.name)
+                            == Some(BuiltinToolExecutionScope::Network))
             })
             .map(|spec| spec.definition.clone())
             .collect()
@@ -313,6 +321,7 @@ impl BuiltinToolRegistry {
             "glob" => execute_glob(&call.tool_call.arguments),
             "grep" => execute_grep(&call.tool_call.arguments),
             "ls" => execute_ls(&call.tool_call.arguments),
+            "web_fetch" => execute_web_fetch(&call.tool_call.arguments),
             "todo_write" => execute_todo_write(&call.tool_call.arguments),
             "complete_step" => execute_complete_step(&call.tool_call.arguments),
             "delete_range" => execute_delete_range(&call.tool_call.arguments),
@@ -409,7 +418,7 @@ pub fn reasonix_aligned_builtin_specs() -> Vec<BuiltinToolSpec> {
             "read_file",
             true,
             true,
-            "Read one UTF-8 text file with optional line offset/limit. Relative paths are resolved from the locked workspace; leading `~` or absolute paths are valid only when canonical/symlink resolution stays inside that locked workspace. Use `ls` first when the path might be a directory. Do not pass directories, generated output paths that do not exist yet, external absolute paths, or guessed files.",
+            "Read one UTF-8 text file with optional line offset/limit. Relative paths are resolved from the locked workspace; leading `~` or absolute paths are valid only when canonical/symlink resolution stays inside that locked workspace. Use `ls` first when the path might be a directory. Do not pass directories, not-yet-created output directories or files, external absolute paths, binary sidecars, or guessed files.",
             json!({
                 "type": "object",
                 "properties": {
@@ -541,7 +550,7 @@ pub fn reasonix_aligned_builtin_specs() -> Vec<BuiltinToolSpec> {
             "ls",
             true,
             true,
-            "List directory entries or report one file entry under the locked workspace. Omit `path` for the workspace root. Relative paths are resolved from the locked workspace; absolute or leading-`~` paths are valid only when canonical/symlink resolution stays inside the locked workspace. Use this before `read_file` when you are unsure whether a path is a file or directory, and to verify whether a generated output file exists.",
+            "List directory entries or report one file entry under the locked workspace. Omit `path` for the workspace root. Relative paths are resolved from the locked workspace; absolute or leading-`~` paths are valid only when canonical/symlink resolution stays inside the locked workspace. Use this before `read_file` when you are unsure whether a path is a file or directory, and to verify whether a generated output file exists. Do not keep listing guessed missing output directories; create required artifacts with `write_file` only when the parent workspace exists.",
             json!({
                 "type": "object",
                 "properties": {
@@ -553,11 +562,15 @@ pub fn reasonix_aligned_builtin_specs() -> Vec<BuiltinToolSpec> {
         spec(
             "web_fetch",
             true,
-            false,
-            "Fetch a URL and return readable text content.",
+            true,
+            "Fetch one HTTP/HTTPS URL and return bounded readable text content. Use this for known authoritative URLs or pages discovered from task context. This is not a search engine; if you need broad discovery, use known source pages, indexed pages supplied by the user/task, or delegate to a Worker only when the Worker tool surface also exposes `web_fetch`.",
             json!({
                 "type": "object",
-                "properties": {"url": {"type": "string"}},
+                "properties": {
+                    "url": {"type": "string", "description": "Absolute http:// or https:// URL to fetch."},
+                    "timeout_seconds": {"type": "integer", "minimum": 1, "maximum": 60},
+                    "limit": {"type": "integer", "minimum": 1, "maximum": 64000}
+                },
                 "required": ["url"]
             }),
         ),
@@ -634,13 +647,13 @@ pub fn reasonix_aligned_builtin_specs() -> Vec<BuiltinToolSpec> {
             "task",
             false,
             true,
-            "Manage Freehand framework tasks and agent registry state. Every call must include top-level op. Prefer the current TaskSpaceSnapshot context before calling query/list/history; use tools only for a concrete mutation or full ledger needed for a decision. Production examples: {\"op\":\"create\",\"title\":\"...\",\"content\":\"...\",\"goal\":\"...\",\"target_cwd\":\"/absolute/existing/repo\",\"dispatch\":{\"mode\":\"none\"}} then {\"op\":\"assign\",\"task_id\":\"...\",\"agent_id\":\"<configured Worker>\"}.",
+            "Task Center call shape is strict: the top-level JSON object must include \"op\". For create, call exactly like {\"op\":\"create\",\"title\":\"...\",\"content\":\"...\",\"goal\":\"...\",\"deliverables\":[\"...\"],\"acceptance\":[\"...\"],\"target_cwd\":\"/absolute/existing/repo\",\"dispatch\":{\"mode\":\"none\"}}; then assign with {\"op\":\"assign\",\"task_id\":\"...\",\"agent_id\":\"<configured Worker>\"}. Do not call task with only a title/content payload and do not omit op. Prefer the current TaskSpaceSnapshot before query/list/history; use tools only for concrete mutations or decision-critical ledger truth.",
             json!({
                 "type": "object",
                 "properties": {
                     "op": {
                         "type": "string",
-                        "description": "Required top-level Task Center operation. Never omit op. Master production flow: {\"op\":\"create\", title/content/goal/deliverables/acceptance/target_cwd, \"dispatch\":{\"mode\":\"none\"}}, then {\"op\":\"assign\", \"task_id\":..., \"agent_id\": configured Worker}. Query/list/history are for specific missing truth only; do not use status=\"all\". Worker runner, not Master, owns claim_next/heartbeat/record_execution in production.",
+                        "description": "Required top-level Task Center operation and first-call discriminator. Never omit op. Never call task with only title/content/goal. Master production flow: {\"op\":\"create\", title/content/goal/deliverables/acceptance/target_cwd, \"dispatch\":{\"mode\":\"none\"}}, then {\"op\":\"assign\", \"task_id\":..., \"agent_id\": configured Worker}. Query/list/history are for specific missing truth only; do not use status=\"all\". Worker runner, not Master, owns claim_next/heartbeat/record_execution in production.",
                         "enum": ["create", "query", "list_tasks", "history", "append", "pause", "resume", "heartbeat", "assign", "claim_next", "record_execution", "cancel", "submit_review", "approve", "reject", "close", "list_agents", "query_agent", "create_agent", "close_agent"]
                     },
                     "task_id": {"type": "string"},
@@ -671,7 +684,7 @@ pub fn reasonix_aligned_builtin_specs() -> Vec<BuiltinToolSpec> {
                     },
                     "dispatch": {
                         "type": "object",
-                        "description": "For normal Master dispatch, use {\"mode\":\"none\"} then task(op=\"assign\", agent_id=<configured Worker>), or {\"mode\":\"agent\",\"agent_id\":<configured Worker>}. Do not use auto/self in production.",
+                        "description": "For normal Master dispatch, use {\"mode\":\"none\"} and then call task with {\"op\":\"assign\",\"task_id\":\"...\",\"agent_id\":\"<configured Worker>\"}, or use {\"mode\":\"agent\",\"agent_id\":\"<configured Worker>\"}. Do not use auto/self in production.",
                         "properties": {
                             "mode": {"type": "string", "enum": ["none", "self", "agent", "auto"]},
                             "agent_id": {"type": "string"},
@@ -687,7 +700,8 @@ pub fn reasonix_aligned_builtin_specs() -> Vec<BuiltinToolSpec> {
                     "agent_id": {"type": "string"},
                     "capabilities": {"type": "array", "items": {"type": "string"}}
                 },
-                "required": ["op"]
+                "required": ["op"],
+                "additionalProperties": false
             }),
         ),
         spec(
@@ -1007,6 +1021,95 @@ fn execute_complete_step(
         text: format!(
             "Step `{step}` signed off with {} evidence item(s). Result: {result}",
             evidence.len()
+        ),
+    })
+}
+
+fn execute_web_fetch(arguments: &[ToolArgument]) -> Result<ToolExecutionOutput, ToolRegistryError> {
+    let url = required_string(arguments, "web_fetch", "url")?;
+    if !(url.starts_with("https://") || url.starts_with("http://")) {
+        return Err(ToolRegistryError::InvalidArguments {
+            tool: "web_fetch".to_owned(),
+            message: "`url` must start with http:// or https://".to_owned(),
+        });
+    }
+    let timeout_seconds = optional_usize(arguments, "web_fetch", "timeout_seconds")?
+        .unwrap_or(WEB_FETCH_DEFAULT_TIMEOUT_SECONDS);
+    if timeout_seconds == 0 || timeout_seconds > 60 {
+        return Err(ToolRegistryError::InvalidArguments {
+            tool: "web_fetch".to_owned(),
+            message: "`timeout_seconds` must be between 1 and 60".to_owned(),
+        });
+    }
+    let limit = optional_usize(arguments, "web_fetch", "limit")?.unwrap_or(WEB_FETCH_MAX_BYTES);
+    if limit == 0 || limit > WEB_FETCH_MAX_BYTES {
+        return Err(ToolRegistryError::InvalidArguments {
+            tool: "web_fetch".to_owned(),
+            message: format!("`limit` must be between 1 and {WEB_FETCH_MAX_BYTES}"),
+        });
+    }
+    let client = reqwest::blocking::Client::builder()
+        .timeout(Duration::from_secs(timeout_seconds as u64))
+        .user_agent("freehand-web-fetch/1")
+        .build()
+        .map_err(|err| ToolRegistryError::ExecutionFailed {
+            tool: "web_fetch".to_owned(),
+            message: format!("cannot build HTTP client: {err}"),
+        })?;
+    let mut response =
+        client
+            .get(url)
+            .send()
+            .map_err(|err| ToolRegistryError::ExecutionFailed {
+                tool: "web_fetch".to_owned(),
+                message: format!("request failed for `{url}`: {err}"),
+            })?;
+    let status = response.status();
+    let content_type = response
+        .headers()
+        .get(reqwest::header::CONTENT_TYPE)
+        .and_then(|value| value.to_str().ok())
+        .unwrap_or("unknown")
+        .to_owned();
+    let mut buffer = Vec::new();
+    let read_limit = limit.saturating_add(1);
+    response
+        .by_ref()
+        .take(read_limit as u64)
+        .read_to_end(&mut buffer)
+        .map_err(|err| ToolRegistryError::ExecutionFailed {
+            tool: "web_fetch".to_owned(),
+            message: format!("cannot read response body from `{url}`: {err}"),
+        })?;
+    let truncated = buffer.len() > limit;
+    if truncated {
+        buffer.truncate(limit);
+    }
+    let snippet = String::from_utf8(buffer).map_err(|err| ToolRegistryError::ExecutionFailed {
+        tool: "web_fetch".to_owned(),
+        message: format!("cannot decode response body from `{url}` as UTF-8 text: {err}"),
+    })?;
+    let suffix = if truncated {
+        format!("\n[truncated to {limit} bytes]")
+    } else {
+        String::new()
+    };
+    if !status.is_success() {
+        return Err(ToolRegistryError::ExecutionFailed {
+            tool: "web_fetch".to_owned(),
+            message: format!(
+                "HTTP {} for `{url}` content_type={content_type}\n{snippet}{suffix}",
+                status.as_u16()
+            ),
+        });
+    }
+    Ok(ToolExecutionOutput {
+        text: format!(
+            "Fetched `{url}` status={} content_type={content_type} bytes={}{}\n{}",
+            status.as_u16(),
+            snippet.len(),
+            if truncated { " truncated=true" } else { "" },
+            snippet
         ),
     })
 }
@@ -2176,6 +2279,8 @@ mod tests {
         AgentId, FeatureId, SessionId, ToolCallContract, ToolCallId, TraceId, TurnId,
     };
     use std::fs;
+    use std::io::{Read, Write};
+    use std::net::TcpListener;
     use std::sync::{Mutex, OnceLock};
     use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -2198,11 +2303,13 @@ mod tests {
         assert!(names.contains(&"todo_write".to_owned()));
         assert!(names.contains(&"complete_step".to_owned()));
         assert!(names.contains(&"timer".to_owned()));
+        assert!(names.contains(&"web_fetch".to_owned()));
         assert_eq!(registry.read_only("read_file"), Some(true));
         assert_eq!(registry.read_only("glob"), Some(true));
         assert_eq!(registry.read_only("grep"), Some(true));
         assert_eq!(registry.read_only("ls"), Some(true));
         assert_eq!(registry.read_only("todo_write"), Some(true));
+        assert_eq!(registry.read_only("web_fetch"), Some(true));
     }
 
     #[test]
@@ -2217,19 +2324,28 @@ mod tests {
         assert!(!names.contains(&"bash".to_owned()));
         assert!(names.contains(&"task".to_owned()));
         assert!(names.contains(&"timer".to_owned()));
-        assert_eq!(names.len(), 2, "master surface must be framework-only");
-        for forbidden in [
+        for local_tool in [
             "read_file",
             "write_file",
             "edit_file",
             "multi_edit",
+            "delete_range",
             "grep",
             "glob",
             "ls",
-            "todo_write",
-            "complete_step",
-            "bash",
         ] {
+            assert!(
+                names.contains(&local_tool.to_owned()),
+                "master surface must expose local workspace tool {local_tool}: {names:?}"
+            );
+        }
+        assert!(names.contains(&"web_fetch".to_owned()));
+        assert_eq!(
+            names.len(),
+            11,
+            "master surface must contain local workspace tools plus task/timer/web_fetch"
+        );
+        for forbidden in ["todo_write", "complete_step", "bash"] {
             assert!(
                 !names.contains(&forbidden.to_owned()),
                 "master surface must not expose {forbidden}: {names:?}"
@@ -2250,6 +2366,10 @@ mod tests {
         assert_eq!(
             registry.execution_scope("timer"),
             Some(BuiltinToolExecutionScope::Framework)
+        );
+        assert_eq!(
+            registry.execution_scope("web_fetch"),
+            Some(BuiltinToolExecutionScope::Network)
         );
     }
 
@@ -2374,6 +2494,12 @@ mod tests {
         assert!(read_file.description.contains("external absolute paths"));
         assert!(read_file.description.contains("locked workspace"));
         assert!(read_file.description.contains("Do not pass directories"));
+        assert!(
+            read_file
+                .description
+                .contains("not-yet-created output directories or files")
+        );
+        assert!(read_file.description.contains("binary sidecars"));
         assert!(read_file.description.contains("guessed files"));
         assert!(
             read_file
@@ -2391,6 +2517,10 @@ mod tests {
         assert!(ls.description.contains("Relative paths are resolved"));
         assert!(ls.description.contains("locked workspace"));
         assert!(ls.description.contains("generated output file exists"));
+        assert!(
+            ls.description
+                .contains("Do not keep listing guessed missing output directories")
+        );
         assert!(
             ls.input_schema
                 .to_string()
@@ -2420,7 +2550,29 @@ mod tests {
             .map(|definition| definition.name)
             .collect::<Vec<_>>();
 
+        assert_eq!(
+            names,
+            vec![
+                "complete_step".to_owned(),
+                "delete_range".to_owned(),
+                "edit_file".to_owned(),
+                "glob".to_owned(),
+                "grep".to_owned(),
+                "ls".to_owned(),
+                "multi_edit".to_owned(),
+                "read_file".to_owned(),
+                "todo_write".to_owned(),
+                "web_fetch".to_owned(),
+                "write_file".to_owned(),
+            ],
+            "worker-visible tools must be exact so the model does not guess unavailable names"
+        );
         assert!(!names.contains(&"bash".to_owned()));
+        assert!(!names.contains(&"shell".to_owned()));
+        assert!(!names.contains(&"readlink".to_owned()));
+        assert!(!names.contains(&"pwd".to_owned()));
+        assert!(!names.contains(&"cat".to_owned()));
+        assert!(!names.contains(&"find".to_owned()));
         assert!(names.contains(&"read_file".to_owned()));
         assert!(names.contains(&"write_file".to_owned()));
         assert!(names.contains(&"todo_write".to_owned()));
@@ -3645,10 +3797,57 @@ beta
             registry.execute(&tool_call("missing_tool", vec![])),
             Err(ToolRegistryError::UnknownTool("missing_tool".to_owned()))
         );
-        assert_eq!(
+        assert!(matches!(
             registry.execute(&tool_call("web_fetch", vec![])),
-            Err(ToolRegistryError::UnimplementedTool("web_fetch".to_owned()))
+            Err(ToolRegistryError::InvalidArguments { tool, .. }) if tool == "web_fetch"
+        ));
+        assert_eq!(
+            registry.execute(&tool_call(
+                "web_fetch",
+                vec![ToolArgument {
+                    name: "url".to_owned(),
+                    value: json!("ftp://example.com"),
+                }],
+            )),
+            Err(ToolRegistryError::InvalidArguments {
+                tool: "web_fetch".to_owned(),
+                message: "`url` must start with http:// or https://".to_owned(),
+            })
         );
+    }
+
+    #[test]
+    fn web_fetch_executes_against_local_http_url() {
+        let listener = TcpListener::bind("127.0.0.1:0").expect("bind local web fixture");
+        let addr = listener.local_addr().expect("local addr");
+        let handle = std::thread::spawn(move || {
+            let (mut stream, _) = listener.accept().expect("accept");
+            let mut request = [0_u8; 1024];
+            let _ = stream.read(&mut request).expect("read request");
+            let body = "freehand web fetch fixture";
+            let response = format!(
+                "HTTP/1.1 200 OK\r\ncontent-type: text/plain; charset=utf-8\r\ncontent-length: {}\r\n\r\n{}",
+                body.len(),
+                body
+            );
+            stream
+                .write_all(response.as_bytes())
+                .expect("write response");
+        });
+        let registry = BuiltinToolRegistry::reasonix_aligned();
+        let output = registry
+            .execute(&tool_call(
+                "web_fetch",
+                vec![ToolArgument {
+                    name: "url".to_owned(),
+                    value: json!(format!("http://{addr}/fixture")),
+                }],
+            ))
+            .expect("web fetch succeeds");
+        handle.join().expect("fixture server joins");
+        assert!(output.text.contains("status=200"));
+        assert!(output.text.contains("text/plain"));
+        assert!(output.text.contains("freehand web fetch fixture"));
     }
 
     #[test]
@@ -3720,10 +3919,22 @@ beta
         assert!(
             task_definition
                 .description
-                .contains("Every call must include top-level op")
+                .contains("top-level JSON object must include \"op\"")
         );
         assert!(task_definition.description.contains("\"op\":\"create\""));
+        assert!(
+            task_definition
+                .description
+                .contains("Do not call task with only a title/content payload")
+        );
         assert!(required.iter().any(|item| item.as_str() == Some("op")));
+        assert_eq!(
+            task_definition
+                .input_schema
+                .get("additionalProperties")
+                .and_then(serde_json::Value::as_bool),
+            Some(false)
+        );
         assert_eq!(
             op_schema.get("type").and_then(serde_json::Value::as_str),
             Some("string")
@@ -3749,6 +3960,13 @@ beta
                 .and_then(serde_json::Value::as_str)
                 .expect("op description")
                 .contains("Never omit op")
+        );
+        assert!(
+            op_schema
+                .get("description")
+                .and_then(serde_json::Value::as_str)
+                .expect("op description")
+                .contains("Never call task with only title/content/goal")
         );
         assert!(
             op_schema
@@ -3847,7 +4065,10 @@ beta
         let registry = BuiltinToolRegistry::reasonix_aligned();
         assert_eq!(
             registry.preview(&tool_call("web_fetch", vec![])),
-            Err(ToolRegistryError::UnimplementedTool("web_fetch".to_owned()))
+            Err(ToolRegistryError::InvalidArguments {
+                tool: "web_fetch".to_owned(),
+                message: "preview is only supported for writable file-mutation tools".to_owned(),
+            })
         );
         assert_eq!(
             registry.preview(&tool_call(

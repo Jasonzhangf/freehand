@@ -62,30 +62,54 @@
 - retryable non-stream HTTP/network failure retries on the primary route; after primary exhaustion, or immediately for failover-eligible non-retryable HTTP status such as 402, the bridge switches once to the configured fallback at the provider-neutral semantic request boundary
 - actual retry and fallback-switch progress is projected as transient model-request transport substate on the same turn before the bridge sleeps, retries, or enters the fallback route; a later provider semantic response replaces it, while retry/error-center evidence remains outside public conversation truth
 - the first master tool-capable request exposes the Reasonix-aligned
-  framework-only master-safe registry subset through provider-neutral request
-  metadata: `task` and `timer` only
-- the master-safe registry subset omits file/search/write tools, unrestricted
-  shell scope, `todo_write`, and `complete_step`, and exports the matching
-  deterministic schema fingerprint stamped into planner diagnostics
-- the first master-task-capable request includes owner-scoped task orchestration guidance and examples that teach the model to use `task(op=...)` instead of standalone semantic-action tool names
+  master-safe registry subset through provider-neutral request metadata:
+  locked local workspace tools, concrete-URL `web_fetch`, plus `task` and
+  `timer`
+- the master-safe registry subset omits unrestricted shell/browser/broad
+  `web_search` tools, `todo_write`, and `complete_step`, and exports the
+  matching deterministic schema fingerprint stamped into planner diagnostics
+- the first master-task-capable request tells the model to use local workspace
+  tools directly when the current selected session cwd is enough, to dispatch
+  only for different-cwd/isolated/concurrent/long-running/resumable work, to
+  use `web_fetch` directly for known HTTP/HTTPS URLs, and to block only when
+  neither Master nor configured Workers expose the required concrete
+  capability, or when broad search/browser behavior is required but no such
+  tool is exposed
+- the first master-task-capable request includes owner-scoped task orchestration guidance and exact JSON examples such as `task({"op":"create",...})` instead of pseudo-call syntax or standalone semantic-action tool names
 - the Master task snapshot guidance tells the model not to call
   `status="all"` and to use the injected current framework truth before
   exploratory task/agent calls, reducing multi-round tool probing
+- Worker runtime tool guidance names the exact Worker-safe tool surface from
+  `tool.registry`, states that all path tools are locked to the canonical task
+  cwd, forbids `shell`/`bash`/`readlink`/`pwd`/`cat`/`find` guesses, and gives
+  first-call path patterns such as `ls` before `read_file`; Worker capability
+  guidance also names `web_fetch` for known HTTP/HTTPS URLs
 - runtime emits provider-request lifecycle debug snapshots through `debug.core` without provider payload text
 - Anthropic live executor runs the HTTP/SSE request through raw-capable callbacks so runtime can capture debug-only provider raw bodies/events before semantic parsing
 - stream mode applies outputs incrementally through the executor callback path before the provider response completes
-- completed provider tool calls are classified by registry execution scope; only
-  `task` and `timer` remain available to the Master; injected Master
-  file/search/write, shell, `todo_write`, or `complete_step` calls return a
-  paired failed capability-boundary result with Worker dispatch guidance and no
-  file-content leak; Worker read/search/write tools remain governed by the
-  locked task workspace; incomplete `tool_use` calls are converted into failed
-  tool-result re-entry truth instead of schema retry; writable in-root Worker
-  calls first go through runtime checkpoint preview/snapshot/execute gating,
-  then success or execution-failure results are written back through
+- completed provider tool calls are classified by registry execution scope;
+  Master local workspace read/search/write/edit tools execute only in the
+  current selected session cwd under `tool.registry` path and checkpoint
+  locks; Master concrete-URL `web_fetch` executes through the tool registry
+  network scope; Master `task` and `timer` remain framework tools; injected
+  Master shell, browser, broad `web_search`, `todo_write`, or `complete_step`
+  calls return a paired failed capability-boundary result with exact
+  local-vs-dispatch guidance and no file-content leak; Worker
+  read/search/write/mutation path tools remain locked
+  to the task cwd after absolute-normalization and symlink/canonical
+  resolution, and boundary failures tell the model to use relative in-cwd paths
+  or return blocked instead of probing external roots; Worker `web_fetch`
+  executes only concrete HTTP/HTTPS URL reads, not broad search; Worker
+  shell/unknown-tool failures include the exact Worker tool list and forbid invented
+  `shell`/`readlink` style calls; incomplete `tool_use` calls are converted into
+  failed tool-result re-entry truth instead of schema retry; writable in-root
+  Worker calls first go through runtime checkpoint preview/snapshot/execute
+  gating, then success or execution-failure results are written back through
   `ReasonTurnEngine::apply_provider_output`, persisted, and sent to the next
   Anthropic request as a paired tool result exchange
-- runtime emits tool execution lifecycle debug snapshots through `debug.core` without tool-result content
+- runtime emits tool execution lifecycle debug snapshots and error-center
+  metadata through `debug.core`/`metadata.core` without tool-result content; the
+  full model-visible recovery text stays in reason tool-result truth only
 - completion schema is parsed only when the provider finish reason is a terminal completion candidate such as `stop` or `end_turn`; it is then validated and either accepted, rejected with field-level feedback plus UI-visible retry waiting projection, or used to schedule the next round
 - runtime emits terminal lifecycle debug snapshots through `debug.core` before terminal persistence
 - runtime dispatch callers may consume the same bridge through CLI or daemon command ingress without owning provider DTOs
@@ -98,9 +122,9 @@
 - recovered retry/failover turns contain no provider semantic error event; the temporary provider recovery activity is cleared by the normal response/terminal projection
 - every applied live semantic output is recorded through `ReasonPersistence::record_provider_output_applied`
 - tool-result re-entry is recorded in turn truth and persisted before the next provider request; execution failures remain model-visible failed tool results, not terminal runtime failures; runtime publishes a model-continuation waiting event after tool results are paired for the next provider request
-- master capability-boundary failures for injected non-framework tools remain
-  paired failed tool results, so the model can create and assign external work
-  through `task`
+- master capability-boundary failures for unavailable tools remain paired
+  failed tool results, so the model can either continue with local workspace
+  tools or create and assign different-cwd/external work through `task`
 - completed/blocked schema writes terminal truth through `ReasonTurnEngine::submit_completion`
 - terminal turns are materialized through `ReasonPersistence::record_turn_closed`
 - schema retry exhaustion writes blocked terminal truth through `ReasonTurnEngine::block_turn`
@@ -127,7 +151,10 @@
 - incomplete tool calls are not executed as successful side effects
 - incomplete `tool_use` responses are paired back to the model as failed tool results; they must not become schema retries or terminal runtime failures
 - writable tools without preview/checkpoint support are rejected explicitly
-- unknown tool names and registered but unimplemented tool names return explicit failed tool results paired to the original tool call so the model can continue the turn
+- unknown tool names and registered but unimplemented tool names return explicit
+  failed tool results paired to the original tool call with exact role-specific
+  tool-surface guidance, so the model can continue the turn without guessing
+  schema/tool names
 - runtime system errors, including provider transport errors after retry exhaustion, persistence failures, metadata failures, checkpoint infrastructure failures, and provider-output apply failures, remain explicit terminal bridge errors and are not converted into tool results
 - provider executor transport failures materialize `ErrorErr01RuntimeClassified` plus failed terminal truth with the concrete provider error code through the active turn before returning dispatch failure, so UI/ADP clients see a closed failed turn instead of a hanging active turn
 - provider-output apply failures from `reason.turn` are returned as explicit `RuntimeLiveBridgeError::ProviderOutputApplyFailed`

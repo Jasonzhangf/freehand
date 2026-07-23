@@ -133,6 +133,9 @@ class AndroidApkUpdater(
         connection.connectTimeout = HTTP_TIMEOUT_MS
         connection.readTimeout = HTTP_TIMEOUT_MS
         connection.requestMethod = "GET"
+        connection.useCaches = false
+        connection.setRequestProperty("Cache-Control", "no-cache")
+        connection.setRequestProperty("Pragma", "no-cache")
         try {
             val status = connection.responseCode
             if (status !in 200..299) {

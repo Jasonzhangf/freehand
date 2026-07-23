@@ -25,7 +25,7 @@
 - Removed top-level transport/relay/alternate-endpoint fields fail explicitly; relay is allowed only as a daemon endpoint inside `remote_registry` with an account relay URL.
 - `MainActivity` immediately loads the canonical daemon WebUI URL from `HostConfig.webUiUrl`: `http://<host>:<port>/?client=android-webview`; daemon HTML and no-store asset URLs own WebUI versioning, not a hardcoded Android query parameter.
 - If startup intent is `ACTION_VIEW` with a supported daemon import deep link, `MainActivity` imports the bootstrap bundle into app-owned config before WebView navigation.
-- `AndroidApkUpdater::checkForUpdateAsync` checks `HostConfig.updateManifestUrl` in the background against the installed `BuildConfig.VERSION_CODE`; current or missing updates do not block canonical WebUI loading.
+- `AndroidApkUpdater::checkForUpdateAsync` checks `HostConfig.updateManifestUrl` in the background against the installed `BuildConfig.VERSION_CODE`; current versions and explicit manifest-route failures are observable status outcomes and do not block canonical WebUI loading.
 - `MainActivity.AndroidApkUpdateBridge::check` exposes a single Android-only Settings trigger to the daemon WebUI; the bridge starts the same updater path and never implements version comparison, download, or install policy in JavaScript.
 - `MainActivity` records the latest APK update status and replays it after page load so startup auto-check and manual Settings checks remain observable in the WebUI.
 - `MainActivity` renders a neutral native startup overlay before WebView navigation and removes it only after `WebUiStartupGate` accepts the canonical Android WebUI shell plus stylesheet and module-JavaScript readiness probe.
@@ -50,7 +50,7 @@
 
 - Config parse/load errors are fatal Android startup errors.
 - Unknown or removed config fields are errors; Android does not ignore or migrate them.
-- APK update manifest parse errors, non-positive versions, non-http absolute APK URLs, HTTP failures, empty APK downloads, or installer handoff errors are explicit `FreehandApkUpdate` logcat failures and do not pretend the app upgraded.
+- APK update manifest route failures, parse errors, non-positive versions, non-http absolute APK URLs, HTTP failures, empty APK downloads, or installer handoff errors are explicit `FreehandApkUpdate` logcat failures and do not pretend the app upgraded or is current.
 - A concurrent Settings click while an update check is already running returns `already_checking` instead of launching a duplicate check; the last recorded status remains replayable to the WebUI.
 - Unsupported bootstrap kind/schema, malformed base64/JSON, expired bootstrap, missing credential, unknown daemon endpoint, relay endpoint without account relay URL, or unsupported endpoint kind is an explicit Android startup/import error.
 - Network/WebView load failures remain WebView failures. Android does not render native fallback UI.
@@ -91,5 +91,5 @@
 - `bridge.html`, Android ADP/SSE/HTTP command transports, native projector, native drawer/composer/topbar/status components, and Android mock route/assets are removed.
 - App-owned config no longer carries ADP/query/command/subscription paths or top-level relay routing.
 - Android can import `remote_registry` bootstrap links and load a declared Tailscale/IPv4/IPv6/relay WebUI endpoint, but it does not own account directory truth, route scoring, live health probing, Tailscale OS connection, or relay tunnel semantics.
-- Android APK update route remains daemon release distribution truth; Android now owns only manifest check, APK cache download, status bridge, and system package-installer handoff, not a native update panel or silent install path.
+- Android APK update route remains daemon signed release distribution truth; Android now owns only manifest check, APK cache download, status bridge, and system package-installer handoff, not a native update panel, sidecar generation, signing, or silent install path.
 - Android file access startup prompting is landed as package permission truth plus logcat projection; it does not add a native product UI, does not silently grant permissions, and does not move daemon/Worker filesystem semantics into Android.

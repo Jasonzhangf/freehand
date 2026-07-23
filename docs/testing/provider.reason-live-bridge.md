@@ -10,7 +10,7 @@
 
 | resource operation | status | white-box | module black-box | project black-box |
 | --- | --- | --- | --- | --- |
-| `request_context.build_provider_request` | bound | `cargo test -p freehand-runtime live_bridge -- --nocapture` covers provider descriptor, request/tool/terminal metadata, schema retry, provider retry, provider retry backoff cancellation, tool re-entry, and master framework request-contract tests | `cargo test -p freehand-runtime live_bridge -- --nocapture` plus `cargo test -p freehand-runtime provider_retry_backoff_sleep_observes_live_cancel_token -- --nocapture` cover selected provider bridge smokes for text/tool/writable/checkpoint/schema/provider-retry/task-tool paths and interruptible retry wait | `scripts/verify-provider-retry-online.sh` covers CLI/daemon live bridge proof through provider -> reason -> tool -> persistence -> UI projection for provider retry behavior |
+| `request_context.build_provider_request` | bound | `cargo test -p freehand-runtime live_bridge -- --nocapture` covers provider descriptor, request/tool/terminal metadata, schema retry, provider retry, provider retry backoff cancellation, tool re-entry, and master framework request-contract tests | `cargo test -p freehand-runtime live_bridge -- --nocapture` plus `cargo test -p freehand-runtime provider_retry_backoff_sleep_observes_live_cancel_token -- --nocapture` cover selected provider bridge smokes for text/tool/writable/checkpoint/schema/provider-retry/task-tool paths and interruptible retry wait | `scripts/verify-provider-retry-online.sh` covers CLI/daemon live bridge proof through provider -> reason -> tool -> persistence -> UI projection for provider retry behavior; `scripts/verify-web-fetch-tool-online.mjs` covers Master concrete-URL `web_fetch` request building, tool execution, provider request re-entry, and final restore on S-profile `4042` |
 
 - lifecycle path under test:
   - selected config resolves one anthropic provider
@@ -80,6 +80,11 @@
     no-`status="all"` instruction before the original task; the live context
     path must not boot full TaskRuntime, replay scheduler facts, or page
     EventInbox just to build prompt context
+  - every Worker live round includes runtime tool guidance that names the exact
+    Worker-safe tool surface from `tool.registry`, including `web_fetch` for
+    known HTTP/HTTPS URLs, states that path tools are locked to the canonical
+    task cwd, forbids invented `shell`/`readlink`/`pwd`/`cat`/`find` calls, and
+    gives valid first-call patterns such as `ls` before `read_file`
   - master-task prompt contract, exposed `task` tool schema, tool field descriptions, dispatch conditions, workspace-boundary rule, concurrency/flow-control guidance, cross-workspace sample, and success/error/retry samples are present in the first provider request before any model task creation decision
   - master-task request contract tells the model every task call needs
     top-level `op`, shows valid create/assign examples, and says `target_cwd`
@@ -94,21 +99,37 @@
   - provider raw debug-ledger failure path is explicit and aborts the live bridge
   - registry-backed tool schema export path
   - registry-backed tool schema fingerprint reaches planner diagnostics
-  - master-safe tool schema export is framework-only: it includes `task` and
-    `timer`, and omits file/search/write tools, unsandboxed `bash`,
-    `todo_write`, and `complete_step`
-  - injected Master file/search/write, shell, `todo_write`, or `complete_step`
-    calls return one paired failed capability-boundary tool result that
-    instructs the model to use `task` with a worker; it does not execute, leak
-    file content, fail, or terminalize the turn
-  - `task` remains executable when the requested target cwd is outside the master
-    runtime home so the model can create and assign delegated work
-  - a hidden/forbidden `read_file` or `bash` call returns a paired failed tool
-    result with worker delegation guidance instead of executing
+  - master-safe tool schema export includes locked local workspace tools,
+    concrete-URL `web_fetch`, plus `task` and `timer`, and omits unsandboxed
+    `bash`, browser, broad `web_search`, `todo_write`, and `complete_step`
+  - in-cwd Master workspace tool calls execute through `tool.registry` and
+    re-enter the model with success/failure truth; cross-cwd workspace calls
+    return one paired failed workspace-boundary tool result that instructs the
+    model to use the current cwd or delegate with `task`, without leaking file
+    content, failing the provider turn, or terminalizing the turn
+  - Master `web_fetch` calls execute for concrete HTTP/HTTPS URLs through
+    `tool.registry`; injected Master shell, browser, broad `web_search`,
+    `todo_write`, or `complete_step` calls return one paired failed
+    capability-boundary tool result with exact local-vs-dispatch guidance and
+    no file-content leak
+  - `task` remains executable when the requested target cwd is outside the current
+    Master cwd so the model can create and assign delegated work
+  - a current-cwd `read_file` call succeeds, a cross-cwd `read_file` call returns
+    workspace-boundary guidance, and a hidden/forbidden `bash` call returns a
+    paired failed tool result with local-vs-dispatch guidance instead of executing
   - implemented registry read-only tool execution path
   - implemented registry read-only tool execution failure path returns `ToolResultStatus::Failed`, passes `is_error=true` to Anthropic, and lets the model continue to a later terminal schema
   - incomplete `tool_use` path returns `ToolResultStatus::Failed`, passes `is_error=true` to Anthropic, keeps `schema_rejections=0`, and lets the model continue to a later terminal schema
   - unknown tool-name execution path returns `ToolResultStatus::Failed`, passes `is_error=true` to Anthropic, and does not materialize failed terminal/error truth by itself
+  - Worker unknown-tool execution path returns role-specific failed
+    tool-result guidance with the exact Worker tool list and no raw tool-result
+    text in error-center metadata
+  - Worker external read/search/list boundary returns `Workspace boundary
+    denied` with locked-task-cwd guidance, `path_diagnostic` recovery language,
+    and no external file-content leak or external-read invitation
+  - Worker injected shell boundary returns the exact Worker tool list and
+    forbids shell/readlink-style probes instead of telling the model to inspect
+    external paths
   - registered but unimplemented tool-name execution path returns `ToolResultStatus::Failed`, passes `is_error=true` to Anthropic, and does not materialize failed terminal/error truth by itself
   - writable tool checkpoint creation and rewind-safe manifest/ledger path
   - previewless writable-tool rejection path
@@ -137,6 +158,9 @@
   - primary success does not call fallback, and adapter/callback/local invalid-config errors do not activate fallback
   - fallback retry exhaustion materializes exactly one failed closed turn with no active turn
   - tool execution result failure returns a paired failed tool result to the model, emits runtime-owned model-continuation waiting status, and can still end with a successful terminal schema
+  - failed tool-result metadata stores only owner/error classification; the full
+    recovery text stays in reason tool-result truth and provider re-entry,
+    never in metadata/debug side channels
   - repaired failed-tool logical turn remains fully visible in persisted/UI truth while future prompt context admits only the final repaired round by default
   - long master-task prompt admission preserves semantic payload while still reporting planner token diagnostics
   - long multi-round carryover admission preserves semantic payload while still reporting planner token diagnostics
@@ -147,7 +171,12 @@
   - cross-workspace master fixture first attempts direct workspace access, receives
     boundary guidance, then calls `task` to create and assign worker work without
     any direct master-side filesystem execution
-  - first provider request carries the master role, dispatch/no-dispatch boundary, workspace-boundary rule, multi-agent dispatch guidance, concurrency/flow-control guidance, task tool workflow, and the Codex-vs-Deepseek-reasonix cross-workspace sample without adding extra task/deep-research tools
+  - first provider request carries the master role, local-cwd direct-tool rule,
+    `web_fetch` known-URL rule, Worker capability surface,
+    dispatch/no-dispatch boundary, broad-search/browser missing-capability
+    boundary, workspace-boundary rule, multi-agent dispatch guidance,
+    concurrency/flow-control guidance, task tool workflow, and the
+    cross-workspace sample without adding extra task/deep-research tools
   - structured task execution fact results are rendered from Task Center event semantics before re-entering provider context
   - provider raw ledger path poisoning returns explicit `RuntimeLiveBridgeError::ReasonPersistenceFailed`
   - reason-turn provider-output apply failure returns explicit dispatch failure when the reason owner rejects mutation

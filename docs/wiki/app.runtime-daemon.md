@@ -19,7 +19,7 @@ Generated from `docs/mainline-calls/app.runtime-daemon.json`. Do not edit by han
 
 - daemon process accepts a host command to start the UI transport
 - daemon process accepts remote-relay [--bind HOST:PORT] to start a standalone account-scoped relay transport service
-- daemon process may be started by macOS launchd through the installed freehand-daemon-launchd wrapper
+- daemon process may be started by macOS launchd through the installed freehand-daemon-launchd wrapper with explicit Android update manifest/APK env paths staged under runtime home
 - each configured Worker process has an agent-specific launchd label, env file, stdout log, and stderr log; a shared workerS service is not the Worker pool
 - daemon bootstrap selects one agent from default config and creates one runtime dispatcher
 - daemon bootstrap routes Master mode to the runtime-backed UI host and Slave mode to the production Worker runner
@@ -41,7 +41,7 @@ Generated from `docs/mainline-calls/app.runtime-daemon.json`. Do not edit by han
 ## Response Mainline
 
 - daemon serves runtime-backed dispatch receipts over HTTP command ingress
-- daemon can run as a launchd user service with fixed WebUI bind, RunAtLoad, KeepAlive, explicit FREEHAND_DAEMON_BIN, and stdout/stderr logs under ~/.freehand/logs
+- daemon can run as a launchd user service with fixed WebUI bind, RunAtLoad, KeepAlive, explicit FREEHAND_DAEMON_BIN, explicit Android update manifest/APK paths, and stdout/stderr logs under ~/.freehand/logs
 - daemon serves query and continuous SSE projections from the runtime-owned shared UI state
 - daemon serves ADP WebSocket command/query/subscribe frames from the same runtime-owned shared UI state and runtime query port, so WebUI, Android, and CLI automation can use one control/status path
 - daemon Master host remains healthy when the background Master lifecycle runner stops or returns an owner-truth error; the error is printed to daemon stderr instead of being converted into a launchd process exit
@@ -64,7 +64,7 @@ Generated from `docs/mainline-calls/app.runtime-daemon.json`. Do not edit by han
 ## Error Mainline
 
 - invalid daemon CLI input returns explicit startup error
-- missing daemon env file, missing launchd wrapper env values, or missing executable daemon binary returns explicit wrapper startup error
+- missing daemon env file, missing launchd wrapper env values, missing executable daemon binary, or incomplete Android update distribution staging returns explicit startup/update-route error instead of silently serving stale APK version truth
 - runtime dispatcher bootstrap failure returns explicit daemon startup error
 - runtime checkpoint projection bootstrap failure returns explicit daemon startup error
 - corrupt checkpoint projection bootstrap truth returns explicit daemon startup error before transport serve
@@ -133,9 +133,10 @@ Generated from `docs/mainline-calls/app.runtime-daemon.json`. Do not edit by han
 | 07 | `handle_adp_socket` | `apps/freehand-server/src/lib.rs` | upgrade daemon-hosted ADP WebSocket connections into protocol-owned command/query/subscribe frame handling | WebSocket ADP frames plus shared protocol state plus dispatch port | ADP response frames and subscription events | WebUI/Android/CLI automation | protocol transport owner |  |  |  | bound |
 | 08 | `handle_adp_connection` | `apps/freehand-server/src/lib.rs` | serve protocol-owned ADP command/query/subscribe frames and matching subscription events on one connection | WebSocket ADP connection plus shared protocol state plus dispatch port | ADP response frames and subscription events | ADP socket route | protocol state and runtime dispatch port |  |  |  | bound |
 | 08a | `RuntimeCommandDispatcher::query_runtime` | `crates/freehand-runtime/src/lib.rs` | serve daemon-hosted read-only runtime query frames such as task list/history and error-center metadata | ADP query command | ADP query result or failure frame | shared ADP transport | runtime owner query bridge |  |  |  | bound |
-| 09 | `run_launchd_wrapper` | `scripts/freehand-daemon-launchd.sh` | load daemon env and exec the configured installed daemon binary on the fixed service bind | ~/.freehand/daemon.env | daemon process exec | macOS launchd | FREEHAND_DAEMON_BIN serve |  |  |  | bound |
+| 09 | `run_launchd_wrapper` | `scripts/freehand-daemon-launchd.sh` | load daemon env and exec the configured installed daemon binary plus Android update distribution env paths on the fixed service bind | ~/.freehand/daemon.env including FREEHAND_ANDROID_UPDATE_MANIFEST_PATH and FREEHAND_ANDROID_APK_PATH | daemon process exec | macOS launchd | FREEHAND_DAEMON_BIN serve |  |  |  | bound |
 | 09a | `sanitize_launchd_component` | `scripts/install-launchd.sh` | derive deterministic agent-specific Worker label, env, and log components | configured Worker agent id | launchd-safe identity component | launchd worker install and restart profiles | Worker service path builder |  |  |  | bound |
 | 09b | `enable_launchd_service` | `scripts/install-launchd.sh` | enable persistent production LaunchAgents unless an isolated verifier explicitly skips enable overrides | install or restart launchd profile | launchctl enable or no persistent override | launchd install and restart profiles | launchctl enable |  |  |  | bound |
+| 09c | `stage_android_update_dist_if_available / restart_s_profile_relay_if_enabled` | `scripts/install-launchd.sh` | stage complete Android update artifacts for Master launchd profiles when repo dist/android is present and keep S-profile relay synchronized | install or restart launchd profile plus repo dist/android artifacts | runtime-home Android update artifacts plus synchronized com.freehand.relayS restart or explicit failure | launchd install and restart profiles | filesystem and scripts/install-relay-launchd.sh |  |  |  | bound |
 | 09 | `handle_adp_socket / RuntimeCommandDispatcher::query_runtime` | `apps/freehand-server/src/lib.rs / crates/freehand-runtime/src/lib.rs` | serve daemon ADP task list/error-center query and subscribe surfaces from runtime owner truth | ADP task or error-center query/subscribe frame | ADP task/error-center query result or subscription event | daemon-hosted ADP client | shared WebUI transport plus runtime query/projection owner |  |  |  | bound |
 | 10 | `run_master_mode / monitor_master_lifecycle_runner` | `apps/freehand-daemon/src/main.rs` | run WebUI/ADP as the Master host lifetime while monitoring the background Master lifecycle runner stop/error without treating it as a daemon host crash | Master bootstrap plus bind plus lifecycle runner task | healthy HTTP/ADP host plus explicit stderr lifecycle-runner stop/error evidence | daemon CLI | shared WebUI transport plus ProductionMasterRunner::run_until |  |  |  | bound |
 | 11 | `handle_adp_socket / RuntimeCommandDispatcher::dispatch` | `apps/freehand-server/src/lib.rs / crates/freehand-runtime/src/lib.rs` | serve daemon ADP session CRUD and rollback commands through shared protocol transport and runtime owner dispatch | ADP session management command or session transcript query frame | ADP command receipt plus active/archived/effective transcript query projection | daemon-hosted ADP client | shared WebUI transport plus runtime.ui-command-dispatch |  |  |  | bound |
@@ -164,4 +165,5 @@ Generated from `docs/mainline-calls/app.runtime-daemon.json`. Do not edit by han
 - agent-specific launchd naming has a non-mutating executable fixture, isolated runtime proof starts three distinct Slave daemon processes, and launchd-managed three-service recovery is proven through KeepAlive restart plus AgentBoard restart-count truth
 - remote relay transport is bound in code: focused tests and scripts/verify-remote-relay-local-online.sh register a relay host, query the account directory, proxy upstream namespaced WebUI root/assets/query/health HTTP, proxy upstream /adp, and prove missing hosts return explicit relay_host_not_found
 - relay endpoint authRequired is directory/route metadata only in this slice; relay HTTP/ADP access authentication is not implemented or claimed, so exposure must remain on trusted local/Tailscale routes until a dedicated auth owner lands with negative online proof
+- S-profile launchd restart stages runtime-home Android update artifacts when repo dist/android is complete before restarting the synchronized relay service, so Android/WebView clients consume the current relay-served asset/update URL
 - generated wiki must be regenerated from `docs/mainline-calls/app.runtime-daemon.json` when this function-map truth changes

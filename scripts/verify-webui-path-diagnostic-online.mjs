@@ -19,7 +19,9 @@ const baseUrl = process.env.FREEHAND_WEBUI_PATH_BASE_URL || 'http://127.0.0.1:40
 const chromePath =
   process.env.FREEHAND_WEBUI_PATH_CHROME ||
   '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
-const parentSessionId = process.env.FREEHAND_WEBUI_PATH_PARENT_SESSION || 'webui-path-diagnostic-fixed-v2';
+const launchdHealthWaitSeconds =
+  process.env.FREEHAND_WEBUI_PATH_LAUNCHD_HEALTH_WAIT_SECONDS || '120';
+const parentSessionId = process.env.FREEHAND_WEBUI_PATH_PARENT_SESSION || 'webui-path-diagnostic-state-sync-fixed';
 const targetCwd = process.env.FREEHAND_WEBUI_PATH_TARGET_CWD || '/Users/fanzhang/github';
 const canonicalTargetCwd = process.env.FREEHAND_WEBUI_PATH_CANONICAL_CWD || '/Users/fanzhang/Documents/github';
 const requestedPath = process.env.FREEHAND_WEBUI_PATH_REQUESTED || '/Users/fanzhang/github/codex';
@@ -38,12 +40,36 @@ const artifactDir =
 
 const prompt = [
   'Master/Worker path diagnostic verification.',
+  `Verifier task id: ${taskId}`,
   `Check requested path: ${requestedPath}`,
   `Worker target_cwd must be: ${targetCwd}`,
   'Master must dispatch the work to a Worker and wait for Task Center truth; dispatch alone is not completion.',
   'Worker must use the built-in path tool to inspect the requested path. If the leaf is missing, report the tool-owned path_diagnostic instead of guessing that the symlink was not expanded.',
   `Acceptance: WebUI must show the TaskBoard-projected Worker, and the Worker session result must mention requested=${requestedPath}, nearest_existing_canonical=${canonicalTargetCwd}, and missing_suffix=${missingSuffix}.`,
 ].join('\n');
+
+const workerToolSchemaNames = [
+  'complete_step',
+  'delete_range',
+  'edit_file',
+  'glob',
+  'grep',
+  'ls',
+  'multi_edit',
+  'read_file',
+  'todo_write',
+  'write_file',
+];
+const forbiddenWorkerToolSchemaNames = [
+  'bash',
+  'shell',
+  'readlink',
+  'pwd',
+  'cat',
+  'find',
+  'task',
+  'timer',
+];
 
 let fixtureServer = null;
 let chrome = null;
@@ -58,12 +84,20 @@ const fixtureState = {
   workerRequests: [],
   masterStep: 0,
   workerStep: 0,
+  workerGuidanceChecks: {},
+  workerFirstRequestToolSchemas: [],
   secondHadToolResult: false,
   secondHadDiagnostic: false,
   secondBodyLength: 0,
   diagnosticChecks: {},
   masterLifecycleAppendRequested: false,
   masterLifecycleAppendChecks: {},
+  parentBlockedFollowUpRequested: false,
+  parentBlockedFollowUpRequestCount: 0,
+  parentBlockedFollowUpChecks: {},
+  unexpectedMasterRequests: [],
+  outOfScopeMasterRequests: [],
+  outOfScopeWorkerRequests: [],
 };
 const webuiEvidence = {
   headerTree: null,
@@ -232,6 +266,50 @@ async function prepareFixedSession() {
     '--cwd',
     targetCwd,
   ]);
+  await rollbackFixedSessionTranscript();
+}
+
+async function rollbackFixedSessionTranscript() {
+  const evidence = [];
+  for (let attempt = 1; attempt <= 20; attempt += 1) {
+    const turns = await querySessionTurns(parentSessionId, `prepare-fixed-session-turns-${attempt}`);
+    const turnIds = (turns.turns || []).map((turn) => turn.turn_id).filter(Boolean);
+    evidence.push({ attempt, turnIds });
+    if (turnIds.length === 0) {
+      await fs.writeFile(
+        path.join(artifactDir, 'fixed-session-reset.json'),
+        JSON.stringify({ parentSessionId, evidence }, null, 2),
+      );
+      return;
+    }
+    const rollback = await run([
+      cli,
+      'adp-session-manage',
+      '--url',
+      adpUrl,
+      '--action',
+      'rollback',
+      '--session',
+      parentSessionId,
+    ]);
+    evidence[evidence.length - 1].rollback = {
+      code: rollback.code,
+      stdout: rollback.stdout.trim(),
+      stderr: rollback.stderr.trim(),
+    };
+    if (rollback.code !== 0) {
+      await fs.writeFile(
+        path.join(artifactDir, 'fixed-session-reset.json'),
+        JSON.stringify({ parentSessionId, evidence }, null, 2),
+      );
+      throw new Error(`fixed session rollback failed: ${rollback.stderr || rollback.stdout}`);
+    }
+  }
+  await fs.writeFile(
+    path.join(artifactDir, 'fixed-session-reset.json'),
+    JSON.stringify({ parentSessionId, evidence }, null, 2),
+  );
+  throw new Error(`fixed session reset exceeded rollback limit for ${parentSessionId}`);
 }
 
 async function runWebUiSubmitAndInspect() {
@@ -315,26 +393,43 @@ async function runWebUiSubmitAndInspect() {
     'Master provider waiting completion after task assignment',
   );
   await waitForParentCurrentTaskWaiting(180000);
+  await refreshWebUiState();
+  const parentWaitingTruth = await waitForParentCurrentTaskWaiting(30000);
+  await fs.writeFile(path.join(artifactDir, 'parent-waiting-truth.json'), JSON.stringify(parentWaitingTruth, null, 2));
+  const parentWaitingDom = await readLifecycleDom();
+  await fs.writeFile(path.join(artifactDir, 'webui-parent-waiting-dom.json'), JSON.stringify(parentWaitingDom, null, 2));
   await waitForFixtureState(
     () => fixtureState.masterLifecycleAppendRequested,
-    60000,
+    180000,
     'Master lifecycle append after Worker blocked',
   );
-  await waitForTaskHistoryEvent('TaskProgressed', 60000);
+  await waitForTaskHistoryEvent('TaskProgressed', 180000);
+  await waitForFixtureState(
+    () => fixtureState.parentBlockedFollowUpRequested,
+    180000,
+    'Master parent blocked follow-up after persisted blocked decision',
+  );
+  const parentBlockedTurn = await waitForParentBlockedFollowUp(120000);
   await refreshWebUiState();
+  await waitForParentBlockedInDom(30000);
   await screenshot(cdp, path.join(artifactDir, '03-parent-after-worker-blocked.png'));
   const parentDom = await readLifecycleDom();
   await fs.writeFile(path.join(artifactDir, 'webui-parent-dom.json'), JSON.stringify(parentDom, null, 2));
-  if (parentDom.selectedSession !== parentSessionId || parentDom.selectedTerminalStatus !== 'toolpending') {
-    throw new Error(`parent DOM did not select current ToolPending parent turn: ${JSON.stringify(parentDom)}`);
+  if (parentDom.selectedSession !== parentSessionId || parentDom.selectedTerminalStatus !== 'blocked') {
+    throw new Error(`parent DOM did not select current blocked parent follow-up turn: ${JSON.stringify(parentDom)}`);
   }
   if (
-    !parentDom.turnStatus.toLowerCase().includes('waiting') ||
-    !parentDom.assistantStatus.toLowerCase().includes('waiting') ||
-    !parentDom.finalStatus.toLowerCase().includes('running') ||
-    !parentDom.messageText.includes(`Waiting for lifecycle: Inspect TaskBoard/TaskHistory for ${taskId}`)
+    !parentDom.turnStatus.toLowerCase().includes('blocked') ||
+    !parentDom.assistantStatus.toLowerCase().includes('blocked') ||
+    !parentDom.finalStatus.toLowerCase().includes('blocked') ||
+    !parentDom.messageText.includes(`Parent blocked follow-up for ${taskId}`) ||
+    !parentDom.selectedCycleTimingText.includes('first response') ||
+    !parentDom.selectedCycleTimingText.includes('total')
   ) {
-    throw new Error(`parent DOM misrepresented dispatched-but-waiting lifecycle as completed: ${JSON.stringify(parentDom)}`);
+    throw new Error(`parent DOM did not render blocked follow-up as terminal observable state: ${JSON.stringify(parentDom)}`);
+  }
+  if (`${parentBlockedTurn.terminal_status || ''}` !== 'Blocked') {
+    throw new Error(`parent blocked follow-up truth is not terminal Blocked: ${JSON.stringify(parentBlockedTurn)}`);
   }
 
   await waitForFunction(
@@ -470,7 +565,7 @@ async function runWebUiSubmitAndInspect() {
   });
   await waitForFunction(
     cdp,
-    (sessionId) => {
+    (sessionId, expectedTaskId) => {
       const shell = document.querySelector('[data-webui-shell="true"]');
       const text = document.getElementById('message-list')?.innerText || '';
       const lowerText = text.toLowerCase();
@@ -479,11 +574,12 @@ async function runWebUiSubmitAndInspect() {
       return shell?.dataset.selectedSession === sessionId &&
         document.getElementById('worker-session-nav')?.hidden === true &&
         !loading &&
-        text.includes('Waiting for lifecycle:');
+        text.includes(`Parent blocked follow-up for ${expectedTaskId}`);
     },
     20000,
     'returned to fixed parent session with loaded transcript',
     parentSessionId,
+    taskId,
   );
   await screenshot(cdp, path.join(artifactDir, '06-returned-parent.png'));
   const returnedParentDom = await readLifecycleDom();
@@ -568,6 +664,8 @@ async function readLifecycleDom() {
   return evalInPage(cdp, () => {
     const shell = document.querySelector('[data-webui-shell="true"]');
     const selectedTurn = shell?.dataset.selectedTurn || '';
+    const selectedCycle = Array.from(document.querySelectorAll('.turn-cycle-card'))
+      .find((node) => node.dataset.turnId === selectedTurn) || null;
     const selectedAssistant = Array.from(document.querySelectorAll('.chat-message-assistant'))
       .find((node) => node.dataset.turnId === selectedTurn) || null;
     return {
@@ -578,6 +676,14 @@ async function readLifecycleDom() {
       assistantStatus: selectedAssistant?.querySelector('.chat-state-pill')?.textContent?.trim() || '',
       finalStatus: selectedAssistant?.querySelector('.chat-section-final .chat-row-status')?.textContent?.trim() || '',
       messageText: document.getElementById('message-list')?.innerText || '',
+      selectedCycleTimingText: selectedCycle?.querySelector('.turn-cycle-header-pill[data-label="timing"]')?.textContent || '',
+      selectedCycleTimeText: selectedCycle?.querySelector('.turn-cycle-header-pill[data-label="time"]')?.textContent || '',
+      selectedCycleTimeToFirstResponseMs: selectedCycle?.dataset.timeToFirstResponseMs || '',
+      selectedCycleTotalElapsedMs: selectedCycle?.dataset.totalElapsedMs || '',
+      mobileAgentTitle: document.getElementById('mobile-agent-summary-title')?.textContent || '',
+      mobileAgentCopy: document.getElementById('mobile-agent-summary-copy')?.textContent || '',
+      sessionRelationMetrics: document.getElementById('session-relation-metrics')?.textContent || '',
+      sessionRelationCopy: document.getElementById('session-relation-copy')?.textContent || '',
       workerNavHidden: document.getElementById('worker-session-nav')?.hidden ?? true,
     };
   });
@@ -591,7 +697,10 @@ async function refreshWebUiState() {
     cdp,
     () => {
       const status = document.getElementById('command-status')?.textContent || '';
-      return status.includes('selected session refreshed') || status.includes('task status refresh failed') || status.length > 0;
+      if (status.includes('task status refresh failed') || status.includes('selected session refresh failed')) {
+        throw new Error(status);
+      }
+      return status.includes('selected session refreshed');
     },
     30000,
     'WebUI selected session refresh',
@@ -615,13 +724,11 @@ async function waitForParentCurrentTaskWaiting(timeoutMs) {
   const deadline = Date.now() + timeoutMs;
   let last = null;
   while (Date.now() < deadline) {
-    const turns = (await queryAdp(
-      { QuerySessionTurns: { session_id: parentSessionId } },
-      'wait-parent-current-task-waiting',
-    )).SessionTurns;
+    const turns = await querySessionTurns(parentSessionId, 'wait-parent-current-task-waiting');
     last = turns;
-    if (findParentWaitingTurn(turns)) {
-      return;
+    const waitingTurn = findParentWaitingTurn(turns);
+    if (waitingTurn) {
+      return waitingTurn;
     }
     await delay(1000);
   }
@@ -632,12 +739,62 @@ async function waitForParentCurrentTaskWaiting(timeoutMs) {
   throw new Error(`parent session never closed current ${taskId} dispatch as claim=waiting`);
 }
 
+async function waitForParentBlockedFollowUp(timeoutMs) {
+  const deadline = Date.now() + timeoutMs;
+  let last = null;
+  while (Date.now() < deadline) {
+    const turns = await querySessionTurns(parentSessionId, 'wait-parent-blocked-follow-up');
+    last = turns;
+    const blockedTurn = findParentBlockedFollowUpTurn(turns);
+    if (blockedTurn) {
+      return blockedTurn;
+    }
+    await delay(1000);
+  }
+  await fs.writeFile(
+    path.join(artifactDir, 'parent-blocked-follow-up-timeout.json'),
+    JSON.stringify(last, null, 2),
+  );
+  throw new Error(`parent session never projected blocked follow-up for ${taskId}`);
+}
+
+async function waitForParentBlockedInDom(timeoutMs) {
+  await waitForFunction(
+    cdp,
+    (sessionId, expectedTaskId) => {
+      const shell = document.querySelector('[data-webui-shell="true"]');
+      const selectedTurn = shell?.dataset.selectedTurn || '';
+      const text = document.getElementById('message-list')?.innerText || '';
+      const lowerText = text.toLowerCase();
+      const loading = lowerText.includes('loading conversation') ||
+        lowerText.includes('loading selected session transcript');
+      const selectedCycle = Array.from(document.querySelectorAll('.turn-cycle-card'))
+        .find((node) => node.dataset.turnId === selectedTurn) || null;
+      const timing = selectedCycle?.querySelector('.turn-cycle-header-pill[data-label="timing"]')?.textContent || '';
+      const mobileTitle = document.getElementById('mobile-agent-summary-title')?.textContent || '';
+      const mobileCopy = document.getElementById('mobile-agent-summary-copy')?.textContent || '';
+      return shell?.dataset.selectedSession === sessionId &&
+        shell?.dataset.selectedTerminalStatus === 'blocked' &&
+        !loading &&
+        text.includes(`Parent blocked follow-up for ${expectedTaskId}`) &&
+        timing.includes('first response') &&
+        timing.includes('total') &&
+        !/\btoolpending\b/i.test(mobileTitle) &&
+        !/\bactive Master\b/i.test(mobileCopy);
+    },
+    timeoutMs,
+    'parent blocked follow-up visible in DOM with timing header',
+    parentSessionId,
+    taskId,
+  );
+}
+
 async function waitForTaskStatus(expectedStatus, timeoutMs) {
   const deadline = Date.now() + timeoutMs;
   let last = null;
   while (Date.now() < deadline) {
-    const board = await queryAdp({ QueryTaskBoard: { include_terminal: true } }, 'wait-task-board');
-    const task = ((board.TaskBoard && board.TaskBoard.tasks) || []).find((candidate) => candidate.task_id === taskId);
+    const board = await queryTaskBoard('wait-task-board');
+    const task = ((board && board.tasks) || []).find((candidate) => candidate.task_id === taskId);
     last = task || board;
     if (task && `${task.status || ''}`.toLowerCase() === expectedStatus) {
       return task;
@@ -651,7 +808,7 @@ async function waitForTaskHistoryEvent(expectedEventType, timeoutMs) {
   const deadline = Date.now() + timeoutMs;
   let last = null;
   while (Date.now() < deadline) {
-    const history = (await queryAdp({ QueryTaskHistory: { task_id: taskId } }, 'wait-task-history')).TaskHistory;
+    const history = await queryTaskHistory(taskId, 'wait-task-history');
     const events = (history.events || []).map((event) => event.event_type);
     last = events;
     if (events.includes(expectedEventType)) {
@@ -663,7 +820,7 @@ async function waitForTaskHistoryEvent(expectedEventType, timeoutMs) {
 }
 
 async function collectTruth() {
-  const taskBoard = (await queryAdp({ QueryTaskBoard: { include_terminal: true } }, 'final-task-board')).TaskBoard;
+  const taskBoard = await queryTaskBoard('final-task-board');
   const task = (taskBoard.tasks || []).find((candidate) => candidate.task_id === taskId);
   if (!task) {
     throw new Error(`expected task missing from TaskBoard: ${taskId}`);
@@ -674,9 +831,9 @@ async function collectTruth() {
     );
   }
   const workerSessionId = task.worker_session_id;
-  const taskHistory = (await queryAdp({ QueryTaskHistory: { task_id: taskId } }, 'final-task-history')).TaskHistory;
-  const parentTurns = (await queryAdp({ QuerySessionTurns: { session_id: parentSessionId } }, 'final-parent-turns')).SessionTurns;
-  const workerTurns = (await queryAdp({ QuerySessionTurns: { session_id: workerSessionId } }, 'final-worker-turns')).SessionTurns;
+  const taskHistory = await queryTaskHistory(taskId, 'final-task-history');
+  const parentTurns = await querySessionTurns(parentSessionId, 'final-parent-turns');
+  const workerTurns = await querySessionTurns(workerSessionId, 'final-worker-turns');
   const events = (taskHistory.events || []).map((event) => event.event_type);
   if (!(parentTurns.turns || []).some((turn) => turn.user_text === prompt)) {
     throw new Error(`parent session does not contain the WebUI-submitted prompt: ${JSON.stringify(parentTurns)}`);
@@ -701,13 +858,31 @@ async function collectTruth() {
   if (!events.includes('TaskProgressed') || !fixtureState.masterLifecycleAppendRequested) {
     throw new Error(`Master lifecycle did not persist a blocked decision through task append: events=${events.join(',')} fixture=${JSON.stringify(fixtureState)}`);
   }
+  const parentBlockedTurn = findParentBlockedFollowUpTurn(parentTurns);
+  if (!parentBlockedTurn) {
+    throw new Error(`parent session did not project a terminal blocked follow-up after blocked_decision: ${JSON.stringify(parentTurns)}`);
+  }
+  const latestParentTurn = (parentTurns.turns || [])[parentTurns.turns.length - 1] || {};
+  if (latestParentTurn.turn_id !== parentBlockedTurn.turn_id || `${latestParentTurn.terminal_status || ''}` !== 'Blocked') {
+    throw new Error(`latest parent turn must be blocked follow-up, not stale waiting: latest=${JSON.stringify(latestParentTurn)} blocked=${JSON.stringify(parentBlockedTurn)}`);
+  }
+  if (
+    !parentBlockedTurn.timing ||
+    typeof parentBlockedTurn.timing.time_to_first_response_ms !== 'number' ||
+    typeof parentBlockedTurn.timing.total_elapsed_ms !== 'number'
+  ) {
+    throw new Error(`parent blocked follow-up is missing durable timing fields: ${JSON.stringify(parentBlockedTurn)}`);
+  }
   if (!fixtureState.secondHadToolResult || !fixtureState.secondHadDiagnostic) {
     throw new Error(`fixture did not observe diagnostic tool_result in second worker request: ${JSON.stringify(fixtureState)}`);
   }
-  if (fixtureState.masterRequests.length !== 4) {
-    throw new Error(`Master fixture must do exactly create, assign, waiting, and blocked-decision append: ${JSON.stringify(fixtureState)}`);
+  if (!Object.values(fixtureState.workerGuidanceChecks || {}).every((value) => value === true)) {
+    throw new Error(`fixture did not observe hard Worker tool guidance/schema contract in first worker request: ${JSON.stringify(fixtureState)}`);
   }
-  return { taskBoard, task, taskHistory, parentTurns, parentWaitingTurn, workerTurns, workerSessionId };
+  if (!fixtureState.parentBlockedFollowUpRequested) {
+    throw new Error(`Master fixture did not observe parent blocked follow-up request: ${JSON.stringify(fixtureState)}`);
+  }
+  return { taskBoard, task, taskHistory, parentTurns, parentWaitingTurn, parentBlockedTurn, workerTurns, workerSessionId };
 }
 
 function buildSummary(truth) {
@@ -774,12 +949,20 @@ function buildSummary(truth) {
     fixture: {
       masterRequests: fixtureState.masterRequests.length,
       workerRequests: fixtureState.workerRequests.length,
+      workerFirstRequestToolSchemas: fixtureState.workerFirstRequestToolSchemas,
+      workerGuidanceChecks: fixtureState.workerGuidanceChecks,
       secondHadToolResult: fixtureState.secondHadToolResult,
       secondHadDiagnostic: fixtureState.secondHadDiagnostic,
       secondBodyLength: fixtureState.secondBodyLength,
       diagnosticChecks: fixtureState.diagnosticChecks,
       masterLifecycleAppendRequested: fixtureState.masterLifecycleAppendRequested,
       masterLifecycleAppendChecks: fixtureState.masterLifecycleAppendChecks,
+      parentBlockedFollowUpRequested: fixtureState.parentBlockedFollowUpRequested,
+      parentBlockedFollowUpRequestCount: fixtureState.parentBlockedFollowUpRequestCount,
+      parentBlockedFollowUpChecks: fixtureState.parentBlockedFollowUpChecks,
+      unexpectedMasterRequests: fixtureState.unexpectedMasterRequests,
+      outOfScopeMasterRequests: fixtureState.outOfScopeMasterRequests,
+      outOfScopeWorkerRequests: fixtureState.outOfScopeWorkerRequests,
     },
     taskStatus: truth.task.status,
     taskEvents,
@@ -788,6 +971,12 @@ function buildSummary(truth) {
       turnId: truth.parentWaitingTurn.turn_id,
       terminalStatus: truth.parentWaitingTurn.terminal_status,
       terminalText: truth.parentWaitingTurn.terminal_text || '',
+    },
+    parentBlockedTurn: {
+      turnId: truth.parentBlockedTurn.turn_id,
+      terminalStatus: truth.parentBlockedTurn.terminal_status,
+      terminalText: truth.parentBlockedTurn.terminal_text || '',
+      timing: truth.parentBlockedTurn.timing || null,
     },
     workerTurnStatuses: workerTurns.map((turn) => `${turn.turn_id}:${turn.terminal_status}`),
     workerTerminalText: workerTerminal.terminal_text || '',
@@ -800,6 +989,27 @@ function buildSummary(truth) {
       taskBlockedInOwnerTruth: truth.task.status === 'blocked' && taskEvents.includes('TaskBlocked'),
       masterLifecyclePersistedBlockedDecision: taskEvents.includes('TaskProgressed') &&
         fixtureState.masterLifecycleAppendRequested,
+      parentLatestTurnIsBlockedFollowUp: truth.parentBlockedTurn.turn_id ===
+        ((parentTurns[parentTurns.length - 1] || {}).turn_id || '') &&
+        `${truth.parentBlockedTurn.terminal_status || ''}` === 'Blocked',
+      parentBlockedFollowUpHasDurableTiming: !!truth.parentBlockedTurn.timing &&
+        typeof truth.parentBlockedTurn.timing.time_to_first_response_ms === 'number' &&
+        typeof truth.parentBlockedTurn.timing.total_elapsed_ms === 'number',
+      parentBlockedFollowUpRenderedTimingHeader: webuiEvidence.returnedParentDom?.selectedCycleTimingText?.includes('first response') &&
+        webuiEvidence.returnedParentDom?.selectedCycleTimingText?.includes('total'),
+      parentBlockedFollowUpMobileSummaryNotStale:
+        !/\btoolpending\b/i.test(webuiEvidence.returnedParentDom?.mobileAgentTitle || '') &&
+        !/\btoolpending\b/i.test(webuiEvidence.returnedParentDom?.sessionRelationMetrics || '') &&
+        !/\bactive Master\b/i.test(webuiEvidence.returnedParentDom?.mobileAgentCopy || '') &&
+        !/\bactive Master\b/i.test(webuiEvidence.returnedParentDom?.sessionRelationCopy || '') &&
+        !(webuiEvidence.returnedParentDom?.mobileAgentTitle || '').includes(truth.parentWaitingTurn.turn_id) &&
+        !(webuiEvidence.returnedParentDom?.sessionRelationMetrics || '').includes(truth.parentWaitingTurn.turn_id),
+      masterFixtureHadExactRequestLifecycle: fixtureState.masterRequests.length === 5 &&
+        fixtureState.masterStep === 5 &&
+        fixtureState.parentBlockedFollowUpRequestCount === 1 &&
+        fixtureState.unexpectedMasterRequests.length === 0,
+      fixtureFirstWorkerRequestHadHardToolGuidance:
+        Object.values(fixtureState.workerGuidanceChecks || {}).every((value) => value === true),
       workerSessionPersistedBlockedDiagnostic: `${workerTerminal.terminal_status || ''}` === 'Blocked' &&
         `${workerTerminal.terminal_text || ''}`.includes(requestedPath) &&
         `${workerTerminal.terminal_text || ''}`.includes(canonicalTargetCwd),
@@ -829,9 +1039,36 @@ function buildSummary(truth) {
 
 function findParentWaitingTurn(parentTurns) {
   return (parentTurns.turns || []).find((turn) =>
-    turn.user_text === prompt &&
     `${turn.terminal_status || ''}` === 'ToolPending' &&
     `${turn.terminal_text || ''}`.includes(taskId),
+  );
+}
+
+function findParentBlockedFollowUpTurn(parentTurns) {
+  return (parentTurns.turns || []).find((turn) =>
+    `${turn.terminal_status || ''}` === 'Blocked' &&
+    `${turn.terminal_text || ''}`.includes(`Parent blocked follow-up for ${taskId}`),
+  );
+}
+
+async function waitForCurrentParentRunInDom(timeoutMs) {
+  await waitForFunction(
+    cdp,
+    (sessionId, expectedTaskId) => {
+      const shell = document.querySelector('[data-webui-shell="true"]');
+      const text = document.getElementById('message-list')?.innerText || '';
+      const lowerText = text.toLowerCase();
+      const loading = lowerText.includes('loading conversation') ||
+        lowerText.includes('loading selected session transcript');
+      return shell?.dataset.selectedSession === sessionId &&
+        shell?.dataset.selectedTerminalStatus === 'toolpending' &&
+        !loading &&
+        text.includes(`Waiting for lifecycle: Inspect TaskBoard/TaskHistory for ${expectedTaskId}`);
+    },
+    timeoutMs,
+    'current fixed-session parent run visible in DOM',
+    parentSessionId,
+    taskId,
   );
 }
 
@@ -875,14 +1112,65 @@ async function startFixtureServer(port) {
 }
 
 function nextMasterResponse(body) {
+  const lastUserText = anthropicLastUserText(body);
+  const lastUserHasParentBlockedFollowUp = lastUserText.includes('<freehand_parent_blocked_follow_up');
+  const lastUserHasCurrentTaskId = lastUserText.includes(taskId);
+  const outOfScopeParentFollowUp = lastUserHasParentBlockedFollowUp && !lastUserHasCurrentTaskId;
+  if (!body.includes(taskId) || outOfScopeParentFollowUp) {
+    fixtureState.outOfScopeMasterRequests.push({
+      requestIndex: fixtureState.outOfScopeMasterRequests.length + 1,
+      bodyLength: body.length,
+      hasPrompt: body.includes(requestedPath),
+      hasParentSessionId: body.includes(parentSessionId),
+      hasTaskId: body.includes(taskId),
+      lastUserHasTaskId: lastUserHasCurrentTaskId,
+      lastUserHasParentBlockedFollowUp,
+    });
+    return anthropicText(
+      [
+        'Out-of-scope Master fixture request ignored by the current verifier run.',
+        completionBlock({
+          claim: 'blocked',
+          blocked_reason: 'out-of-scope fixture request did not include the current verifier task id',
+        }),
+      ].join('\n'),
+    );
+  }
+  const currentParentBlockedFollowUp = lastUserHasParentBlockedFollowUp && lastUserHasCurrentTaskId;
   fixtureState.masterRequests.push({
-    step: fixtureState.masterStep + 1,
+    requestIndex: fixtureState.masterRequests.length + 1,
+    step: currentParentBlockedFollowUp ? 'parent_blocked_follow_up' : fixtureState.masterStep + 1,
     bodyLength: body.length,
     hasPrompt: body.includes(requestedPath),
     isLifecycleCoordinator: body.includes('production Master lifecycle coordinator'),
     hasTaskBlocked: body.includes('TaskBlocked') || body.includes('execution_blocked'),
     hasAttentionResolution: body.includes('freehand_attention_resolution'),
+    currentParentBlockedFollowUp,
   });
+  if (currentParentBlockedFollowUp) {
+    return nextParentBlockedFollowUpResponse(body);
+  }
+  if (fixtureState.masterStep >= 5) {
+    fixtureState.unexpectedMasterRequests.push({
+      requestIndex: fixtureState.masterRequests.length,
+      bodyLength: body.length,
+      masterStep: fixtureState.masterStep,
+      hasPrompt: body.includes(requestedPath),
+      hasTaskBlocked: body.includes('TaskBlocked') || body.includes('execution_blocked'),
+      hasAttentionResolution: body.includes('freehand_attention_resolution'),
+      lastUserHasParentBlockedFollowUp: lastUserText.includes('<freehand_parent_blocked_follow_up'),
+    });
+    return anthropicText(
+      [
+        `Parent blocked follow-up for ${taskId}: unexpected extra Master fixture request after the terminal blocked follow-up.`,
+        'The verifier will fail masterFixtureHadExactRequestLifecycle; this response exists only to avoid manufacturing provider retry noise.',
+        completionBlock({
+          claim: 'blocked',
+          blocked_reason: `unexpected extra Master fixture request after terminal blocked follow-up for ${taskId}`,
+        }),
+      ].join('\n'),
+    );
+  }
   fixtureState.masterStep += 1;
   if (fixtureState.masterStep === 1) {
     return anthropicToolUse('toolu_webui_path_create', 'task', {
@@ -950,12 +1238,119 @@ function nextMasterResponse(body) {
       ].join(' '),
     });
   }
+  if (fixtureState.masterStep === 5) {
+    return nextParentBlockedFollowUpResponse(body);
+  }
   throw new Error(`master sequence exhausted at step ${fixtureState.masterStep}`);
 }
 
+function nextParentBlockedFollowUpResponse(body) {
+  const checks = {
+    parentBlockedFollowUp: body.includes('<freehand_parent_blocked_follow_up'),
+    originalObjective: body.includes('Master/Worker path diagnostic verification'),
+    taskId: body.includes(taskId),
+    taskBlocked: body.includes('"status": "blocked"') || body.includes('TaskBlocked') || body.includes('blocked'),
+    blockedDecision: body.includes('blocked_decision: Worker path diagnostic proves'),
+    requested: body.includes(requestedPath),
+    nearestExistingCanonical: body.includes(canonicalTargetCwd),
+    missingSuffix: body.includes(missingSuffix),
+    blockedDecisionAppendObserved: fixtureState.masterLifecycleAppendRequested,
+  };
+  fixtureState.parentBlockedFollowUpChecks = checks;
+  fixtureState.parentBlockedFollowUpRequestCount += 1;
+  if (!fixtureState.masterLifecycleAppendRequested) {
+    fixtureState.unexpectedMasterRequests.push({
+      requestIndex: fixtureState.masterRequests.length,
+      kind: 'parent_blocked_follow_up_before_blocked_decision_append',
+      bodyLength: body.length,
+    });
+    return anthropicText(
+      [
+        `Parent blocked follow-up for ${taskId}: unexpected parent follow-up before Master persisted blocked_decision.`,
+        'The verifier will fail masterFixtureHadExactRequestLifecycle; this response exists only to avoid manufacturing provider retry noise.',
+        completionBlock({
+          claim: 'blocked',
+          blocked_reason: `parent blocked follow-up was requested before blocked_decision append for ${taskId}`,
+        }),
+      ].join('\n'),
+    );
+  }
+  if (!Object.values(checks).every(Boolean)) {
+    throw new Error(`parent blocked follow-up request missing blocker truth: ${JSON.stringify(checks)}`);
+  }
+  fixtureState.parentBlockedFollowUpRequested = true;
+  fixtureState.masterStep = Math.max(fixtureState.masterStep, 5);
+  return anthropicText(
+    [
+      `Parent blocked follow-up for ${taskId}: the Worker is blocked on requested=${requestedPath}.`,
+      `Worker evidence includes nearest_existing_canonical=${canonicalTargetCwd} and missing_suffix=${missingSuffix}.`,
+      'Required external action: provide or create the requested repository path before retrying; no Worker is still running for this task.',
+      completionBlock({
+        claim: 'blocked',
+        blocked_reason: `Parent blocked follow-up for ${taskId}: Worker path diagnostic proves requested=${requestedPath} is blocked; nearest_existing_canonical=${canonicalTargetCwd}; missing_suffix=${missingSuffix}; required external action is to provide or create the requested path before retrying.`,
+      }),
+    ].join('\n'),
+  );
+}
+
+function anthropicLastUserText(body) {
+  try {
+    const parsed = JSON.parse(body);
+    const messages = Array.isArray(parsed.messages) ? parsed.messages : [];
+    for (let index = messages.length - 1; index >= 0; index -= 1) {
+      const message = messages[index];
+      if (`${message?.role || ''}` !== 'user') {
+        continue;
+      }
+      return anthropicContentText(message.content);
+    }
+  } catch (_) {
+    return '';
+  }
+  return '';
+}
+
+function anthropicContentText(content) {
+  if (typeof content === 'string') {
+    return content;
+  }
+  if (!Array.isArray(content)) {
+    return '';
+  }
+  return content
+    .map((block) => typeof block === 'string' ? block : `${block?.text || ''}`)
+    .join('\n');
+}
+
 function nextWorkerResponse(body) {
+  if (!body.includes(taskId)) {
+    fixtureState.outOfScopeWorkerRequests.push({
+      requestIndex: fixtureState.outOfScopeWorkerRequests.length + 1,
+      bodyLength: body.length,
+      hasDiagnostic: body.includes('path_diagnostic'),
+      hasToolResult: body.includes('tool_result'),
+    });
+    return anthropicText(
+      [
+        'Out-of-scope Worker fixture request ignored by the current verifier run.',
+        completionBlock({
+          claim: 'blocked',
+          blocked_reason: 'out-of-scope fixture request did not include the current verifier task id',
+        }),
+      ].join('\n'),
+    );
+  }
+  const step = fixtureState.workerStep + 1;
+  if (step === 1) {
+    const checks = workerFirstRequestGuidanceChecks(body);
+    fixtureState.workerGuidanceChecks = checks;
+    fixtureState.workerFirstRequestToolSchemas = workerToolSchemaNamesFromBody(body);
+    if (!Object.values(checks).every((value) => value === true)) {
+      throw new Error(`worker first request missing hard tool guidance/schema contract: ${JSON.stringify(checks)}`);
+    }
+  }
   fixtureState.workerRequests.push({
-    step: fixtureState.workerStep + 1,
+    step,
     bodyLength: body.length,
     hasDiagnostic: body.includes('path_diagnostic'),
     hasToolResult: body.includes('tool_result'),
@@ -993,6 +1388,48 @@ function nextWorkerResponse(body) {
     );
   }
   throw new Error(`worker sequence exhausted at step ${fixtureState.workerStep}`);
+}
+
+function workerFirstRequestGuidanceChecks(body) {
+  const schemaNames = new Set(workerToolSchemaNamesFromBody(body));
+  return {
+    workerToolSurfaceGuidance:
+      body.includes('Worker tool surface') &&
+      body.includes('available tools are exactly'),
+    exactWorkerToolSchemas:
+      schemaNames.size === workerToolSchemaNames.length &&
+      workerToolSchemaNames.every((name) => schemaNames.has(name)),
+    noForbiddenWorkerToolSchemas:
+      forbiddenWorkerToolSchemaNames.every((name) => !schemaNames.has(name)),
+    pathToolsLockedGuidance:
+      body.includes('Path tools are locked') &&
+      body.includes('locked task cwd'),
+    forbidsShellReadlink:
+      body.includes('Do not call shell, bash, readlink') &&
+      body.includes('pwd') &&
+      body.includes('cat') &&
+      body.includes('find'),
+    lsBeforeReadFileGuidance:
+      body.includes('Use `ls` before `read_file`'),
+    pathDiagnosticGuidance:
+      body.includes('path_diagnostic') &&
+      body.includes('symlink ancestors'),
+    noExternalReadAllowance:
+      !body.includes('read-only tools may inspect readable external paths') &&
+      !body.includes('Read/query operations may inspect external paths') &&
+      !body.includes('read-only path tools may inspect readable external paths'),
+  };
+}
+
+function workerToolSchemaNamesFromBody(body) {
+  const parsed = JSON.parse(body);
+  if (!Array.isArray(parsed.tools)) {
+    return [];
+  }
+  return parsed.tools
+    .map((tool) => `${tool?.name || ''}`)
+    .filter(Boolean)
+    .sort();
 }
 
 function anthropicToolUse(id, name, input) {
@@ -1033,8 +1470,10 @@ async function queryAdp(query, label) {
       }
       clearTimeout(timeout);
       socket.close();
-      if (message.error) {
-        reject(new Error(`ADP query ${label} failed: ${JSON.stringify(message.error)}`));
+      if (message.kind === 'failure' || message.failure || message.error) {
+        reject(new Error(`ADP query ${label} failed: ${JSON.stringify(message.failure || message.error)}`));
+      } else if (message.kind !== 'query_result' || !Object.prototype.hasOwnProperty.call(message, 'result')) {
+        reject(new Error(`ADP query ${label} returned unexpected frame: ${JSON.stringify(message)}`));
       } else {
         resolve(message.result);
       }
@@ -1044,6 +1483,38 @@ async function queryAdp(query, label) {
       reject(new Error(`ADP socket error for ${label}`));
     });
   });
+}
+
+async function querySessionTurns(sessionId, label) {
+  return queryAdpVariant(
+    { QuerySessionTurns: { session_id: sessionId } },
+    label,
+    'SessionTurns',
+  );
+}
+
+async function queryTaskBoard(label) {
+  return queryAdpVariant({ QueryTaskBoard: { include_terminal: true } }, label, 'TaskBoard');
+}
+
+async function queryTaskHistory(targetTaskId, label) {
+  return queryAdpVariant(
+    { QueryTaskHistory: { task_id: targetTaskId } },
+    label,
+    'TaskHistory',
+  );
+}
+
+async function queryAdpVariant(query, label, variant) {
+  const result = await queryAdp(query, label);
+  if (
+    !result ||
+    typeof result !== 'object' ||
+    !Object.prototype.hasOwnProperty.call(result, variant)
+  ) {
+    throw new Error(`ADP query ${label} expected ${variant}, got ${JSON.stringify(result)}`);
+  }
+  return result[variant];
 }
 
 async function restoreRuntime() {
@@ -1065,7 +1536,7 @@ async function restoreRuntime() {
   const envGrep = await run([
     'grep',
     '-n',
-    'FREEHAND_WEBUI_PATH_DIAGNOSTIC_FIXTURE_KEY\\|FREEHAND_PROVIDER_RETRY_FIXTURE_KEY\\|FREEHAND_PROVIDER_RETRY_BACKOFF_MS',
+    'FREEHAND_WEBUI_PATH_DIAGNOSTIC_FIXTURE_KEY\\|FREEHAND_PROVIDER_RETRY_FIXTURE_KEY\\|FREEHAND_PROVIDER_RETRY_BACKOFF_MS\\|FREEHAND_TEST_DISABLE_MASTER_LIFECYCLE_RUNNER',
     daemonEnvPath,
     workerEnvPath,
   ]);
@@ -1124,7 +1595,15 @@ async function must(argv) {
 
 function run(argv) {
   return new Promise((resolve) => {
-    const child = spawn(argv[0], argv.slice(1), { cwd: repo, stdio: ['ignore', 'pipe', 'pipe'] });
+    const env = { ...process.env };
+    if (argv[0] === 'scripts/install-launchd.sh' && !env.FREEHAND_LAUNCHD_HEALTH_WAIT_SECONDS) {
+      env.FREEHAND_LAUNCHD_HEALTH_WAIT_SECONDS = launchdHealthWaitSeconds;
+    }
+    const child = spawn(argv[0], argv.slice(1), {
+      cwd: repo,
+      env,
+      stdio: ['ignore', 'pipe', 'pipe'],
+    });
     let stdout = '';
     let stderr = '';
     child.stdout.on('data', (chunk) => {
@@ -1264,6 +1743,7 @@ async function waitForFunction(client, fn, timeoutMs, label, ...args) {
     }
     await delay(250);
   }
+  await snapshotWebUiDom(`timeout-${label.replace(/[^a-z0-9]+/gi, '-').toLowerCase()}`).catch(() => null);
   throw new Error(`timeout waiting for ${label}`);
 }
 

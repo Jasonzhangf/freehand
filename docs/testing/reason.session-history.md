@@ -8,6 +8,8 @@
   - compaction/rollback/resume rebuild are the only explicit rewrite gates
   - rewrite gate emits ledger diagnostics and is consumed by the next started turn
   - session truth can be serialized and restored without losing rewrite state
+  - owner-approved effective restore can retain a subset of base context
+    segments without bypassing stable/session-stable validation
 - white-box plan:
   - session initialization validation tests
   - compaction version-bump tests
@@ -22,6 +24,8 @@
   - session mismatch rejection tests
   - persisted json round-trip tests
   - persisted file round-trip tests
+  - retained-base-context filtering through
+    `rollback_filters_model_visible_history_to_effective_turn_truth`
 - module black-box plan:
   - `SessionHistory` rewrite state reaches `ReasonTurnEngine::start_turn` diagnostics
   - non-ordinary rewrite modes are one-shot and return to ordinary mode after successful startup
@@ -42,4 +46,6 @@
   - ordinary-turn stability and rewrite-gate bump behavior are covered in crate tests
   - persisted JSON/file round-trip baseline is covered in crate tests
   - direct white-box failures for empty rewrite reason, forbidden rewrite base segments, invalid persisted json, file IO failure on persist/load, and session mismatch are now explicitly covered
+  - retained-base-context mutation is covered through the reason.persistence
+    effective-history rollback test
   - migrated mainline-call source and generated wiki are kept in sync with this test design

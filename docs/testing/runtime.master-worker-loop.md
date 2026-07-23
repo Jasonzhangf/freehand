@@ -99,7 +99,7 @@ all present.
 | Task / execution | TaskRuntime task ledger, task snapshot, execution id, review state | `TaskInterrupted`, `TaskBlocked`, `TaskReviewRejected`, stale `TaskReviewSubmitted`, stale `Approved` without `Closed` | Master must reject/retry, reassign same task, append blocked decision, approve+close, or leave a deliberate blocked decision; Worker must not silently retry blocked/interrupted work | TaskBoard, TaskHistory, EventInbox, selected parent session | `cargo test -p freehand-runtime production_master_runner -- --nocapture --test-threads=1`; `scripts/verify-master-three-worker-e2e-online.sh` |
 | Worker process / agent resource | AgentLifecycle and AgentBoard process instance, pid, heartbeat, TTL-derived alive, current task/execution binding | heartbeat stale, `alive=false`, process restart, current binding after terminal task truth | launchd may restart the process; Master uses TaskHistory plus AgentBoard truth to choose same-task retry or cross-Worker takeover; terminal task truth must clear current binding | AgentBoard process fields, `restart_count`, `alive`, `current_task_id`, `current_execution_id`, `last_activity` | `cargo test -p freehand-task agent_process -- --nocapture`; `scripts/verify-master-three-worker-e2e-online.sh` offline/restart phase |
 | Master supervisor attention | Master loop state, EventInbox cursor, pending attention, lifecycle turn, target-task decision boundary | missing review decision, incomplete approval, blocked without append, interrupted without reassignment, provider retry/failover/schema repair | keep the same attention item retryable with bounded backoff until owner mutation closes the boundary; after retry cap, record explicit blocked-decision truth where applicable; never mark success without Task Center mutation | internal lifecycle session, ErrorCenter, SessionList active turn, TaskHistory cursor advance | `cargo test -p freehand-runtime production_master_runner -- --nocapture --test-threads=1`; `cargo test -p freehand-runtime runtime_query_session_turns_ -- --nocapture --test-threads=1` |
-| Parent user session / workset | reason persistence parent turn truth, Task parent links, parent evaluation marker keyed by parent session plus logical turn workset | child tasks still actionable, first closed exact-round child while siblings remain open, failed/interrupted/cancelled parent-evaluation turn | parent stays `waiting` while any same-logical-turn child is actionable; once all close, one idempotent parent evaluation approves final completion, creates next-round work, or records blocker; failed evaluation remains retryable | selected parent session turns, task tree, parent `runtime-turn-N` / `runtime-turn-N-rM` cards | `cargo test -p freehand-runtime production_master_runner_groups_parent_workset_by_logical_turn_rounds -- --nocapture --test-threads=1`; `scripts/verify-master-three-worker-e2e-online.sh` |
+| Parent user session / workset | reason persistence parent turn truth, Task parent links, parent evaluation marker keyed by parent session plus logical turn workset | child tasks still actionable, first closed exact-round child while siblings remain open, decided `TaskBlocked` without parent follow-up, failed/interrupted/cancelled parent-evaluation turn | parent stays `waiting` while any same-logical-turn child is actionable; once all close, one idempotent parent evaluation approves final completion, creates next-round work, or records blocker; once no active/reviewable sibling remains and a blocked child has Master `blocked_decision`, one idempotent parent blocked follow-up closes the parent session observably as blocked; failed evaluation remains retryable | selected parent session turns, task tree, parent `runtime-turn-N` / `runtime-turn-N-rM` cards | `cargo test -p freehand-runtime production_master_runner_groups_parent_workset_by_logical_turn_rounds -- --nocapture --test-threads=1`; `cargo test -p freehand-runtime production_master_runner_projects_decided_worker_block_to_parent_session -- --nocapture`; `scripts/verify-master-three-worker-e2e-online.sh` |
 
 | branch | required owner truth | required next action |
 | --- | --- | --- |
@@ -179,6 +179,11 @@ Task Center truth before another execution starts.
   verified complete.
 - A child `task_closed` event whose parent still has any open child task is a
   no-op for parent evaluation.
+- A decided `TaskBlocked` child whose same-logical parent workset has no
+  active/reviewable siblings triggers exactly one parent-session blocked
+  follow-up turn in the original persisted parent session. The follow-up must
+  include original user objective truth, Worker blocker evidence, and the
+  Master `blocked_decision` note, and must not claim final success.
 - Replayed `task_closed` events or daemon restart after evaluation do not
   repeat the same parent decision or duplicate next-round tasks for the same
   parent/closed-child set, including evaluation turns that ended waiting after
@@ -357,6 +362,10 @@ Task Center truth before another execution starts.
   terminal success, even if the model emits a syntactically valid
   `claim="complete"` schema.
 - A closed child task with an open sibling must not trigger parent evaluation.
+- A Worker `TaskBlocked` without a Master-owned `blocked_decision` must not
+  project a user-visible parent blocked follow-up.
+- A decided `TaskBlocked` child must not project a parent blocked follow-up
+  while a same-logical-turn sibling child remains active or reviewable.
 - A closed child task whose siblings were created in later rounds of the same
   logical `runtime-turn-N` must not trigger parent evaluation until all
   same-logical-turn children are terminal closed; covered by
@@ -424,6 +433,11 @@ Task Center truth before another execution starts.
   - review approve and close
   - review rejection with persisted requirements
   - blocked decision persisted through `task(op="append")`
+  - decided Worker block projected to the original parent session:
+    `production_master_runner_projects_decided_worker_block_to_parent_session`
+  - undecided Worker block and active sibling block guards:
+    `production_master_runner_does_not_project_undecided_worker_block_to_parent_session`
+    and `production_master_runner_does_not_block_parent_while_sibling_child_is_active`
   - missing review decision and same-event retry
   - all-children-closed parent evaluation in the original parent session
   - stale waiting parent workset recovery after cursor advancement while an
@@ -487,7 +501,7 @@ Task Center truth before another execution starts.
   - repeated `continue` without a decision and proves finite blocked closeout
   - two different lifecycle events and proves their lifecycle session name is
     task-scoped while turn and trace ids remain event-scoped
-- real live bridge test proves Worker schema excludes `task` and unrestricted shell tools, read-only tools may inspect readable external paths, and mutation tools keep workspace root as task cwd.
+- real live bridge test proves Worker schema excludes `task` and unrestricted shell tools; Worker read/search/list/mutation path tools are all locked to the canonical task cwd after symlink/canonical resolution, and external path attempts return model-visible boundary guidance instead of inviting external probing.
 - runner tests prove `~/...` plus symlink target cwd resolves to a canonical Worker workspace and missing `~/...` blocks before model execution.
 - daemon test proves:
   - Master mode creates UI host

@@ -873,6 +873,12 @@ impl ProductionMasterRunner {
         loop {
             if state.pending_attention.is_empty() {
                 if let Some(outcome) =
+                    self.reconcile_blocked_parent_worksets(&task_runtime, &mut state)?
+                {
+                    self.write_state(&state)?;
+                    return Ok(outcome);
+                }
+                if let Some(outcome) =
                     self.reconcile_closed_parent_worksets(&task_runtime, &mut state)?
                 {
                     self.write_state(&state)?;
@@ -1416,6 +1422,129 @@ impl ProductionMasterRunner {
         Ok(None)
     }
 
+    fn reconcile_blocked_parent_worksets(
+        &self,
+        task_runtime: &TaskRuntime,
+        state: &mut MasterLoopState,
+    ) -> Result<Option<ProductionMasterTickOutcome>, ProductionMasterRunnerError> {
+        let board = task_runtime
+            .query_task_board(TaskBoardQuery {
+                status: None,
+                assignee: None,
+                include_terminal: true,
+            })
+            .map_err(task_center_error)?;
+        let mut groups = BTreeMap::<String, Vec<TaskSnapshot>>::new();
+        for task in board.tasks {
+            let Some(parent_session_id) = task.parent.session_id.as_ref() else {
+                continue;
+            };
+            let parent_turn_id = parent_turn_group_key(task.parent.turn_id.as_ref());
+            groups
+                .entry(format!("{}|{}", parent_session_id.as_str(), parent_turn_id))
+                .or_default()
+                .push(task);
+        }
+        for mut children in groups.into_values() {
+            children.sort_by(|left, right| left.task_id.cmp(&right.task_id));
+            let Some(parent_session_id) = children
+                .first()
+                .and_then(|task| task.parent.session_id.clone())
+            else {
+                continue;
+            };
+            let parent_turn_id = children[0].parent.turn_id.clone();
+            if !parent_logical_turn_waits_for_lifecycle(
+                &self.runtime_home,
+                &self.master_agent_id,
+                &parent_session_id,
+                parent_turn_id.as_ref(),
+            )? {
+                continue;
+            }
+            if children.iter().any(|task| {
+                !matches!(
+                    task.status,
+                    TaskStatus::Blocked
+                        | TaskStatus::Closed
+                        | TaskStatus::Cancelled
+                        | TaskStatus::Failed
+                )
+            }) {
+                continue;
+            }
+            let mut blocked = Vec::new();
+            for task in &children {
+                if let Some(truth) =
+                    parent_blocked_subtask_truth(task_runtime, &self.master_agent_id, task)?
+                {
+                    blocked.push(truth);
+                }
+            }
+            if blocked.is_empty() {
+                continue;
+            }
+            let decision_key = blocked
+                .iter()
+                .map(|task| format!("{}:{}", task.task_id.as_str(), task.decision_seq))
+                .collect::<Vec<_>>()
+                .join(",");
+            let evaluation_key = format!(
+                "blocked|{}|{}|{}",
+                parent_session_id.as_str(),
+                parent_turn_group_key(parent_turn_id.as_ref()),
+                decision_key
+            );
+            if state.completed_parent_evaluations.contains(&evaluation_key) {
+                continue;
+            }
+            let evaluation_marker = parent_evaluation_marker(&evaluation_key);
+            if persisted_parent_blocked_follow_up_summary(
+                &self.runtime_home,
+                &self.master_agent_id,
+                &parent_session_id,
+                &evaluation_marker,
+            )?
+            .is_some()
+            {
+                state.completed_parent_evaluations.insert(evaluation_key);
+                continue;
+            }
+            let Some(user_objectives) = parent_user_objectives(
+                &self.runtime_home,
+                &self.master_agent_id,
+                &parent_session_id,
+            )?
+            else {
+                continue;
+            };
+            let evaluation_turn_id = next_parent_evaluation_turn_id(
+                &self.runtime_home,
+                &self.master_agent_id,
+                &parent_session_id,
+            )?;
+            let request = parent_blocked_follow_up_live_request(
+                &self.runtime_home,
+                &parent_session_id,
+                &evaluation_turn_id,
+                &evaluation_marker,
+                &user_objectives,
+                &blocked,
+            )?;
+            let summary = self
+                .executor
+                .execute_parent_evaluation(&self.selected, request)
+                .map_err(ProductionMasterRunnerError::Execution)?;
+            state.completed_parent_evaluations.insert(evaluation_key);
+            return Ok(Some(ProductionMasterTickOutcome::ParentEvaluated {
+                parent_session_id,
+                evaluated_child_task_ids: blocked.into_iter().map(|task| task.task_id).collect(),
+                summary,
+            }));
+        }
+        Ok(None)
+    }
+
     fn evaluate_closed_parent_workset(
         &self,
         task_runtime: &TaskRuntime,
@@ -1610,6 +1739,85 @@ struct ParentCompletedSubtaskTruth {
     review_evidence: Vec<String>,
 }
 
+#[derive(Debug, Serialize)]
+struct ParentBlockedSubtaskTruth {
+    task_id: TaskId,
+    title: String,
+    goal: String,
+    status: String,
+    blocked_reason: String,
+    blocked_evidence: Vec<String>,
+    master_decision: String,
+    decision_seq: u64,
+}
+
+fn parent_blocked_subtask_truth(
+    task_runtime: &TaskRuntime,
+    master_agent_id: &AgentId,
+    task: &TaskSnapshot,
+) -> Result<Option<ParentBlockedSubtaskTruth>, ProductionMasterRunnerError> {
+    if task.status != TaskStatus::Blocked {
+        return Ok(None);
+    }
+    let history = task_runtime
+        .task_history(&task.task_id)
+        .map_err(task_center_error)?;
+    let Some(blocked_index) = history
+        .iter()
+        .rposition(|event| event.event_type == "TaskBlocked")
+    else {
+        return Ok(None);
+    };
+    let decision = history
+        .iter()
+        .skip(blocked_index.saturating_add(1))
+        .rev()
+        .find(|event| {
+            event.event_type == "TaskProgressed"
+                && &event.actor.agent_id == master_agent_id
+                && event
+                    .payload
+                    .get("note")
+                    .and_then(serde_json::Value::as_str)
+                    .is_some_and(|note| note.starts_with("blocked_decision:"))
+        });
+    let Some(decision) = decision else {
+        return Ok(None);
+    };
+    let blocked = &history[blocked_index];
+    let blocked_reason = blocked
+        .payload
+        .get("reason")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or("Worker reported a blocked execution")
+        .to_owned();
+    let blocked_evidence = blocked
+        .payload
+        .get("evidence")
+        .and_then(serde_json::Value::as_array)
+        .into_iter()
+        .flatten()
+        .filter_map(serde_json::Value::as_str)
+        .map(str::to_owned)
+        .collect();
+    let master_decision = decision
+        .payload
+        .get("note")
+        .and_then(serde_json::Value::as_str)
+        .unwrap_or("blocked_decision: external action is required")
+        .to_owned();
+    Ok(Some(ParentBlockedSubtaskTruth {
+        task_id: task.task_id.clone(),
+        title: task.title.clone(),
+        goal: task.goal.clone(),
+        status: "blocked".to_owned(),
+        blocked_reason,
+        blocked_evidence,
+        master_decision,
+        decision_seq: decision.seq,
+    }))
+}
+
 fn parent_completed_subtask_truth(
     task_runtime: &TaskRuntime,
     task: &TaskSnapshot,
@@ -1762,6 +1970,30 @@ fn persisted_parent_evaluation_summary(
     }))
 }
 
+fn persisted_parent_blocked_follow_up_summary(
+    runtime_home: &Path,
+    agent_id: &AgentId,
+    parent_session_id: &SessionId,
+    evaluation_marker: &str,
+) -> Result<Option<String>, ProductionMasterRunnerError> {
+    let persistence = ReasonPersistence::new(runtime_home.to_path_buf(), agent_id.clone());
+    let turns = match persistence.restore_authoritative_turn_snapshots_for_ui(parent_session_id) {
+        Ok(turns) => turns,
+        Err(ReasonPersistenceError::MissingRecoveryTruth(_)) => return Ok(None),
+        Err(error) => return Err(ProductionMasterRunnerError::State(error.to_string())),
+    };
+    Ok(turns.into_iter().find_map(|turn| {
+        let terminal = turn.terminal_event?;
+        (turn.request.user_text.contains(&format!(
+            "<freehand_parent_blocked_follow_up id=\"{evaluation_marker}\">"
+        )) && matches!(
+            terminal.status,
+            TerminalStatus::Blocked | TerminalStatus::Failed | TerminalStatus::Cancelled
+        ))
+        .then_some(terminal.summary)
+    }))
+}
+
 fn parent_logical_turn_waits_for_lifecycle(
     runtime_home: &Path,
     agent_id: &AgentId,
@@ -1852,6 +2084,41 @@ Original user objective history:\n\
 {objectives_json}\n\
 \n\
 Completed subtask and accepted review truth:\n{subtasks_json}"
+        ),
+        cwd: Some(runtime_home.to_path_buf()),
+        stream: false,
+        cancel_token: None,
+    })
+}
+
+fn parent_blocked_follow_up_live_request(
+    runtime_home: &Path,
+    parent_session_id: &SessionId,
+    turn_id: &TurnId,
+    evaluation_marker: &str,
+    user_objectives: &[String],
+    blocked_subtasks: &[ParentBlockedSubtaskTruth],
+) -> Result<LiveReasonTurnRequest, ProductionMasterRunnerError> {
+    let objectives_json = serde_json::to_string_pretty(user_objectives)
+        .map_err(|error| ProductionMasterRunnerError::State(error.to_string()))?;
+    let blocked_json = serde_json::to_string_pretty(blocked_subtasks)
+        .map_err(|error| ProductionMasterRunnerError::State(error.to_string()))?;
+    Ok(LiveReasonTurnRequest {
+        runtime_home: runtime_home.to_path_buf(),
+        session_id: parent_session_id.clone(),
+        turn_id: turn_id.clone(),
+        trace_id: TraceId::new(format!("master-parent-blocked-trace-{evaluation_marker}")),
+        prompt: format!(
+            "<freehand_parent_blocked_follow_up id=\"{evaluation_marker}\">\n\
+You are the production Master returning to the original user session after a Worker execution was blocked and the blocker was persisted in Task Center truth.\n\
+This is a user-visible lifecycle follow-up, not a hidden status note and not a success summary.\n\
+Do not claim the objective is complete. Do not create a replacement task unless current Task Center truth permits a concrete correction; the persisted blocked decision says external action is required.\n\
+Return an explicit blocked result naming the failed child task, the Worker evidence, and the exact external action required before progress can continue.\n\
+Keep the parent session observable and terminal as blocked. Never leave it waiting without a timer or active child execution.\n\
+\n\
+Original user objective history:\n{objectives_json}\n\
+\n\
+Blocked child truth:\n{blocked_json}"
         ),
         cwd: Some(runtime_home.to_path_buf()),
         stream: false,

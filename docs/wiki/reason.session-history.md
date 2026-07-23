@@ -17,11 +17,13 @@ Generated from `docs/mainline-calls/reason.session-history.json`. Do not edit by
 - explicit rewrite gate methods are the only owner path that may bump `rewrite_version` and switch non-ordinary `rewrite_mode`
 - `ReasonTurnEngine::start_turn` reads `SessionHistory` for base context, `rewrite_mode`, and `rewrite_version`
 - after successful turn startup, `SessionHistory::commit_turn_start` returns the session to ordinary-turn mode while preserving the bumped version
+- persistence-owned effective restore may retain a validated subset of stable/session-stable base context through `SessionHistory::retain_base_context_segments`
 
 ## Response Mainline
 
 - rewrite gate methods return updated session truth plus a rewrite-ledger record
 - persistence methods return JSON or filesystem snapshots for later reload
+- retained base-context mutation reuses the same rewrite-base validator before session truth changes
 - turn startup consumes session history state and projects rewrite metadata into planner diagnostics, not request text
 
 ## Error Mainline
@@ -59,6 +61,7 @@ Generated from `docs/mainline-calls/reason.session-history.json`. Do not edit by
 | 06 | `SessionHistory::commit_turn_start` | `crates/freehand-reason/src/session_history.rs` | clear one-shot non-ordinary rewrite mode after successful startup and stamp applied turn id | turn id | updated session truth | turn orchestrator | session-history owner |  |  |  | bound |
 | 07 | `SessionHistory::persist_json` | `crates/freehand-reason/src/session_history.rs` | render persistable session truth snapshot | session history | JSON snapshot | runtime/debug/replay | persistence helper |  |  |  | bound |
 | 08 | `SessionHistory::from_persisted_json` | `crates/freehand-reason/src/session_history.rs` | restore session truth from persisted JSON | JSON snapshot | session history | runtime/debug/replay | persistence helper |  |  |  | bound |
+| 09 | `SessionHistory::retain_base_context_segments` | `crates/freehand-reason/src/session_history.rs` | retain a validated subset of stable/session-stable base context segments for owner-approved effective restore | current base context plus owner predicate | session history with validated retained base context | reason.persistence effective restore | session-history owner |  |  |  | bound |
 
 ## Sync Status Against Mainline Call
 
@@ -66,6 +69,7 @@ Generated from `docs/mainline-calls/reason.session-history.json`. Do not edit by
 - rewrite mode and rewrite version are now sourced from `SessionHistory` instead of turn-local constants
 - compaction, rollback, and resume rebuild each have explicit owner methods
 - persisted json/file round-trip is implemented for session truth baseline
+- retained-base-context mutation is implemented for `reason.persistence` effective restore and reuses the same rewrite-base validator
 - direct white-box locks now cover empty rewrite reason, forbidden rewrite base segments, invalid persisted json, file IO failure on persist/load, and `ReasonTurnEngine::start_turn` session mismatch
 - `ReasonRewriteRuntime` now consumes `reason.rewrite-policy` decisions before calling each rewrite gate
 - remaining gap: final CLI/server runtime loop must supply real usage metrics and persisted recovery payloads

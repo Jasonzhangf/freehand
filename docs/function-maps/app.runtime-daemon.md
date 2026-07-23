@@ -56,7 +56,7 @@
 
 - daemon process accepts a host command to start the UI transport
 - daemon process accepts `remote-relay [--bind HOST:PORT]` to start a standalone account-scoped relay transport service
-- daemon process may be started by macOS launchd through the installed `freehand-daemon-launchd` wrapper
+- daemon process may be started by macOS launchd through the installed `freehand-daemon-launchd` wrapper with explicit Android update manifest/APK env paths staged under runtime home
 - S-profile launchd restart also restarts `com.freehand.relayS`, which binds the local Tailscale relay port and registers `studio-host` to the S-profile upstream before Android/WebView clients are treated as current
 - each configured Worker process has an agent-specific launchd label, env file,
   stdout log, and stderr log; a shared `workerS` service is not the Worker pool
@@ -80,7 +80,7 @@
 ## Response Mainline
 
 - daemon serves runtime-backed dispatch receipts over HTTP command ingress
-- daemon can run as a launchd user service with fixed WebUI port, Tailscale-IP bind when available, `RunAtLoad`, `KeepAlive`, and stdout/stderr logs under `~/.freehand/logs`
+- daemon can run as a launchd user service with fixed WebUI port, Tailscale-IP bind when available, `RunAtLoad`, `KeepAlive`, stdout/stderr logs under `~/.freehand/logs`, and Android update distribution paths under `~/.freehand/dist/android`
 - daemon launchd wrapper execs the explicit `FREEHAND_DAEMON_BIN` from `~/.freehand/daemon.env` instead of resolving a possibly stale daemon from `PATH`
 - S-profile relay runs as `com.freehand.relayS` with fixed Tailscale `:44042`, explicit upstream `http://127.0.0.1:4042`, host registration for `studio-host`, and logs/env under `~/.freehand`
 - daemon serves query and continuous SSE projections from the runtime-owned shared UI state
@@ -105,7 +105,7 @@
 ## Error Mainline
 
 - invalid daemon CLI input returns explicit startup error
-- missing daemon env file, missing launchd wrapper env values, or missing executable daemon binary returns explicit wrapper startup error
+- missing daemon env file, missing launchd wrapper env values, missing executable daemon binary, or incomplete Android update distribution staging returns explicit startup/update-route error instead of silently serving stale APK version truth
 - runtime dispatcher bootstrap failure returns explicit daemon startup error
 - corrupt checkpoint projection bootstrap truth returns explicit daemon startup error before transport serve
 - runtime dispatch failures return protocol-mapped HTTP failures through the shared transport layer
@@ -232,5 +232,5 @@
   relay HTTP/ADP access authentication is not implemented or claimed, so
   exposure must remain on trusted local/Tailscale routes until a dedicated auth
   owner lands with negative online proof
-- S-profile relay launchd management is bound in scripts: `scripts/install-launchd.sh restartS` refreshes `com.freehand.daemonS`, then restarts `com.freehand.relayS`, registers `studio-host`, and makes Android/WebView proof consume the current relay-served asset URL instead of a manually started stale relay process
+- S-profile relay launchd management is bound in scripts: `scripts/install-launchd.sh restartS` refreshes `com.freehand.daemonS`, stages runtime-home Android update artifacts when repo `dist/android` is complete, then restarts `com.freehand.relayS`, registers `studio-host`, and makes Android/WebView proof consume the current relay-served asset/update URL instead of a manually started stale relay process
 - generated wiki must be regenerated from `docs/mainline-calls/app.runtime-daemon.json` when this function-map truth changes

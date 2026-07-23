@@ -13,11 +13,13 @@
     "`ReasonRewriteRuntime` is the baseline consumer that applies policy decisions before calling any `SessionHistory::stage_*` method",
     "explicit rewrite gate methods are the only owner path that may bump `rewrite_version` and switch non-ordinary `rewrite_mode`",
     "`ReasonTurnEngine::start_turn` reads `SessionHistory` for base context, `rewrite_mode`, and `rewrite_version`",
-    "after successful turn startup, `SessionHistory::commit_turn_start` returns the session to ordinary-turn mode while preserving the bumped version"
+    "after successful turn startup, `SessionHistory::commit_turn_start` returns the session to ordinary-turn mode while preserving the bumped version",
+    "persistence-owned effective restore may retain a validated subset of stable/session-stable base context through `SessionHistory::retain_base_context_segments`"
   ],
   "response_mainline": [
     "rewrite gate methods return updated session truth plus a rewrite-ledger record",
     "persistence methods return JSON or filesystem snapshots for later reload",
+    "retained base-context mutation reuses the same rewrite-base validator before session truth changes",
     "turn startup consumes session history state and projects rewrite metadata into planner diagnostics, not request text"
   ],
   "error_mainline": [
@@ -145,6 +147,17 @@
       "caller": "runtime/debug/replay",
       "callee": "persistence helper",
       "binding_status": "bound"
+    },
+    {
+      "step": "09",
+      "symbol_path": "SessionHistory::retain_base_context_segments",
+      "file_path": "crates/freehand-reason/src/session_history.rs",
+      "responsibility": "retain a validated subset of stable/session-stable base context segments for owner-approved effective restore",
+      "input_semantic": "current base context plus owner predicate",
+      "output_semantic": "session history with validated retained base context",
+      "caller": "reason.persistence effective restore",
+      "callee": "session-history owner",
+      "binding_status": "bound"
     }
   ],
   "sync_status": [
@@ -152,6 +165,7 @@
     "rewrite mode and rewrite version are now sourced from `SessionHistory` instead of turn-local constants",
     "compaction, rollback, and resume rebuild each have explicit owner methods",
     "persisted json/file round-trip is implemented for session truth baseline",
+    "retained-base-context mutation is implemented for `reason.persistence` effective restore and reuses the same rewrite-base validator",
     "direct white-box locks now cover empty rewrite reason, forbidden rewrite base segments, invalid persisted json, file IO failure on persist/load, and `ReasonTurnEngine::start_turn` session mismatch",
     "`ReasonRewriteRuntime` now consumes `reason.rewrite-policy` decisions before calling each rewrite gate",
     "remaining gap: final CLI/server runtime loop must supply real usage metrics and persisted recovery payloads",

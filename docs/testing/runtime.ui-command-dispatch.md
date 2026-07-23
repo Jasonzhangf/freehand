@@ -29,17 +29,18 @@
   - runtime-backed Agent resource-count commands route to `config.core`, expose pending `1..=5` shared-provider topology projection, and do not fabricate live AgentBoard processes before restart
   - successful task tool mutations publish a runtime-owned task list projection into shared UI protocol state so ADP task subscribers receive owner-backed lifecycle changes
   - session-management dispatch routes create/rename/archive/restore/delete-as-archive commands to reason persistence metadata APIs and refreshes the shared UI projection
-  - session rollback dispatch routes `RollbackLatestSessionTurn` to reason persistence, reloads effective turn snapshots, and replaces the shared UI session transcript projection
+  - session rollback dispatch routes `RollbackLatestSessionTurn` to reason persistence, cancels non-terminal child tasks from the rolled-back logical parent turn through `task.cancel`, reloads effective turn snapshots, and replaces the shared UI session transcript projection
   - runtime-backed `QuerySessionTurns` reloads exact per-round snapshots from the master plus configured Worker reason-persistence namespaces and replaces the shared UI session transcript projection so background-written parent turns and Worker task conversations are visible without daemon restart while every `runtime-turn-N` / `runtime-turn-N-rM` tool round remains observable, active live provider transport/model waiting and tool activity are preserved only on the latest nonterminal replacement turn, missed background lifecycle provider retry/failover is reconstructed from ErrorCenter metadata as model-request transport substate and schema waiting as model-request phase only for that latest nonterminal turn, and internal parent-evaluation / `worker-task-*` framework prompts are not projected as user-authored text
   - missing Worker task sessions return explicit target-not-found and never resolve to an empty transcript, another configured agent, or a global session
   - live bootstrap restores persisted turn projection and next runtime turn ordinal from all persisted sessions when recovery truth exists
   - live bootstrap restores authoritative turn snapshots without replaying every historical reason ledger; complete authoritative multi-round snapshots remain separate derived UI cards, while selected-session query performs exact-round ledger backfill for incomplete old snapshots
+  - live bootstrap consumes reason-persistence authoritative closed-turn `*.json` truth and must not fail when a previous atomic write left a non-`.json` temp file in the turns directory
   - live bootstrap recovers or clears dead-owner Master active-work checkpoints before user work is accepted; checkpoint-only stale work with missing session truth or no matching active turn snapshot must not survive restart
   - reason-backed submit/cancel update derived UI state
   - reason-backed submit with a selected session id keeps the session transcript queryable under that session
   - reason-backed submit with selected cwd projects cwd into session transcript and later same-session submits inherit it
   - live submit persists a prepared active turn snapshot before pre-provider context admission so refresh/restart/session queries can observe the accepted user turn even if instruction capability or provider request build has not completed yet
-  - active live cancel sets a cancel token and publishes cancelled projection without waiting for provider completion
+  - active live cancel sets a cancel token, immediately persists cancelled terminal truth for the same prepared active snapshot, clears in-memory active_turn and Master active-work, and publishes cancelled projection without waiting for provider completion or pre-provider context construction
   - latest-active cancel resolves the current active live turn when UI has not received a concrete `turn_id`
   - cancelled live provider success must not overwrite the cancelled UI projection or commit a success outcome
   - reason-backed submit projects the original user prompt into derived UI public conversation truth
@@ -67,7 +68,7 @@
   - selected-session live submit coverage
   - selected-session cwd inheritance coverage
   - session metadata dispatch coverage for create, rename, archive, restore, and delete-as-archive
-  - session rollback dispatch coverage for append-only marker write plus effective transcript refresh
+  - session rollback dispatch coverage for append-only marker write, rolled-back child-task cancellation, retained-turn child non-cancellation, and effective transcript refresh
   - runtime query-session-turns coverage for persistence-backed transcript
     refresh, including parent-goal evaluation internal prompt hiding and final
     assistant decision visibility plus Worker task prompt hiding with Worker
@@ -79,7 +80,7 @@
   - next runtime turn ordinal restore coverage, including selected non-default sessions created by WebUI
   - submit/cancel reason dispatch coverage
   - pre-provider prepared active turn persistence coverage proving `QuerySessionTurns` sees the submitted turn before provider request build and does not collapse to an older transcript after refresh/restart
-  - active live cancel immediate receipt coverage
+  - active live cancel immediate receipt and persistent pre-provider terminalization coverage
   - latest-active cancel coverage
   - cancelled live submit negative coverage proving later provider success cannot replace cancelled projection
   - live bridge cancellation checkpoint coverage before provider output, tool execution, and terminal write
@@ -117,9 +118,10 @@
   - live reason projection keeps earlier-round tool activity visible on the earlier round after tool-result continuation
   - live bootstrap projection keeps earlier-round tool activity on its original round after restart
   - live bootstrap negative coverage poisons an incomplete historical reason ledger and proves daemon bootstrap succeeds from authoritative snapshots without parsing that ledger
+  - live bootstrap negative coverage covers leftover atomic temp files under reason closed-turn directories through `reason.persistence` restore tests before daemon startup is considered blocked
   - live reason final projection negative coverage proves intermediate continuation text is not exposed in the final public conversation
   - live reason dispatch failure projection coverage proves bridge-materialized failed turns update `UiProtocolState` before the dispatch error is returned
-  - live reason pre-provider active snapshot coverage proves cancellation and pre-provider failure close the same prepared turn instead of losing it or replacing it with a previous session turn
+  - live reason pre-provider active snapshot coverage proves cancellation, cancel command dispatch, and pre-provider failure close the same prepared turn instead of losing it, leaving active-work behind, or replacing it with a previous session turn
   - live reason pre-provider success coverage proves the prepared active snapshot writes `RewriteStateUpdated` only, provider execution writes exactly one canonical `TurnStarted`, and the prepared current turn is not replayed as historical context to the model
   - early live provider/protocol failure projection coverage proves the selected session keeps the original user prompt and a persisted failed terminal turn even when the provider bridge exits before recovery truth exists
   - runtime query-session-turns projection coverage proves `runtime_query_session_turns_restores_background_parent_evaluation` restores a background parent evaluation turn from reason persistence, hides the `<freehand_parent_evaluation>` synthetic user text, and keeps the Master evaluation decision/final assistant answer visible
@@ -171,7 +173,7 @@
   - selected non-default session restore now has regression coverage proving the next live submit does not reuse an existing `runtime-turn-N` after daemon restart
 - selected-session cwd projection and inheritance are covered
 - session metadata dispatch coverage is implemented through runtime dispatch into `reason.persistence` and shared UI projection queries
-- session rollback dispatch coverage is implemented through runtime dispatch into `reason.persistence` and shared UI transcript replacement queries
+- session rollback dispatch coverage is implemented through runtime dispatch into `reason.persistence`, `task.cancel` child cleanup for the rolled-back logical turn, and shared UI transcript replacement queries
 - live provider submit now streams incremental UI state updates through runtime-owned hooks
 - live provider submit now projects provider-request-built lifecycle state into UI before model response arrives
 - live provider submit now projects both missing-schema and invalid-schema retry lifecycle feedback into UI before the repair response completes
@@ -180,11 +182,11 @@
   - live bootstrap now restores complete authoritative earlier-round tool activity on its original UI turn without scanning historical ledgers, while selected `QuerySessionTurns` backfills incomplete old transcripts from ledger truth
   - live bootstrap now clears dead-owner Master active-work checkpoints when no matching active turn snapshot or session truth remains, covered by `live_bootstrap_clears_dead_owner_master_active_work_without_active_snapshot` and `live_bootstrap_clears_dead_owner_master_active_work_without_session_truth`
   - selected `QuerySessionTurns` refresh now preserves active provider transport retry/model waiting and tool activity only for the latest nonterminal replacement turn through `runtime_query_session_turns_preserves_live_provider_retry_activity` and `runtime_query_session_turns_preserves_live_tool_activity`; background lifecycle ErrorCenter-derived latest nonterminal retry transport projection is covered by `runtime_query_session_turns_projects_background_provider_retry_from_error_center`, terminal reactivation is blocked by `runtime_query_session_turns_does_not_reactivate_terminal_error_center_retry`, and historical retry reactivation before a later terminal round is blocked by `runtime_query_session_turns_does_not_reactivate_historical_retry_before_later_terminal_round`
-  - live submit prepared active snapshot persistence is covered by `runtime_live_submit_persists_pre_provider_active_turn_for_refresh`, `runtime_live_submit_materializes_cancelled_turn_before_provider_request`, and `runtime_live_submit_success_does_not_duplicate_prepared_turn_started`
+  - live submit prepared active snapshot persistence is covered by `runtime_live_submit_persists_pre_provider_active_turn_for_refresh`, `runtime_live_submit_materializes_cancelled_turn_before_provider_request`, `cancel_latest_active_live_turn_materializes_pre_provider_terminal_truth`, and `runtime_live_submit_success_does_not_duplicate_prepared_turn_started`
   - live bootstrap now restores persisted session cwd from turn records for UI projection and same-session inheritance
   - live provider submit now refreshes failed bridge truth from persistence before returning dispatch failure, preventing silent waiting UI state
   - reason-backed cancel dispatch is covered
-  - active live cancel no longer waits behind provider IO because live submit releases the runtime mutex after active turn registration
+  - active live cancel no longer waits behind provider IO or pre-provider context construction because dispatch cancellation materializes the prepared active snapshot as `Cancelled`, clears `active_turns`, and releases Master active-work immediately
   - active live cancel no longer waits behind provider retry backoff sleep because `sleep_provider_retry` checks the live cancel token; covered by `provider_retry_backoff_sleep_observes_live_cancel_token`
   - latest-active cancel is covered for current-turn stop without a UI-known `turn_id`
   - active live cancel blocks later provider success projection after cancellation

@@ -8,6 +8,9 @@ runtime_home="${FREEHAND_RUNTIME_HOME:-"$HOME/.freehand"}"
 logs_dir="$runtime_home/logs"
 pair_token="${FREEHAND_PAIR_TOKEN_SHARED:-}"
 command="${1:-install}"
+runtime_android_dist_dir="$runtime_home/dist/android"
+runtime_android_update_manifest="$runtime_android_dist_dir/update.json"
+runtime_android_apk="$runtime_android_dist_dir/freehand-android-release.apk"
 
 sanitize_launchd_component() {
   printf '%s\n' "$1" | sed 's/[^A-Za-z0-9_.-]/-/g'
@@ -147,6 +150,25 @@ remove_env_var() {
   rm -f "$tmp_env"
 }
 
+stage_android_update_dist_if_available() {
+  if [[ "$service_role" != "master" ]]; then
+    return 0
+  fi
+  local source_dir="$repo_root/dist/android"
+  local source_manifest="$source_dir/update.json"
+  local source_apk="$source_dir/freehand-android-release.apk"
+  if [[ ! -f "$source_manifest" && ! -f "$source_apk" ]]; then
+    return 0
+  fi
+  if [[ ! -f "$source_manifest" || ! -f "$source_apk" ]]; then
+    echo "Android update distribution is incomplete under $source_dir; expected update.json and freehand-android-release.apk" >&2
+    exit 2
+  fi
+  mkdir -p "$runtime_android_dist_dir"
+  cp "$source_manifest" "$runtime_android_update_manifest"
+  cp "$source_apk" "$runtime_android_apk"
+}
+
 copy_worker_provider_env_from_master() {
   if [[ "$service_role" != "worker" ]]; then
     return 0
@@ -199,6 +221,8 @@ EOF
     fi
     if [[ "$service_role" == "master" ]]; then
       printf 'FREEHAND_DAEMON_BIND="%s"\n' "$bind_addr" >>"$env_file"
+      printf 'FREEHAND_ANDROID_UPDATE_MANIFEST_PATH="%s"\n' "$runtime_android_update_manifest" >>"$env_file"
+      printf 'FREEHAND_ANDROID_APK_PATH="%s"\n' "$runtime_android_apk" >>"$env_file"
     fi
     chmod 0600 "$env_file"
   else
@@ -229,8 +253,12 @@ EOF
     fi
     if [[ "$service_role" == "master" ]]; then
       upsert_env_var "FREEHAND_DAEMON_BIND" "$bind_addr"
+      upsert_env_var "FREEHAND_ANDROID_UPDATE_MANIFEST_PATH" "$runtime_android_update_manifest"
+      upsert_env_var "FREEHAND_ANDROID_APK_PATH" "$runtime_android_apk"
     else
       remove_env_var "FREEHAND_DAEMON_BIND"
+      remove_env_var "FREEHAND_ANDROID_UPDATE_MANIFEST_PATH"
+      remove_env_var "FREEHAND_ANDROID_APK_PATH"
     fi
     if [[ -z "${HOME:-}" ]]; then
       printf '\nHOME="%s"\n' "$HOME" >>"$env_file"
@@ -441,6 +469,7 @@ case "$command" in
   install)
     env -u FREEHAND_DAEMON_WORKDIR -u FREEHAND_WORKSPACE_ROOT scripts/install-global.sh
     run_file_permission_preflight
+    stage_android_update_dist_if_available
     write_launchd_env
     write_launchd_plist
     run_install_launchd
@@ -448,6 +477,7 @@ case "$command" in
   installS)
     env -u FREEHAND_DAEMON_WORKDIR -u FREEHAND_WORKSPACE_ROOT scripts/install-symlink.sh
     run_file_permission_preflight
+    stage_android_update_dist_if_available
     write_launchd_env
     write_launchd_plist
     run_install_launchd
@@ -455,6 +485,7 @@ case "$command" in
     ;;
   restart)
     run_file_permission_preflight
+    stage_android_update_dist_if_available
     write_launchd_env
     write_launchd_plist
     restart_launchd
@@ -462,6 +493,7 @@ case "$command" in
   restartS)
     env -u FREEHAND_DAEMON_WORKDIR -u FREEHAND_WORKSPACE_ROOT scripts/install-symlink.sh
     run_file_permission_preflight
+    stage_android_update_dist_if_available
     write_launchd_env
     write_launchd_plist
     restart_launchd
@@ -470,6 +502,7 @@ case "$command" in
   installWorker)
     env -u FREEHAND_DAEMON_WORKDIR -u FREEHAND_WORKSPACE_ROOT scripts/install-global.sh
     run_file_permission_preflight
+    stage_android_update_dist_if_available
     write_launchd_env
     write_launchd_plist
     run_install_launchd
@@ -477,12 +510,14 @@ case "$command" in
   installWorkerS)
     env -u FREEHAND_DAEMON_WORKDIR -u FREEHAND_WORKSPACE_ROOT scripts/install-symlink.sh
     run_file_permission_preflight
+    stage_android_update_dist_if_available
     write_launchd_env
     write_launchd_plist
     run_install_launchd
     ;;
   restartWorker)
     run_file_permission_preflight
+    stage_android_update_dist_if_available
     write_launchd_env
     write_launchd_plist
     restart_launchd
@@ -490,6 +525,7 @@ case "$command" in
   restartWorkerS)
     env -u FREEHAND_DAEMON_WORKDIR -u FREEHAND_WORKSPACE_ROOT scripts/install-symlink.sh
     run_file_permission_preflight
+    stage_android_update_dist_if_available
     write_launchd_env
     write_launchd_plist
     restart_launchd

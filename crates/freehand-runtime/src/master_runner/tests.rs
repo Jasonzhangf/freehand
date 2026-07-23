@@ -428,6 +428,209 @@ fn production_master_runner_accepts_persisted_blocked_append_decision() {
 }
 
 #[test]
+fn production_master_runner_projects_decided_worker_block_to_parent_session() {
+    let runtime_home = temp_path("blocked-parent-follow-up");
+    bootstrap_runner(&runtime_home);
+    let parent_session_id = SessionId::new("parent-session-blocked-follow-up");
+    persist_parent_user_objective_with_turn_id(
+        &runtime_home,
+        &parent_session_id,
+        &TurnId::new("runtime-turn-1"),
+        "Inspect the repository and produce the requested report.",
+        TerminalStatus::ToolPending,
+        "Waiting for delegated Worker task.",
+    );
+    let task_id = seed_parent_blocked_child_for_turn(
+        &runtime_home,
+        &parent_session_id,
+        &TurnId::new("runtime-turn-1"),
+        "missing-report-directory",
+    );
+    let action_task_id = task_id.clone();
+    let observed_parent_request = Arc::new(Mutex::new(None::<LiveReasonTurnRequest>));
+    let parent_request_out = Arc::clone(&observed_parent_request);
+    let executor = Arc::new(StubMasterExecutor::new(move |request| {
+        if request.session_id.as_str().starts_with("master-lifecycle-") {
+            let runtime = TaskRuntime::boot(&request.runtime_home, AgentId::new("master"))
+                .map_err(to_string)?;
+            runtime
+                .append_task(TaskAppendRequest {
+                    task_id: action_task_id.clone(),
+                    note: "blocked_decision: create the missing reports directory before retrying"
+                        .to_owned(),
+                    actor: test_actor("master"),
+                    watermark: test_watermark("blocked-parent-decision"),
+                })
+                .map_err(to_string)?;
+            return Ok("blocked decision persisted".to_owned());
+        }
+        *parent_request_out.lock().expect("parent request") = Some(request.clone());
+        Ok("parent session blocked with required external action".to_owned())
+    }));
+    let runner = test_runner(runtime_home.clone(), executor.clone());
+
+    assert!(matches!(
+        runner.run_once().expect("blocked lifecycle decision"),
+        ProductionMasterTickOutcome::BlockedObserved {
+            task_id: ref outcome_task_id,
+            ..
+        } if outcome_task_id == &task_id
+    ));
+    assert!(matches!(
+        runner.run_once().expect("blocked parent follow-up"),
+        ProductionMasterTickOutcome::ParentEvaluated {
+            parent_session_id: ref outcome_parent,
+            evaluated_child_task_ids: ref outcome_tasks,
+            ref summary,
+        } if outcome_parent == &parent_session_id
+            && outcome_tasks == &vec![task_id.clone()]
+            && summary == "parent session blocked with required external action"
+    ));
+    let request = observed_parent_request
+        .lock()
+        .expect("parent request")
+        .clone()
+        .expect("parent follow-up request");
+    assert_eq!(request.session_id, parent_session_id);
+    assert_eq!(request.turn_id, TurnId::new("runtime-turn-2"));
+    assert!(
+        request
+            .prompt
+            .contains("<freehand_parent_blocked_follow_up")
+    );
+    assert!(request.prompt.contains("old wrong path is blocked"));
+    assert!(request.prompt.contains("path missing"));
+    assert!(
+        request
+            .prompt
+            .contains("create the missing reports directory before retrying")
+    );
+    assert_eq!(
+        runner.run_once().expect("blocked follow-up is idempotent"),
+        ProductionMasterTickOutcome::Idle
+    );
+    assert_eq!(executor.calls.load(Ordering::Relaxed), 2);
+
+    fs::remove_dir_all(runtime_home).expect("cleanup");
+}
+
+#[test]
+fn production_master_runner_does_not_project_undecided_worker_block_to_parent_session() {
+    let runtime_home = temp_path("blocked-parent-undecided");
+    bootstrap_runner(&runtime_home);
+    let parent_session_id = SessionId::new("parent-session-blocked-undecided");
+    persist_parent_user_objective_with_turn_id(
+        &runtime_home,
+        &parent_session_id,
+        &TurnId::new("runtime-turn-1"),
+        "Inspect the repository and produce the requested report.",
+        TerminalStatus::ToolPending,
+        "Waiting for delegated Worker task.",
+    );
+    seed_parent_blocked_child_for_turn(
+        &runtime_home,
+        &parent_session_id,
+        &TurnId::new("runtime-turn-1"),
+        "undecided-block",
+    );
+    let executor = Arc::new(StubMasterExecutor::new(|_| {
+        Err("undecided block must not produce a parent follow-up".to_owned())
+    }));
+    let runner = test_runner(runtime_home.clone(), executor.clone());
+    let runtime = TaskRuntime::boot(&runtime_home, AgentId::new("master")).expect("runtime");
+    let inbox = runtime
+        .query_event_inbox(TaskEventInboxQuery {
+            after_cursor: None,
+            limit: usize::MAX,
+        })
+        .expect("event inbox");
+    let mut state: MasterLoopState =
+        serde_json::from_str(&fs::read_to_string(runner.state_path()).expect("read state"))
+            .expect("parse state");
+    state.cursor = inbox.next_cursor;
+    state.pending_attention.clear();
+    fs::write(
+        runner.state_path(),
+        serde_json::to_string_pretty(&state).expect("render state"),
+    )
+    .expect("write state");
+
+    assert_eq!(
+        runner.run_once().expect("undecided block remains internal"),
+        ProductionMasterTickOutcome::Idle
+    );
+    assert_eq!(executor.calls.load(Ordering::Relaxed), 0);
+
+    fs::remove_dir_all(runtime_home).expect("cleanup");
+}
+
+#[test]
+fn production_master_runner_does_not_block_parent_while_sibling_child_is_active() {
+    let runtime_home = temp_path("blocked-parent-active-sibling");
+    bootstrap_runner(&runtime_home);
+    let parent_session_id = SessionId::new("parent-session-blocked-active-sibling");
+    persist_parent_user_objective_with_turn_id(
+        &runtime_home,
+        &parent_session_id,
+        &TurnId::new("runtime-turn-1"),
+        "Inspect the repository and produce the requested report.",
+        TerminalStatus::ToolPending,
+        "Waiting for delegated Worker tasks.",
+    );
+    let blocked_task_id = seed_parent_blocked_child_for_turn(
+        &runtime_home,
+        &parent_session_id,
+        &TurnId::new("runtime-turn-1"),
+        "blocked-child",
+    );
+    seed_parent_children_for_turn(
+        &runtime_home,
+        &parent_session_id,
+        &TurnId::new("runtime-turn-1-r2"),
+        &[("still-active", false)],
+    );
+    let runtime = TaskRuntime::boot(&runtime_home, AgentId::new("master")).expect("runtime");
+    runtime
+        .append_task(TaskAppendRequest {
+            task_id: blocked_task_id,
+            note: "blocked_decision: wait for an external directory fix".to_owned(),
+            actor: test_actor("master"),
+            watermark: test_watermark("blocked-active-sibling-decision"),
+        })
+        .expect("append blocked decision");
+    let inbox = runtime
+        .query_event_inbox(TaskEventInboxQuery {
+            after_cursor: None,
+            limit: usize::MAX,
+        })
+        .expect("event inbox");
+    let executor = Arc::new(StubMasterExecutor::new(|_| {
+        Err("active sibling must keep parent waiting".to_owned())
+    }));
+    let runner = test_runner(runtime_home.clone(), executor.clone());
+    let mut state: MasterLoopState =
+        serde_json::from_str(&fs::read_to_string(runner.state_path()).expect("read state"))
+            .expect("parse state");
+    state.cursor = inbox.next_cursor;
+    state.pending_attention.clear();
+    fs::write(
+        runner.state_path(),
+        serde_json::to_string_pretty(&state).expect("render state"),
+    )
+    .expect("write state");
+
+    assert_eq!(
+        runner
+            .run_once()
+            .expect("active sibling keeps parent waiting"),
+        ProductionMasterTickOutcome::Idle
+    );
+    assert_eq!(executor.calls.load(Ordering::Relaxed), 0);
+
+    fs::remove_dir_all(runtime_home).expect("cleanup");
+}
+
+#[test]
 fn production_master_runner_requires_interrupted_assignment_decision() {
     let runtime_home = temp_path("interrupted-missing-decision");
     bootstrap_runner_with_selected(
@@ -2487,6 +2690,70 @@ fn production_master_runner_recovers_closed_parent_workset_after_cursor_advanced
             .as_ref()
             .is_some_and(|request| request.session_id == parent_session_id)
     );
+
+    fs::remove_dir_all(runtime_home).expect("cleanup");
+}
+
+#[test]
+fn production_master_runner_ignores_blocked_workset_for_replaced_parent_turn() {
+    let runtime_home = temp_path("blocked-parent-replaced-turn");
+    bootstrap_runner(&runtime_home);
+    let parent_session_id = SessionId::new("parent-session-blocked-replaced-turn");
+    persist_parent_user_objective_with_turn_id(
+        &runtime_home,
+        &parent_session_id,
+        &TurnId::new("runtime-turn-399"),
+        "Use the corrected path and wait only for the current child task.",
+        TerminalStatus::ToolPending,
+        "Waiting for lifecycle: current corrected child task.",
+    );
+    let old_task_id = seed_parent_blocked_child_for_turn(
+        &runtime_home,
+        &parent_session_id,
+        &TurnId::new("runtime-turn-391"),
+        "old-wrong-path",
+    );
+    let runtime = TaskRuntime::boot(&runtime_home, AgentId::new("master")).expect("task runtime");
+    runtime
+        .append_task(TaskAppendRequest {
+            task_id: old_task_id,
+            note: "blocked_decision: old path was rejected before the parent turn changed"
+                .to_owned(),
+            actor: test_actor("master"),
+            watermark: test_watermark("blocked-replaced-turn-decision"),
+        })
+        .expect("append old blocked decision");
+    let inbox = runtime
+        .query_event_inbox(TaskEventInboxQuery {
+            after_cursor: None,
+            limit: usize::MAX,
+        })
+        .expect("event inbox");
+    let executor = Arc::new(StubMasterExecutor::new(|_| {
+        Err("old replaced parent turn must not trigger blocked follow-up".to_owned())
+    }));
+    let runner = test_runner(runtime_home.clone(), executor.clone());
+    let state_path = runner.state_path();
+    let mut state: MasterLoopState =
+        serde_json::from_str(&fs::read_to_string(&state_path).expect("read state"))
+            .expect("parse state");
+    state.cursor = inbox.next_cursor;
+    state.pending_attention.clear();
+    state.completed_parent_evaluations.clear();
+    state.skipped_parent_evaluations.clear();
+    fs::write(
+        &state_path,
+        serde_json::to_string_pretty(&state).expect("render state"),
+    )
+    .expect("write advanced cursor state");
+
+    assert_eq!(
+        runner
+            .run_once()
+            .expect("old blocked workset is not current parent truth"),
+        ProductionMasterTickOutcome::Idle
+    );
+    assert_eq!(executor.calls.load(Ordering::Relaxed), 0);
 
     fs::remove_dir_all(runtime_home).expect("cleanup");
 }

@@ -5,7 +5,7 @@
 - resource map: `docs/resource-maps/core.json`
 - lifecycle path under test:
   - daemon bootstrap selects one agent from config and creates a runtime dispatcher
-  - launchd wrapper loads `~/.freehand/daemon.env` and starts one configured daemon agent through explicit `FREEHAND_DAEMON_BIN` on a fixed port, binding to the local Tailscale IPv4 when available so Android/WebView clients can reach the daemon
+  - launchd wrapper loads `~/.freehand/daemon.env` and starts one configured daemon agent through explicit `FREEHAND_DAEMON_BIN` plus Android update manifest/APK env paths on a fixed port, binding to the local Tailscale IPv4 when available so Android/WebView clients can reach the daemon
   - runtime dispatcher exposes one shared UI state handle
   - daemon injects runtime dispatch into shared HTTP/SSE transport
   - daemon exposes the same shared state and runtime dispatch through ADP WebSocket at `/adp`
@@ -14,7 +14,7 @@
     background Master lifecycle runner; runner stop/error is explicit stderr
     evidence and must not crash the host process
   - standalone remote relay mode hosts account-scoped relay directory registration plus namespaced WebUI HTTP/ADP pass-through for registered daemon hosts
-  - S-profile launchd restart keeps the Android relay in the same lifecycle by restarting `com.freehand.relayS`, registering `studio-host`, and proving relay-served WebUI assets before true-device acceptance
+  - S-profile launchd restart keeps the Android relay and APK update distribution in the same lifecycle by staging runtime-home Android update artifacts, restarting `com.freehand.relayS`, registering `studio-host`, and proving relay-served WebUI assets/update routes before true-device acceptance
   - daemon restart restores persisted latest-turn projection before new command ingress
   - provider-backed submit and direct-message commands return runtime-backed receipts
   - latest-turn query reflects runtime-owned terminal projection changes after provider completion
@@ -87,7 +87,7 @@
   - remote relay local online smoke:
     `scripts/verify-remote-relay-local-online.sh` starts real `freehand-server webui-serve-smoke`, `freehand-daemon remote-relay`, and `freehand-cli adp-smoke` processes, then proves relay registration, directory query, namespaced WebUI HTML/CSS/JS and health pass-through, ADP pass-through, and missing-host rejection
   - S-profile relay launchd smoke:
-    `scripts/install-launchd.sh restartS` must restart `com.freehand.daemonS` and `com.freehand.relayS`, register `studio-host` to `http://127.0.0.1:4042`, prove `http://100.66.1.82:44042/relay/daemon/studio-host/` advertises the current asset version, and prove relay ADP smoke succeeds before Android WebView proof is accepted
+    `scripts/install-launchd.sh restartS` must stage complete Android update artifacts when repo `dist/android` is present, restart `com.freehand.daemonS` and `com.freehand.relayS`, register `studio-host` to `http://127.0.0.1:4042`, prove `http://100.66.1.82:44042/relay/daemon/studio-host/` advertises the current asset version, prove `/relay/daemon/studio-host/android/update.json` exposes the staged version truth, and prove relay ADP smoke succeeds before Android WebView proof is accepted
   - Android relay true-device smoke:
     build and install the current debug APK, expose one fixed relay port through device routing, persist a `remote_registry` config whose active endpoint `webUrl` is `/relay/daemon/{relay_host_id}/`, launch `com.freehand.android/.ui.MainActivity`, and require app-owned config readback, relay-served current asset version, `FreehandWebUiLayout` canonical shell/CSS/JS/mobile evidence, foreground activity, no stale live rows for terminal sessions, no fatal logcat, and screenshot review
   - launchd service smoke: `launchctl print`, `/health`, `/`, log file creation, restart wait-until-healthy behavior, and Tailscale-IP `/health` reachability for Android clients when Tailscale is present
@@ -123,7 +123,7 @@
     slice; relay HTTP/ADP access authentication is not implemented or claimed,
     so relay exposure must remain behind the trusted local/Tailscale route
     until a dedicated auth owner and online negative proof land
-  - S-profile Android relay coverage is required after WebUI asset or live-state changes: relay asset version, relay ADP smoke, true-device CDP DOM state, and screenshot must all come from the Tailscale relay endpoint
+  - S-profile Android relay coverage is required after WebUI asset, live-state, or APK update distribution changes: relay asset version, relay APK update manifest, relay ADP smoke, true-device CDP DOM state, and screenshot must all come from the Tailscale relay endpoint
   - config-selected bootstrap smoke is landed and uses configured peer topology
   - configured Slave bootstrap now constructs the production Worker runner
   - configured Slave bootstrap test verifies process identity through

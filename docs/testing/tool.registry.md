@@ -5,27 +5,35 @@
 - resource map: `docs/resource-maps/core.json`
 - resource operation coverage:
   - `tool_call.execute_workspace_path`
+  - `tool_call.execute_external_http`
 
 ## Resource Operation Test Coverage
 
 | resource operation | status | white-box | module black-box | project black-box |
 | --- | --- | --- | --- | --- |
 | `tool_call.execute_workspace_path` | bound | `cargo test -p freehand-tools -- --nocapture` covers built-in schema, locked workspace path, absolute/symlink path, external absolute rejection, read/search/write, preview, and tool display tests | `cargo test -p freehand-tools -- --nocapture` covers registry execution smokes for read_file/glob/grep/ls/write_file/edit_file/multi_edit and failure guidance | `cargo test -p freehand-runtime live_bridge -- --nocapture` covers runtime live tool-loop smokes and Worker online evidence that tool calls execute only through the locked workspace owner |
+| `tool_call.execute_external_http` | bound | `cargo test -p freehand-tools web_fetch_executes_against_local_http_url -- --nocapture` covers bounded HTTP fetch execution and argument validation tests cover invalid URL/limit/timeout handling | `cargo test -p freehand-tools web_fetch_executes_against_local_http_url -- --nocapture` covers registry execution through the owner `BuiltinToolRegistry::execute` path | `cargo test -p freehand-runtime live_bridge_admits_long_operator_task_without_semantic_truncation -- --nocapture --test-threads=1` proves Master/Worker provider request context advertises `web_fetch`; online proof must inspect provider request/tool-call evidence before claiming model behavior |
 
 - lifecycle path under test:
   - registry is created per run
   - Reasonix-aligned tool names and schemas are exported in stable registry order
   - generic implemented tools execute against the explicit per-call workspace root and return explicit result text
-  - the master-safe export is a stable framework-only subset containing `task`
-    and `timer`
+  - the master-safe export is a stable local-workspace-plus-framework subset
+    containing locked workspace file/search/write/edit tools, concrete-URL
+    `web_fetch`, plus `task` and `timer`
   - unimplemented registered tools fail explicitly
   - unknown tools fail explicitly
 - white-box plan:
   - registry name/schema export tests
   - implemented schema fingerprint stability tests
   - implemented schema fingerprint change detection tests
-  - master-safe tool export includes `task` and `timer` and excludes
-    file/search/write tools, shell, `todo_write`, and `complete_step`
+  - master-safe tool export includes locked local workspace tools (`ls`,
+    `read_file`, `grep`, `glob`, `write_file`, `edit_file`, `multi_edit`,
+    `delete_range`) plus `web_fetch`, `task`, and `timer`, and excludes shell,
+    browser, broad `web_search`, `todo_write`, and `complete_step`
+  - worker-safe tool export is exact and excludes shell/task/timer,
+    unimplemented names, and observed bad invented names such as `shell`,
+    `readlink`, `pwd`, `cat`, and `find`
   - tool execution scope classification distinguishes framework, workspace, and
     unrestricted process tools in the registry owner
   - read-only path tools reject existing external absolute paths after
@@ -41,9 +49,14 @@
 - path tool failures report owner-rendered `path_diagnostic` truth for relative
   path absolute-normalization and absolute symlink-parent missing-leaf cases
 - `read_file` schema export tells the model to use `ls` first when a target may
-  be a directory and not to read guessed or not-yet-created files
+  be a directory and not to read guessed files, binary sidecars, or
+  not-yet-created output directories/files
 - `ls` schema export says it can list directories or report one file entry, so
-  file-existence checks do not need exact-file glob trial calls
+  file-existence checks do not need exact-file glob trial calls; it also tells
+  the model not to keep listing guessed missing output directories
+  - `web_fetch` schema and execution tests cover concrete `http://`/`https://`
+    URL fetching with timeout/byte limits and explicit failure for non-HTTP
+    schemes; this is not broad search/browser capability
   - writable path escape returns a typed workspace-boundary error instead of
     an unstructured invalid-argument string
 - `read_only` metadata tests
@@ -58,7 +71,7 @@
   when they resolve to an existing workspace, and rejects glob, broad-search,
   or output-directory targets
 - `timer` is exposed as a separate standard internal framework tool, not as
-  `task(op=wait)` or task note text
+  task input `{"op":"wait"}` or task note text
 - `bash` success-path, workspace-cwd, explicit workspace root, timeout, and non-zero-exit tests
 - live runtime checkpoint routing must not treat non-file-mutation tools such as `bash` as preview/checkpointable file mutations
   - `read_file` line-window and external absolute rejection tests
@@ -71,6 +84,9 @@
     `ls`, and `write_file`
   - `glob` schema prompt-guard test for leading-`~`, parent traversal, and
     external absolute patterns
+  - `read_file`/`ls` schema prompt-guard test for directory-as-file, guessed
+    generated reports, binary sidecars, and repeated listing of missing output
+    directories
   - path diagnostic tests for relative path absolute-normalization and absolute
     symlink-parent missing-leaf evidence
   - `grep` recursive match and external absolute rejection tests
@@ -96,9 +112,12 @@
   - runtime live bridge can execute a real implemented read-only registry tool inside the master runtime home and re-enter the result
   - runtime live bridge returns a paired failed result for an external requested session cwd without exposing external file content
 - project black-box impact:
-  - master live turns cannot receive or execute file/search/write tools,
-    unsandboxed `bash`, `todo_write`, or `complete_step`; cross-workspace work
-    must enter through `task` and a worker
+  - master live turns can receive and execute locked local workspace
+    file/search/write/edit tools in the current selected session cwd,
+    concrete-URL `web_fetch`, plus `task` and `timer`; unsandboxed `bash`,
+    browser, broad `web_search`, `todo_write`, and `complete_step` remain
+    unavailable; different-cwd, isolated, concurrent, long-running, or
+    resumable work must enter through `task` and a Worker
   - worker read-only path tools and file-mutation tools remain locked to the
     current agent cwd after canonical/symlink resolution; for Worker provider
     turns that current agent cwd is the locked task cwd
@@ -125,7 +144,7 @@
     persisted active timer that expires across service-scoped `restartS` is
     claimed after restart and completed from durable timer truth
   - writable file-mutation tools now still enter the live path only through the registry owner instead of runtime orchestration
-  - future bash/web/notebook tools still have one owner and cannot be implemented in runtime orchestration
+  - future bash/broad-search/browser/notebook tools still have one owner and cannot be implemented in runtime orchestration
   - future task-management actions must enter through the small owner-scoped
     tool/op surface, while standard non-task internal actions such as timers
     use their own owner-approved internal tool surface
@@ -135,11 +154,16 @@
   - provider mock tool-use fixtures
   - `~/.freehand/ledgers/reason`
 - known gaps:
-  - `bg_jobs`, `kill_shell`, `wait_job`, web, notebook, and symbol-aware mutation tools are still intentionally unimplemented until dedicated lifecycle and permission gates are locked
+  - `web_fetch` is implemented as a bounded concrete-URL network tool; `bg_jobs`,
+    `kill_shell`, `wait_job`, broad `web_search`, browser, notebook, and
+    symbol-aware mutation tools are still intentionally unimplemented until
+    dedicated lifecycle and permission gates are locked
 - sync status between design and implementation:
   - registry-backed foreground `bash`, workspace-locked read-only file/search, and first text-mutation tools are landed
   - explicit per-call workspace root support is landed through `with_workspace_root`
-  - generic, worker-safe, and framework-only master-safe implemented tool schema
-    exports and fingerprints are landed for their respective consumers
+  - generic, worker-safe, and local-workspace-plus-framework master-safe
+    implemented tool schema exports and fingerprints are landed for their
+    respective consumers; worker surface tests lock the exact Worker list so
+    runtime guidance does not invent `shell`/`readlink`/`pwd`/`cat`/`find`
   - writable tool live exposure is routed through the code-bound `tool.preview` plus `runtime.checkpoint-rewind` owner paths instead of runtime-local mutation shortcuts
   - runtime and daemon smokes now consume real registry tools instead of a forced demo first tool

@@ -9,7 +9,8 @@
   "resource_operations": [
     "task.create",
     "task.attach_session",
-    "task.assign"
+    "task.assign",
+    "task.cancel"
   ],
   "request_mainline": [
     "runtime receives a provider tool call named `task`",
@@ -514,6 +515,9 @@
       "output_semantic": "cancelled task snapshot plus released agent state",
       "caller": "runtime task bridge",
       "callee": "task owner",
+      "source_resource": "task",
+      "target_resource": "task",
+      "resource_operation": "task.cancel",
       "binding_status": "bound"
     },
     {

@@ -105,6 +105,8 @@ pub struct TurnProjection {
 pub struct TurnRecord {
     #[serde(default)]
     pub created_at: u64,
+    #[serde(default, skip_serializing_if = "TurnTiming::is_empty")]
+    pub timing: TurnTiming,
     pub request: ReasonReq02ContextComposedInput,
     pub provider_payload: ReasonReq03ProviderPayload,
     pub planned_context: PlannedContext,
@@ -116,6 +118,54 @@ pub struct TurnRecord {
     pub usage_events: Vec<ReasonResp02UsageEvent>,
     pub terminal_event: Option<ReasonResp03TerminalEvent>,
     pub error_events: Vec<ErrorErr01RuntimeClassified>,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
+pub struct TurnTiming {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub turn_started_at_ms: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub first_response_at_ms: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub completed_at_ms: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub time_to_first_response_ms: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub total_elapsed_ms: Option<u64>,
+}
+
+impl TurnTiming {
+    pub fn is_empty(&self) -> bool {
+        self.turn_started_at_ms.is_none()
+            && self.first_response_at_ms.is_none()
+            && self.completed_at_ms.is_none()
+            && self.time_to_first_response_ms.is_none()
+            && self.total_elapsed_ms.is_none()
+    }
+
+    pub fn mark_first_response(&mut self, timestamp_ms: u64) {
+        if self.first_response_at_ms.is_none() {
+            self.first_response_at_ms = Some(timestamp_ms);
+        }
+        if self.time_to_first_response_ms.is_none()
+            && let (Some(started_at), Some(first_at)) =
+                (self.turn_started_at_ms, self.first_response_at_ms)
+        {
+            self.time_to_first_response_ms = first_at.checked_sub(started_at);
+        }
+    }
+
+    pub fn mark_completed(&mut self, timestamp_ms: u64) {
+        if self.completed_at_ms.is_none() {
+            self.completed_at_ms = Some(timestamp_ms);
+        }
+        if self.total_elapsed_ms.is_none()
+            && let (Some(started_at), Some(completed_at)) =
+                (self.turn_started_at_ms, self.completed_at_ms)
+        {
+            self.total_elapsed_ms = completed_at.checked_sub(started_at);
+        }
+    }
 }
 
 pub struct ReasonTurnEngine {
@@ -238,8 +288,13 @@ impl ReasonTurnEngine {
             model: input.model,
             input_segments: planned_context.ordered_segments.clone(),
         };
+        let started_at_ms = unix_millis_now();
         let turn = TurnRecord {
-            created_at: unix_seconds_now(),
+            created_at: started_at_ms / 1000,
+            timing: TurnTiming {
+                turn_started_at_ms: Some(started_at_ms),
+                ..TurnTiming::default()
+            },
             request,
             provider_payload,
             planned_context,
@@ -305,6 +360,10 @@ impl ReasonTurnEngine {
         output: ProviderSemanticOutput,
     ) -> Result<(), ReasonTurnError> {
         self.write_provider_output_metadata(turn, &output)?;
+        let output_started = !matches!(output, ProviderSemanticOutput::ToolResultReentry(_));
+        if output_started {
+            turn.timing.mark_first_response(unix_millis_now());
+        }
         match output {
             ProviderSemanticOutput::SemanticEvent(event) => {
                 turn.semantic_events.push(event.clone());
@@ -406,6 +465,7 @@ impl ReasonTurnEngine {
                     summary: terminal_text,
                 };
                 turn.terminal_event = Some(event.clone());
+                turn.timing.mark_completed(unix_millis_now());
                 self.publish(ReasonBroadcastEvent::Terminal(event.clone()));
                 self.emit_debug(
                     turn,
@@ -452,6 +512,7 @@ impl ReasonTurnEngine {
             summary: summary.into(),
         };
         turn.terminal_event = Some(event.clone());
+        turn.timing.mark_completed(unix_millis_now());
         self.publish(ReasonBroadcastEvent::Terminal(event.clone()));
         self.emit_debug(
             turn,
@@ -494,6 +555,7 @@ impl ReasonTurnEngine {
             summary: summary.into(),
         };
         turn.terminal_event = Some(event.clone());
+        turn.timing.mark_completed(unix_millis_now());
         self.publish(ReasonBroadcastEvent::Terminal(event.clone()));
         self.emit_debug(
             turn,
@@ -525,6 +587,7 @@ impl ReasonTurnEngine {
             summary: summary.into(),
         };
         turn.terminal_event = Some(event.clone());
+        turn.timing.mark_completed(unix_millis_now());
         self.publish(ReasonBroadcastEvent::Terminal(event.clone()));
         self.emit_debug(
             turn,
@@ -754,6 +817,16 @@ fn unix_seconds_now() -> u64 {
         .unwrap_or(0)
 }
 
+fn unix_millis_now() -> u64 {
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| {
+            let millis = duration.as_millis();
+            u64::try_from(millis).unwrap_or(u64::MAX)
+        })
+        .unwrap_or(0)
+}
+
 fn unix_timestamp_string() -> String {
     unix_seconds_now().to_string()
 }
@@ -879,6 +952,97 @@ mod tests {
             receiver.recv().expect("tool result broadcast"),
             ReasonBroadcastEvent::ToolResult(_)
         ));
+    }
+
+    #[test]
+    fn turn_timing_records_first_provider_response_and_terminal_elapsed() {
+        let engine = ReasonTurnEngine::new();
+        let mut history = session_history();
+        let mut turn = engine
+            .start_turn(&mut history, start_input())
+            .expect("turn");
+        let started_at = turn.timing.turn_started_at_ms.expect("turn start timing");
+        assert!(turn.timing.first_response_at_ms.is_none());
+        assert!(turn.timing.time_to_first_response_ms.is_none());
+        assert!(turn.timing.total_elapsed_ms.is_none());
+
+        let result = ReasonReq05ToolResultReentry {
+            session_id: turn.request.session_id.clone(),
+            turn_id: turn.request.turn_id.clone(),
+            trace_id: turn.request.trace_id.clone(),
+            feature_id: turn.request.feature_id.clone(),
+            agent_id: turn.request.agent_id.clone(),
+            tool_result: freehand_contracts::ToolResultContract {
+                tool_call_id: ToolCallId::new("tool-1"),
+                status: freehand_contracts::ToolResultStatus::Success,
+                output: "done".to_owned(),
+            },
+        };
+        engine
+            .apply_provider_output(&mut turn, ProviderSemanticOutput::ToolResultReentry(result))
+            .expect("tool result reentry");
+        assert!(
+            turn.timing.first_response_at_ms.is_none(),
+            "tool result re-entry is not a provider first response"
+        );
+
+        let ctx = freehand_provider_core::ProviderEventContext {
+            agent_id: turn.request.agent_id.clone(),
+            session_id: turn.request.session_id.clone(),
+            turn_id: turn.request.turn_id.clone(),
+            trace_id: turn.request.trace_id.clone(),
+            feature_id: turn.request.feature_id.clone(),
+        };
+        engine
+            .apply_provider_output(
+                &mut turn,
+                freehand_provider_core::map_adapter_event(
+                    &ctx,
+                    ProviderAdapterEvent::TextDelta("first byte".to_owned()),
+                ),
+            )
+            .expect("first provider output");
+        let first_response_at = turn
+            .timing
+            .first_response_at_ms
+            .expect("first response timing");
+        assert!(first_response_at >= started_at);
+        assert_eq!(
+            turn.timing.time_to_first_response_ms,
+            Some(first_response_at - started_at)
+        );
+
+        engine
+            .apply_provider_output(
+                &mut turn,
+                freehand_provider_core::map_adapter_event(
+                    &ctx,
+                    ProviderAdapterEvent::TextDelta("second byte".to_owned()),
+                ),
+            )
+            .expect("second provider output");
+        assert_eq!(turn.timing.first_response_at_ms, Some(first_response_at));
+
+        engine
+            .submit_completion(
+                &mut turn,
+                &CompletionSubmission {
+                    claim: CompletionClaim::Complete,
+                    completion_reason: Some("done".to_owned()),
+                    evidence: Some("tests passed".to_owned()),
+                    summary: Some("completed task".to_owned()),
+                    learned: Some("keep schema strict".to_owned()),
+                    next_step: None,
+                    blocked_reason: None,
+                },
+            )
+            .expect("terminal");
+        let completed_at = turn.timing.completed_at_ms.expect("completed timing");
+        assert!(completed_at >= started_at);
+        assert_eq!(
+            turn.timing.total_elapsed_ms,
+            Some(completed_at - started_at)
+        );
     }
 
     #[test]

@@ -50,6 +50,8 @@
     and without granting task mutation authority
   - `task.assign` (`task -> agent`): create or replace the temporary assignment
     while preserving the same task id and parent session id
+  - `task.cancel` (`task -> task`): move a non-terminal task to Cancelled and
+    release any temporary Agent assignment
 - forbidden shortcuts:
   - Session must not own or directly bind Agent lifecycle truth
   - current-session Agent attachment must be derived through Task parent truth
@@ -303,7 +305,7 @@
 | 13 | `TaskRuntime::assign_task` | `crates/freehand-task/src/lib.rs` | assign waiting/created/interrupted task to an available agent, including replacing an interrupted task's previous assignee | task assignment request | same task snapshot + new temporary assignment + agent queued state | runtime task bridge | task owner | bound |
 | 14 | `TaskRuntime::claim_next_task` | `crates/freehand-task/src/lib.rs` | claim the highest-priority assigned task for an agent and enter lease-backed running state | agent task-claim request | claimed running task snapshot or no-task outcome | runtime task bridge | task owner | bound |
 | 15 | `TaskRuntime::record_execution` | `crates/freehand-task/src/lib.rs` | append semantic worker execution progress for a running task | worker execution record request | running task snapshot + progress event | runtime task bridge | task owner | bound |
-| 16 | `TaskRuntime::cancel_task` | `crates/freehand-task/src/lib.rs` | cancel non-terminal task and release assignee state | task mutation request | cancelled task snapshot + released agent | runtime task bridge | task owner | bound |
+| 16 | `TaskRuntime::cancel_task` | `crates/freehand-task/src/lib.rs` | cancel non-terminal task and release assignee state for `task.cancel` | task mutation request | cancelled task snapshot + released agent | runtime task bridge | task owner | bound |
 | 17 | `TaskRuntime::create_agent` / `close_agent` | `crates/freehand-task/src/lib.rs` | create persisted idle worker agents and close only idle agents | agent mutation request | agent snapshot | runtime task bridge | task owner | bound |
 | 18 | `TaskRuntime::query_task_board` | `crates/freehand-task/src/lib.rs` | project TaskBoard truth for master, scheduler, UI, and headless query | task snapshots + execution facts + agent registry | TaskBoard projection | runtime query dispatch | task owner | bound |
 | 19 | `TaskRuntime::apply_execution_fact` | `crates/freehand-task/src/lib.rs` | admit typed ExecutionFact state into Task Center without raw prose parsing, including interrupted system-retry truth | ExecutionFact | task snapshot + event | Agent Lifecycle sync / runtime | task owner | bound |

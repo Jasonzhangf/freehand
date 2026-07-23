@@ -1,3 +1,4 @@
+use axum::body::Body;
 use axum::http::{HeaderValue, StatusCode, header};
 use axum::response::{IntoResponse, Response};
 
@@ -26,12 +27,24 @@ const WEBUI_JS: Asset = Asset {
     body: include_str!("../assets/webui.js"),
 };
 
+const LOGO_PNG: &[u8] = include_bytes!("../../../assets/logo.png");
+
 pub fn asset_response(path: &str) -> Result<Response, StatusCode> {
     let asset = match path {
         "theme.css" => &THEME_CSS,
         "webui.css" => &WEBUI_CSS,
         "theme.js" => &THEME_JS,
         "webui.js" => &WEBUI_JS,
+        "logo.png" => {
+            return Response::builder()
+                .header(header::CONTENT_TYPE, HeaderValue::from_static("image/png"))
+                .header(
+                    header::CACHE_CONTROL,
+                    HeaderValue::from_static("no-store, max-age=0"),
+                )
+                .body(Body::from(LOGO_PNG))
+                .map_err(|_| StatusCode::INTERNAL_SERVER_ERROR);
+        }
         _ => return Err(StatusCode::NOT_FOUND),
     };
     Ok((

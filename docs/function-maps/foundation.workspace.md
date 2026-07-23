@@ -33,12 +33,12 @@
 - gate runner verifies `make ci`, pre-push, CI, and release paths include the canonical full gate with mainline freshness
 - gate runner verifies launchd defaults the master daemon workdir to `$HOME/.freehand`, creates that directory before bootstrap, and rejects the former repository-root default
 - gate runner verifies source-only search policy so implementation searches use source code, tests, maintained scripts, and canonical docs rather than generated/runtime output; the wrapper rejects unsafe `rg` options such as `--no-ignore` / `-u` and keeps hard generated-output exclusions after caller args
-- release script runs full regression, release binary builds, Android JVM regression, Android release APK packaging with Android release lint disabled in Gradle config, and deterministic artifact staging
+- release script runs full regression, release binary builds, Android JVM regression, Android release APK packaging with Android release lint disabled in Gradle config, extracts APK version truth, and stages deterministic Android update artifacts including `dist/android/update.json`
 - WebUI online verification wrapper checks fixed S-profile `127.0.0.1:4042` daemon health and invokes the real browser WebUI + ADP proof for alpha promotion; release-profile `127.0.0.1:4041` proof is a separate explicit target
 - fixed-session ADP observability verifier submits with the correct internally tagged ADP envelope and queries selected session plus TaskBoard/AgentBoard owner truth so receipt waits cannot masquerade as lifecycle proof
-- global install script installs the staged host binaries into one explicit prefix without inventing runtime config truth
+- global install script installs the staged host binaries into one explicit prefix and copies compiled Android update artifacts into runtime-home distribution truth without inventing runtime config truth
 - symlink install script builds debug host binaries, exposes `freehand-cliS`, `freehand-serverS`, and `freehand-daemonS` as symlinks, and installs a copied `freehand-daemon-launchdS` wrapper for development without replacing global release commands
-- launchd install script installs host binaries, writes the LaunchAgent plist, writes daemon environment truth with explicit daemon binary path, starts the user service, and exposes fixed WebUI/log paths
+- launchd install script installs host binaries, stages compiled Android update artifacts into runtime-home distribution truth, writes the LaunchAgent plist, writes daemon environment truth with explicit daemon binary and Android update artifact paths, starts the user service, and exposes fixed WebUI/log paths
 - launchd install/restart runs `scripts/freehand-file-permission-preflight.sh` before bootstrapping the user service; on macOS it checks runtime/workdir plus standard protected user folders and opens Full Disk Access settings on denial instead of letting Worker execution discover permission failure later
 - launchd install script supports a coexisting symlink profile through `installS` / `restartS`, using `com.freehand.daemonS`, `~/.freehand/daemonS.env`, `127.0.0.1:4042`, and `daemonS.*.log`; `restartS` refreshes the debug daemon binary copy, rewrites the plist, reloads only the service-scoped launchd label, sources the env file at daemon start, and health-checks the env-backed bind so Tailscale defaults cannot move the S profile off loopback
 - launchd install script supports release and S Worker services through
@@ -65,13 +65,13 @@
 - gate returns success when migrated mainline call-table bindings resolve to source files and symbols
 - gate returns success when local and remote automation routes through the same full gate stack
 - gate returns success when `.ignore`, `scripts/source-search.sh`, debug docs, and local skill keep generated/runtime output excluded from implementation search, including wrapper-level rejection of unsafe `rg` ignore bypass options
-- release artifacts include `freehand-cli`, `freehand-server`, `freehand-daemon`, and the Android release APK under `dist/`
+- release artifacts include `freehand-cli`, `freehand-server`, `freehand-daemon`, the Android release APK, and `dist/android/update.json` under `dist/`
 - S-profile WebUI online verification writes screenshots and `summary.json` under `artifacts/webui-online/<run-id>/`, proving composer clear, visible submitted input, multi-round failed-tool continuation, no stale historical animation, refresh persistence, and ADP session truth alignment
 - fixed-session ADP observability verifier returns one JSON summary containing pending selected-session turn truth, final selected-session turn truth, command receipt or timeout, and current Worker/blocked-task owner truth
-- global install exposes `freehand-cli`, `freehand-server`, and `freehand-daemon` on the chosen install prefix
+- global install exposes `freehand-cli`, `freehand-server`, and `freehand-daemon` on the chosen install prefix, plus Android update APK/manifest artifacts under `$HOME/.freehand/dist/android` or `FREEHAND_RUNTIME_HOME/dist/android`
 - symlink install exposes `freehand-cliS`, `freehand-serverS`, `freehand-daemonS`, and `freehand-daemon-launchdS` on the chosen prefix, pointing host commands at repo debug binaries while keeping the launchd wrapper executable as a prefix-local file
-- launchd install exposes `com.freehand.daemon` as a user LaunchAgent with `RunAtLoad`, `KeepAlive`, explicit `FREEHAND_DAEMON_BIN`, fixed `127.0.0.1:4041` WebUI, and logs under `~/.freehand/logs`
-- launchd symlink install exposes `com.freehand.daemonS` as a separate user LaunchAgent with explicit `FREEHAND_DAEMON_BIN`, fixed `127.0.0.1:4042` WebUI, and separate `daemonS.*.log` files; symlink profile restart refreshes the debug daemon binary copy and health-checks the existing env bind before restarting
+- launchd install exposes `com.freehand.daemon` as a user LaunchAgent with `RunAtLoad`, `KeepAlive`, explicit `FREEHAND_DAEMON_BIN`, explicit Android update manifest/APK paths, fixed `127.0.0.1:4041` WebUI, and logs under `~/.freehand/logs`
+- launchd symlink install exposes `com.freehand.daemonS` as a separate user LaunchAgent with explicit `FREEHAND_DAEMON_BIN`, explicit Android update manifest/APK paths, fixed `127.0.0.1:4042` WebUI, and separate `daemonS.*.log` files; symlink profile restart refreshes the debug daemon binary copy, stages current repo `dist/android` artifacts when present, and health-checks the existing env bind before restarting
 - launchd Worker install exposes `com.freehand.worker` and
   `com.freehand.workerS` as separate `RunAtLoad` + `KeepAlive` services with no
   UI port and with pair-token identity shared from the matching Master profile

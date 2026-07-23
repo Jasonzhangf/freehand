@@ -6,7 +6,7 @@
   - app boundary receives protocol-owned query/projection truth
   - app boundary receives protocol-owned command ingress intent and returns dispatch receipt/failure only
   - app boundary renders a usable protocol-driven WebUI shell
-  - app boundary serves split theme and WebUI assets
+  - app boundary serves split theme, WebUI, and shared logo assets
   - app boundary renders a compact session rail with separate new-conversation and new-task affordances; new task requires a visible target cwd, while new conversation does not require cwd
   - app boundary renders protocol-owned debug query projection
   - app boundary renders slave-card visibility only for WebUI
@@ -48,24 +48,25 @@
   - router and serve helper
   - dependency boundary scan for protocol-only app wiring
 - module black-box plan:
-  - WebUI root shell smoke
-  - WebUI theme asset smoke
+  - WebUI root shell smoke, including shared logo reference
+  - WebUI theme and shared logo asset smoke
   - WebUI JS asset smoke
-  - Android update route smoke for manifest JSON and explicit missing-APK 404
+  - Android update route smoke for env/sidecar manifest JSON, explicit missing-sidecar failure, and explicit missing-APK 404
   - WebUI JS asset smoke locks ADP WebSocket command/query usage, rejects `fetch` as a live path, and requires `EventSource` only for latest-turn SSE display refresh
   - WebUI ADP subscription accepted/waiting status rendering smoke
   - WebUI ADP failure frame visible-card/status smoke
   - WebUI ADP request timeout visible-failure smoke
 - WebUI ADP failure card ordering smoke: failure card must not render ahead of the current conversation items
 - WebUI asset and online smoke must prove user-visible status text, failure cards, and verifier-submitted diagnostic prompts do not expose `ADP`; protocol naming is allowed only in internal code, docs, CLI, and test harness output
-  - WebUI hidden failure diagnostic prompts must stay within the Master framework-only tool surface: use `task`/`timer` samples, not workspace tools such as `read_file`
+  - WebUI hidden failure diagnostic prompts must stay within the active Master tool surface: current-cwd workspace tools such as `read_file` should succeed, so use cross-cwd workspace-boundary or unavailable-tool samples when a failed tool card is needed
   - WebUI hidden success/failure diagnostic prompt asset smoke and no persistent sample-button smoke
   - WebUI keyboard shortcut smoke for submit, cancel, refresh, focus composer, and sample loading
   - WebUI slash command smoke for `/help`, `/sessions`, `/reload`, `/success`, `/failure`, `/cancel`, and `/clear`
   - WebUI attachment control smoke for add/remove/preview and session-scoped draft retention
   - WebUI attachment success-clear smoke
   - WebUI attachment failure-retain smoke
-  - WebUI settings shell smoke for desktop/mobile entry points, complete registry rendering without a fixed provider count, owner-backed current/fallback selectors that keep fallback truth on initial load and provider upsert until the operator explicitly edits selector draft state, owner-backed definition add/update and selection command wiring, Android-only APK update card/bridge/status callback wiring, visible invalid-save errors, visible restart-required success, absence of unsupported read-only status cards, no API-key/password inputs, no credential text, and no direct config write helpers
+- WebUI settings shell smoke for desktop/mobile entry points, complete registry rendering without a fixed provider count, owner-backed current/fallback selectors that keep fallback truth on initial load and provider upsert until the operator explicitly edits selector draft state, owner-backed definition add/update and selection command wiring, Android-only APK update card/bridge/status callback wiring, visible invalid-save errors, visible restart-required success, absence of unsupported read-only status cards, no API-key/password inputs, no credential text, and no direct config write helpers
+- Server APK update route smoke must prove `/android/update.json` serves explicit runtime env override or compiled sidecar truth with no-store cache headers, `/android/freehand-android.apk` serves the signed staged APK, and that a missing sidecar does not return a hardcoded old `versionCode` as a false current-version success.
   - WebUI mobile settings drawer back/close smoke locks sticky drawer header CSS plus `window.__freehandHandleAndroidBack`: focused settings input is blurred on first back, a following back closes the settings drawer, and the conversation remains visible without native fallback UI
   - mobile Agent header renders owner-backed Worker limit and system max five; increment/decrement stays within `1..=5` and save routes only through `UpdateAgentResourceConfig`
   - Agent resource save failure remains visible and does not rewrite the displayed owner projection as success
@@ -158,7 +159,10 @@
   `worker_session_id` / `task_id`, and asserts the parent transcript
   renders `waiting lifecycle`/`running` rather than completed while the Worker
   transcript renders `blocked` diagnostic truth without exposing internal
-  Worker prompts or top-level `worker-task-*` sessions.
+  Worker prompts or top-level `worker-task-*` sessions; the script keeps launchd restarts service-scoped and sets the
+  existing `FREEHAND_LAUNCHD_HEALTH_WAIT_SECONDS` to 120 seconds by default so
+  slow S-profile startup is measured by `/health` truth instead of a duplicate
+  restart path.
 - WebUI online mobile Agent Dashboard proof for Worker limit must reject task-card labels above the configured Worker resource range, so `worker`, `worker-2`, and `worker-3` render as Worker 1/2/3 even when AgentBoard also contains the Master row
 - WebUI mobile Agent Dashboard negative coverage must prove unrelated global/history tasks never appear, missing `worker_session_id` is an explicit unavailable error rather than an empty synthetic session, switching Agents never leaves the previous Agent transcript visible under the new selection, the Agents sheet contains no capacity-save control, and toggling the sheet does not reset or recreate semantic state
 - WebUI mobile Agent Dashboard race coverage must start a parent transcript query, click a Worker task before it resolves, and assert the late parent `SessionTurns` response is discarded while the projected Worker transcript remains selected and visible
@@ -234,7 +238,24 @@
 - WebUI tool cards no longer normalize by `tool_call_id`; waiting state animation assets are served, and submit clears the composer immediately while preserving pending user input in the stream
 - WebUI submit/dispatch pending state and tool waiting state now both refresh with visible elapsed time instead of static waiting text
 - WebUI model-response waiting state is driven by protocol-projected typed `model_request.kind`, not local-only guessing or non-empty detail strings; lifecycle clocks are keyed by session/turn/model phase instead of a single global `modelRequestStartedAt`
+- WebUI frozen terminal cycle-card coverage permits same-key replacement only
+  when the existing frozen card is missing owner `created_at`, first-response
+  timing, or total-elapsed timing and the refreshed transcript provides that
+  exact missing field; it must not allow a later request to mutate
+  already-timed terminal card semantics
 - WebUI selected-session transcript refresh keeps nonterminal `model_request` rows visible with static waiting/retrying/switching status when they are not the current live turn
+- WebUI selected-session lifecycle refresh keeps the current latest
+  `ToolPending` turn under owner-truth watchdog refresh until a later terminal
+  transcript projection arrives, while historical `ToolPending` cards stop
+  driving refresh after terminal truth becomes selected
+- WebUI Header/mobile Agent observation must treat a later same-session
+  terminal transcript turn as authoritative over older `SessionList.active_turn_id`
+  or `ToolPending` status, so blocked/failed/closed truth cannot keep showing as
+  a running Agent after Master/Worker lifecycle has already closed.
+- WebUI Header/mobile Agent observation must not fall back to an unrelated
+  globally active session while any Master or Worker session is selected; selected
+  pages may observe only the selected session or the selected Worker's parent
+  Master.
 - WebUI renders provider retry/failover activity only as updating transport detail inside the current Model request row; recovered turns replace that row with normal response truth and do not retain an Error card or a stale `Provider` flow row
 - WebUI completed/failed tool cards now render protocol-projected semantic target/body while status/outcome stays in the status line, and tool-complete-to-next-model waiting has its own elapsed timer
 - WebUI current-live-turn-only wait gating is landed so historical completed turns cannot keep blinking, even when the selected-session transcript still contains protocol model_request fields from earlier rounds

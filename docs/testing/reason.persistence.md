@@ -21,16 +21,22 @@
   - restart recovery restores from snapshot plus reason-ledger tail, or from reason-ledger-only rebuild when snapshots are missing or invalid
   - selected-session UI restore reads complete authoritative closed/active snapshots plus rollback-marker sidecar truth when available, preserves exact `runtime-turn-N` / `runtime-turn-N-rM` rounds as separate UI snapshots, and backfills from the reason ledger when authoritative snapshot truth is missing earlier observed rounds
   - daemon bootstrap and Master parent-workset reconciliation use the authoritative-only UI restore path and must not replay every historical reason ledger; incomplete old snapshots are expanded only when that session is explicitly queried
+  - authoritative closed-turn restore reads only `*.json` turn snapshots; leftover `*.tmp-*` atomic write artifacts in the turns directory must not be parsed as turn truth or prevent daemon bootstrap
   - non-UI turn-start restore reads authoritative reason-ledger
     `TurnStarted` rows, honors rollback markers, and preserves first-round user
     intent even when effective UI snapshots only retain a repaired round
   - derived UI and index sidecars rebuild from authoritative truth and are never recovery truth
   - reason-owned session display metadata stores `title` and `archived` state for shared UI CRUD without entering provider-visible session history
   - append-only rollback markers filter effective transcript restore while preserving raw closed-turn files for audit
+  - authoritative restore and rollback persistence filter model-visible
+    `historical_turn:*` session-memory segments against the same effective
+    active/closed turn set used by transcript truth; stable memory without a
+    historical-turn reference remains intact
   - provider raw ledgers remain debug-only and never become session truth
 - white-box plan:
   - session snapshot render/load tests
   - invalid persisted snapshot JSON rejection tests
+  - leftover atomic temp file rejection-from-truth test proving authoritative restore ignores non-`.json` turn-directory files
   - invalid snapshot coherence rejection tests
   - persistence cursor serialization tests
   - reason-ledger sequence monotonicity tests
@@ -45,6 +51,7 @@
   - UI restore test that poisons the reason ledger after complete authoritative snapshots exist, proving transcript query does not depend on replaying the ledger
   - UI restore test that leaves authoritative closed-turn truth with only the terminal continuation round, proving earlier provider/tool rounds are backfilled from reason-ledger snapshots
   - runtime bootstrap test that removes the first authoritative round and poisons the historical reason ledger, proving global startup consumes the remaining authoritative snapshot without parsing the ledger
+  - runtime/bootstrap-adjacent restore test that writes a zero-byte atomic temp file next to a closed turn and proves both `restore` and `restore_authoritative_turn_snapshots_for_ui` return only the closed `*.json` turn
   - turn-start restore test for an original `runtime-turn-1` start plus a closed
     repaired `runtime-turn-1-r2` snapshot, proving first-round request truth
     remains available and rollback does not resurrect it
@@ -60,6 +67,9 @@
   - non-destructive delete-as-archive session metadata test
   - append-only latest-turn rollback marker test
   - effective transcript filtering test after rollback
+  - effective session-history filtering test proving valid historical-turn
+    memory and ordinary stable memory remain while rolled-back and orphan
+    historical-turn memory is removed
   - raw closed-turn file retention test after rollback
   - multi-round logical turn rollback test
 - module black-box plan:
@@ -98,8 +108,12 @@
   - live Anthropic `reason-live` path now persists start/output/rejection/terminal events plus provider raw debug bodies/events through `ReasonPersistence`
   - runtime white-box coverage now explicitly locks ledger sequence-gap rejection plus provider-raw-only and UI-sidecar-only missing-recovery rejection
   - runtime white-box coverage now explicitly locks invalid persisted snapshot JSON, invalid snapshot coherence, and duplicate-sequence recovery rejection
+  - runtime white-box coverage now explicitly locks leftover atomic temp files out of authoritative closed-turn restore
   - session metadata CRUD is implemented with positive create/rename/archive/restore/delete-as-archive coverage and negative unknown-session rejection coverage
   - append-only latest-session-turn rollback is implemented with positive marker/effective-filter/raw-file-retention coverage
+  - effective session-history rollback filtering is covered positively for
+    retained effective/stable memory and negatively for rolled-back/orphan
+    historical-turn memory
   - runtime parent evaluation has a regression proving original user-objective
     recovery when the authoritative closed snapshot contains only a repaired
     round

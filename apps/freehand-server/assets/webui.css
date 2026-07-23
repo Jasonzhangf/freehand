@@ -63,11 +63,16 @@ textarea {
   height: 40px;
   border-radius: 13px;
   background: var(--panel);
-  color: var(--rail);
   display: grid;
   place-items: center;
-  font-weight: 900;
-  font-size: 13px;
+  overflow: hidden;
+}
+
+.brand-logo {
+  width: 34px;
+  height: 34px;
+  display: block;
+  object-fit: contain;
 }
 
 .rail-group {
@@ -1432,6 +1437,25 @@ body.theme-dark .conversation-region {
 
 .turn-cycle-card .chat-message {
   z-index: 1;
+}
+
+.turn-cycle-header {
+  z-index: 1;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  padding: 0 8px 2px 18px;
+  color: var(--text-muted);
+  font-size: 11px;
+  font-variant-numeric: tabular-nums;
+  font-weight: 700;
+}
+
+.turn-cycle-header-pill {
+  border: 1px solid rgba(43, 66, 58, 0.10);
+  border-radius: 999px;
+  padding: 3px 8px;
+  background: rgba(255, 255, 255, 0.64);
 }
 
 .chat-message {
