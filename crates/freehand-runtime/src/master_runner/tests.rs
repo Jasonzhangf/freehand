@@ -7,14 +7,15 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use freehand_config::{
     AgentMode, ProviderAuthSourceKind, ProviderAuthType, ProviderProtocol, ProviderType,
-    SelectedAgentConfig, SelectedPeerAgentConfig, SelectedProviderConfig,
+    ProviderWebSearchMode, SelectedAgentConfig, SelectedPeerAgentConfig, SelectedProviderConfig,
 };
 use freehand_contracts::{AgentId, FeatureId, SessionId, TerminalStatus, TraceId, TurnId};
 use freehand_reason::{ReasonPersistence, ReasonTurnEngine, SessionHistory, TurnStartInput};
 use freehand_task::{
     AgentCreateRequest, ExecutionFact, ExecutionFactKind, TaskActor, TaskAppendRequest,
-    TaskClaimRequest, TaskCreateRequest, TaskDispatchRequest, TaskId, TaskMutationRequest,
-    TaskParentRef, TaskReviewRejection, TaskRuntime, TaskStatus, TaskWatermark,
+    TaskClaimRequest, TaskCreateRequest, TaskDispatchRequest, TaskExecutionProfile, TaskId,
+    TaskMutationRequest, TaskParentRef, TaskReviewRejection, TaskRuntime, TaskStatus,
+    TaskWatermark,
 };
 
 use super::*;
@@ -3048,6 +3049,7 @@ fn production_master_runner_closed_loop_requires_next_round_before_final_evaluat
                     acceptance: vec!["report proves alpha and beta are integrated".to_owned()],
                     priority: 95,
                     target_cwd: Some(request.runtime_home.display().to_string()),
+                    execution_profile: TaskExecutionProfile::Workspace,
                     dispatch: TaskDispatchRequest::Agent {
                         agent_id: AgentId::new("worker"),
                     },
@@ -3234,6 +3236,7 @@ fn seed_parent_children_with_turn_ids(
                 acceptance: vec![format!("{name} evidence")],
                 priority: 100 - index as i64,
                 target_cwd: Some(runtime_home.display().to_string()),
+                execution_profile: TaskExecutionProfile::Workspace,
                 dispatch: TaskDispatchRequest::Agent {
                     agent_id: AgentId::new("worker"),
                 },
@@ -3348,6 +3351,7 @@ fn seed_parent_blocked_child_for_turn(
             acceptance: vec![format!("{name} evidence")],
             priority: 80,
             target_cwd: Some(runtime_home.display().to_string()),
+            execution_profile: TaskExecutionProfile::Workspace,
             dispatch: TaskDispatchRequest::Agent {
                 agent_id: AgentId::new("worker"),
             },
@@ -3610,6 +3614,7 @@ fn seed_review_ready_task(runtime_home: &Path) -> TaskId {
             acceptance: vec!["evidence exists".to_owned()],
             priority: 90,
             target_cwd: Some(runtime_home.display().to_string()),
+            execution_profile: TaskExecutionProfile::Workspace,
             dispatch: TaskDispatchRequest::Agent {
                 agent_id: AgentId::new("worker"),
             },
@@ -3735,6 +3740,7 @@ fn seed_interrupted_task_with_parent(
             acceptance: vec!["same task id is preserved".to_owned()],
             priority: 90,
             target_cwd: Some(runtime_home.display().to_string()),
+            execution_profile: TaskExecutionProfile::Workspace,
             dispatch: TaskDispatchRequest::Agent {
                 agent_id: AgentId::new(worker_id),
             },
@@ -3795,6 +3801,7 @@ fn seed_attention_required_task(runtime_home: &Path, worker_id: &str) -> TaskId 
             acceptance: vec!["same task id is preserved".to_owned()],
             priority: 95,
             target_cwd: Some(runtime_home.display().to_string()),
+            execution_profile: TaskExecutionProfile::Workspace,
             dispatch: TaskDispatchRequest::Agent {
                 agent_id: AgentId::new(worker_id),
             },
@@ -3870,6 +3877,7 @@ fn selected_master_with_workers(worker_ids: &[&str]) -> SelectedAgentConfig {
             protocol: ProviderProtocol::Messages,
             base_url: "https://example.invalid".to_owned(),
             default_model: "master-model".to_owned(),
+            web_search: ProviderWebSearchMode::Auto,
             auth_type: ProviderAuthType::ApiKey,
             auth_source: ProviderAuthSourceKind::Inline,
             api_key: "test-key".to_owned(),

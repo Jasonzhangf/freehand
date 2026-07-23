@@ -8,8 +8,10 @@
 - resource map: `docs/resource-maps/core.json`
 - resource operations:
   - `request_context.build_provider_request`
+  - `provider_request.select_hosted_search`
 - owner entry symbols:
   - `run_live_reason_turn`
+  - `LiveReasonExecutionRole::hosted_tool_definitions`
 
 ## Resource Map Binding
 
@@ -18,11 +20,14 @@
   - `provider_request`
 - touched resources:
   - `request_context`
+  - `provider_hosted_search`
 - resource operations:
   - `request_context.build_provider_request`
+  - `provider_request.select_hosted_search` (`provider_request` -> `provider_hosted_search`)
 - forbidden shortcuts:
   - Runtime must not patch provider payloads from turn truth without going through typed request context.
   - Instruction manifests must not patch provider requests directly.
+  - Runtime must not render OpenAI Responses hosted search wire; it may only select provider-neutral `ProviderHostedToolDefinition` values before adapter IO.
 
 ## Request Mainline
 
@@ -57,6 +62,7 @@
   UI/debug clients can identify the exact pre-provider segment instead of a
   silent pending submit
 - bridge derives provider descriptor and executor config from the active primary/fallback route without exposing provider wire DTOs
+- bridge derives provider-hosted search capability from config/provider descriptor and execution profile; OpenAI Responses GPT-family models with `web_search=auto` can declare hosted search, while disabled/unsupported provider-protocol-model combinations leave it absent
 - `reason.turn` may start multiple rounds under one logical live request when completion schema says `continue` or when schema rejection requires same-task retry
 - provider semantic request is built from each round's turn-owned provider payload
 - retryable non-stream HTTP/network failure retries on the primary route; after primary exhaustion, or immediately for failover-eligible non-retryable HTTP status such as 402, the bridge switches once to the configured fallback at the provider-neutral semantic request boundary
@@ -65,16 +71,19 @@
   master-safe registry subset through provider-neutral request metadata:
   locked local workspace tools, concrete-URL `web_fetch`, plus `task` and
   `timer`
+- the first master request may also declare provider-hosted `web_search` metadata when the selected provider supports hosted search mixed with function tools; this is provider-native search, not a Freehand function tool
 - the master-safe registry subset omits unrestricted shell/browser/broad
   `web_search` tools, `todo_write`, and `complete_step`, and exports the
   matching deterministic schema fingerprint stamped into planner diagnostics
+- search-only hosted providers must not be mixed into the Master function-tool request; broad/current search on such providers is routed through `TaskExecutionProfile::CleanSearch` Worker turns with zero Freehand function tools
 - the first master-task-capable request tells the model to use local workspace
   tools directly when the current selected session cwd is enough, to dispatch
   only for different-cwd/isolated/concurrent/long-running/resumable work, to
   use `web_fetch` directly for known HTTP/HTTPS URLs, and to block only when
-  neither Master nor configured Workers expose the required concrete
-  capability, or when broad search/browser behavior is required but no such
-  tool is exposed
+  neither Master nor configured Workers/provider-hosted capabilities expose
+  the required concrete capability, or when broad search/browser behavior is
+  required but neither provider-hosted search nor a `clean_search` Worker is
+  available
 - the first master-task-capable request includes owner-scoped task orchestration guidance and exact JSON examples such as `task({"op":"create",...})` instead of pseudo-call syntax or standalone semantic-action tool names
 - the Master task snapshot guidance tells the model not to call
   `status="all"` and to use the injected current framework truth before
@@ -234,6 +243,7 @@
 ## Sync Status Against Code
 
 - current live path supports Anthropic `messages`, OpenAI-compatible `responses`, and OpenAI-compatible `chat_completions` through a provider-neutral runtime driver abstraction
+- current live path selects provider-hosted search only as provider-neutral hosted tool metadata; OpenAI wire rendering remains adapter-owned
 - runtime owner path preserves incremental stream apply, completion schema loop, persistence, registry-backed tool loop, tool-schema fingerprint wiring, shared metadata-ledger producer wiring, runtime-owned debug snapshot emission, checkpoint gating, and shared path/symlink diagnostics without duplicating adapter or path semantics
 - runtime live bridge now bootstraps one shared metadata ledger and writes restore/request/tool/terminal lifecycle metadata without request-text leakage
 - runtime live bridge now emits restore/request/tool/terminal lifecycle debug snapshots through `debug.core` without prompt, provider-payload, or tool-result leakage

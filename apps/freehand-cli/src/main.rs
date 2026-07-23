@@ -6,13 +6,13 @@ use freehand_config::{
 };
 use freehand_contracts::{AgentId, SemanticEventKind, SessionId, TerminalStatus, TraceId, TurnId};
 use freehand_runtime::{
-    LiveReasonRestoreStatus, LiveReasonTurnRequest, load_default_runtime_agent,
-    run_live_reason_turn,
+    LiveReasonExecutionProfile, LiveReasonRestoreStatus, LiveReasonTurnRequest,
+    load_default_runtime_agent, run_live_reason_turn,
 };
 use freehand_task::{
     ExecutionFact, ExecutionFactKind, TaskActor, TaskAssignRequest, TaskClaimRequest,
-    TaskCreateRequest, TaskDispatchRequest, TaskId, TaskParentRef, TaskReviewRejection,
-    TaskReviewSubmission, TaskRuntime, TaskWatermark,
+    TaskCreateRequest, TaskDispatchRequest, TaskExecutionProfile, TaskId, TaskParentRef,
+    TaskReviewRejection, TaskReviewSubmission, TaskRuntime, TaskWatermark,
 };
 use freehand_testkit::{
     ReasonRuntimeSmokeScenario, run_reason_persistence_smoke, run_reason_runtime_smoke,
@@ -120,7 +120,7 @@ fn run() -> Result<String, String> {
     }
     if flag != "--agent" {
         return Err(
-            "usage: freehand-cli --agent <name>\n   or: freehand-cli reason-e2e --agent <name> --scenario <usage-compaction|recovery-block>\n   or: freehand-cli reason-persist-smoke --agent <name>\n   or: freehand-cli reason-live --agent <name> --prompt <text> [--stream]\n   or: freehand-cli adp-smoke --url ws://127.0.0.1:4041/adp\n   or: freehand-cli adp-turn-sample --url ws://127.0.0.1:4041/adp --sample <success|failure|schema-mismatch|provider-retry>\n   or: freehand-cli session-continue-sample --url ws://127.0.0.1:4041/adp\n   or: freehand-cli task-lifecycle-sample --url ws://127.0.0.1:4041/adp\n   or: freehand-cli task-restart-seed-review --agent master --task <id> --worker <id> --execution <id> --target-cwd <path> --summary <text>\n   or: freehand-cli task-restart-seed-rejected --agent master --task <id> --worker <id> --execution <id> --target-cwd <path> --summary <text>\n   or: freehand-cli task-restart-seed-blocked --agent master --task <id> --worker <id> --execution <id> --target-cwd <path> --summary <text>\n   or: freehand-cli task-restart-seed-running --agent master --task <id> --worker <id> --execution <id> --target-cwd <path> --summary <text>\n   or: freehand-cli phase1-foundation-sample --url ws://127.0.0.1:4041/adp [--verify-task <task_id> --review-task <task_id> --execution <id> --agent <id>]\n   or: freehand-cli master-worker-foundation-sample --url ws://127.0.0.1:4041/adp [--verify-task <task_id> --execution <id> --agent <id>]\n   or: freehand-cli master-worker-autonomy-sample --url ws://127.0.0.1:4041/adp [--scenario <all|success|execution-error|reject-retry>] [--verify-task <task_id> --execution <id> --agent <id>]\n   or: freehand-cli master-poll-foundation-sample --url ws://127.0.0.1:4041/adp [--verify-task <task_id> --execution <id> --agent <id> --cursor <cursor>]\n   or: freehand-cli worker-control-foundation-sample --url ws://127.0.0.1:4041/adp [--verify-task <task_id> --execution <id> --agent <id> --control <control_id>]\n   or: freehand-cli adp-session-query --url ws://127.0.0.1:4041/adp [--session <id>]\n   or: freehand-cli adp-session-manage --url ws://127.0.0.1:4041/adp --action <create|rename|archive|restore|delete> --session <id> [--title <title>] [--cwd <path>]\n   or: freehand-cli adp-config-query --url ws://127.0.0.1:4041/adp\n   or: freehand-cli adp-config-update --url ws://127.0.0.1:4041/adp --agent <name> --provider <id> --type <openai|anthropic> --protocol <responses|chat_completions|messages> --base-url <url> --model <model> --api-key-env <ENV>\n   or: freehand-cli adp-task-query --url ws://127.0.0.1:4041/adp [--status <status>] [--agent <id>] [--history <task_id>]\n   or: freehand-cli adp-task-subscribe --url ws://127.0.0.1:4041/adp [--status <status>] [--agent <id>]\n   or: freehand-cli adp-error-query --url ws://127.0.0.1:4041/adp --session <id> [--trace <id>] [--turn <id>] [--domain <domain>]\n   or: freehand-cli remote-daemon-bootstrap-link --daemon <id> --credential-env <ENV> [--ttl-seconds <seconds>] [--web]"
+        "usage: freehand-cli --agent <name>\n   or: freehand-cli reason-e2e --agent <name> --scenario <usage-compaction|recovery-block>\n   or: freehand-cli reason-persist-smoke --agent <name>\n   or: freehand-cli reason-live --agent <name> --prompt <text> [--stream]\n   or: freehand-cli adp-smoke --url ws://127.0.0.1:4041/adp\n   or: freehand-cli adp-turn-sample --url ws://127.0.0.1:4041/adp --sample <success|failure|schema-mismatch|provider-retry>\n   or: freehand-cli session-continue-sample --url ws://127.0.0.1:4041/adp\n   or: freehand-cli task-lifecycle-sample --url ws://127.0.0.1:4041/adp\n   or: freehand-cli task-restart-seed-review --agent master --task <id> --worker <id> --execution <id> --target-cwd <path> --summary <text>\n   or: freehand-cli task-restart-seed-rejected --agent master --task <id> --worker <id> --execution <id> --target-cwd <path> --summary <text>\n   or: freehand-cli task-restart-seed-blocked --agent master --task <id> --worker <id> --execution <id> --target-cwd <path> --summary <text>\n   or: freehand-cli task-restart-seed-running --agent master --task <id> --worker <id> --execution <id> --target-cwd <path> --summary <text>\n   or: freehand-cli phase1-foundation-sample --url ws://127.0.0.1:4041/adp [--verify-task <task_id> --review-task <task_id> --execution <id> --agent <id>]\n   or: freehand-cli master-worker-foundation-sample --url ws://127.0.0.1:4041/adp [--verify-task <task_id> --execution <id> --agent <id>]\n   or: freehand-cli master-worker-autonomy-sample --url ws://127.0.0.1:4041/adp [--scenario <all|success|execution-error|reject-retry>] [--verify-task <task_id> --execution <id> --agent <id>]\n   or: freehand-cli master-poll-foundation-sample --url ws://127.0.0.1:4041/adp [--verify-task <task_id> --execution <id> --agent <id> --cursor <cursor>]\n   or: freehand-cli worker-control-foundation-sample --url ws://127.0.0.1:4041/adp [--verify-task <task_id> --execution <id> --agent <id> --control <control_id>]\n   or: freehand-cli adp-session-query --url ws://127.0.0.1:4041/adp [--session <id>]\n   or: freehand-cli adp-session-manage --url ws://127.0.0.1:4041/adp --action <create|rename|archive|restore|delete> --session <id> [--title <title>] [--cwd <path>]\n   or: freehand-cli adp-config-query --url ws://127.0.0.1:4041/adp\n   or: freehand-cli adp-config-update --url ws://127.0.0.1:4041/adp --agent <name> --provider <id> --type <openai|anthropic> --protocol <responses|chat_completions|messages> --base-url <url> --model <model> [--web-search auto|disabled] --api-key-env <ENV>\n   or: freehand-cli adp-task-query --url ws://127.0.0.1:4041/adp [--status <status>] [--agent <id>] [--history <task_id>]\n   or: freehand-cli adp-task-subscribe --url ws://127.0.0.1:4041/adp [--status <status>] [--agent <id>]\n   or: freehand-cli adp-error-query --url ws://127.0.0.1:4041/adp --session <id> [--trace <id>] [--turn <id>] [--domain <domain>]\n   or: freehand-cli remote-daemon-bootstrap-link --daemon <id> --credential-env <ENV> [--ttl-seconds <seconds>] [--web]"
                 .to_owned(),
         );
     }
@@ -137,7 +137,7 @@ fn run() -> Result<String, String> {
         .map_err(|err| err.to_string())?;
 
     Ok(format!(
-        "agent={} mode={} allowed_pair_ip={} pair_token_env={} provider={} provider_type={} provider_protocol={} default_model={} base_url={} provider_auth_source={} restart_required_on_change={}",
+        "agent={} mode={} allowed_pair_ip={} pair_token_env={} provider={} provider_type={} provider_protocol={} default_model={} web_search={} base_url={} provider_auth_source={} restart_required_on_change={}",
         selected.name,
         mode_label(selected.mode),
         selected
@@ -149,6 +149,7 @@ fn run() -> Result<String, String> {
         provider_type_label(selected.provider.provider_type),
         provider_protocol_label(selected.provider.protocol),
         selected.provider.default_model,
+        selected.provider.web_search.as_str(),
         selected.provider.base_url,
         selected.provider.auth_source.as_str(),
         selected.restart_required_on_change
@@ -378,6 +379,7 @@ fn run_task_restart_seed(
             ],
             priority: 100,
             target_cwd: Some(target_cwd.clone()),
+            execution_profile: TaskExecutionProfile::Workspace,
             dispatch: TaskDispatchRequest::None,
             parent: TaskParentRef {
                 session_id: Some(session_id),
@@ -948,7 +950,7 @@ fn run_adp_config_query(args: Vec<String>) -> Result<String, String> {
 
 fn run_adp_config_update(args: Vec<String>) -> Result<String, String> {
     let usage =
-        "usage: freehand-cli adp-config-update --url ws://127.0.0.1:4041/adp --agent <name> --provider <id> --type <openai|anthropic> --protocol <responses|chat_completions|messages> --base-url <url> --model <model> --api-key-env <ENV>"
+        "usage: freehand-cli adp-config-update --url ws://127.0.0.1:4041/adp --agent <name> --provider <id> --type <openai|anthropic> --protocol <responses|chat_completions|messages> --base-url <url> --model <model> [--web-search auto|disabled] --api-key-env <ENV>"
             .to_owned();
     let mut url = None::<String>;
     let mut update = UiProviderConfigUpdate {
@@ -958,6 +960,7 @@ fn run_adp_config_update(args: Vec<String>) -> Result<String, String> {
         provider_protocol: String::new(),
         base_url: String::new(),
         default_model: String::new(),
+        web_search: String::new(),
         api_key_env: String::new(),
     };
     let mut index = 0;
@@ -989,6 +992,10 @@ fn run_adp_config_update(args: Vec<String>) -> Result<String, String> {
             }
             "--model" if index + 1 < args.len() => {
                 update.default_model = args[index + 1].clone();
+                index += 2;
+            }
+            "--web-search" if index + 1 < args.len() => {
+                update.web_search = args[index + 1].clone();
                 index += 2;
             }
             "--api-key-env" if index + 1 < args.len() => {
@@ -1721,11 +1728,12 @@ fn summarize_config_query_result(
                 .iter()
                 .map(|provider| {
                     format!(
-                        "{}:{}:{}:{}:{}:{}:{}",
+                        "{}:{}:{}:{}:{}:{}:{}:{}",
                         sanitize_config_query_token(&provider.provider_id),
                         sanitize_config_query_token(&provider.provider_type),
                         sanitize_config_query_token(&provider.provider_protocol),
                         sanitize_config_query_token(&provider.default_model),
+                        sanitize_config_query_token(&provider.provider_web_search),
                         sanitize_config_query_token(&provider.provider_base_url_host),
                         sanitize_config_query_token(&provider.provider_auth_source),
                         provider.enabled
@@ -1734,7 +1742,7 @@ fn summarize_config_query_result(
                 .collect::<Vec<_>>()
                 .join(",");
             let output = format!(
-                "adp_config_query_ok url={} agent={} mode={} node={} paired_agents={} provider={} fallback_provider={} provider_type={} provider_protocol={} base_url_host={} default_model={} auth_type={} auth_source={} provider_registry={} restart_required_on_change={}",
+                "adp_config_query_ok url={} agent={} mode={} node={} paired_agents={} provider={} fallback_provider={} provider_type={} provider_protocol={} base_url_host={} default_model={} web_search={} auth_type={} auth_source={} provider_registry={} restart_required_on_change={}",
                 url,
                 status.agent_name,
                 status.agent_mode,
@@ -1746,6 +1754,7 @@ fn summarize_config_query_result(
                 status.provider_protocol,
                 status.provider_base_url_host,
                 status.default_model,
+                status.provider_web_search,
                 status.provider_auth_type,
                 status.provider_auth_source,
                 provider_registry,
@@ -2051,6 +2060,7 @@ async fn run_task_lifecycle_sample_async(url: String) -> Result<String, String> 
                     acceptance: vec!["accepted summary recorded".to_owned()],
                     priority: 50,
                     target_cwd: None,
+                    execution_profile: "workspace".to_owned(),
                     session_id: Some(session_id.clone()),
                     turn_id: None,
                     dispatch: None,
@@ -2180,6 +2190,7 @@ async fn run_phase1_foundation_sample_async(
                     acceptance: vec!["TaskBoard review queue contains the task".to_owned()],
                     priority: 80,
                     target_cwd: None,
+                    execution_profile: "workspace".to_owned(),
                     session_id: Some(session_id.clone()),
                     turn_id: Some(turn_id.clone()),
                     dispatch: None,
@@ -2229,6 +2240,7 @@ async fn run_phase1_foundation_sample_async(
                     ],
                     priority: 70,
                     target_cwd: None,
+                    execution_profile: "workspace".to_owned(),
                     session_id: Some(session_id.clone()),
                     turn_id: Some(turn_id.clone()),
                     dispatch: None,
@@ -2561,6 +2573,7 @@ async fn run_master_worker_foundation_sample_async(
                     acceptance: vec!["task closes only after approved review".to_owned()],
                     priority: 90,
                     target_cwd: None,
+                    execution_profile: "workspace".to_owned(),
                     session_id: Some(session_id.clone()),
                     turn_id: Some(turn_id.clone()),
                     dispatch: Some(UiTaskDispatchCommand::None),
@@ -3305,6 +3318,7 @@ async fn run_master_poll_foundation_sample_async(
                     ],
                     priority: 96,
                     target_cwd: None,
+                    execution_profile: "workspace".to_owned(),
                     session_id: Some(session_id.clone()),
                     turn_id: Some(turn_id.clone()),
                     dispatch: Some(UiTaskDispatchCommand::None),
@@ -3754,6 +3768,7 @@ async fn run_worker_control_foundation_sample_async(
                     acceptance: vec!["control events survive restart".to_owned()],
                     priority: 98,
                     target_cwd: None,
+                    execution_profile: "workspace".to_owned(),
                     session_id: Some(session_id.clone()),
                     turn_id: Some(turn_id.clone()),
                     dispatch: Some(UiTaskDispatchCommand::None),
@@ -5032,6 +5047,7 @@ fn run_reason_live(args: Vec<String>) -> Result<String, String> {
             trace_id: TraceId::new(format!("cli-live-trace-{stamp}")),
             prompt: args[3].clone(),
             cwd: None,
+            execution_profile: LiveReasonExecutionProfile::Workspace,
             stream,
             cancel_token: None,
         },

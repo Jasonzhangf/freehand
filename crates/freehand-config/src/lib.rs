@@ -71,6 +71,22 @@ impl ProviderProtocol {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+#[serde(rename_all = "lowercase")]
+pub enum ProviderWebSearchMode {
+    Auto,
+    Disabled,
+}
+
+impl ProviderWebSearchMode {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Auto => "auto",
+            Self::Disabled => "disabled",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
 pub enum ProviderAuthType {
     #[serde(rename = "apikey")]
     ApiKey,
@@ -125,6 +141,7 @@ pub struct ProviderConfig {
     pub protocol: ProviderProtocol,
     pub base_url: String,
     pub default_model: String,
+    pub web_search: ProviderWebSearchMode,
     pub auth_type: ProviderAuthType,
     pub auth: ProviderAuthConfig,
 }
@@ -138,6 +155,7 @@ pub struct SafeProviderConfigProjection {
     pub base_url: String,
     pub base_url_host: String,
     pub default_model: String,
+    pub web_search: ProviderWebSearchMode,
     pub auth_type: ProviderAuthType,
     pub auth_source: ProviderAuthSourceKind,
 }
@@ -149,6 +167,7 @@ pub struct SelectedProviderConfig {
     pub protocol: ProviderProtocol,
     pub base_url: String,
     pub default_model: String,
+    pub web_search: ProviderWebSearchMode,
     pub auth_type: ProviderAuthType,
     pub auth_source: ProviderAuthSourceKind,
     pub api_key: String,
@@ -162,6 +181,7 @@ pub struct ProviderConfigUpdate {
     pub protocol: String,
     pub base_url: String,
     pub default_model: String,
+    pub web_search: String,
     pub api_key_env: String,
 }
 
@@ -817,6 +837,7 @@ impl ProviderConfig {
             base_url: safe_provider_base_url_for_projection(&self.base_url),
             base_url_host: provider_base_url_host_for_projection(&self.base_url),
             default_model: self.default_model.clone(),
+            web_search: self.web_search,
             auth_type: self.auth_type,
             auth_source: self.auth.source_kind(),
         }
@@ -967,6 +988,11 @@ pub enum ConfigError {
     UnsupportedProviderProtocol {
         provider_id: String,
         protocol: String,
+    },
+    #[error("provider `{provider_id}` web_search `{web_search}` is not supported")]
+    UnsupportedProviderWebSearch {
+        provider_id: String,
+        web_search: String,
     },
     #[error("provider `{provider_id}` default_model must be non-empty")]
     EmptyProviderDefaultModel { provider_id: String },
@@ -1196,6 +1222,8 @@ struct RawProviderConfig {
     base_url: String,
     #[serde(alias = "defaultModel")]
     default_model: String,
+    #[serde(default)]
+    web_search: Option<ProviderWebSearchMode>,
     auth: RawProviderAuthConfig,
 }
 
@@ -1655,6 +1683,9 @@ fn validate_config(parsed: RawConfig) -> Result<LoadedConfig, ConfigError> {
             protocol,
             base_url: raw_provider.base_url,
             default_model: raw_provider.default_model,
+            web_search: raw_provider
+                .web_search
+                .unwrap_or(ProviderWebSearchMode::Auto),
             auth_type,
             auth,
         };
@@ -2045,6 +2076,11 @@ fn apply_provider_definition_config_update(
         "default_model".to_owned(),
         toml::Value::String(update.default_model.trim().to_owned()),
     );
+    let web_search = parse_provider_web_search(provider_id, &update.web_search)?;
+    provider.insert(
+        "web_search".to_owned(),
+        toml::Value::String(web_search.as_str().to_owned()),
+    );
     let mut auth = toml::map::Map::new();
     auth.insert("type".to_owned(), toml::Value::String("apikey".to_owned()));
     auth.insert(
@@ -2398,6 +2434,23 @@ fn parse_provider_protocol(
     }
 }
 
+fn parse_provider_web_search(
+    provider_id: &str,
+    web_search: &str,
+) -> Result<ProviderWebSearchMode, ConfigError> {
+    let value = web_search.trim();
+    if value.is_empty() || value == "auto" {
+        return Ok(ProviderWebSearchMode::Auto);
+    }
+    if value == "disabled" {
+        return Ok(ProviderWebSearchMode::Disabled);
+    }
+    Err(ConfigError::UnsupportedProviderWebSearch {
+        provider_id: provider_id.to_owned(),
+        web_search: value.to_owned(),
+    })
+}
+
 fn validate_provider_auth(
     provider_id: &str,
     auth: RawProviderAuthConfig,
@@ -2529,6 +2582,7 @@ fn select_provider_for_agent(
         protocol: provider.protocol,
         base_url: provider.base_url.clone(),
         default_model: provider.default_model.clone(),
+        web_search: provider.web_search,
         auth_type: provider.auth_type,
         auth_source: provider.auth.source_kind(),
         api_key: resolve_provider_api_key(provider)?,
@@ -4168,6 +4222,7 @@ provider = "old"
                 protocol: "responses".to_owned(),
                 base_url: "https://api.minimaxi.com/v1".to_owned(),
                 default_model: "MiniMax-M3".to_owned(),
+                web_search: "auto".to_owned(),
                 api_key_env: provider_key_env.clone(),
             },
         )
@@ -4175,6 +4230,7 @@ provider = "old"
 
         assert_eq!(selected.provider.id, "minimax");
         assert_eq!(selected.provider.default_model, "MiniMax-M3");
+        assert_eq!(selected.provider.web_search, ProviderWebSearchMode::Auto);
         assert_eq!(selected.provider.auth_source, ProviderAuthSourceKind::Env);
         assert_eq!(selected.provider.api_key, "provider-secret");
         assert!(selected.restart_required_on_change);
@@ -4203,6 +4259,7 @@ type = "openai"
 protocol = "responses"
 base_url = "https://user:password@api.anyint.ai/openai/v1?token=secret"
 default_model = "gpt-5.5"
+web_search = "disabled"
 
 [providers.cc.auth]
 type = "apikey"
@@ -4252,6 +4309,7 @@ fallback_provider = "minimax"
         assert_eq!(cc.protocol, ProviderProtocol::Responses);
         assert_eq!(cc.base_url, "https://api.anyint.ai/openai/v1");
         assert_eq!(cc.base_url_host, "api.anyint.ai");
+        assert_eq!(cc.web_search, ProviderWebSearchMode::Disabled);
         assert_eq!(cc.auth_source, ProviderAuthSourceKind::Env);
         let minimax = registry
             .iter()
@@ -4260,6 +4318,7 @@ fallback_provider = "minimax"
         assert_eq!(minimax.provider_type, ProviderType::Anthropic);
         assert_eq!(minimax.protocol, ProviderProtocol::Messages);
         assert_eq!(minimax.base_url, "https://api.minimaxi.com/anthropic");
+        assert_eq!(minimax.web_search, ProviderWebSearchMode::Auto);
         assert_eq!(minimax.auth_source, ProviderAuthSourceKind::Inline);
 
         let debug = format!("{registry:?}");
@@ -4331,6 +4390,7 @@ fallback_provider = "minimax"
                 protocol: "responses".to_owned(),
                 base_url: "https://new.example.test/openai/v1".to_owned(),
                 default_model: "gpt-next".to_owned(),
+                web_search: "disabled".to_owned(),
                 api_key_env: "FREEHAND_NEW_OPENAI_KEY".to_owned(),
             },
         )
@@ -4348,6 +4408,7 @@ fallback_provider = "minimax"
         assert!(raw.contains("[providers.cc]"));
         assert!(raw.contains("[providers.minimax]"));
         assert!(raw.contains("[providers.\"new.openai\"]"));
+        assert!(raw.contains("web_search = \"disabled\""));
         assert!(raw.contains("provider = \"cc\""));
         assert!(raw.contains("fallback_provider = \"minimax\""));
         assert!(raw.contains("api_key_env = \"FREEHAND_NEW_OPENAI_KEY\""));
@@ -4602,6 +4663,7 @@ provider = "old"
                 protocol: "responses".to_owned(),
                 base_url: "not-a-url".to_owned(),
                 default_model: "model".to_owned(),
+                web_search: "auto".to_owned(),
                 api_key_env: "FREEHAND_API_KEY".to_owned(),
             },
         )
@@ -4612,6 +4674,67 @@ provider = "old"
         ));
         let after = fs::read_to_string(&path).expect("read config after failed update");
         assert_eq!(after, before);
+
+        fs::remove_file(path).expect("cleanup");
+    }
+
+    #[test]
+    fn provider_update_rejects_invalid_web_search_without_overwriting_config() {
+        let path = write_temp_config(
+            r#"
+[providers.old]
+id = "old"
+enabled = true
+type = "openai"
+protocol = "responses"
+base_url = "https://old.example.test/v1"
+default_model = "old-model"
+
+[providers.old.auth]
+type = "apikey"
+api_key = "sk-inline"
+
+[agents.master]
+name = "master"
+mode = "master"
+node_id = "master-node"
+paired_agents = ["worker"]
+pair_token = "FREEHAND_MASTER_TOKEN"
+provider = "old"
+
+[agents.worker]
+name = "worker"
+mode = "slave"
+node_id = "worker-node"
+paired_agents = ["master"]
+pair_token = "WORKER_TOKEN"
+provider = "old"
+"#,
+        );
+        let before = fs::read_to_string(&path).expect("read original config");
+        let err = upsert_provider_config_in_path(
+            &path,
+            ProviderConfigUpdate {
+                agent_name: "master".to_owned(),
+                provider_id: "bad".to_owned(),
+                provider_type: "openai".to_owned(),
+                protocol: "responses".to_owned(),
+                base_url: "https://new.example.test/v1".to_owned(),
+                default_model: "gpt-5.5".to_owned(),
+                web_search: "enabled".to_owned(),
+                api_key_env: "FREEHAND_API_KEY".to_owned(),
+            },
+        )
+        .expect_err("invalid web search must fail");
+        assert!(matches!(
+            err,
+            ConfigError::UnsupportedProviderWebSearch { provider_id, web_search }
+                if provider_id == "bad" && web_search == "enabled"
+        ));
+        assert_eq!(
+            fs::read_to_string(&path).expect("read config after failed update"),
+            before
+        );
 
         fs::remove_file(path).expect("cleanup");
     }

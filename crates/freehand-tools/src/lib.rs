@@ -647,13 +647,13 @@ pub fn reasonix_aligned_builtin_specs() -> Vec<BuiltinToolSpec> {
             "task",
             false,
             true,
-            "Task Center call shape is strict: the top-level JSON object must include \"op\". For create, call exactly like {\"op\":\"create\",\"title\":\"...\",\"content\":\"...\",\"goal\":\"...\",\"deliverables\":[\"...\"],\"acceptance\":[\"...\"],\"target_cwd\":\"/absolute/existing/repo\",\"dispatch\":{\"mode\":\"none\"}}; then assign with {\"op\":\"assign\",\"task_id\":\"...\",\"agent_id\":\"<configured Worker>\"}. Do not call task with only a title/content payload and do not omit op. Prefer the current TaskSpaceSnapshot before query/list/history; use tools only for concrete mutations or decision-critical ledger truth.",
+            "Task Center call shape is strict: the top-level JSON object must include \"op\". For workspace work, call exactly like {\"op\":\"create\",\"title\":\"...\",\"content\":\"...\",\"goal\":\"...\",\"deliverables\":[\"...\"],\"acceptance\":[\"...\"],\"target_cwd\":\"/absolute/existing/repo\",\"execution_profile\":\"workspace\",\"dispatch\":{\"mode\":\"none\"}}; then assign with {\"op\":\"assign\",\"task_id\":\"...\",\"agent_id\":\"<configured Worker>\"}. For provider-hosted broad search, use \"execution_profile\":\"clean_search\" and omit target_cwd. Do not call task with only a title/content payload and do not omit op. Prefer the current TaskSpaceSnapshot before query/list/history; use tools only for concrete mutations or decision-critical ledger truth.",
             json!({
                 "type": "object",
                 "properties": {
                     "op": {
                         "type": "string",
-                        "description": "Required top-level Task Center operation and first-call discriminator. Never omit op. Never call task with only title/content/goal. Master production flow: {\"op\":\"create\", title/content/goal/deliverables/acceptance/target_cwd, \"dispatch\":{\"mode\":\"none\"}}, then {\"op\":\"assign\", \"task_id\":..., \"agent_id\": configured Worker}. Query/list/history are for specific missing truth only; do not use status=\"all\". Worker runner, not Master, owns claim_next/heartbeat/record_execution in production.",
+                        "description": "Required top-level Task Center operation and first-call discriminator. Never omit op. Never call task with only title/content/goal. Master production workspace flow: {\"op\":\"create\", title/content/goal/deliverables/acceptance/target_cwd, \"execution_profile\":\"workspace\", \"dispatch\":{\"mode\":\"none\"}}, then {\"op\":\"assign\", \"task_id\":..., \"agent_id\": configured Worker}. Broad provider-hosted search flow: create with \"execution_profile\":\"clean_search\" and no target_cwd. Query/list/history are for specific missing truth only; do not use status=\"all\". Worker runner, not Master, owns claim_next/heartbeat/record_execution in production.",
                         "enum": ["create", "query", "list_tasks", "history", "append", "pause", "resume", "heartbeat", "assign", "claim_next", "record_execution", "cancel", "submit_review", "approve", "reject", "close", "list_agents", "query_agent", "create_agent", "close_agent"]
                     },
                     "task_id": {"type": "string"},
@@ -681,6 +681,11 @@ pub fn reasonix_aligned_builtin_specs() -> Vec<BuiltinToolSpec> {
                     "target_cwd": {
                         "type": "string",
                         "description": "Existing Worker repository/workspace cwd. Prefer an expanded absolute path such as /absolute/existing/workspace. Leading-~/symlink aliases are valid only when they resolve to an existing workspace; preserve the user-facing path in task content/acceptance and require canonical-path evidence. Do not pass glob patterns, broad search paths, or a not-yet-created output directory."
+                    },
+                    "execution_profile": {
+                        "type": "string",
+                        "description": "Worker execution profile. Use workspace for normal cwd-bound file/repo work and include target_cwd. Use clean_search only for provider-hosted broad/current web search; omit target_cwd and require the Worker to return sourced search conclusions for Master synthesis. Do not use clean_search for local files, code edits, tests, or known-URL web_fetch work.",
+                        "enum": ["workspace", "clean_search"]
                     },
                     "dispatch": {
                         "type": "object",

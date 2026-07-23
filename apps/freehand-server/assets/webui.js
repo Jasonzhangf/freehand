@@ -120,6 +120,7 @@ const settingsProviderTypeInput = document.getElementById("settings-provider-typ
 const settingsProviderProtocolInput = document.getElementById("settings-provider-protocol-input");
 const settingsProviderUrlInput = document.getElementById("settings-provider-url-input");
 const settingsProviderModelInput = document.getElementById("settings-provider-model-input");
+const settingsProviderWebSearchInput = document.getElementById("settings-provider-web-search-input");
 const settingsProviderEnvInput = document.getElementById("settings-provider-env-input");
 const settingsProviderSaveButton = document.getElementById("settings-provider-save-button");
 const settingsApkUpdateSummary = document.getElementById("settings-apk-update-summary");
@@ -6211,6 +6212,7 @@ function renderSettingsShell() {
   setText("settings-provider-type", state.configStatus?.provider_type || "loading");
   setText("settings-provider-protocol", state.configStatus?.provider_protocol || "loading");
   setText("settings-provider-host", state.configStatus?.provider_base_url_host || "loading");
+  setText("settings-provider-web-search", state.configStatus?.provider_web_search || "loading");
   setText("settings-provider-auth", state.configStatus ? `${settingsAuthTypeLabel(state.configStatus.provider_auth_type)} · ${state.configStatus.provider_auth_source}` : "loading");
   setText("settings-restart-required", state.configStatus?.restart_required_on_change ? "restart required after changes" : "no restart flag");
   setText("settings-config-error", state.configStatusError || "none");
@@ -6377,6 +6379,7 @@ function configProviderRegistry() {
     provider_base_url: state.configStatus.provider_base_url || "",
     provider_base_url_host: state.configStatus.provider_base_url_host,
     default_model: state.configStatus.default_model,
+    provider_web_search: state.configStatus.provider_web_search || "auto",
     provider_auth_type: state.configStatus.provider_auth_type,
     provider_auth_source: state.configStatus.provider_auth_source,
   }];
@@ -6482,6 +6485,9 @@ function fillSettingsProviderFormFromProvider(provider) {
   if (settingsProviderModelInput) {
     settingsProviderModelInput.value = provider.default_model || "";
   }
+  if (settingsProviderWebSearchInput) {
+    settingsProviderWebSearchInput.value = provider.provider_web_search || "auto";
+  }
   if (settingsProviderEnvInput && document.activeElement !== settingsProviderEnvInput) {
     settingsProviderEnvInput.value = "";
   }
@@ -6528,6 +6534,7 @@ function renderSettingsProviderRegistry() {
     meta.textContent = [
       `${provider.provider_type}/${provider.provider_protocol}`,
       provider.default_model,
+      `web_search=${provider.provider_web_search || "auto"}`,
       provider.provider_base_url_host || provider.provider_base_url,
       `${settingsAuthTypeLabel(provider.provider_auth_type)} ${provider.provider_auth_source}`,
     ].filter(Boolean).join(" · ");
@@ -6550,6 +6557,7 @@ function syncSettingsProviderForm() {
   setInputValueIfNotFocused(settingsProviderProtocolInput, provider?.provider_protocol || status?.provider_protocol || "responses");
   setInputValueIfNotFocused(settingsProviderUrlInput, provider?.provider_base_url || status?.provider_base_url || "");
   setInputValueIfNotFocused(settingsProviderModelInput, provider?.default_model || status?.default_model || "");
+  setInputValueIfNotFocused(settingsProviderWebSearchInput, provider?.provider_web_search || status?.provider_web_search || "auto");
   if (settingsProviderEnvInput && document.activeElement !== settingsProviderEnvInput && !settingsProviderEnvInput.value) {
     settingsProviderEnvInput.value = "";
   }
@@ -6579,6 +6587,7 @@ async function submitProviderConfigUpdate(event) {
     provider_protocol: settingsProviderProtocolInput?.value.trim() || "",
     base_url: settingsProviderUrlInput?.value.trim() || "",
     default_model: settingsProviderModelInput?.value.trim() || "",
+    web_search: settingsProviderWebSearchInput?.value.trim() || "auto",
     api_key_env: settingsProviderEnvInput?.value.trim() || "",
   };
   state.configSaveInFlight = true;

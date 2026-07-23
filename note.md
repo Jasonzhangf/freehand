@@ -7871,3 +7871,34 @@ Current real root cause split:
 - required future proof:
   - Provider-request black-box fixtures for OpenAI Responses and MiniMax-selected protocol.
   - Online S-profile proof that the model can request broad search, provider receives native search declaration, results return through the provider response chain, and no `web_fetch` concrete-URL substitute is used.
+
+# 2026-07-23 provider-hosted web_search OpenAI Responses closeout
+
+- trigger:
+  - Jason pointed out OpenAI behavior can be verified directly from local Codex source, and Freehand should use provider-native web_search where supported instead of faking broad search with web_fetch.
+- Codex source evidence:
+  - `/Users/fanzhang/code/codex/codex-rs/tools/src/tool_spec.rs` serializes `ToolSpec::WebSearch` as Responses hosted tool type `web_search`.
+  - `/Users/fanzhang/code/codex/codex-rs/core/src/tools/hosted_spec.rs` maps live web search to `external_web_access=true`.
+  - `/Users/fanzhang/code/codex/codex-rs/core/tests/common/responses.rs`, `core/src/event_mapping_tests.rs`, and `protocol/src/models.rs` treat `web_search_call` as hosted search observation/item, not a local function call.
+- implementation truth:
+  - `provider.semantic` now carries provider-neutral `ProviderHostedToolDefinition::WebSearch` on `ProviderSemanticRequest.hosted_tools`.
+  - `provider.openai-adapter` renders OpenAI Responses hosted `{"type":"web_search","external_web_access":true}` and maps `web_search_call` into provider-hosted reasoning observations, never `ProviderSemanticOutput::ToolCall`.
+  - `provider.reason-live-bridge` derives hosted search only from config/provider descriptor/execution profile. OpenAI Responses GPT-family models with `web_search=auto` can mix hosted search with Master function tools; `clean_search` Worker uses hosted search only with zero local function tools.
+  - `web_fetch` remains a concrete-URL tool. It may be declared on the Master mixed-tool surface, but online proof must show broad-search evidence came from provider `web_search_call`, not `web_fetch` tool execution.
+  - MiniMax remains unsupported for hosted search because the current Freehand MiniMax baseline is Anthropic-compatible Messages at `api.minimaxi.com/anthropic` with model `MiniMax-M3`; RCC/CC config hints are not enough without exact native wire proof.
+- resource/gate fix:
+  - The first `xtask gates check` failed because the new `tool_call -> provider_hosted_search` shortcut gate forbade `freehand-provider-core`, while `freehand-tools` already legitimately depends on provider-core types.
+  - The gate was corrected to `precise_checked` on `crates/freehand-tools/src/lib.rs::reasonix_aligned_builtin_specs`, forbidding a local `"web_search"` spec or provider hosted-search symbols while requiring concrete-URL `web_fetch`, `task`, and `timer` guidance.
+- online proof:
+  - `node scripts/verify-provider-hosted-web-search-online.mjs` passed on S-profile `ws://127.0.0.1:4042/adp`.
+  - Artifact: `artifacts/webui-online/provider-hosted-web-search-20260723T111359-38940/summary.json`.
+  - Fixed session `provider-hosted-web-search-online-fixed`; current-run turn `runtime-turn-532`; terminal `Success`.
+  - Fixture saw `requestCount=1` to `/openai/v1/responses` with hosted tool `web_search`, `external_web_access=true`, no function tool `web_search`, Master function tools including `task`, `timer`, and concrete-url `web_fetch`.
+  - ADP observed `provider-hosted web_search` plus the exact search query, final marker was visible, and checks proved `adpDidNotUseWebFetchAsSearch=true`.
+  - Restore proof returned S config to `provider=minimax`, `fallback_provider=cc`, `provider_protocol=messages`, `base_url_host=api.minimaxi.com`, `default_model=MiniMax-M3`, `auth_source=inline`, with fixture env grep 0.
+- local proof:
+  - `node --check scripts/verify-provider-hosted-web-search-online.mjs`, `jq empty` for touched manifests, `cargo fmt --check`, `cargo run -p xtask -- mainlines check`, `cargo run -p xtask -- gates check`, and `git diff --check` passed.
+  - `cargo test -p freehand-provider-core hosted_tool_metadata -- --nocapture` passed.
+  - `cargo test -p freehand-provider-openai web_search -- --nocapture` passed 4/4.
+  - Runtime hosted-search focused tests passed: `live_bridge_derives_hosted_web_search_only_for_supported_openai_responses`, `clean_search_worker_request_uses_hosted_search_without_local_instruction_scan`, `live_bridge_does_not_mix_search_only_hosted_tool_with_master_functions`, and `clean_search` 5/5.
+  - `cargo check -p freehand-cli`, `cargo test -p freehand-config provider`, `cargo test -p freehand-ui-protocol config`, and `cargo test -p freehand-server --lib` passed; server panic output is the intentional dispatch-worker join-failure negative test.

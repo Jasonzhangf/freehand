@@ -12,6 +12,7 @@ Current first-version references cover:
 - Anthropic streaming messages
 - Anthropic tool use
 - Anthropic fine-grained tool streaming
+- MiniMax current Freehand provider baseline and hosted-search unsupported status
 
 ## Source Policy
 
@@ -28,6 +29,9 @@ Current first-version references cover:
   - chat messages request shape, tool calls, stream chunks, finish reasons
 - `anthropic-messages.md`
   - messages API shape, statelessness, stop reasons, streaming, tool-use loop
+- `minimax.md`
+  - current Freehand MiniMax Anthropic-compatible Messages baseline and
+    provider-hosted search unsupported-until-wire-verified rule
 
 ## Use Rule
 

@@ -244,6 +244,8 @@ pub struct UiProviderConfigUpdate {
     pub provider_protocol: String,
     pub base_url: String,
     pub default_model: String,
+    #[serde(default)]
+    pub web_search: String,
     pub api_key_env: String,
 }
 
@@ -525,6 +527,8 @@ pub struct UiTaskSnapshotProjection {
     pub goal: String,
     pub priority: i64,
     pub target_cwd: Option<String>,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub execution_profile: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub parent_session_id: Option<SessionId>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
@@ -757,6 +761,8 @@ pub struct UiConfigStatusProjection {
     pub provider_base_url: String,
     pub provider_base_url_host: String,
     pub default_model: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub provider_web_search: String,
     pub provider_auth_type: String,
     pub provider_auth_source: String,
     pub restart_required_on_change: bool,
@@ -771,6 +777,8 @@ pub struct UiProviderConfigSummaryProjection {
     pub provider_base_url: String,
     pub provider_base_url_host: String,
     pub default_model: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub provider_web_search: String,
     pub provider_auth_type: String,
     pub provider_auth_source: String,
 }
@@ -800,6 +808,8 @@ pub struct UiTaskCreateCommand {
     pub priority: i64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub target_cwd: Option<String>,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub execution_profile: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub session_id: Option<SessionId>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -3278,6 +3288,7 @@ mod tests {
                     acceptance: vec!["closed".to_owned()],
                     priority: 90,
                     target_cwd: None,
+                    execution_profile: "workspace".to_owned(),
                     session_id: Some(SessionId::new("session-phase2a")),
                     turn_id: Some(TurnId::new("turn-phase2a")),
                     dispatch: Some(UiTaskDispatchCommand::None),
@@ -5465,6 +5476,7 @@ mod tests {
                 provider_base_url: "https://api.example.test/anthropic".to_owned(),
                 provider_base_url_host: "api.example.test".to_owned(),
                 default_model: "MiniMax-M2".to_owned(),
+                provider_web_search: "auto".to_owned(),
                 provider_auth_type: "apikey".to_owned(),
                 provider_auth_source: "env".to_owned(),
             }],
@@ -5479,6 +5491,7 @@ mod tests {
             provider_base_url: "https://api.example.test/anthropic".to_owned(),
             provider_base_url_host: "api.example.test".to_owned(),
             default_model: "MiniMax-M2".to_owned(),
+            provider_web_search: "auto".to_owned(),
             provider_auth_type: "apikey".to_owned(),
             provider_auth_source: "env".to_owned(),
             restart_required_on_change: true,
@@ -5505,6 +5518,7 @@ mod tests {
                 provider_protocol: "responses".to_owned(),
                 base_url: "https://api.minimaxi.com/v1".to_owned(),
                 default_model: "MiniMax-M3".to_owned(),
+                web_search: "auto".to_owned(),
                 api_key_env: "MINIMAX_API_KEY".to_owned(),
             },
         };
@@ -5522,6 +5536,7 @@ mod tests {
                 provider_protocol: "responses".to_owned(),
                 base_url: "https://api.minimaxi.com/v1".to_owned(),
                 default_model: String::new(),
+                web_search: "auto".to_owned(),
                 api_key_env: "MINIMAX_API_KEY".to_owned(),
             },
         })
@@ -5540,6 +5555,7 @@ mod tests {
                 provider_protocol: "responses".to_owned(),
                 base_url: "https://api.minimaxi.com/v1".to_owned(),
                 default_model: "MiniMax-M3".to_owned(),
+                web_search: "auto".to_owned(),
                 api_key_env: "MINIMAX_API_KEY".to_owned(),
             },
         };
@@ -5561,6 +5577,7 @@ mod tests {
                 provider_protocol: "responses".to_owned(),
                 base_url: "https://api.anyint.ai/openai/v1".to_owned(),
                 default_model: "gpt-5.5".to_owned(),
+                web_search: "auto".to_owned(),
                 api_key_env: "FREEHAND_CC_API_KEY".to_owned(),
             },
         };

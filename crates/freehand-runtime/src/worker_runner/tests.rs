@@ -7,13 +7,13 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use freehand_config::{
     AgentMode, ProviderAuthSourceKind, ProviderAuthType, ProviderProtocol, ProviderType,
-    SelectedAgentConfig, SelectedPeerAgentConfig, SelectedProviderConfig,
+    ProviderWebSearchMode, SelectedAgentConfig, SelectedPeerAgentConfig, SelectedProviderConfig,
 };
 use freehand_contracts::{AgentId, TerminalStatus, TurnId};
 use freehand_task::{
     AgentStatus, TaskActor, TaskAssignRequest, TaskClaimRequest, TaskCreateRequest,
-    TaskDispatchRequest, TaskId, TaskListQuery, TaskMutationRequest, TaskParentRef,
-    TaskReviewRejection, TaskRuntime, TaskStatus, TaskWatermark, WorkerControlOp,
+    TaskDispatchRequest, TaskExecutionProfile, TaskId, TaskListQuery, TaskMutationRequest,
+    TaskParentRef, TaskReviewRejection, TaskRuntime, TaskStatus, TaskWatermark, WorkerControlOp,
     WorkerControlRequest,
 };
 use serde_json::Value;
@@ -29,6 +29,7 @@ struct StubExecutor {
     result: Mutex<Option<Result<WorkerTurnExecution, String>>>,
     calls: AtomicUsize,
     prompts: Mutex<Vec<String>>,
+    requests: Mutex<Vec<LiveReasonTurnRequest>>,
 }
 
 impl StubExecutor {
@@ -37,11 +38,16 @@ impl StubExecutor {
             result: Mutex::new(Some(result)),
             calls: AtomicUsize::new(0),
             prompts: Mutex::new(Vec::new()),
+            requests: Mutex::new(Vec::new()),
         }
     }
 
     fn prompts(&self) -> Vec<String> {
         self.prompts.lock().expect("lock prompts").clone()
+    }
+
+    fn requests(&self) -> Vec<LiveReasonTurnRequest> {
+        self.requests.lock().expect("lock requests").clone()
     }
 }
 
@@ -52,6 +58,10 @@ impl WorkerTurnExecutor for StubExecutor {
         request: LiveReasonTurnRequest,
     ) -> Result<WorkerTurnExecution, String> {
         self.calls.fetch_add(1, Ordering::Relaxed);
+        self.requests
+            .lock()
+            .expect("lock requests")
+            .push(request.clone());
         self.prompts
             .lock()
             .expect("lock prompts")
@@ -218,6 +228,87 @@ fn production_worker_runner_success_claims_heartbeats_and_submits_review() {
 
     fs::remove_dir_all(runtime_home).expect("cleanup runtime");
     fs::remove_dir_all(workspace).expect("cleanup workspace");
+}
+
+#[test]
+fn production_worker_runner_clean_search_runs_without_target_cwd_on_hosted_provider() {
+    let runtime_home = temp_path("clean-search-success");
+    let executor = Arc::new(StubExecutor::new(Ok(WorkerTurnExecution {
+        status: TerminalStatus::Success,
+        summary: "search evidence returned".to_owned(),
+        turn_id: TurnId::new("worker-turn-clean-search"),
+    })));
+    let runner = ProductionWorkerRunner::from_selected_agent_with_executor(
+        selected_worker_openai_responses_search(),
+        runtime_home.clone(),
+        executor.clone(),
+    )
+    .expect("worker runner");
+    let expected_task_id = seed_assigned_clean_search_task(&runtime_home);
+
+    let outcome = runner.run_once().expect("worker tick");
+    assert!(matches!(
+        outcome,
+        ProductionWorkerTickOutcome::ReviewReady { ref task_id, .. }
+            if task_id == &expected_task_id
+    ));
+    let requests = executor.requests();
+    assert_eq!(requests.len(), 1);
+    assert_eq!(
+        requests[0].execution_profile,
+        LiveReasonExecutionProfile::CleanSearch
+    );
+    assert!(
+        requests[0].cwd.is_none(),
+        "clean_search must not bind or scan a local workspace cwd"
+    );
+    assert!(
+        requests[0]
+            .prompt
+            .contains("Execution profile: clean_search")
+    );
+    assert!(requests[0].prompt.contains("provider-hosted web_search"));
+    assert!(requests[0].prompt.contains("No target_cwd is needed"));
+    let task_runtime =
+        TaskRuntime::boot(&runtime_home, AgentId::new("master")).expect("task runtime");
+    let task = task_runtime
+        .query_task(&expected_task_id)
+        .expect("query clean search task");
+    assert_eq!(task.status, TaskStatus::ReviewSubmitted);
+    assert_eq!(task.execution_profile, TaskExecutionProfile::CleanSearch);
+    assert!(task.target_cwd.is_none());
+
+    fs::remove_dir_all(runtime_home).expect("cleanup runtime");
+}
+
+#[test]
+fn production_worker_runner_clean_search_blocks_when_provider_has_no_hosted_search() {
+    let runtime_home = temp_path("clean-search-unsupported");
+    let executor = Arc::new(StubExecutor::new(Err("must not execute".to_owned())));
+    let runner = test_runner(runtime_home.clone(), executor.clone());
+    let expected_task_id = seed_assigned_clean_search_task(&runtime_home);
+
+    let outcome = runner.run_once().expect("worker tick");
+    assert!(matches!(
+        outcome,
+        ProductionWorkerTickOutcome::Blocked {
+            ref task_id,
+            ref reason,
+            ..
+        } if task_id == &expected_task_id
+            && reason.contains("requires provider-hosted web_search")
+    ));
+    assert_eq!(executor.calls.load(Ordering::Relaxed), 0);
+    let task_runtime =
+        TaskRuntime::boot(&runtime_home, AgentId::new("master")).expect("task runtime");
+    let task = task_runtime
+        .query_task(&expected_task_id)
+        .expect("query clean search task");
+    assert_eq!(task.status, TaskStatus::Blocked);
+    assert_eq!(task.execution_profile, TaskExecutionProfile::CleanSearch);
+    assert!(task.target_cwd.is_none());
+
+    fs::remove_dir_all(runtime_home).expect("cleanup runtime");
 }
 
 #[test]
@@ -1256,6 +1347,7 @@ fn seed_assigned_task_with_target(runtime_home: &Path, target_cwd: Option<String
             acceptance: vec!["tests pass".to_owned()],
             priority: 80,
             target_cwd,
+            execution_profile: TaskExecutionProfile::Workspace,
             dispatch: TaskDispatchRequest::Agent {
                 agent_id: AgentId::new("worker"),
             },
@@ -1268,6 +1360,36 @@ fn seed_assigned_task_with_target(runtime_home: &Path, target_cwd: Option<String
             watermark: worker_watermark("seed", "create"),
         })
         .expect("create assigned task");
+    task_id
+}
+
+fn seed_assigned_clean_search_task(runtime_home: &Path) -> TaskId {
+    let task_runtime =
+        TaskRuntime::boot(runtime_home, AgentId::new("master")).expect("task runtime");
+    let task_id = TaskId::new(format!("task-clean-search-{}", now_unix_seconds()));
+    task_runtime
+        .create_task(TaskCreateRequest {
+            task_id: Some(task_id.clone()),
+            title: "clean search task".to_owned(),
+            content: "search broad current web evidence".to_owned(),
+            goal: "return sourced search conclusion".to_owned(),
+            deliverables: vec!["search summary".to_owned()],
+            acceptance: vec!["sources and gaps reported".to_owned()],
+            priority: 80,
+            target_cwd: None,
+            execution_profile: TaskExecutionProfile::CleanSearch,
+            dispatch: TaskDispatchRequest::Agent {
+                agent_id: AgentId::new("worker"),
+            },
+            parent: TaskParentRef {
+                session_id: None,
+                turn_id: None,
+                trace_id: None,
+            },
+            actor: worker_actor(&AgentId::new("master"), None),
+            watermark: worker_watermark("seed-clean-search", "create"),
+        })
+        .expect("create clean search task");
     task_id
 }
 
@@ -1352,6 +1474,7 @@ fn selected_worker() -> SelectedAgentConfig {
             protocol: ProviderProtocol::Messages,
             base_url: "https://example.invalid".to_owned(),
             default_model: "worker-model".to_owned(),
+            web_search: ProviderWebSearchMode::Auto,
             auth_type: ProviderAuthType::ApiKey,
             auth_source: ProviderAuthSourceKind::Inline,
             api_key: "test-key".to_owned(),
@@ -1359,6 +1482,15 @@ fn selected_worker() -> SelectedAgentConfig {
         fallback_provider: None,
         restart_required_on_change: true,
     }
+}
+
+fn selected_worker_openai_responses_search() -> SelectedAgentConfig {
+    let mut selected = selected_worker();
+    selected.provider.provider_type = ProviderType::OpenAi;
+    selected.provider.protocol = ProviderProtocol::Responses;
+    selected.provider.default_model = "gpt-5.5".to_owned();
+    selected.provider.base_url = "https://openai.example.invalid".to_owned();
+    selected
 }
 
 fn temp_path(label: &str) -> PathBuf {

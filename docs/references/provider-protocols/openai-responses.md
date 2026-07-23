@@ -44,6 +44,36 @@
   - built-in tools such as web search and file search
   - remote MCP-related integrations according to the migration guide
 - one request can contain an agentic loop with multiple tool interactions
+- local Codex source reference confirms hosted web search is a Responses API
+  tool, not a normal function tool:
+  - `/Users/fanzhang/code/codex/codex-rs/tools/src/tool_spec.rs`
+    serializes `ToolSpec::WebSearch` as `{"type":"web_search", ...}`
+  - `/Users/fanzhang/code/codex/codex-rs/core/src/tools/hosted_spec.rs`
+    maps `WebSearchMode::Live` to `external_web_access=true`, `Cached` to
+    `external_web_access=false`, and `Indexed` to
+    `external_web_access=true` plus `indexed_web_access=true`
+  - `/Users/fanzhang/code/codex/codex-rs/tools/src/tool_spec_tests.rs`
+    locks optional fields: `indexed_web_access`, `filters`,
+    `user_location`, `search_context_size`, and `search_content_types`
+
+### Hosted Web Search Output
+
+- Responses emits hosted search activity as output items with
+  `type="web_search_call"`, not as local function calls.
+- Local Codex source reference:
+  - `/Users/fanzhang/code/codex/codex-rs/core/tests/common/responses.rs`
+    uses SSE events `response.output_item.added` and
+    `response.output_item.done` carrying item type `web_search_call`
+  - `/Users/fanzhang/code/codex/codex-rs/protocol/src/models.rs`
+    documents `web_search_call` with `id`, optional `status`, and optional
+    `action`
+  - `/Users/fanzhang/code/codex/codex-rs/core/src/event_mapping_tests.rs`
+    maps action variants `search`, `open_page`, `find_in_page`, and partial
+    no-action calls into web-search observation items
+- Freehand mapping rule: `web_search_call` must become provider-hosted
+  reasoning/observation semantics. It must not become
+  `ProviderSemanticOutput::ToolCall`, because there is no local Freehand
+  `web_search` tool to execute.
 
 ### Semantic Difference From Chat Completions
 
@@ -76,4 +106,7 @@
 - do not model OpenAI `responses` as plain chat messages only
 - completed responses may carry `error: null`; field presence alone is not failure evidence
 - do not leak item-level or wire-level DTOs outside the OpenAI adapter
+- do not expose hosted `web_search` as a Freehand function tool; adapter-owned
+  Responses wire must be rendered only from provider-neutral hosted tool
+  metadata
 - when docs and observed payloads diverge, keep raw evidence and update adapter references

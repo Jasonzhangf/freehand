@@ -89,7 +89,7 @@
       "owner_crate": "crates/freehand-runtime",
       "identity": "trace_id plus turn_id plus provider attempt",
       "truth_store": "provider debug ledger when enabled and live bridge attempt state",
-      "operations": ["build", "send", "retry_recoverable"],
+      "operations": ["build", "send", "retry_recoverable", "select_hosted_search", "render_hosted_search_wire"],
       "projections": ["provider attempt evidence", "error-center metadata"]
     },
     {
@@ -98,8 +98,17 @@
       "owner_crate": "crates/freehand-provider-core",
       "identity": "trace_id plus turn_id plus provider event index",
       "truth_store": "provider semantic event stream and debug raw ledgers",
-      "operations": ["normalize", "classify_finish", "map_tool_call", "map_error", "apply_to_turn"],
+      "operations": ["normalize", "classify_finish", "map_tool_call", "map_error", "apply_to_turn", "observe_hosted_search_call"],
       "projections": ["reason provider output events", "error-center observed failure"]
+    },
+    {
+      "resource_type": "provider_hosted_search",
+      "owner_feature_id": "provider.semantic",
+      "owner_crate": "crates/freehand-provider-core",
+      "identity": "provider id plus protocol plus model plus hosted search mode",
+      "truth_store": "provider semantic request hosted-tool declaration plus provider response web_search_call observations; not Freehand local tool execution truth",
+      "operations": ["declare"],
+      "projections": ["provider request hosted tool declaration", "reasoning event observation for provider-hosted web_search_call", "online verifier provider request capture"]
     },
     {
       "resource_type": "tool_call",
@@ -266,12 +275,48 @@
       "binding_status": "bound"
     },
     {
+      "operation_id": "provider_hosted_search.declare",
+      "owner_feature_id": "provider.semantic",
+      "source_resource": "provider_hosted_search",
+      "target_resource": "provider_request",
+      "effect": "carry provider-native hosted search as provider-neutral request metadata instead of Freehand function-tool schema",
+      "mainline_call_doc": "docs/mainline-calls/provider.semantic.json",
+      "binding_status": "bound"
+    },
+    {
+      "operation_id": "provider_request.select_hosted_search",
+      "owner_feature_id": "provider.reason-live-bridge",
+      "source_resource": "provider_request",
+      "target_resource": "provider_hosted_search",
+      "effect": "select provider-hosted search declarations from config/provider capabilities and execution profile before provider IO",
+      "mainline_call_doc": "docs/mainline-calls/provider.reason-live-bridge.json",
+      "binding_status": "bound"
+    },
+    {
+      "operation_id": "provider_request.render_hosted_search_wire",
+      "owner_feature_id": "provider.openai-adapter",
+      "source_resource": "provider_request",
+      "target_resource": "provider_hosted_search",
+      "effect": "render provider-neutral hosted search declarations into OpenAI Responses hosted web_search wire without runtime hardcoding",
+      "mainline_call_doc": "docs/mainline-calls/provider.openai-adapter.json",
+      "binding_status": "bound"
+    },
+    {
       "operation_id": "provider_response.apply_to_turn",
       "owner_feature_id": "reason.turn",
       "source_resource": "provider_response",
       "target_resource": "turn",
       "effect": "apply normalized provider output to turn truth",
       "mainline_call_doc": "docs/mainline-calls/reason.turn.json",
+      "binding_status": "bound"
+    },
+    {
+      "operation_id": "provider_response.observe_hosted_search_call",
+      "owner_feature_id": "provider.openai-adapter",
+      "source_resource": "provider_response",
+      "target_resource": "provider_hosted_search",
+      "effect": "map OpenAI Responses web_search_call output items into provider-neutral reasoning observations without entering local tool execution",
+      "mainline_call_doc": "docs/mainline-calls/provider.openai-adapter.json",
       "binding_status": "bound"
     },
     {
@@ -589,6 +634,39 @@
       "binding_status": "bound"
     },
     {
+      "edge_id": "provider.semantic#07",
+      "operation_id": "provider_hosted_search.declare",
+      "source_resource": "provider_hosted_search",
+      "target_resource": "provider_request",
+      "mainline_call_doc": "docs/mainline-calls/provider.semantic.json",
+      "call_table_step": "07",
+      "file_path": "crates/freehand-provider-core/src/lib.rs",
+      "symbol_path": "ProviderHostedToolDefinition",
+      "binding_status": "bound"
+    },
+    {
+      "edge_id": "provider.reason-live-bridge#08a",
+      "operation_id": "provider_request.select_hosted_search",
+      "source_resource": "provider_request",
+      "target_resource": "provider_hosted_search",
+      "mainline_call_doc": "docs/mainline-calls/provider.reason-live-bridge.json",
+      "call_table_step": "08a",
+      "file_path": "crates/freehand-runtime/src/lib.rs",
+      "symbol_path": "LiveReasonExecutionRole::hosted_tool_definitions",
+      "binding_status": "bound"
+    },
+    {
+      "edge_id": "provider.openai-adapter#01a",
+      "operation_id": "provider_request.render_hosted_search_wire",
+      "source_resource": "provider_request",
+      "target_resource": "provider_hosted_search",
+      "mainline_call_doc": "docs/mainline-calls/provider.openai-adapter.json",
+      "call_table_step": "01a",
+      "file_path": "crates/freehand-provider-openai/src/lib.rs",
+      "symbol_path": "openai_responses_hosted_tool",
+      "binding_status": "bound"
+    },
+    {
       "edge_id": "reason.turn#02",
       "operation_id": "provider_response.apply_to_turn",
       "source_resource": "provider_response",
@@ -597,6 +675,17 @@
       "call_table_step": "02",
       "file_path": "crates/freehand-reason/src/lib.rs",
       "symbol_path": "ReasonTurnEngine::apply_provider_output",
+      "binding_status": "bound"
+    },
+    {
+      "edge_id": "provider.openai-adapter#02a",
+      "operation_id": "provider_response.observe_hosted_search_call",
+      "source_resource": "provider_response",
+      "target_resource": "provider_hosted_search",
+      "mainline_call_doc": "docs/mainline-calls/provider.openai-adapter.json",
+      "call_table_step": "02a",
+      "file_path": "crates/freehand-provider-openai/src/lib.rs",
+      "symbol_path": "provider_hosted_web_search_observation",
       "binding_status": "bound"
     },
     {
@@ -989,12 +1078,36 @@
       "reason": "The live bridge may build provider request truth from typed request context."
     },
     {
+      "rule_id": "provider-hosted-search-declares-provider-request-direct",
+      "source_resource": "provider_hosted_search",
+      "target_resource": "provider_request",
+      "allowed_direct": true,
+      "via_resources": [],
+      "reason": "Provider semantic may carry hosted search as provider-neutral request metadata without making it a Freehand function tool."
+    },
+    {
+      "rule_id": "provider-request-selects-hosted-search-direct",
+      "source_resource": "provider_request",
+      "target_resource": "provider_hosted_search",
+      "allowed_direct": true,
+      "via_resources": [],
+      "reason": "The live bridge and provider adapters may select and render hosted search only through provider request truth and declared provider capabilities."
+    },
+    {
       "rule_id": "provider-response-applies-to-turn-direct",
       "source_resource": "provider_response",
       "target_resource": "turn",
       "allowed_direct": true,
       "via_resources": [],
       "reason": "Reason turn owner may apply normalized provider semantic output into turn truth."
+    },
+    {
+      "rule_id": "provider-response-observes-hosted-search-direct",
+      "source_resource": "provider_response",
+      "target_resource": "provider_hosted_search",
+      "allowed_direct": true,
+      "via_resources": [],
+      "reason": "Provider adapters may map hosted search response items into provider-neutral observations without routing through local tool execution."
     },
     {
       "rule_id": "tool-call-executes-workspace-path-direct",
@@ -1011,6 +1124,14 @@
       "allowed_direct": true,
       "via_resources": [],
       "reason": "Tool registry owner may execute a bounded HTTP/HTTPS fetch for a concrete URL and return only tool-result text/error truth."
+    },
+    {
+      "rule_id": "tool-call-to-hosted-search-through-provider-request",
+      "source_resource": "tool_call",
+      "target_resource": "provider_hosted_search",
+      "allowed_direct": false,
+      "via_resources": ["provider_request", "provider_hosted_search"],
+      "reason": "Provider-hosted search is declared and observed through provider request/response truth; it must not be implemented as a local Freehand function-tool execution."
     },
     {
       "rule_id": "task-projects-to-ui-direct",
@@ -1311,6 +1432,14 @@
       "reason": "Instruction manifests must not patch provider requests directly."
     },
     {
+      "source_resource": "tool_call",
+      "target_resource": "provider_hosted_search",
+      "required_via": ["provider_request", "provider_hosted_search"],
+      "source_gate_status": "precise_checked",
+      "source_gate_reason": "precise_source_edge_gates checks reasonix_aligned_builtin_specs so tool.registry never exposes hosted web_search as a local Freehand function tool",
+      "reason": "Provider-hosted search is not a local Freehand function tool and must not be executed through tool.registry."
+    },
+    {
       "source_resource": "ui_projection",
       "target_resource": "node_pairing",
       "required_via": ["runtime_command", "node_pairing"],
@@ -1409,6 +1538,26 @@
         "execute_registry_tool_call"
       ],
       "reason": "Runtime command rewind admission must route through checkpoint owner before any workspace restore work happens."
+    },
+    {
+      "source_resource": "tool_call",
+      "target_resource": "provider_hosted_search",
+      "file_path": "crates/freehand-tools/src/lib.rs",
+      "symbol_path": "reasonix_aligned_builtin_specs",
+      "required_tokens": [
+        "\"web_fetch\"",
+        "\"task\"",
+        "\"timer\"",
+        "This is not a search engine"
+      ],
+      "forbidden_tokens": [
+        "\"web_search\"",
+        "ProviderHostedToolDefinition",
+        "ProviderWebSearchCapability",
+        "hosted_tools",
+        "provider-hosted web_search"
+      ],
+      "reason": "Tool registry may expose concrete-url web_fetch and framework tools, but provider-hosted web_search must remain provider_request/provider_response truth and never appear as a local built-in tool spec."
     }
   ]
 }

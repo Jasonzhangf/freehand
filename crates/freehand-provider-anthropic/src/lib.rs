@@ -812,7 +812,8 @@ mod tests {
     };
     use freehand_provider_core::{
         ProviderCapabilities, ProviderDescriptor, ProviderFamily, ProviderToolChoice,
-        ProviderToolDefinition, ProviderToolExchange, build_semantic_request,
+        ProviderToolDefinition, ProviderToolExchange, ProviderWebSearchCapability,
+        build_semantic_request,
     };
     use std::io::{Read, Write};
     use std::net::TcpListener;
@@ -838,7 +839,7 @@ mod tests {
                 protocol: ProviderProtocol::AnthropicMessages,
                 model: "claude-test".to_owned(),
                 capabilities: ProviderCapabilities {
-                    web_search: false,
+                    web_search: ProviderWebSearchCapability::Unsupported,
                     multimodal: true,
                     vision: true,
                     reasoning: true,

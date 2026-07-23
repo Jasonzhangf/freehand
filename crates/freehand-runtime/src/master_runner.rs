@@ -19,13 +19,13 @@ use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 use super::{
-    DueTimerSchedule, LiveReasonTaskDecisionBoundary, LiveReasonTaskDecisionMode,
-    LiveReasonTurnRequest, RuntimeAgentBootstrapError, apply_runtime_debug_event,
-    apply_runtime_reason_broadcast, claim_due_timer_schedule, complete_due_timer_schedule,
-    fail_due_timer_schedule, load_default_runtime_agent, now_unix_seconds, run_live_reason_turn,
-    run_live_reason_turn_with_hooks, run_master_lifecycle_reason_turn,
-    run_master_lifecycle_reason_turn_with_hooks, runtime_turn_position, sanitize_identifier,
-    ui_user_text_for_turn,
+    DueTimerSchedule, LiveReasonExecutionProfile, LiveReasonTaskDecisionBoundary,
+    LiveReasonTaskDecisionMode, LiveReasonTurnRequest, RuntimeAgentBootstrapError,
+    apply_runtime_debug_event, apply_runtime_reason_broadcast, claim_due_timer_schedule,
+    complete_due_timer_schedule, fail_due_timer_schedule, load_default_runtime_agent,
+    now_unix_seconds, run_live_reason_turn, run_live_reason_turn_with_hooks,
+    run_master_lifecycle_reason_turn, run_master_lifecycle_reason_turn_with_hooks,
+    runtime_turn_position, sanitize_identifier, ui_user_text_for_turn,
 };
 
 #[cfg(test)]
@@ -1721,6 +1721,7 @@ Task snapshot:\n{task_json}\n\
 Trigger event:\n{event_json}"
         ),
         cwd: Some(runtime_home.to_path_buf()),
+        execution_profile: LiveReasonExecutionProfile::Workspace,
         stream: false,
         cancel_token: None,
     })
@@ -2086,6 +2087,7 @@ Original user objective history:\n\
 Completed subtask and accepted review truth:\n{subtasks_json}"
         ),
         cwd: Some(runtime_home.to_path_buf()),
+        execution_profile: LiveReasonExecutionProfile::Workspace,
         stream: false,
         cancel_token: None,
     })
@@ -2121,6 +2123,7 @@ Original user objective history:\n{objectives_json}\n\
 Blocked child truth:\n{blocked_json}"
         ),
         cwd: Some(runtime_home.to_path_buf()),
+        execution_profile: LiveReasonExecutionProfile::Workspace,
         stream: false,
         cancel_token: None,
     })
@@ -2201,6 +2204,7 @@ Injected timer prompt:\n{}",
             due.schedule.prompt
         ),
         cwd: Some(runtime_home.to_path_buf()),
+        execution_profile: LiveReasonExecutionProfile::Workspace,
         stream: false,
         cancel_token: None,
     })

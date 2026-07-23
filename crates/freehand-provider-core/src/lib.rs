@@ -26,10 +26,60 @@ pub enum ProviderProtocol {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ProviderCapabilities {
-    pub web_search: bool,
+    pub web_search: ProviderWebSearchCapability,
     pub multimodal: bool,
     pub vision: bool,
     pub reasoning: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ProviderWebSearchCapability {
+    Unsupported,
+    Hosted {
+        mode: ProviderWebSearchMode,
+        tool_mixing: ProviderToolMixing,
+    },
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ProviderWebSearchMode {
+    Live,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ProviderToolMixing {
+    WithFunctionTools,
+    SearchOnlyTurn,
+}
+
+impl ProviderWebSearchCapability {
+    pub fn hosted_live_with_functions() -> Self {
+        Self::Hosted {
+            mode: ProviderWebSearchMode::Live,
+            tool_mixing: ProviderToolMixing::WithFunctionTools,
+        }
+    }
+
+    pub fn hosted_live_search_only() -> Self {
+        Self::Hosted {
+            mode: ProviderWebSearchMode::Live,
+            tool_mixing: ProviderToolMixing::SearchOnlyTurn,
+        }
+    }
+
+    pub fn can_mix_with_function_tools(&self) -> bool {
+        matches!(
+            self,
+            Self::Hosted {
+                tool_mixing: ProviderToolMixing::WithFunctionTools,
+                ..
+            }
+        )
+    }
+
+    pub fn is_hosted(&self) -> bool {
+        matches!(self, Self::Hosted { .. })
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -53,6 +103,7 @@ pub struct ProviderSemanticRequest {
     pub payload: ReasonReq03ProviderPayload,
     pub raw_retention: RawRetentionPolicy,
     pub tools: Vec<ProviderToolDefinition>,
+    pub hosted_tools: Vec<ProviderHostedToolDefinition>,
     pub tool_choice: Option<ProviderToolChoice>,
     pub tool_exchanges: Vec<ProviderToolExchange>,
 }
@@ -62,6 +113,14 @@ pub struct ProviderToolDefinition {
     pub name: String,
     pub description: String,
     pub input_schema: Value,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ProviderHostedToolDefinition {
+    WebSearch {
+        mode: ProviderWebSearchMode,
+        external_web_access: bool,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -150,6 +209,7 @@ pub fn build_semantic_request(
                 RawRetentionPolicy::DoNotRetain
             },
             tools: Vec::new(),
+            hosted_tools: Vec::new(),
             tool_choice: None,
             tool_exchanges: Vec::new(),
         }),
@@ -278,7 +338,7 @@ mod tests {
             protocol: ProviderProtocol::OpenAiResponses,
             model: "gpt-test".to_owned(),
             capabilities: ProviderCapabilities {
-                web_search: true,
+                web_search: ProviderWebSearchCapability::hosted_live_with_functions(),
                 multimodal: false,
                 vision: true,
                 reasoning: true,
@@ -343,6 +403,30 @@ mod tests {
     }
 
     #[test]
+    fn hosted_tool_metadata_stays_provider_neutral_request_metadata() {
+        let mut request =
+            build_semantic_request(descriptor(), payload(), false).expect("build request");
+        request
+            .hosted_tools
+            .push(ProviderHostedToolDefinition::WebSearch {
+                mode: ProviderWebSearchMode::Live,
+                external_web_access: true,
+            });
+
+        assert!(request.tools.is_empty());
+        assert_eq!(request.hosted_tools.len(), 1);
+        match &request.hosted_tools[0] {
+            ProviderHostedToolDefinition::WebSearch {
+                mode,
+                external_web_access,
+            } => {
+                assert_eq!(*mode, ProviderWebSearchMode::Live);
+                assert!(*external_web_access);
+            }
+        }
+    }
+
+    #[test]
     fn maps_reasoning_and_text_events_into_semantic_output() {
         let mapped = map_adapter_event(
             &ctx(),
@@ -373,10 +457,10 @@ mod tests {
             &ctx(),
             ProviderAdapterEvent::ToolCall(ToolCallContract {
                 tool_call_id: ToolCallId::new("tool-1"),
-                tool_name: "web_search".to_owned(),
+                tool_name: "read_file".to_owned(),
                 arguments: vec![ToolArgument {
-                    name: "query".to_owned(),
-                    value: serde_json::json!("rust"),
+                    name: "path".to_owned(),
+                    value: serde_json::json!("README.md"),
                 }],
                 arguments_complete: false,
             }),
@@ -384,7 +468,7 @@ mod tests {
         match mapped {
             ProviderSemanticOutput::ToolCall(event) => {
                 assert!(!event.tool_call.arguments_complete);
-                assert_eq!(event.tool_call.tool_name, "web_search");
+                assert_eq!(event.tool_call.tool_name, "read_file");
             }
             other => panic!("unexpected output: {other:?}"),
         }

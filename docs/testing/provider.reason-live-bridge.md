@@ -5,18 +5,21 @@
 - resource map: `docs/resource-maps/core.json`
 - resource operation coverage:
   - `request_context.build_provider_request`
+  - `provider_request.select_hosted_search`
 
 ## Resource Operation Test Coverage
 
 | resource operation | status | white-box | module black-box | project black-box |
 | --- | --- | --- | --- | --- |
 | `request_context.build_provider_request` | bound | `cargo test -p freehand-runtime live_bridge -- --nocapture` covers provider descriptor, request/tool/terminal metadata, schema retry, provider retry, provider retry backoff cancellation, tool re-entry, and master framework request-contract tests | `cargo test -p freehand-runtime live_bridge -- --nocapture` plus `cargo test -p freehand-runtime provider_retry_backoff_sleep_observes_live_cancel_token -- --nocapture` cover selected provider bridge smokes for text/tool/writable/checkpoint/schema/provider-retry/task-tool paths and interruptible retry wait | `scripts/verify-provider-retry-online.sh` covers CLI/daemon live bridge proof through provider -> reason -> tool -> persistence -> UI projection for provider retry behavior; `scripts/verify-web-fetch-tool-online.mjs` covers Master concrete-URL `web_fetch` request building, tool execution, provider request re-entry, and final restore on S-profile `4042` |
+| `provider_request.select_hosted_search` | bound | `cargo test -p freehand-runtime live_bridge_derives_hosted_web_search_only_for_supported_openai_responses -- --nocapture --test-threads=1` covers OpenAI Responses GPT-family enablement plus disabled/chat-completions rejection; `cargo test -p freehand-runtime live_bridge_does_not_mix_search_only_hosted_tool_with_master_functions -- --nocapture --test-threads=1` covers search-only separation | `cargo test -p freehand-runtime clean_search_worker_request_uses_hosted_search_without_local_instruction_scan -- --nocapture --test-threads=1` proves clean_search Worker requests carry hosted search and zero local function tools/local instruction scan | `node scripts/verify-provider-hosted-web-search-online.mjs` proves S-profile `4042` declares provider-hosted `web_search`, observes `web_search_call`, reaches terminal success, and restores config/env |
 
 - lifecycle path under test:
   - selected config resolves one anthropic provider
   - runtime-owned live bridge restores existing session truth or explicitly creates a new session when recovery truth is missing
   - one or more reason rounds start and build provider payloads
   - provider semantic request is built from round truth
+  - hosted search metadata is selected only from provider descriptor capability, config `web_search`, and execution profile, then carried as provider-neutral request metadata for adapter rendering
   - provider raw response/error/event bodies are captured through raw-capable executor callbacks and written into debug-only provider ledgers
   - first tool-capable request advertises implemented schemas from the Reasonix-aligned tool registry
   - anthropic executor runs single-shot or SSE request
@@ -27,6 +30,8 @@
   - runtime dispatch projects the final turn into shared `UiProtocolState`
 - white-box plan:
   - provider descriptor derivation
+  - provider-hosted search capability derivation for OpenAI Responses GPT-family models, disabled config, and unsupported protocols
+  - search-only hosted capability must not mix with Master function tools and must route through `clean_search` Worker turns without local function tools
   - unsupported provider rejection
   - metadata center bootstrap from `~/.freehand/ledgers/metadata`
   - runtime-owned restore/request/tool/terminal lifecycle metadata writes
@@ -173,10 +178,11 @@
     any direct master-side filesystem execution
   - first provider request carries the master role, local-cwd direct-tool rule,
     `web_fetch` known-URL rule, Worker capability surface,
-    dispatch/no-dispatch boundary, broad-search/browser missing-capability
-    boundary, workspace-boundary rule, multi-agent dispatch guidance,
+    provider-hosted web_search rule, dispatch/no-dispatch boundary,
+    broad-search/browser capability boundary, workspace-boundary rule, multi-agent dispatch guidance,
     concurrency/flow-control guidance, task tool workflow, and the
     cross-workspace sample without adding extra task/deep-research tools
+  - clean_search Worker profile carries hosted `web_search` only, omits function tools, and avoids local AGENTS/skill scanning
   - structured task execution fact results are rendered from Task Center event semantics before re-entering provider context
   - provider raw ledger path poisoning returns explicit `RuntimeLiveBridgeError::ReasonPersistenceFailed`
   - reason-turn provider-output apply failure returns explicit dispatch failure when the reason owner rejects mutation
@@ -184,6 +190,7 @@
   - CLI can reuse the runtime-owned bridge for a live-turn smoke path without importing provider DTOs into app code
   - CLI can prove real provider -> reason -> tool -> reason -> persistence from the app boundary
   - daemon can prove HTTP command ingress -> runtime live bridge -> provider -> reason -> persistence -> UI query/SSE projection
+  - daemon can prove provider-hosted OpenAI Responses search declaration/observation without using `web_fetch` as a broad-search substitute
 - fixtures / replay inputs / runtime evidence paths:
   - `crates/freehand-provider-anthropic/fixtures/minimonth_messages_single.json`
   - `crates/freehand-provider-anthropic/fixtures/minimonth_messages_stream.sse`
@@ -206,6 +213,7 @@
   - runtime white-box coverage now explicitly locks provider executor failure materialization: transport failure writes concrete provider error codes such as `anthropic_http_status_500` or `openai_http_status_500`, retries recoverable non-stream failures up to ten attempts, closes the active turn as failed only after exhaustion, and restores with no active turn
   - runtime white-box coverage locks configured primary/fallback routing: retryable primary provider exhaustion switches once to the configured fallback using the same provider-neutral round input, fallback success owns the persisted model/provider metadata, fallback exhaustion materializes one failed turn, and non-retryable adapter/callback/content failures do not switch providers
   - runtime white-box coverage locks OpenAI-compatible `responses` and `chat_completions` descriptor mapping through the same provider-neutral live bridge abstraction
+  - runtime white-box coverage locks provider-hosted web_search capability selection for OpenAI Responses, disabled/unsupported combinations, search-only non-mixing, and clean_search Worker request shape
   - runtime white-box coverage now explicitly locks context economy for repaired logical turns: superseded failed repair attempts do not leak into rebuilt future prompt context
   - runtime white-box coverage now locks long operator task admission through the live bridge: `original-task` budget scales with actual prompt content and the provider request preserves the prompt tail sentinel
   - runtime white-box coverage now locks `original-task` as a `TaskContract` segment and proves second-round requests still carry control status and runtime tool guidance

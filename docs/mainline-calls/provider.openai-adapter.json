@@ -6,15 +6,21 @@
   "test_design_doc": "docs/testing/provider.openai-adapter.md",
   "mainline_call_doc": "docs/mainline-calls/provider.openai-adapter.json",
   "generated_wiki_doc": "docs/wiki/provider.openai-adapter.md",
+  "resource_operations": [
+    "provider_request.render_hosted_search_wire",
+    "provider_response.observe_hosted_search_call"
+  ],
   "request_mainline": [
     "provider-neutral semantic request enters OpenAI adapter",
     "adapter renders either `responses` or `chat completions` request body based on selected protocol",
     "adapter consumes typed `input_segments` and renders them to OpenAI wire text without owning segment admission truth",
-    "adapter renders provider-neutral tool definitions and tool-result re-entry into the selected OpenAI wire shape so runtime never hardcodes protocol-specific tool wire"
+    "adapter renders provider-neutral tool definitions and tool-result re-entry into the selected OpenAI wire shape so runtime never hardcodes protocol-specific tool wire",
+    "adapter renders provider-neutral `ProviderHostedToolDefinition::WebSearch` into OpenAI Responses hosted `{\"type\":\"web_search\",\"external_web_access\":true}` wire when the live bridge declares it"
   ],
   "response_mainline": [
     "OpenAI single-shot body or stream chunk becomes provider-neutral semantic output",
     "optional wire error fields are absent when missing or JSON null; only a non-null error object becomes a provider semantic error",
+    "OpenAI Responses `web_search_call` output items are observed as provider-hosted reasoning events so the search stays provider-native and never enters local tool execution",
     "partial tool calls stay adapter-local until enough JSON exists to emit structured arguments",
     "OpenAI executor owns HTTP endpoint selection, bearer auth, status/body capture, SSE reading, and callback mapping before returning provider-neutral semantic outputs"
   ],
@@ -53,6 +59,20 @@
       "binding_status": "bound"
     },
     {
+      "step": "01a",
+      "symbol_path": "openai_responses_hosted_tool",
+      "file_path": "crates/freehand-provider-openai/src/lib.rs",
+      "responsibility": "render provider-neutral hosted search declarations into OpenAI Responses hosted tool wire",
+      "input_semantic": "provider semantic request hosted tool metadata",
+      "output_semantic": "OpenAI Responses hosted tool JSON",
+      "caller": "OpenAiAdapter::render_request",
+      "callee": "adapter renderer",
+      "source_resource": "provider_request",
+      "target_resource": "provider_hosted_search",
+      "resource_operation": "provider_request.render_hosted_search_wire",
+      "binding_status": "bound"
+    },
+    {
       "step": "02",
       "symbol_path": "OpenAiAdapter::parse_response",
       "file_path": "crates/freehand-provider-openai/src/lib.rs",
@@ -61,6 +81,20 @@
       "output_semantic": "provider semantic outputs",
       "caller": "runtime/provider caller",
       "callee": "adapter parser",
+      "binding_status": "bound"
+    },
+    {
+      "step": "02a",
+      "symbol_path": "provider_hosted_web_search_observation",
+      "file_path": "crates/freehand-provider-openai/src/lib.rs",
+      "responsibility": "map OpenAI Responses `web_search_call` items into provider-neutral reasoning observations",
+      "input_semantic": "raw OpenAI response item",
+      "output_semantic": "provider semantic reasoning event",
+      "caller": "OpenAiAdapter::parse_response / OpenAiAdapter::parse_stream_event",
+      "callee": "adapter parser",
+      "source_resource": "provider_response",
+      "target_resource": "provider_hosted_search",
+      "resource_operation": "provider_response.observe_hosted_search_call",
       "binding_status": "bound"
     },
     {
@@ -99,6 +133,7 @@
   ],
   "sync_status": [
     "renderer/parser bindings match `OpenAiAdapter`, and live HTTP/SSE executor bindings match `OpenAiExecutor`",
+    "hosted OpenAI Responses web_search request rendering and `web_search_call` observation are adapter-owned and covered by focused adapter tests",
     "generated wiki must be regenerated from `docs/mainline-calls/provider.openai-adapter.json` when this function-map truth changes"
   ]
 }

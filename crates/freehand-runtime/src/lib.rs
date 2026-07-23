@@ -72,11 +72,11 @@ use freehand_config::SelectedPeerAgentConfig;
 use freehand_config::{
     AgentMode, AgentProviderSelectionConfigUpdate, AgentResourceConfigUpdate, LoadedConfig,
     MAX_AGENT_RESOURCE_COUNT, ProviderConfigUpdate, ProviderProtocol as ConfigProviderProtocol,
-    ProviderType, SelectedAgentConfig, SelectedProviderConfig, default_config_path,
-    load_config_from_path, load_default_config, provider_base_url_host_for_projection,
-    safe_provider_base_url_for_projection, switch_agent_provider_in_path,
-    update_agent_resource_config_in_path, update_provider_config_in_path,
-    upsert_provider_config_in_path,
+    ProviderType, ProviderWebSearchMode, SelectedAgentConfig, SelectedProviderConfig,
+    default_config_path, load_config_from_path, load_default_config,
+    provider_base_url_host_for_projection, safe_provider_base_url_for_projection,
+    switch_agent_provider_in_path, update_agent_resource_config_in_path,
+    update_provider_config_in_path, upsert_provider_config_in_path,
 };
 use freehand_contracts::{
     AgentId, ContextCachePolicy, ContextProvenance, ContextRole, ContextSegment, ContextSegmentId,
@@ -107,8 +107,10 @@ use freehand_provider_anthropic::{
 };
 use freehand_provider_core::{
     ProviderCapabilities, ProviderDescriptor, ProviderEventContext, ProviderFamily,
-    ProviderProtocol, ProviderSemanticOutput, ProviderSemanticRequest, ProviderToolDefinition,
-    ProviderToolExchange, build_semantic_request,
+    ProviderHostedToolDefinition, ProviderProtocol, ProviderSemanticOutput,
+    ProviderSemanticRequest, ProviderToolDefinition, ProviderToolExchange,
+    ProviderWebSearchCapability, ProviderWebSearchMode as SemanticWebSearchMode,
+    build_semantic_request,
 };
 use freehand_provider_openai::{
     OpenAiExecutor, OpenAiExecutorConfig, OpenAiExecutorError, OpenAiRawCapture,
@@ -125,11 +127,11 @@ use freehand_task::{
     MasterPollClassification, MasterPollOutcome, MasterPollRequest, SchedulerTickRequest,
     TaskActor, TaskAppendRequest, TaskAssignRequest, TaskBoardProjection, TaskBoardQuery,
     TaskClaimRequest, TaskCreateRequest, TaskDispatchRequest, TaskError, TaskEventInboxEntry,
-    TaskEventInboxProjection, TaskEventInboxQuery, TaskExecutionRecordRequest,
-    TaskHeartbeatRequest, TaskId, TaskLedgerEvent, TaskListQuery, TaskMutationRequest,
-    TaskParentRef, TaskReviewRejection, TaskReviewSubmission, TaskRuntime, TaskSnapshot,
-    TaskStatus, TaskWatermark, WorkerControlEvent, WorkerControlOp, WorkerControlProjection,
-    WorkerControlRequest,
+    TaskEventInboxProjection, TaskEventInboxQuery, TaskExecutionProfile,
+    TaskExecutionRecordRequest, TaskHeartbeatRequest, TaskId, TaskLedgerEvent, TaskListQuery,
+    TaskMutationRequest, TaskParentRef, TaskReviewRejection, TaskReviewSubmission, TaskRuntime,
+    TaskSnapshot, TaskStatus, TaskWatermark, WorkerControlEvent, WorkerControlOp,
+    WorkerControlProjection, WorkerControlRequest,
 };
 use freehand_tools::{
     BuiltinToolExecutionScope, BuiltinToolRegistry, ToolRegistryError, with_workspace_root,
@@ -169,11 +171,40 @@ pub struct LiveReasonTurnRequest {
     pub trace_id: TraceId,
     pub prompt: String,
     pub cwd: Option<PathBuf>,
+    pub execution_profile: LiveReasonExecutionProfile,
     pub stream: bool,
     pub cancel_token: Option<LiveReasonCancelToken>,
 }
 
 pub type LiveReasonCancelToken = Arc<AtomicBool>;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum LiveReasonExecutionProfile {
+    Workspace,
+    CleanSearch,
+}
+
+impl LiveReasonExecutionProfile {
+    fn as_str(self) -> &'static str {
+        match self {
+            Self::Workspace => "workspace",
+            Self::CleanSearch => "clean_search",
+        }
+    }
+
+    fn requires_worker_workspace(self) -> bool {
+        matches!(self, Self::Workspace)
+    }
+}
+
+impl From<TaskExecutionProfile> for LiveReasonExecutionProfile {
+    fn from(value: TaskExecutionProfile) -> Self {
+        match value {
+            TaskExecutionProfile::Workspace => Self::Workspace,
+            TaskExecutionProfile::CleanSearch => Self::CleanSearch,
+        }
+    }
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) enum LiveReasonTaskDecisionMode {
@@ -264,14 +295,53 @@ impl LiveReasonExecutionRole {
         }
     }
 
-    fn tool_definitions(self, registry: &BuiltinToolRegistry) -> Vec<ProviderToolDefinition> {
+    fn tool_definitions(
+        self,
+        registry: &BuiltinToolRegistry,
+        execution_profile: LiveReasonExecutionProfile,
+    ) -> Vec<ProviderToolDefinition> {
+        if execution_profile == LiveReasonExecutionProfile::CleanSearch {
+            return Vec::new();
+        }
         match self {
             Self::Master => registry.master_implemented_definitions(),
             Self::Worker => registry.worker_implemented_definitions(),
         }
     }
 
-    fn tool_schema_fingerprint(self, registry: &BuiltinToolRegistry) -> String {
+    fn hosted_tool_definitions(
+        self,
+        descriptor: &ProviderDescriptor,
+        execution_profile: LiveReasonExecutionProfile,
+    ) -> Vec<ProviderHostedToolDefinition> {
+        let allow_hosted_search = match (self, execution_profile) {
+            (Self::Master, LiveReasonExecutionProfile::Workspace) => descriptor
+                .capabilities
+                .web_search
+                .can_mix_with_function_tools(),
+            (Self::Worker, LiveReasonExecutionProfile::CleanSearch) => {
+                descriptor.capabilities.web_search.is_hosted()
+            }
+            _ => false,
+        };
+        if allow_hosted_search {
+            vec![ProviderHostedToolDefinition::WebSearch {
+                mode: SemanticWebSearchMode::Live,
+                external_web_access: true,
+            }]
+        } else {
+            Vec::new()
+        }
+    }
+
+    fn tool_schema_fingerprint(
+        self,
+        registry: &BuiltinToolRegistry,
+        execution_profile: LiveReasonExecutionProfile,
+    ) -> String {
+        if execution_profile == LiveReasonExecutionProfile::CleanSearch {
+            return "clean-search:no-function-tools".to_owned();
+        }
         match self {
             Self::Master => registry.master_implemented_schema_fingerprint(),
             Self::Worker => registry.worker_implemented_schema_fingerprint(),
@@ -599,7 +669,10 @@ where
             actual: selected.mode.as_str().to_owned(),
         });
     }
-    if role == LiveReasonExecutionRole::Worker && request.cwd.is_none() {
+    if role == LiveReasonExecutionRole::Worker
+        && request.execution_profile.requires_worker_workspace()
+        && request.cwd.is_none()
+    {
         return Err(RuntimeLiveBridgeError::WorkerWorkspaceRequired);
     }
     match (selected.provider.provider_type, selected.provider.protocol) {
@@ -728,6 +801,10 @@ where
                     value: json!(request.stream),
                 },
                 MetadataEntry {
+                    key: "runtime.execution_profile".to_owned(),
+                    value: json!(request.execution_profile.as_str()),
+                },
+                MetadataEntry {
                     key: "provider.family".to_owned(),
                     value: json!(provider_label.family),
                 },
@@ -814,6 +891,10 @@ where
                     value: json!(request.stream),
                 },
                 MetadataEntry {
+                    key: "runtime.execution_profile".to_owned(),
+                    value: json!(request.execution_profile.as_str()),
+                },
+                MetadataEntry {
                     key: "context.cwd_bound".to_owned(),
                     value: json!(request.cwd.is_some()),
                 },
@@ -864,6 +945,7 @@ where
     let mut carryover_segments = base_live_context_segments_with_observer(
         &request.prompt,
         role,
+        request.execution_profile,
         configured_worker_set,
         &request.runtime_home,
         request.cwd.as_deref(),
@@ -920,7 +1002,8 @@ where
     let mut tool_exchanges: Vec<ProviderToolExchange> = Vec::new();
     let mut executed_tool_call_ids = Vec::<String>::new();
     let tool_registry = BuiltinToolRegistry::reasonix_aligned();
-    let tool_schema_fingerprint = role.tool_schema_fingerprint(&tool_registry);
+    let tool_schema_fingerprint =
+        role.tool_schema_fingerprint(&tool_registry, request.execution_profile);
 
     'reason_loop: loop {
         ensure_live_not_cancelled(&request)?;
@@ -935,6 +1018,7 @@ where
                 &resolution,
                 LiveRoundContext {
                     role,
+                    execution_profile: request.execution_profile,
                     configured_worker_set,
                     runtime_home: &request.runtime_home,
                     cwd: request.cwd.as_deref(),
@@ -954,6 +1038,7 @@ where
                 &resolution,
                 LiveRoundContext {
                     role,
+                    execution_profile: request.execution_profile,
                     configured_worker_set,
                     runtime_home: &request.runtime_home,
                     cwd: request.cwd.as_deref(),
@@ -996,7 +1081,9 @@ where
             debug_hub.is_enabled(),
         )
         .map_err(|err| RuntimeLiveBridgeError::ProviderRequestBuildFailed(err.to_string()))?;
-        semantic_request.tools = role.tool_definitions(&tool_registry);
+        semantic_request.tools = role.tool_definitions(&tool_registry, request.execution_profile);
+        semantic_request.hosted_tools =
+            role.hosted_tool_definitions(&active_provider_descriptor, request.execution_profile);
         semantic_request.tool_choice = None;
         semantic_request.tool_exchanges = tool_exchanges.clone();
         write_control_hook_metadata(
@@ -1093,7 +1180,12 @@ where
                     format!("provider_route={}", active_route.kind.as_str()),
                     format!("provider_id={}", active_route.provider.id),
                     format!("model={}", active_route.provider.default_model),
+                    format!("execution_profile={}", request.execution_profile.as_str()),
                     format!("tool_definition_count={}", semantic_request.tools.len()),
+                    format!(
+                        "hosted_tool_definition_count={}",
+                        semantic_request.hosted_tools.len()
+                    ),
                     format!(
                         "tool_exchange_count={}",
                         semantic_request.tool_exchanges.len()
@@ -1458,6 +1550,7 @@ where
                 &request.prompt,
                 LiveRoundContext {
                     role,
+                    execution_profile: request.execution_profile,
                     configured_worker_set,
                     runtime_home: &request.runtime_home,
                     cwd: request.cwd.as_deref(),
@@ -1503,6 +1596,7 @@ where
                         &request.prompt,
                         LiveRoundContext {
                             role,
+                            execution_profile: request.execution_profile,
                             configured_worker_set,
                             runtime_home: &request.runtime_home,
                             cwd: request.cwd.as_deref(),
@@ -1543,6 +1637,7 @@ where
                         &request.prompt,
                         LiveRoundContext {
                             role,
+                            execution_profile: request.execution_profile,
                             configured_worker_set,
                             runtime_home: &request.runtime_home,
                             cwd: request.cwd.as_deref(),
@@ -1810,6 +1905,7 @@ where
                 None,
                 LiveRoundContext {
                     role,
+                    execution_profile: request.execution_profile,
                     configured_worker_set,
                     runtime_home: &request.runtime_home,
                     cwd: request.cwd.as_deref(),
@@ -1860,6 +1956,7 @@ where
                 &public_provider_text,
                 LiveRoundContext {
                     role,
+                    execution_profile: request.execution_profile,
                     configured_worker_set,
                     runtime_home: &request.runtime_home,
                     cwd: request.cwd.as_deref(),
@@ -1968,6 +2065,7 @@ where
                     Some(feedback.as_str()),
                     LiveRoundContext {
                         role,
+                        execution_profile: request.execution_profile,
                         configured_worker_set,
                         runtime_home: &request.runtime_home,
                         cwd: request.cwd.as_deref(),
@@ -2012,6 +2110,7 @@ where
                             &public_provider_text,
                             LiveRoundContext {
                                 role,
+                                execution_profile: request.execution_profile,
                                 configured_worker_set,
                                 runtime_home: &request.runtime_home,
                                 cwd: request.cwd.as_deref(),
@@ -2130,6 +2229,7 @@ where
                             &public_provider_text,
                             LiveRoundContext {
                                 role,
+                                execution_profile: request.execution_profile,
                                 configured_worker_set,
                                 runtime_home: &request.runtime_home,
                                 cwd: request.cwd.as_deref(),
@@ -2223,6 +2323,7 @@ where
                         None,
                         LiveRoundContext {
                             role,
+                            execution_profile: request.execution_profile,
                             configured_worker_set,
                             runtime_home: &request.runtime_home,
                             cwd: request.cwd.as_deref(),
@@ -2270,6 +2371,7 @@ where
                             &visible_text,
                             LiveRoundContext {
                                 role,
+                                execution_profile: request.execution_profile,
                                 configured_worker_set,
                                 runtime_home: &request.runtime_home,
                                 cwd: request.cwd.as_deref(),
@@ -2399,6 +2501,7 @@ where
                         None,
                         LiveRoundContext {
                             role,
+                            execution_profile: request.execution_profile,
                             configured_worker_set,
                             runtime_home: &request.runtime_home,
                             cwd: request.cwd.as_deref(),
@@ -2555,6 +2658,7 @@ where
                     Some(feedback.as_str()),
                     LiveRoundContext {
                         role,
+                        execution_profile: request.execution_profile,
                         configured_worker_set,
                         runtime_home: &request.runtime_home,
                         cwd: request.cwd.as_deref(),
@@ -3428,6 +3532,7 @@ impl RuntimeCommandDispatcher {
                 trace_id: prepared.trace_id.clone(),
                 prompt: prepared.prompt.clone(),
                 cwd: Some(prepared.cwd.clone()),
+                execution_profile: LiveReasonExecutionProfile::Workspace,
                 stream: prepared.live.stream,
                 cancel_token: Some(Arc::clone(&cancel_token)),
             },
@@ -4147,6 +4252,7 @@ fn project_config_status_for_ui(
                     provider_base_url: provider.base_url,
                     provider_base_url_host: provider.base_url_host,
                     default_model: provider.default_model,
+                    provider_web_search: provider.web_search.as_str().to_owned(),
                     provider_auth_type: provider.auth_type.as_str().to_owned(),
                     provider_auth_source: provider.auth_source.as_str().to_owned(),
                 })
@@ -4190,6 +4296,7 @@ fn project_config_status_for_ui(
         provider_base_url: safe_provider_base_url_for_projection(&selected.provider.base_url),
         provider_base_url_host: provider_base_url_host_for_projection(&selected.provider.base_url),
         default_model: selected.provider.default_model.clone(),
+        provider_web_search: selected.provider.web_search.as_str().to_owned(),
         provider_auth_type: selected.provider.auth_type.as_str().to_owned(),
         provider_auth_source: selected.provider.auth_source.as_str().to_owned(),
         restart_required_on_change: selected.restart_required_on_change,
@@ -4583,6 +4690,12 @@ impl RuntimeCommandDispatcher {
                 acceptance: task.acceptance,
                 priority: task.priority,
                 target_cwd: task.target_cwd,
+                execution_profile: parse_task_execution_profile_value(&task.execution_profile)
+                    .map_err(|err| {
+                        UiCommandDispatchPortError::DispatchFailed(format!(
+                            "task execution profile is invalid: {err}"
+                        ))
+                    })?,
                 dispatch: task_dispatch_from_ui(task.dispatch),
                 parent: TaskParentRef {
                     session_id: task.session_id,
@@ -4965,6 +5078,7 @@ impl RuntimeCommandDispatcher {
                 protocol: update.provider_protocol,
                 base_url: update.base_url,
                 default_model: update.default_model,
+                web_search: update.web_search,
                 api_key_env: update.api_key_env,
             },
         )
@@ -5002,6 +5116,7 @@ impl RuntimeCommandDispatcher {
                 protocol: update.provider_protocol,
                 base_url: update.base_url,
                 default_model: update.default_model,
+                web_search: update.web_search,
                 api_key_env: update.api_key_env,
             },
         )
@@ -5493,6 +5608,7 @@ fn project_task_snapshot_for_ui(task: TaskSnapshot) -> UiTaskSnapshotProjection 
         goal: task.goal,
         priority: task.priority,
         target_cwd: task.target_cwd,
+        execution_profile: task.execution_profile.as_str().to_owned(),
         parent_session_id: task.parent.session_id,
         attached_session_ids: task.attached_session_ids,
         worker_session_id: Some(worker_session_id),
@@ -6938,12 +7054,58 @@ fn provider_descriptor(
         protocol,
         model: provider.default_model.clone(),
         capabilities: ProviderCapabilities {
-            web_search: false,
-            multimodal: false,
-            vision: false,
+            web_search: provider_web_search_capability(provider, protocol),
+            multimodal: provider_multimodal_capability(provider),
+            vision: provider_vision_capability(provider),
             reasoning: true,
         },
     })
+}
+
+fn provider_web_search_capability(
+    provider: &SelectedProviderConfig,
+    protocol: ProviderProtocol,
+) -> ProviderWebSearchCapability {
+    if provider.web_search == ProviderWebSearchMode::Disabled {
+        return ProviderWebSearchCapability::Unsupported;
+    }
+    match (provider.provider_type, protocol) {
+        (ProviderType::OpenAi, ProviderProtocol::OpenAiResponses)
+            if openai_model_supports_hosted_web_search(&provider.default_model) =>
+        {
+            ProviderWebSearchCapability::hosted_live_with_functions()
+        }
+        _ => ProviderWebSearchCapability::Unsupported,
+    }
+}
+
+fn openai_model_supports_hosted_web_search(model: &str) -> bool {
+    let normalized = model.trim().to_ascii_lowercase();
+    normalized.starts_with("gpt-5")
+        || normalized.starts_with("gpt-4.1")
+        || normalized.starts_with("gpt-4o")
+        || normalized.ends_with("-search-api")
+}
+
+fn provider_vision_capability(provider: &SelectedProviderConfig) -> bool {
+    let model = provider.default_model.trim().to_ascii_lowercase();
+    match provider.provider_type {
+        ProviderType::OpenAi => {
+            model.starts_with("gpt-5")
+                || model.starts_with("gpt-4.1")
+                || model.starts_with("gpt-4o")
+                || model.contains("vision")
+        }
+        ProviderType::Anthropic => {
+            model.contains("claude")
+                || model.starts_with("minimax-m")
+                || model.starts_with("minimax-")
+        }
+    }
+}
+
+fn provider_multimodal_capability(provider: &SelectedProviderConfig) -> bool {
+    provider_vision_capability(provider)
 }
 
 #[derive(Debug, Clone, Copy)]
@@ -7217,6 +7379,7 @@ fn derived_trace_id(base: &TraceId, round: usize) -> TraceId {
 #[derive(Clone, Copy)]
 struct LiveRoundContext<'a> {
     role: LiveReasonExecutionRole,
+    execution_profile: LiveReasonExecutionProfile,
     configured_worker_set: Option<&'a [String]>,
     runtime_home: &'a Path,
     cwd: Option<&'a Path>,
@@ -7232,6 +7395,7 @@ fn next_round_segments(
     let mut segments = base_live_context_segments(
         original_prompt,
         context.role,
+        context.execution_profile,
         context.configured_worker_set,
         context.runtime_home,
         context.cwd,
@@ -7769,7 +7933,8 @@ fn execute_task_tool(
         return Err(concat!(
             "`op` is required as a top-level task field. ",
             "Valid production examples: ",
-            "task({\"op\":\"create\",\"title\":\"...\",\"content\":\"...\",\"goal\":\"...\",\"target_cwd\":\"/absolute/existing/repo\",\"dispatch\":{\"mode\":\"none\"}}), ",
+            "task({\"op\":\"create\",\"title\":\"...\",\"content\":\"...\",\"goal\":\"...\",\"target_cwd\":\"/absolute/existing/repo\",\"execution_profile\":\"workspace\",\"dispatch\":{\"mode\":\"none\"}}), ",
+            "or for broad hosted search task({\"op\":\"create\",\"title\":\"...\",\"content\":\"...\",\"goal\":\"...\",\"execution_profile\":\"clean_search\",\"dispatch\":{\"mode\":\"none\"}}), ",
             "then task({\"op\":\"assign\",\"task_id\":\"...\",\"agent_id\":\"<configured Worker>\"}). ",
             "Use task({\"op\":\"query\",\"task_id\":\"...\"}) or task({\"op\":\"history\",\"task_id\":\"...\"}) only for specific existing-task truth."
         )
@@ -7789,6 +7954,7 @@ fn execute_task_tool(
                 acceptance: required_json_string_array(&args, "acceptance")?,
                 priority: optional_json_i64(&args, "priority").unwrap_or(50),
                 target_cwd: optional_json_string(&args, "target_cwd").map(ToOwned::to_owned),
+                execution_profile: parse_task_execution_profile(&args)?,
                 dispatch: parse_task_dispatch(&args)?,
                 parent: TaskParentRef {
                     session_id: Some(turn.request.session_id.clone()),
@@ -8244,6 +8410,23 @@ fn parse_task_status(value: &str) -> Result<TaskStatus, String> {
         "cancelled" => Ok(TaskStatus::Cancelled),
         "closed" => Ok(TaskStatus::Closed),
         other => Err(format!("unsupported task status `{other}`")),
+    }
+}
+
+fn parse_task_execution_profile(args: &Map<String, Value>) -> Result<TaskExecutionProfile, String> {
+    let Some(value) = optional_json_string(args, "execution_profile") else {
+        return Ok(TaskExecutionProfile::Workspace);
+    };
+    parse_task_execution_profile_value(value)
+}
+
+fn parse_task_execution_profile_value(value: &str) -> Result<TaskExecutionProfile, String> {
+    match value.trim() {
+        "" | "workspace" => Ok(TaskExecutionProfile::Workspace),
+        "clean_search" => Ok(TaskExecutionProfile::CleanSearch),
+        other => Err(format!(
+            "unsupported execution_profile `{other}`; expected `workspace` or `clean_search`"
+        )),
     }
 }
 

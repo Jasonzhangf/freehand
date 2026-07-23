@@ -15,7 +15,9 @@ use freehand_task::{TaskRuntime, TaskSnapshot, TaskSpaceSnapshotQuery};
 use freehand_tools::BuiltinToolRegistry;
 use serde_json::{Value, json};
 
-use crate::{LiveReasonExecutionRole, RuntimeLiveBridgeError, task_status_label};
+use crate::{
+    LiveReasonExecutionProfile, LiveReasonExecutionRole, RuntimeLiveBridgeError, task_status_label,
+};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub(crate) enum LiveContextSegmentBuildStatus {
@@ -98,13 +100,17 @@ pub(crate) fn control_status_contract_segment() -> ContextSegment {
 
 fn tool_guidance_segment(
     role: LiveReasonExecutionRole,
+    execution_profile: LiveReasonExecutionProfile,
     configured_worker_set: Option<&[String]>,
 ) -> ContextSegment {
     let content = match role {
         LiveReasonExecutionRole::Master => master_task_orchestration_guidance(
             configured_worker_set.expect("Master guidance requires configured Worker"),
         ),
-        LiveReasonExecutionRole::Worker => worker_execution_guidance(),
+        LiveReasonExecutionRole::Worker => match execution_profile {
+            LiveReasonExecutionProfile::Workspace => worker_execution_guidance(),
+            LiveReasonExecutionProfile::CleanSearch => worker_clean_search_guidance(),
+        },
     };
     ContextSegment {
         segment_id: ContextSegmentId::new("runtime-tool-guidance"),
@@ -266,12 +272,49 @@ pub(crate) fn instruction_capability_segment(
     })
 }
 
+fn instruction_capability_segment_for_profile(
+    execution_profile: LiveReasonExecutionProfile,
+    runtime_home: &Path,
+    cwd: Option<&Path>,
+) -> Result<ContextSegment, RuntimeLiveBridgeError> {
+    if execution_profile == LiveReasonExecutionProfile::CleanSearch {
+        return Ok(clean_search_instruction_capability_segment());
+    }
+    instruction_capability_segment(runtime_home, cwd)
+}
+
+fn clean_search_instruction_capability_segment() -> ContextSegment {
+    let content = concat!(
+        "<freehand_instruction_capability>\n",
+        "execution_profile=clean_search\n",
+        "No local workspace instruction capability was loaded for this search-only turn. ",
+        "Do not infer repository cwd, local AGENTS.md, local skills, or filesystem access. ",
+        "Use only the hosted provider web_search capability and the explicit Task Center prompt.\n",
+        "</freehand_instruction_capability>"
+    )
+    .to_owned();
+    ContextSegment {
+        segment_id: ContextSegmentId::new("instruction-capability"),
+        kind: ContextSegmentKind::InstructionCapability,
+        stability: ContextStability::SessionStable,
+        cache_policy: ContextCachePolicy::Cacheable,
+        role: ContextRole::Developer,
+        token_budget: runtime_prompt_segment_token_budget(&content),
+        content,
+        provenance: ContextProvenance {
+            source: "instruction_capability".to_owned(),
+            reference: Some("clean_search_no_local_scan".to_owned()),
+        },
+    }
+}
+
 fn compact_task_snapshot_json(task: &TaskSnapshot) -> Value {
     json!({
         "task_id": task.task_id.as_str(),
         "status": task_status_label(&task.status),
         "title": task.title,
         "target_cwd": task.target_cwd,
+        "execution_profile": task.execution_profile.as_str(),
         "assignee_agent_id": task.assignee.as_ref().map(|assignee| assignee.agent_id.as_str()),
         "active_execution_id": task.active_execution_id,
         "review_status": task.review.status,
@@ -297,7 +340,7 @@ fn worker_capability_guidance() -> String {
     format!(
         "Configured Worker capability surface from the actual worker-safe tool schema: {worker_tools}. \
 Workers can inspect/edit their locked task workspace with path tools and can fetch known HTTP/HTTPS URLs with `web_fetch`. \
-Workers do not receive `task`, `timer`, or shell. If your own Master surface cannot complete a slice directly but a Worker has the needed cwd/network capability, create and assign a Worker task instead of declaring the user request blocked."
+Workers do not receive `task`, `timer`, or shell. Worker tasks may use `execution_profile=\"workspace\"` for cwd-bound work or `execution_profile=\"clean_search\"` for provider-hosted broad search without function tools. If your own Master surface cannot complete a slice directly but a Worker has the needed cwd/network/provider-search capability, create and assign a Worker task instead of declaring the user request blocked."
     )
 }
 
@@ -330,6 +373,18 @@ fn worker_execution_guidance() -> String {
     )
 }
 
+fn worker_clean_search_guidance() -> String {
+    concat!(
+        "Worker clean_search execution profile. This turn is isolated for provider-hosted broad web search and must not use Freehand function tools.\n",
+        "- Available capability: provider-hosted `web_search` only when the selected provider/protocol declares hosted web search.\n",
+        "- Unavailable tools: all workspace tools, `web_fetch`, `task`, `timer`, shell/bash, browser, readlink, pwd, cat, find, python, and any unlisted function tool.\n",
+        "- No target_cwd is required for this profile. Do not infer repository access or claim workspace inspection.\n",
+        "- Search workflow: issue concise search queries through hosted web search, read returned source evidence in the provider response, then synthesize one compact conclusion for the Master.\n",
+        "- Output contract: final summary must include query terms, source/evidence summary, confidence or gaps, and next-step recommendation. If hosted search is unavailable or returns no usable evidence, finish blocked with the exact capability/provider reason.\n",
+    )
+    .to_owned()
+}
+
 pub(crate) fn configured_worker_label(configured_worker_set: Option<&[String]>) -> String {
     let Some(configured_worker_set) = configured_worker_set else {
         return "<configured-worker>".to_owned();
@@ -354,10 +409,10 @@ fn master_task_orchestration_guidance(configured_worker_set: &[String]) -> Strin
             "- Role: you are the master agent. You own the user conversation, task decomposition, worker coordination, review, and final user-facing answer.\n",
             "- Master local tool surface: `ls`, `read_file`, `grep`, `glob`, `write_file`, `edit_file`, `multi_edit`, and `delete_range` operate only inside the current selected session cwd after canonical/symlink workspace locking. Use them directly for local repository analysis or local artifact creation when that cwd is the requested workspace.\n",
             "- Master network tool surface: `web_fetch` fetches known HTTP/HTTPS URLs and returns bounded readable text. It is not a search engine; use it for concrete authoritative pages from the task/context. Do not claim broad web search unless a real search/discovery tool is exposed or a Worker result provides sourced evidence.\n",
-            "- Master framework tool surface: `task` manages Task Center/Worker lifecycle and `timer` schedules durable wakeups. Do not call shell/bash, web_search, browser, todo_write, complete_step, readlink, pwd, cat, find, python, or any unlisted tool.\n",
+            "- Master framework tool surface: local workspace tools, `web_fetch` for known URLs, `task` for Task Center/Worker lifecycle, and `timer` for durable wakeups. Do not invent a Freehand function tool named `web_search`; provider-hosted `web_search` is a provider-native capability only when the selected provider/protocol declares it. Do not call shell/bash, browser, todo_write, complete_step, readlink, pwd, cat, find, python, or any unlisted function tool.\n",
             "- Do not dispatch when: the request is conversational, explanatory, or small enough to complete inside the current selected session cwd with the local workspace tools.\n",
             "- Dispatch when: work targets a different cwd/repository than the current selected session cwd, needs isolated context, has independent evidence gathering, can run concurrently, is long-running, or should be resumable outside your main context.\n",
-            "- Web/network routing: first use your own `web_fetch` for known URLs. If the needed online work is an independent research slice and a configured Worker has `web_fetch`, create/assign a Worker task with concrete source URLs or source-discovery requirements. Finish blocked only when neither Master nor any configured Worker has the required capability, or when the task truly needs broad search/browser behavior that no exposed tool provides.\n",
+            "- Web/network routing: first use your own `web_fetch` for known URLs. If provider-hosted `web_search` is declared in this provider request, it may be used as provider-native search, not as a Freehand function tool. For broad/current web search on a provider that cannot mix hosted search with function tools, create/assign a Worker task with `execution_profile=\"clean_search\"`; the Worker must return the search conclusion and evidence for Master synthesis. Finish blocked only when neither Master nor any configured Worker/provider route has the required search capability.\n",
             "- Workspace boundary: for a different repository/workspace, create or reuse a worker resource, create a task with the correct existing target_cwd, assign it to one configured Worker, then let that production Worker runner claim and execute it.\n",
             "- Path duty before dispatch: for any user-supplied path, identify whether it is absolute or starts with ~. Treat ~ as the user's home path from the request context, not as the Master's runtime workspace. Prefer an expanded absolute path when known, but leading-~/symlink aliases are valid target_cwd values only when they resolve to an existing repository/workspace. Do not pass glob patterns, broad search paths, or not-yet-created output directories as target_cwd. If the task tool returns target_cwd_path_diagnostic, use it before asking the user: symlink_ancestors are valid aliases, nearest_existing_canonical is resolved parent truth, and missing_suffix is the unresolved leaf.\n",
             "- Symlink duty before dispatch: when a user path may include symlinks, instruct the Worker to check the path itself and each parent component for symlinks, resolve the canonical path, and report both the requested path and canonical path. The task goal/acceptance must preserve the original user-facing path and require canonical-path evidence.\n",
@@ -367,7 +422,7 @@ fn master_task_orchestration_guidance(configured_worker_set: &[String]) -> Strin
             "- Concurrency control: assign only useful independent subtasks; avoid duplicate dispatch for work already running, recovering, blocked, or review_ready; poll task truth before starting more work.\n",
             "- Flow control: call task with {\"op\":\"list_agents\"}, {\"op\":\"list_tasks\"}, {\"op\":\"query\"}, and {\"op\":\"history\"} to inspect current framework truth before dispatching duplicates, retrying, approving, rejecting, or closing work.\n",
             "- Task tool workflow: create_agent only when needed; create a task with goal, deliverables, acceptance, target_cwd, and priority; assign it; query task/history while the Worker runner claims, heartbeats, and records execution; approve/reject; close only after accepted review.\n",
-            "- Task create dispatch: every task tool call must include top-level op. For production worker work, call task with {\"op\":\"create\", ..., \"target_cwd\":\"/absolute/existing/workspace\", \"dispatch\":{\"mode\":\"none\"}} and then task with {\"op\":\"assign\", \"task_id\":\"...\", \"agent_id\":\"one configured Worker id\"}. Never omit dispatch and never use auto or self dispatch, because persisted historical agents are not production targets.\n",
+            "- Task create dispatch: every task tool call must include top-level op. For production workspace work, call task with {\"op\":\"create\", ..., \"target_cwd\":\"/absolute/existing/workspace\", \"execution_profile\":\"workspace\", \"dispatch\":{\"mode\":\"none\"}} and then task with {\"op\":\"assign\", \"task_id\":\"...\", \"agent_id\":\"one configured Worker id\"}. For provider-hosted broad search, use {\"op\":\"create\", ..., \"execution_profile\":\"clean_search\", \"dispatch\":{\"mode\":\"none\"}} and omit target_cwd. Never omit dispatch and never use auto or self dispatch, because persisted historical agents are not production targets.\n",
             "- Ownership boundary: as Master, do not call claim_next, heartbeat, or record_execution on behalf of a Worker. Those mutations are owned by the Worker runner. Use them only in explicit framework/debug tests, never as normal production orchestration.\n",
             "- Timer workflow: when all immediate Master-side actions are dispatched or waiting on worker progress, call timer with {\"op\":\"schedule\",\"reason\":\"...\",\"prompt\":\"...\"} plus delay_seconds, run_at_unix_seconds, or a repeat rule. If the next useful wait exceeds 3 minutes, schedule a timer instead of dead-waiting in the current turn. A timer is not scheduled until the timer tool returns `Timer scheduled`; do not claim or imply that a timer was scheduled in completion text unless this turn has a successful timer tool result. After scheduling the timer, continue any other ready Master-side work instead of blocking on the waited item. If no other work is ready and the user's requested final outcome is not yet delivered, finish the current turn with `claim=\"waiting\"` and name the Task Center/timer follow-up in `next_step`; do not use `claim=\"complete\"` for mere dispatch. The timer prompt must tell the future Master turn what current truth to inspect, what waited condition to revisit, and what decision to make. Timer truth is independent internal scheduler truth, not task truth. Daily, weekly, and cron repeat rules use the local timezone. Cron is 5 fields: minute hour day-of-month month weekday.\n",
             "- Completion boundary: `claim=\"complete\"` is allowed only after the user-visible objective is actually satisfied with evidence. A created/assigned Worker task, heartbeat, timer, or pending review is lifecycle progress, not user-task completion.\n",
@@ -379,7 +434,7 @@ fn master_task_orchestration_guidance(configured_worker_set: &[String]) -> Strin
             "- Timer relative sample: call timer with {\"op\":\"schedule\",\"mode\":\"relative\",\"delay_seconds\":300,\"reason\":\"worker dispatched; waiting more than 3 minutes must be timer-driven\",\"prompt\":\"Read TaskBoard, EventInbox, TaskHistory, and AgentBoard from current truth. Revisit whether the dispatched worker has produced review_ready, blocked, or interrupted truth. If review is ready, approve/reject/close. If still running and no immediate action exists, schedule the next timer.\"}.\n",
             "- Timer local cron sample: call timer with {\"op\":\"schedule\",\"mode\":\"recurring\",\"reason\":\"working-hours follow-up\",\"prompt\":\"Run scheduled Master follow-up using current framework truth only.\",\"repeat\":{\"kind\":\"cron\",\"expression\":\"*/15 9-17 * * 1-5\",\"max_runs\":32}}.\n",
             "- Local workspace sample: for a request to inspect or edit the current selected repository, call `ls`, `grep`, `read_file`, and when needed `write_file`/`edit_file` directly; do not create a Worker task only because the work is local.\n",
-            "- Web fetch sample: for known URLs, call `web_fetch` directly and cite the fetched source in evidence. For independent URL-review work, dispatch a Worker task only if the Worker capability surface includes `web_fetch`; otherwise return `claim=\"blocked\"` naming the missing concrete capability.\n",
+            "- Web fetch sample: for known URLs, call `web_fetch` directly and cite the fetched source in evidence. For broad/current search where native provider search is search-only, create a clean_search Worker task and review its returned sources before final synthesis.\n",
             "- Create worker resources with task input {\"op\":\"create_agent\",\"agent_id\":\"<new-worker-id>\",\"capabilities\":[\"repository\"]} only when the task needs a worker id that does not exist.\n",
             "- Create and dispatch work with task input {\"op\":\"create\",...} and then {\"op\":\"assign\",...}. Keep the same task_id and agent_id while the Worker runner creates and preserves the execution_id. The task input JSON must include top-level `op`; do not send a task input object without `op`.\n",
             "- Cross-workspace sample: for a request comparing ~/work/repo-a with ~/work/repo-b, create one task for repo-a analysis and one task for repo-b analysis, each with target_cwd, deliverables, acceptance, and evidence requirements; assign/claim separate workers when available, then synthesize the comparison only after reviewing the worker results.\n",
@@ -412,6 +467,7 @@ pub(crate) fn original_task_segment(prompt: &str) -> ContextSegment {
 pub(crate) fn base_live_context_segments(
     original_prompt: &str,
     role: LiveReasonExecutionRole,
+    execution_profile: LiveReasonExecutionProfile,
     configured_worker_set: Option<&[String]>,
     runtime_home: &Path,
     cwd: Option<&Path>,
@@ -420,6 +476,7 @@ pub(crate) fn base_live_context_segments(
     base_live_context_segments_with_observer(
         original_prompt,
         role,
+        execution_profile,
         configured_worker_set,
         runtime_home,
         cwd,
@@ -431,6 +488,7 @@ pub(crate) fn base_live_context_segments(
 pub(crate) fn base_live_context_segments_with_observer<F>(
     original_prompt: &str,
     role: LiveReasonExecutionRole,
+    execution_profile: LiveReasonExecutionProfile,
     configured_worker_set: Option<&[String]>,
     runtime_home: &Path,
     cwd: Option<&Path>,
@@ -448,10 +506,14 @@ where
             Ok(control_status_contract_segment())
         })?,
         build_required_context_segment("runtime-tool-guidance", &mut observe, || {
-            Ok(tool_guidance_segment(role, configured_worker_set))
+            Ok(tool_guidance_segment(
+                role,
+                execution_profile,
+                configured_worker_set,
+            ))
         })?,
         build_required_context_segment("instruction-capability", &mut observe, || {
-            instruction_capability_segment(runtime_home, cwd)
+            instruction_capability_segment_for_profile(execution_profile, runtime_home, cwd)
         })?,
     ];
     if let Some(segment) =

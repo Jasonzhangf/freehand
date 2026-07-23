@@ -80,6 +80,28 @@ pub struct TaskParentRef {
     pub trace_id: Option<TraceId>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum TaskExecutionProfile {
+    Workspace,
+    CleanSearch,
+}
+
+impl Default for TaskExecutionProfile {
+    fn default() -> Self {
+        Self::Workspace
+    }
+}
+
+impl TaskExecutionProfile {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Workspace => "workspace",
+            Self::CleanSearch => "clean_search",
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TaskSnapshot {
     pub schema_version: u32,
@@ -92,6 +114,8 @@ pub struct TaskSnapshot {
     pub acceptance: Vec<String>,
     pub priority: i64,
     pub target_cwd: Option<String>,
+    #[serde(default)]
+    pub execution_profile: TaskExecutionProfile,
     pub assignee: Option<TaskAssignee>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub active_execution_id: Option<String>,
@@ -621,6 +645,7 @@ pub struct TaskCreateRequest {
     pub acceptance: Vec<String>,
     pub priority: i64,
     pub target_cwd: Option<String>,
+    pub execution_profile: TaskExecutionProfile,
     pub dispatch: TaskDispatchRequest,
     pub parent: TaskParentRef,
     pub actor: TaskActor,
@@ -875,6 +900,7 @@ impl TaskRuntime {
             acceptance: request.acceptance,
             priority: request.priority,
             target_cwd: request.target_cwd,
+            execution_profile: request.execution_profile,
             assignee: None,
             active_execution_id: None,
             review: TaskReviewState {
@@ -8447,6 +8473,7 @@ mod tests {
             acceptance: vec!["recovery test passes".to_owned()],
             priority: 50,
             target_cwd: Some("/tmp/freehand-task".to_owned()),
+            execution_profile: TaskExecutionProfile::Workspace,
             dispatch: TaskDispatchRequest::SelfAgent,
             parent: TaskParentRef {
                 session_id: Some(SessionId::new("session-1")),

@@ -10,15 +10,16 @@ use freehand_config::{AgentMode, SelectedAgentConfig};
 use freehand_contracts::{AgentId, SessionId, TerminalStatus, TraceId, TurnId};
 use freehand_task::{
     AgentCreateRequest, AgentLifecycleEvent, ExecutionFact, ExecutionFactKind, TaskActor,
-    TaskAssignRequest, TaskClaimOutcome, TaskClaimRequest, TaskError, TaskId, TaskListQuery,
-    TaskRuntime, TaskSnapshot, TaskStatus, TaskWatermark, WorkerControlEvent, WorkerControlOp,
+    TaskAssignRequest, TaskClaimOutcome, TaskClaimRequest, TaskError, TaskExecutionProfile, TaskId,
+    TaskListQuery, TaskRuntime, TaskSnapshot, TaskStatus, TaskWatermark, WorkerControlEvent,
+    WorkerControlOp,
 };
 use thiserror::Error;
 
 use super::{
-    LiveReasonCancelToken, LiveReasonTurnRequest, RuntimeAgentBootstrapError,
-    expand_leading_tilde_path, load_default_runtime_agent, path_resolution_diagnostic_text,
-    run_worker_live_reason_turn,
+    LiveReasonCancelToken, LiveReasonExecutionProfile, LiveReasonTurnRequest,
+    RuntimeAgentBootstrapError, expand_leading_tilde_path, load_default_runtime_agent,
+    path_resolution_diagnostic_text, provider_descriptor, run_worker_live_reason_turn,
 };
 
 mod heartbeat;
@@ -220,25 +221,35 @@ impl ProductionWorkerRunner {
         let execution_id = selected_task.execution_id;
         let retry_kind = selected_task.retry_kind;
 
-        let Some(target_cwd) = task.target_cwd.as_deref() else {
-            return self.report_blocked(
-                &task_runtime,
-                &task,
-                &execution_id,
-                None,
-                "assigned worker task is missing target_cwd".to_owned(),
-            );
-        };
-        let workspace = match canonical_worker_workspace(target_cwd) {
-            Ok(workspace) => workspace,
-            Err(reason) => {
-                return self.report_blocked(
-                    &task_runtime,
-                    &task,
-                    &execution_id,
-                    None,
-                    reason.into_reason(),
-                );
+        let workspace = match task.execution_profile {
+            TaskExecutionProfile::Workspace => {
+                let Some(target_cwd) = task.target_cwd.as_deref() else {
+                    return self.report_blocked(
+                        &task_runtime,
+                        &task,
+                        &execution_id,
+                        None,
+                        "assigned workspace worker task is missing target_cwd".to_owned(),
+                    );
+                };
+                match canonical_worker_workspace(target_cwd) {
+                    Ok(workspace) => Some(workspace),
+                    Err(reason) => {
+                        return self.report_blocked(
+                            &task_runtime,
+                            &task,
+                            &execution_id,
+                            None,
+                            reason.into_reason(),
+                        );
+                    }
+                }
+            }
+            TaskExecutionProfile::CleanSearch => {
+                if let Err(reason) = selected_provider_supports_clean_search(&self.selected) {
+                    return self.report_blocked(&task_runtime, &task, &execution_id, None, reason);
+                }
+                None
             }
         };
 
@@ -297,10 +308,7 @@ impl ProductionWorkerRunner {
                         kind: ExecutionFactKind::ReviewReady {
                             summary: summary.clone(),
                             deliverables: task.deliverables.clone(),
-                            evidence: vec![
-                                format!("worker_turn_id={}", execution.turn_id.as_str()),
-                                format!("target_cwd={target_cwd}"),
-                            ],
+                            evidence: worker_review_ready_evidence(&task, &execution.turn_id),
                         },
                         watermark: worker_watermark(&execution_id, "review_ready"),
                     })
@@ -748,30 +756,60 @@ fn worker_live_request(
     runtime_home: &Path,
     task: &TaskSnapshot,
     execution_id: &str,
-    workspace: PathBuf,
+    workspace: Option<PathBuf>,
     retry_kind: Option<WorkerRetryKind>,
     cancel_token: Option<LiveReasonCancelToken>,
 ) -> LiveReasonTurnRequest {
     let task_key = sanitize_identifier(task.task_id.as_str());
     let execution_key = sanitize_identifier(execution_id);
-    let prompt = worker_task_prompt(task, &workspace, retry_kind);
+    let prompt = worker_task_prompt(task, workspace.as_deref(), retry_kind);
     LiveReasonTurnRequest {
         runtime_home: runtime_home.to_path_buf(),
         session_id: SessionId::new(format!("worker-task-{task_key}")),
         turn_id: TurnId::new(format!("worker-turn-{execution_key}")),
         trace_id: TraceId::new(format!("worker-trace-{execution_key}")),
         prompt,
-        cwd: Some(workspace),
+        cwd: workspace,
+        execution_profile: LiveReasonExecutionProfile::from(task.execution_profile),
         stream: false,
         cancel_token,
     }
 }
 
+fn selected_provider_supports_clean_search(selected: &SelectedAgentConfig) -> Result<(), String> {
+    let descriptor = provider_descriptor(&selected.provider).map_err(|err| err.to_string())?;
+    if descriptor.capabilities.web_search.is_hosted() {
+        return Ok(());
+    }
+    Err(format!(
+        "clean_search worker task requires provider-hosted web_search, but selected provider `{}` protocol `{}` model `{}` does not declare hosted web_search capability",
+        selected.provider.id,
+        selected.provider.protocol.as_str(),
+        selected.provider.default_model
+    ))
+}
+
+fn worker_review_ready_evidence(task: &TaskSnapshot, turn_id: &TurnId) -> Vec<String> {
+    let mut evidence = vec![
+        format!("worker_turn_id={}", turn_id.as_str()),
+        format!("execution_profile={}", task.execution_profile.as_str()),
+    ];
+    if let Some(target_cwd) = task.target_cwd.as_deref() {
+        evidence.push(format!("target_cwd={target_cwd}"));
+    }
+    evidence
+}
+
 fn worker_task_prompt(
     task: &TaskSnapshot,
-    canonical_workspace: &Path,
+    canonical_workspace: Option<&Path>,
     retry_kind: Option<WorkerRetryKind>,
 ) -> String {
+    if task.execution_profile == TaskExecutionProfile::CleanSearch {
+        return worker_clean_search_task_prompt(task, retry_kind);
+    }
+    let canonical_workspace =
+        canonical_workspace.expect("workspace execution profile must pass canonical workspace");
     let retry_context = match retry_kind {
         Some(WorkerRetryKind::ReviewRejected) => format!(
             "\nReview rejection:\nReason: {}\nRequired changes:\n{}",
@@ -805,6 +843,45 @@ Goal: {}\n\
         task.content,
         task.target_cwd.as_deref().unwrap_or("(missing)"),
         canonical_workspace.display(),
+        render_lines(&task.deliverables),
+        render_lines(&task.acceptance),
+        retry_context,
+    )
+}
+
+fn worker_clean_search_task_prompt(
+    task: &TaskSnapshot,
+    retry_kind: Option<WorkerRetryKind>,
+) -> String {
+    let retry_context = match retry_kind {
+        Some(WorkerRetryKind::ReviewRejected) => format!(
+            "\nReview rejection:\nReason: {}\nRequired changes:\n{}",
+            task.review
+                .reject_reason
+                .as_deref()
+                .unwrap_or("not provided"),
+            render_lines(&task.review.next_requirements),
+        ),
+        None => String::new(),
+    };
+    format!(
+        "Execute the assigned clean_search Task Center task using provider-hosted web_search only.\n\
+Task ID: {}\n\
+Title: {}\n\
+Goal: {}\n\
+Content: {}\n\
+Execution profile: clean_search\n\
+Deliverables:\n{}\n\
+Acceptance criteria:\n{}\n\
+Rules:\n\
+- Do not inspect or mutate files. No target_cwd is needed for this task.\n\
+- Use provider-hosted web_search to discover current/broad source evidence.\n\
+- Return one compact conclusion for the Master with query terms, source/evidence summary, gaps, and recommended next action.\n\
+- If hosted search is unavailable or evidence is insufficient, return blocked with the exact provider/capability reason.{}",
+        task.task_id.as_str(),
+        task.title,
+        task.goal,
+        task.content,
         render_lines(&task.deliverables),
         render_lines(&task.acceptance),
         retry_context,

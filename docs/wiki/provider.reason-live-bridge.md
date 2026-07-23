@@ -11,6 +11,7 @@ Generated from `docs/mainline-calls/provider.reason-live-bridge.json`. Do not ed
 ## Resource Operation Backlinks
 
 - request_context.build_provider_request
+- provider_request.select_hosted_search
 
 ## Request Mainline
 
@@ -25,7 +26,7 @@ Generated from `docs/mainline-calls/provider.reason-live-bridge.json`. Do not ed
 - runtime emits restore lifecycle debug snapshots through `debug.core` without request text
 - runtime emits context-planning started/completed plus segment-level started/completed/failed metadata and debug snapshots before the first provider round starts, without request text or provider payload content, so UI/debug clients can observe the exact pre-provider context segment being prepared
 - live bridge bootstraps one shared metadata ledger for runtime-owned lifecycle facts plus delegated `reason.turn` producer writes
-- bridge derives provider descriptor and executor config from the active primary/fallback route without exposing provider wire DTOs; Anthropic output budget stays at the adapter default `DEFAULT_ANTHROPIC_MAX_TOKENS=8192` without a smaller live-bridge cap
+- bridge derives provider descriptor and executor config from the active primary/fallback route without exposing provider wire DTOs; hosted search capability is selected from provider descriptor, config `web_search`, and execution profile while OpenAI wire rendering remains adapter-owned; Anthropic output budget stays at the adapter default `DEFAULT_ANTHROPIC_MAX_TOKENS=8192` without a smaller live-bridge cap
 - `reason.turn` may start multiple rounds under one logical live request when completion schema says `continue` or when schema rejection requires same-task retry
 - provider semantic request is built from each round's turn-owned provider payload
 - retryable non-stream HTTP/network failure retries on the primary route; after primary exhaustion, or immediately for failover-eligible non-retryable HTTP status such as 402, the bridge switches once to the configured fallback at the provider-neutral semantic request boundary
@@ -33,7 +34,9 @@ Generated from `docs/mainline-calls/provider.reason-live-bridge.json`. Do not ed
 - runtime writes provider-request lifecycle metadata without request payload text before executor IO
 - runtime emits provider-request lifecycle debug snapshots through `debug.core` without provider payload text
 - the first master tool-capable request exposes the Reasonix-aligned master-safe registry subset through provider-neutral request metadata
+- the first master request may also declare provider-hosted `web_search` metadata when the selected provider supports hosted search mixed with function tools; this is provider-native search, not a Freehand function tool
 - the master-safe registry subset exposes locked local workspace tools, concrete-URL `web_fetch`, plus `task` and `timer`, while Worker live requests use the worker-safe registry subset including `web_fetch` stamped into planner diagnostics
+- search-only hosted providers must not be mixed into the Master function-tool request; broad/current search on such providers is routed through `TaskExecutionProfile::CleanSearch` Worker turns with zero Freehand function tools
 - Worker runtime tool guidance names the exact Worker-safe tool surface from `tool.registry`, including `web_fetch` for known HTTP/HTTPS URLs, states that all path tools are locked to the canonical task cwd, forbids `shell`/`bash`/`readlink`/`pwd`/`cat`/`find` guesses, and gives first-call path patterns such as `ls` before `read_file`
 - Anthropic live executor runs the HTTP/SSE request through raw-capable callbacks so runtime can capture debug-only provider raw bodies/events before semantic parsing
 - stream mode applies outputs incrementally through the executor callback path before the provider response completes
@@ -53,7 +56,7 @@ Generated from `docs/mainline-calls/provider.reason-live-bridge.json`. Do not ed
 - recovered retry/failover turns contain no provider semantic error event; the temporary provider recovery activity is cleared by the normal response/terminal projection
 - every applied live semantic output is recorded through `ReasonPersistence::record_provider_output_applied`
 - tool-result re-entry is recorded in turn truth and persisted before the next provider request; execution failures remain model-visible failed tool results, not terminal runtime failures
-- master workspace-boundary failures and unavailable shell/browser/broad-search/control calls remain paired failed tool results so the model can continue locally, use `web_fetch` for concrete URLs, or create and assign different-cwd work through `task`
+- master workspace-boundary failures and unavailable shell/browser/local-broad-search/control function-tool calls remain paired failed tool results so the model can continue locally, use `web_fetch` for concrete URLs, use provider-hosted search when declared, or create and assign different-cwd/clean_search work through `task`
 - completed/blocked schema writes terminal truth through `ReasonTurnEngine::submit_completion`
 - terminal turns are materialized through `ReasonPersistence::record_turn_closed`
 - schema retry exhaustion writes blocked terminal truth through `ReasonTurnEngine::block_turn`; provider interruption without a completion-schema candidate writes interrupted terminal truth through `ReasonTurnEngine::interrupt_turn`
@@ -68,7 +71,7 @@ Generated from `docs/mainline-calls/provider.reason-live-bridge.json`. Do not ed
 - adapter, callback, local invalid-config, schema, tool-content, and persistence errors do not activate provider fallback
 - stream execution never switches providers because partial semantic output/tool calls cannot be safely replayed without a typed rollback/resume contract
 - invalid or missing completion schema is rejected with field-level feedback and retried up to 3 times before blocked terminal truth, not provider failed terminal truth
-- master shell/browser/broad-search attempts and cross-cwd workspace attempts are execution-policy failures returned to the model with local-vs-dispatch instructions; they do not execute, expose external content, or terminalize the turn, while concrete-URL `web_fetch` remains an allowed Master network tool
+- master shell/browser/local-broad-search function-tool attempts and cross-cwd workspace attempts are execution-policy failures returned to the model with local-vs-dispatch instructions; they do not execute, expose external content, or terminalize the turn, while concrete-URL `web_fetch` and declared provider-hosted search remain allowed Master network paths
 - incomplete tool calls are not executed and do not become tool-result truth
 - writable tools without preview/checkpoint support are rejected explicitly
 - unknown tool names and registered but unimplemented tool names return explicit failed tool results paired to the original tool call with exact role-specific tool-surface guidance, so the model can continue the turn without guessing schema/tool names
@@ -128,6 +131,7 @@ Generated from `docs/mainline-calls/provider.reason-live-bridge.json`. Do not ed
 | 06 | `ReasonTurnEngine::start_turn` | `crates/freehand-reason/src/lib.rs` | create one round turn and provider payload while stamping runtime-owned tool-schema fingerprint into planner diagnostics | session history plus prompt plus optional tool-schema fingerprint | initialized turn record | live bridge | reason owner |  |  |  | bound |
 | 07 | `ReasonPersistence::record_turn_started` | `crates/freehand-reason/src/persistence.rs` | persist live round start | session history plus active turn | reason ledger row plus active-turn snapshot | live bridge | persistence owner |  |  |  | bound |
 | 08 | `build_semantic_request` | `crates/freehand-provider-core/src/lib.rs` | build provider-neutral request | provider descriptor plus provider payload | provider semantic request | live bridge | provider semantic owner | request_context | provider_request | request_context.build_provider_request | bound |
+| 08a | `LiveReasonExecutionRole::hosted_tool_definitions` | `crates/freehand-runtime/src/lib.rs` | select provider-hosted search declarations from config, provider capabilities, role, and execution profile before provider IO | provider descriptor plus live role plus execution profile | provider-neutral hosted tool definitions on the semantic request | live bridge | provider request selection | provider_request | provider_hosted_search | provider_request.select_hosted_search | bound |
 | 09 | `write_live_bridge_metadata` | `crates/freehand-runtime/src/lib.rs` | write runtime-owned provider-request lifecycle metadata without payload text | round ordinal plus provider/model/tool-count control facts | durable runtime metadata record | live bridge | metadata owner |  |  |  | bound |
 | 10 | `emit_live_bridge_debug` | `crates/freehand-runtime/src/lib.rs` | emit runtime-owned provider-request lifecycle debug snapshot without payload text | round ordinal plus provider/model/tool-count control facts | runtime-owned debug event | live bridge | debug.core |  |  |  | bound |
 | 11 | `build_live_provider_driver` | `crates/freehand-runtime/src/lib.rs` | select the provider driver abstraction from config without exposing provider wire DTOs to the live loop | selected provider type/protocol plus auth/base URL | boxed provider-neutral live driver or explicit unsupported provider error | live bridge | provider driver factory |  |  |  | bound |
@@ -154,6 +158,7 @@ Generated from `docs/mainline-calls/provider.reason-live-bridge.json`. Do not ed
 ## Sync Status Against Mainline Call
 
 - current live path supports Anthropic `messages`, OpenAI-compatible `responses`, and OpenAI-compatible `chat_completions` through one provider-neutral runtime driver abstraction
+- current live path selects provider-hosted search only as provider-neutral hosted tool metadata; OpenAI wire rendering remains adapter-owned
 - runtime owner path preserves incremental stream apply, completion schema loop, persistence, master-safe registry-backed tool loop, matching tool-schema fingerprint wiring, shared metadata-ledger producer wiring, runtime-owned debug snapshot emission, checkpoint gating, and shared path/symlink diagnostics without duplicating adapter or path semantics
 - runtime live bridge now bootstraps one shared metadata ledger and writes restore/request/tool/terminal lifecycle metadata without request-text leakage
 - runtime live bridge now emits restore/request/tool/terminal lifecycle debug snapshots through `debug.core` without prompt, provider-payload, or tool-result leakage

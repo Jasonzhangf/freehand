@@ -84,7 +84,7 @@ This table is the feature-map backlink for `docs/resource-maps/core.json`. The r
 | `reason.turn` | `turn` | `docs/resource-maps/core.json` |
 | `reason.context-planner` | `request_context` | `docs/resource-maps/core.json` |
 | `provider.reason-live-bridge` | `provider_request` | `docs/resource-maps/core.json` |
-| `provider.semantic` | `provider_response` | `docs/resource-maps/core.json` |
+| `provider.semantic` | `provider_response`, `provider_hosted_search` | `docs/resource-maps/core.json` |
 | `tool.registry` | `tool_call`, `workspace_path`, `external_http_resource` | `docs/resource-maps/core.json` |
 | `task.orchestration` | `task` | `docs/resource-maps/core.json` |
 | `agent.lifecycle` | `agent` | `docs/resource-maps/core.json` |

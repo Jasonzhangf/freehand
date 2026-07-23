@@ -659,6 +659,7 @@ fn live_bridge_restores_same_session_history_into_follow_up_provider_request() {
         trace_id: TraceId::new("runtime-trace-1"),
         prompt: "first history prompt".to_owned(),
         cwd: None,
+        execution_profile: LiveReasonExecutionProfile::Workspace,
         stream: false,
         cancel_token: None,
     };
@@ -686,6 +687,7 @@ fn live_bridge_restores_same_session_history_into_follow_up_provider_request() {
         trace_id: TraceId::new("runtime-trace-2"),
         prompt: "second history prompt".to_owned(),
         cwd: None,
+        execution_profile: LiveReasonExecutionProfile::Workspace,
         stream: false,
         cancel_token: None,
     };
@@ -1996,6 +1998,7 @@ provider = "old"
                     provider_protocol: "messages".to_owned(),
                     base_url: "https://new.example.test/v1".to_owned(),
                     default_model: "new-model".to_owned(),
+                    web_search: "auto".to_owned(),
                     api_key_env: "FREEHAND_RUNTIME_PROVIDER_NEW".to_owned(),
                 },
             })
@@ -2149,6 +2152,7 @@ fallback_provider = "minimax"
                     provider_protocol: "responses".to_owned(),
                     base_url: "https://extra.example.test/openai/v1".to_owned(),
                     default_model: "gpt-extra".to_owned(),
+                    web_search: "auto".to_owned(),
                     api_key_env: "FREEHAND_RUNTIME_PROVIDER_UPSERT_EXTRA".to_owned(),
                 },
             })
@@ -2423,6 +2427,7 @@ provider = "old"
                     provider_protocol: "messages".to_owned(),
                     base_url: "not-a-url".to_owned(),
                     default_model: "bad-model".to_owned(),
+                    web_search: "auto".to_owned(),
                     api_key_env: "FREEHAND_RUNTIME_PROVIDER_NEW_INVALID".to_owned(),
                 },
             })
@@ -2593,6 +2598,7 @@ fn live_dispatch_failure_preserves_other_session_transcripts() {
             trace_id: TraceId::new("runtime-trace-1"),
             prompt: "preserved prompt".to_owned(),
             cwd: None,
+            execution_profile: LiveReasonExecutionProfile::Workspace,
             stream: false,
             cancel_token: None,
         },
@@ -3091,6 +3097,7 @@ fn runtime_dispatches_session_rollback_into_effective_ui_projection() {
             acceptance: vec!["child cancelled on rollback".to_owned()],
             priority: 90,
             target_cwd: Some(runtime_home.display().to_string()),
+            execution_profile: TaskExecutionProfile::Workspace,
             dispatch: TaskDispatchRequest::None,
             parent: TaskParentRef {
                 session_id: Some(session_id.clone()),
@@ -3112,6 +3119,7 @@ fn runtime_dispatches_session_rollback_into_effective_ui_projection() {
             acceptance: vec!["child remains attached".to_owned()],
             priority: 80,
             target_cwd: Some(runtime_home.display().to_string()),
+            execution_profile: TaskExecutionProfile::Workspace,
             dispatch: TaskDispatchRequest::None,
             parent: TaskParentRef {
                 session_id: Some(session_id.clone()),
@@ -3779,6 +3787,7 @@ fn live_master_rejects_complete_while_parent_child_task_open() {
             acceptance: vec!["child task closed".to_owned()],
             priority: 90,
             target_cwd: Some(runtime_home.display().to_string()),
+            execution_profile: TaskExecutionProfile::Workspace,
             dispatch: TaskDispatchRequest::None,
             parent: TaskParentRef {
                 session_id: Some(SessionId::new("session-live")),
@@ -3860,6 +3869,7 @@ fn live_master_allows_complete_with_terminal_cancelled_child_tasks() {
                 acceptance: vec!["cancelled child does not keep parent waiting".to_owned()],
                 priority: 90,
                 target_cwd: Some(runtime_home.display().to_string()),
+                execution_profile: TaskExecutionProfile::Workspace,
                 dispatch: TaskDispatchRequest::None,
                 parent: TaskParentRef {
                     session_id: Some(SessionId::new("session-live")),
@@ -4674,6 +4684,7 @@ fn selected_master_agent() -> SelectedAgentConfig {
             protocol: freehand_config::ProviderProtocol::Messages,
             base_url: "https://example.invalid".to_owned(),
             default_model: "model-master".to_owned(),
+            web_search: freehand_config::ProviderWebSearchMode::Auto,
             auth_type: freehand_config::ProviderAuthType::ApiKey,
             auth_source: freehand_config::ProviderAuthSourceKind::Inline,
             api_key: "secret".to_owned(),
@@ -4713,6 +4724,7 @@ fn live_selected_agent(
             protocol,
             base_url,
             default_model: "MiniMax-M2.7".to_owned(),
+            web_search: freehand_config::ProviderWebSearchMode::Auto,
             auth_type: freehand_config::ProviderAuthType::ApiKey,
             auth_source: freehand_config::ProviderAuthSourceKind::Env,
             api_key: "test-api-key".to_owned(),
@@ -4793,6 +4805,7 @@ fn live_selected_agent_with_fallback(
         protocol: ConfigProviderProtocol::Messages,
         base_url: fallback_base_url,
         default_model: "MiniMax-M3".to_owned(),
+        web_search: freehand_config::ProviderWebSearchMode::Auto,
         auth_type: freehand_config::ProviderAuthType::ApiKey,
         auth_source: freehand_config::ProviderAuthSourceKind::Env,
         api_key: "fallback-test-api-key".to_owned(),
@@ -4841,6 +4854,7 @@ fn live_request(stream: bool) -> LiveReasonTurnRequest {
         trace_id: TraceId::new("trace-live"),
         prompt: "reply exactly pong".to_owned(),
         cwd: None,
+        execution_profile: LiveReasonExecutionProfile::Workspace,
         stream,
         cancel_token: None,
     }
@@ -4854,6 +4868,7 @@ fn live_request_for(runtime_home: &Path, session_id: &str, ordinal: u64) -> Live
         trace_id: TraceId::new(format!("runtime-trace-{ordinal}")),
         prompt: format!("prompt for {session_id}"),
         cwd: None,
+        execution_profile: LiveReasonExecutionProfile::Workspace,
         stream: false,
         cancel_token: None,
     }
@@ -4905,6 +4920,7 @@ fn lifecycle_live_request(runtime_home: &Path, event_id: &str) -> LiveReasonTurn
         trace_id: TraceId::new(format!("master-lifecycle-trace-{event_id}")),
         prompt: format!("make one Task Center decision for {event_id}"),
         cwd: Some(runtime_home.to_path_buf()),
+        execution_profile: LiveReasonExecutionProfile::Workspace,
         stream: false,
         cancel_token: None,
     }
@@ -4932,6 +4948,7 @@ fn create_lifecycle_test_task(runtime: &TaskRuntime, task_id: &str) -> TaskSnaps
             acceptance: vec!["target task changes".to_owned()],
             priority: 90,
             target_cwd: Some(std::env::temp_dir().display().to_string()),
+            execution_profile: TaskExecutionProfile::Workspace,
             dispatch: TaskDispatchRequest::None,
             parent: TaskParentRef {
                 session_id: None,
@@ -5300,6 +5317,13 @@ fn request_is_complete(raw: &[u8]) -> bool {
         .and_then(|value| value.parse::<usize>().ok())
         .unwrap_or(0);
     raw.len() >= header_end + 4 + content_length
+}
+
+fn http_request_body_json(raw: &str) -> Value {
+    let (_, body) = raw
+        .split_once("\r\n\r\n")
+        .expect("HTTP request should contain a body separator");
+    serde_json::from_str(body).expect("HTTP request body json")
 }
 
 fn tagged_completion_json(body: &str) -> String {
@@ -6302,6 +6326,103 @@ fn task_tool_create_persists_and_queries_task() {
     let agents_output = execute_task_tool(&runtime_home, &turn, &agents_call).expect("list agents");
 
     assert!(agents_output.contains("\"agent_id\":\"agent-task\""));
+    let _ = fs::remove_dir_all(runtime_home);
+}
+
+#[test]
+fn task_tool_create_clean_search_task_without_target_cwd() {
+    let runtime_home = temp_runtime_home();
+    let engine = ReasonTurnEngine::new();
+    let mut history =
+        SessionHistory::new(SessionId::new("session-task"), Vec::new()).expect("history");
+    let turn = engine
+        .start_turn(
+            &mut history,
+            TurnStartInput {
+                session_id: SessionId::new("session-task"),
+                turn_id: TurnId::new("turn-task"),
+                trace_id: TraceId::new("trace-task"),
+                feature_id: FeatureId::new("provider.reason-live-bridge"),
+                agent_id: AgentId::new("agent-task"),
+                user_text: "create a clean search task".to_owned(),
+                planned_context_segments: Vec::new(),
+                tool_schema_fingerprint: None,
+                model: "model".to_owned(),
+            },
+        )
+        .expect("turn");
+    let create_call = task_tool_call(vec![
+        ("op", json!("create")),
+        ("task_id", json!("task-clean-search")),
+        ("title", json!("Clean search")),
+        ("content", json!("Search current provider docs")),
+        ("goal", json!("Return search evidence")),
+        ("deliverables", json!(["search summary"])),
+        ("acceptance", json!(["sources and gaps are reported"])),
+        ("execution_profile", json!("clean_search")),
+        ("dispatch", json!({"mode":"none"})),
+    ]);
+
+    let create_output =
+        execute_task_tool(&runtime_home, &turn, &create_call).expect("create clean search task");
+    assert!(create_output.contains("task_id=task-clean-search"));
+    assert!(!create_output.contains("target_cwd_path_diagnostic"));
+
+    let query_output = execute_task_tool(
+        &runtime_home,
+        &turn,
+        &task_tool_call(vec![
+            ("op", json!("query")),
+            ("task_id", json!("task-clean-search")),
+        ]),
+    )
+    .expect("query clean search task");
+    assert!(query_output.contains("\"execution_profile\":\"clean_search\""));
+    assert!(query_output.contains("\"target_cwd\":null"));
+    let _ = fs::remove_dir_all(runtime_home);
+}
+
+#[test]
+fn task_tool_rejects_unknown_execution_profile() {
+    let runtime_home = temp_runtime_home();
+    let engine = ReasonTurnEngine::new();
+    let mut history =
+        SessionHistory::new(SessionId::new("session-task"), Vec::new()).expect("history");
+    let turn = engine
+        .start_turn(
+            &mut history,
+            TurnStartInput {
+                session_id: SessionId::new("session-task"),
+                turn_id: TurnId::new("turn-task"),
+                trace_id: TraceId::new("trace-task"),
+                feature_id: FeatureId::new("provider.reason-live-bridge"),
+                agent_id: AgentId::new("agent-task"),
+                user_text: "create invalid profile task".to_owned(),
+                planned_context_segments: Vec::new(),
+                tool_schema_fingerprint: None,
+                model: "model".to_owned(),
+            },
+        )
+        .expect("turn");
+    let err = execute_task_tool(
+        &runtime_home,
+        &turn,
+        &task_tool_call(vec![
+            ("op", json!("create")),
+            ("task_id", json!("task-invalid-profile")),
+            ("title", json!("Invalid profile")),
+            ("content", json!("Invalid")),
+            ("goal", json!("Reject invalid profile")),
+            ("deliverables", json!(["none"])),
+            ("acceptance", json!(["explicit failure"])),
+            ("execution_profile", json!("search")),
+            ("dispatch", json!({"mode":"none"})),
+        ]),
+    )
+    .expect_err("invalid execution profile must fail");
+    assert!(err.contains(
+        "unsupported execution_profile `search`; expected `workspace` or `clean_search`"
+    ));
     let _ = fs::remove_dir_all(runtime_home);
 }
 
@@ -9241,6 +9362,216 @@ fn live_bridge_maps_openai_protocols_to_provider_descriptor() {
 }
 
 #[test]
+fn live_bridge_derives_hosted_web_search_only_for_supported_openai_responses() {
+    let mut responses_agent = live_selected_agent_with_protocol(
+        "http://127.0.0.1:1".to_owned(),
+        freehand_config::ProviderType::OpenAi,
+        ConfigProviderProtocol::Responses,
+    );
+    responses_agent.provider.default_model = "gpt-5.5".to_owned();
+    let responses = provider_descriptor(&responses_agent.provider).expect("responses descriptor");
+    assert_eq!(
+        responses.capabilities.web_search,
+        ProviderWebSearchCapability::hosted_live_with_functions()
+    );
+    assert_eq!(
+        LiveReasonExecutionRole::Master
+            .hosted_tool_definitions(&responses, LiveReasonExecutionProfile::Workspace)
+            .len(),
+        1
+    );
+    assert!(
+        LiveReasonExecutionRole::Worker
+            .hosted_tool_definitions(&responses, LiveReasonExecutionProfile::Workspace)
+            .is_empty()
+    );
+    assert_eq!(
+        LiveReasonExecutionRole::Worker
+            .hosted_tool_definitions(&responses, LiveReasonExecutionProfile::CleanSearch)
+            .len(),
+        1
+    );
+
+    responses_agent.provider.web_search = freehand_config::ProviderWebSearchMode::Disabled;
+    let disabled = provider_descriptor(&responses_agent.provider).expect("disabled descriptor");
+    assert_eq!(
+        disabled.capabilities.web_search,
+        ProviderWebSearchCapability::Unsupported
+    );
+    assert!(
+        LiveReasonExecutionRole::Master
+            .hosted_tool_definitions(&disabled, LiveReasonExecutionProfile::Workspace)
+            .is_empty()
+    );
+
+    let mut chat_agent = live_selected_agent_with_protocol(
+        "http://127.0.0.1:1".to_owned(),
+        freehand_config::ProviderType::OpenAi,
+        ConfigProviderProtocol::ChatCompletions,
+    );
+    chat_agent.provider.default_model = "gpt-5.5".to_owned();
+    let chat = provider_descriptor(&chat_agent.provider).expect("chat descriptor");
+    assert_eq!(
+        chat.capabilities.web_search,
+        ProviderWebSearchCapability::Unsupported
+    );
+}
+
+#[test]
+fn live_bridge_does_not_mix_search_only_hosted_tool_with_master_functions() {
+    let mut descriptor = provider_descriptor(
+        &live_selected_agent_with_protocol(
+            "http://127.0.0.1:1".to_owned(),
+            freehand_config::ProviderType::OpenAi,
+            ConfigProviderProtocol::Responses,
+        )
+        .provider,
+    )
+    .expect("descriptor");
+    descriptor.capabilities.web_search = ProviderWebSearchCapability::hosted_live_search_only();
+
+    assert!(
+        LiveReasonExecutionRole::Master
+            .hosted_tool_definitions(&descriptor, LiveReasonExecutionProfile::Workspace)
+            .is_empty()
+    );
+    assert_eq!(
+        LiveReasonExecutionRole::Worker
+            .hosted_tool_definitions(&descriptor, LiveReasonExecutionProfile::CleanSearch)
+            .len(),
+        1
+    );
+}
+
+#[test]
+fn clean_search_worker_profile_exposes_hosted_search_without_function_tools() {
+    let mut agent = live_selected_agent_with_protocol(
+        "http://127.0.0.1:1".to_owned(),
+        freehand_config::ProviderType::OpenAi,
+        ConfigProviderProtocol::Responses,
+    );
+    agent.provider.default_model = "gpt-5.5".to_owned();
+    let descriptor = provider_descriptor(&agent.provider).expect("descriptor");
+    let registry = BuiltinToolRegistry::reasonix_aligned();
+
+    assert!(
+        LiveReasonExecutionRole::Worker
+            .tool_definitions(&registry, LiveReasonExecutionProfile::CleanSearch)
+            .is_empty()
+    );
+    assert_eq!(
+        LiveReasonExecutionRole::Worker
+            .tool_schema_fingerprint(&registry, LiveReasonExecutionProfile::CleanSearch),
+        "clean-search:no-function-tools"
+    );
+    assert_eq!(
+        LiveReasonExecutionRole::Worker
+            .hosted_tool_definitions(&descriptor, LiveReasonExecutionProfile::CleanSearch)
+            .len(),
+        1
+    );
+
+    assert!(
+        LiveReasonExecutionRole::Worker
+            .tool_definitions(&registry, LiveReasonExecutionProfile::Workspace)
+            .iter()
+            .any(|tool| tool.name == "read_file")
+    );
+    assert!(
+        LiveReasonExecutionRole::Worker
+            .hosted_tool_definitions(&descriptor, LiveReasonExecutionProfile::Workspace)
+            .is_empty()
+    );
+}
+
+#[test]
+fn clean_search_worker_request_uses_hosted_search_without_local_instruction_scan() {
+    with_locked_cwd(|| {
+        let original_cwd = std::env::current_dir().expect("current cwd");
+        let runtime_home = temp_runtime_home();
+        let local_workspace = temp_runtime_home();
+        fs::create_dir_all(&runtime_home).expect("runtime home");
+        fs::create_dir_all(local_workspace.join(".agents/skills/local-search-skill"))
+            .expect("local skill dir");
+        fs::write(
+            runtime_home.join("AGENTS.md"),
+            "FH-CLEAN-SEARCH-RUNTIME-AGENTS must not enter hosted search request",
+        )
+        .expect("runtime agents");
+        fs::write(
+            local_workspace.join("Cargo.toml"),
+            "[package]\nname=\"clean-search-local\"\nversion=\"0.0.0\"\nedition=\"2021\"\n",
+        )
+        .expect("workspace marker");
+        fs::write(
+            local_workspace.join("AGENTS.md"),
+            "FH-CLEAN-SEARCH-LOCAL-AGENTS must not enter hosted search request",
+        )
+        .expect("local agents");
+        fs::write(
+            local_workspace.join(".agents/skills/local-search-skill/SKILL.md"),
+            "---\nname: local-search-skill\ndescription: FH-CLEAN-SEARCH-LOCAL-SKILL sentinel\n---\n# Local Search Skill\n",
+        )
+        .expect("local skill");
+        std::env::set_current_dir(&local_workspace).expect("set local cwd");
+        let restore_cwd = RestoreCwd {
+            original: original_cwd,
+        };
+
+        let (base_url, rx, handle) = spawn_mock_server(
+            200,
+            "application/json",
+            openai_responses_complete_response("clean search complete"),
+        );
+        let mut selected =
+            live_selected_worker_agent(base_url, freehand_config::ProviderType::OpenAi);
+        selected.provider.protocol = ConfigProviderProtocol::Responses;
+        selected.provider.default_model = "gpt-5.5".to_owned();
+        let request = LiveReasonTurnRequest {
+            runtime_home: runtime_home.clone(),
+            session_id: SessionId::new("clean-search-worker-session"),
+            turn_id: TurnId::new("clean-search-worker-turn"),
+            trace_id: TraceId::new("clean-search-worker-trace"),
+            prompt: "Find current source evidence for a broad web question.".to_owned(),
+            cwd: None,
+            execution_profile: LiveReasonExecutionProfile::CleanSearch,
+            stream: false,
+            cancel_token: None,
+        };
+
+        let outcome = run_worker_live_reason_turn(&selected, request)
+            .expect("clean_search worker live request");
+        let raw_request = rx.recv().expect("provider request");
+        handle.join().expect("join provider");
+        let body = http_request_body_json(&raw_request);
+        let tools = body["tools"].as_array().expect("tools array");
+        assert_eq!(tools.len(), 1);
+        assert_eq!(tools[0]["type"], json!("web_search"));
+        assert_eq!(tools[0]["external_web_access"], json!(true));
+        assert!(tools[0].get("name").is_none());
+        assert!(tools[0].get("parameters").is_none());
+        let body_text = body.to_string();
+        assert!(body_text.contains("execution_profile=clean_search"));
+        assert!(body_text.contains("No local workspace instruction capability was loaded"));
+        assert!(!body_text.contains("FH-CLEAN-SEARCH-RUNTIME-AGENTS"));
+        assert!(!body_text.contains("FH-CLEAN-SEARCH-LOCAL-AGENTS"));
+        assert!(!body_text.contains("FH-CLEAN-SEARCH-LOCAL-SKILL"));
+        assert_eq!(
+            outcome
+                .turn
+                .terminal_event
+                .as_ref()
+                .map(|event| event.status.clone()),
+            Some(TerminalStatus::Success)
+        );
+
+        drop(restore_cwd);
+        fs::remove_dir_all(runtime_home).expect("cleanup runtime home");
+        fs::remove_dir_all(local_workspace).expect("cleanup local workspace");
+    });
+}
+
+#[test]
 fn live_bridge_rejects_unsupported_provider_selection() {
     let err = run_live_reason_turn(
         &live_selected_agent_with_protocol(
@@ -9672,6 +10003,7 @@ fn bootstrap_with_live_restore_recovers_ui_projection_and_next_turn_ordinal() {
             trace_id: TraceId::new("runtime-trace-1"),
             prompt: "first request".to_owned(),
             cwd: None,
+            execution_profile: LiveReasonExecutionProfile::Workspace,
             stream: false,
             cancel_token: None,
         },
@@ -9780,6 +10112,7 @@ fn live_restore_resumes_turn_ordinal_from_selected_non_default_session() {
             trace_id: TraceId::new("runtime-trace-1"),
             prompt: "selected first request".to_owned(),
             cwd: None,
+            execution_profile: LiveReasonExecutionProfile::Workspace,
             stream: false,
             cancel_token: None,
         },
@@ -11101,6 +11434,7 @@ fn runtime_query_reads_task_truth_from_task_runtime() {
             acceptance: vec!["task history".to_owned()],
             priority: 90,
             target_cwd: Some("/tmp".to_owned()),
+            execution_profile: TaskExecutionProfile::Workspace,
             dispatch: TaskDispatchRequest::None,
             parent: TaskParentRef {
                 session_id: None,
@@ -11200,6 +11534,7 @@ fn runtime_query_reads_phase1_task_and_agent_boards() {
             acceptance: vec!["agent board".to_owned()],
             priority: 91,
             target_cwd: Some("/tmp".to_owned()),
+            execution_profile: TaskExecutionProfile::Workspace,
             dispatch: TaskDispatchRequest::SelfAgent,
             parent: TaskParentRef {
                 session_id: None,
@@ -11357,6 +11692,7 @@ fn runtime_dispatch_execution_fact_and_scheduler_tick_update_task_truth() {
                 acceptance: vec!["TaskBoard projection updates".to_owned()],
                 priority: 80,
                 target_cwd: None,
+                execution_profile: TaskExecutionProfile::Workspace,
                 dispatch: TaskDispatchRequest::None,
                 parent: TaskParentRef {
                     session_id: Some(SessionId::new("runtime-phase1-fact-session")),
@@ -11591,6 +11927,7 @@ fn runtime_dispatches_phase2a_master_worker_loop_into_task_truth() {
                 acceptance: vec!["approved before close".to_owned()],
                 priority: 90,
                 target_cwd: None,
+                execution_profile: "workspace".to_owned(),
                 session_id: Some(SessionId::new("runtime-phase2a-session")),
                 turn_id: Some(turn_id.clone()),
                 dispatch: Some(UiTaskDispatchCommand::None),
@@ -11822,6 +12159,7 @@ fn runtime_dispatches_phase2b_master_poll_and_event_inbox() {
                         acceptance: vec!["backlog remains visible to EventInbox".to_owned()],
                         priority: 1,
                         target_cwd: None,
+                        execution_profile: "workspace".to_owned(),
                         session_id: Some(SessionId::new(format!(
                             "runtime-phase2b-backlog-session-{index:03}"
                         ))),
@@ -11851,6 +12189,7 @@ fn runtime_dispatches_phase2b_master_poll_and_event_inbox() {
                 acceptance: vec!["master poll reads state without mutating".to_owned()],
                 priority: 95,
                 target_cwd: None,
+                execution_profile: "workspace".to_owned(),
                 session_id: Some(SessionId::new("runtime-phase2b-session")),
                 turn_id: Some(turn_id.clone()),
                 dispatch: Some(UiTaskDispatchCommand::None),
@@ -12141,6 +12480,7 @@ fn runtime_dispatches_worker_control_to_task_owner() {
                 acceptance: vec!["control events persist".to_owned()],
                 priority: 97,
                 target_cwd: None,
+                execution_profile: "workspace".to_owned(),
                 session_id: Some(SessionId::new("runtime-phase2c-session")),
                 turn_id: Some(turn_id.clone()),
                 dispatch: Some(UiTaskDispatchCommand::None),
@@ -12593,6 +12933,7 @@ fn runtime_task_tool_mutation_publishes_task_list_projection() {
         trace_id: TraceId::new("runtime-trace-task-push-1"),
         prompt: "create a task".to_owned(),
         cwd: None,
+        execution_profile: LiveReasonExecutionProfile::Workspace,
         stream: false,
         cancel_token: None,
     };
