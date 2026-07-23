@@ -7902,3 +7902,47 @@ Current real root cause split:
   - `cargo test -p freehand-provider-openai web_search -- --nocapture` passed 4/4.
   - Runtime hosted-search focused tests passed: `live_bridge_derives_hosted_web_search_only_for_supported_openai_responses`, `clean_search_worker_request_uses_hosted_search_without_local_instruction_scan`, `live_bridge_does_not_mix_search_only_hosted_tool_with_master_functions`, and `clean_search` 5/5.
   - `cargo check -p freehand-cli`, `cargo test -p freehand-config provider`, `cargo test -p freehand-ui-protocol config`, and `cargo test -p freehand-server --lib` passed; server panic output is the intentional dispatch-worker join-failure negative test.
+
+# 2026-07-23 web_search auto effective capability diagnosis
+
+- symptom:
+  - WebUI Settings shows selected provider `web_search=auto`, but live Master session `webui-session-20260723001509-bd98e156` turn `runtime-turn-534` answered that the environment has no web_search capability/tool.
+- evidence:
+  - `freehand-cliS adp-config-query --url ws://127.0.0.1:4042/adp` shows selected master provider `minimax:anthropic:messages:MiniMax-M3:web_search=auto` and registry also has `cc:openai:responses:gpt-5.5:web_search=auto`.
+  - `~/.freehand/state/turns/master/webui-session-20260723001509-bd98e156/turns/runtime-turn-534.json` runtime-tool-guidance says provider-hosted search may be used only if declared in the current provider request and that broad/current search can use `execution_profile="clean_search"`, but it does not list effective configured-vs-current-vs-worker route status.
+  - Provider response ledger for `runtime-turn-534` shows MiniMax-M3 answered from that ambiguous guidance: no local function `web_search`, selected provider did not declare hosted search, therefore no capability.
+- first divergence:
+  - Runtime config projection and model-visible guidance collapse configured mode (`auto`) with effective capability. `project_config_status_for_ui` projects only `provider_web_search`, not current effective support/reason or configured worker clean_search routes.
+- owner/scope:
+  - unique owner: `provider.reason-live-bridge` for provider descriptor/effective capability and Master model-visible route guidance.
+  - UI projection owner touched through protocol projection: `runtime.ui-command-dispatch` / `freehand-ui-protocol` config status shape.
+  - allowed paths: `crates/freehand-runtime/src/lib.rs`, `crates/freehand-runtime/src/live_context.rs`, `crates/freehand-ui-protocol/src/lib.rs`, `apps/freehand-server/assets/webui.js`, owner docs/tests.
+- fix direction:
+  - Add configured-vs-effective hosted search projection for selected and registry providers.
+  - Add model-visible active Web Search Route Status listing selected provider effective state and configured Worker clean_search-capable providers.
+  - Keep `web_search` out of local tool registry; do not fake a function tool.
+# 2026-07-23 provider-hosted web_search MiniMax/OpenAI closeout refresh
+
+- trigger:
+  - Jason pointed out Settings had `web_search=auto` but model-visible tools did not expose usable search, and asked why the provider capability was effectively blocked instead of testable/visible.
+- root cause verified:
+  - The provider capability projection/guidance initially collapsed configured `auto` with effective route state, so MiniMax could answer "no web_search capability" from ambiguous guidance.
+  - Direct MiniMax ADP test initially failed after declaring the hosted server tool because `execute_provider_web_search_test` used `tool_choice=auto`; MiniMax-M3 chose not to call the server tool and returned text claiming no browsing/search capability. This proved prompt induction is not a capability test.
+- implementation truth:
+  - `provider.reason-live-bridge` now projects configured-vs-effective web search state for the selected provider and registry: `web_search_effective=hosted_declared` for OpenAI Responses and Anthropic Messages when `web_search=auto`, including MiniMax's current `api.minimaxi.com/anthropic` Messages baseline.
+  - Model-visible route guidance now states the selected provider, protocol, effective hosted-search state, configured Worker clean_search routes, and explicitly says Freehand never exposes a local function tool named `web_search`.
+  - `TestProviderWebSearch` is an ADP/runtime-owned command available from CLI and WebUI Settings. It sends a direct provider request with hosted search only and requires a provider-hosted observation.
+  - For Anthropic/MiniMax Messages, the provider web_search test uses required `tool_choice={"type":"tool","name":"web_search"}`; for OpenAI Responses it keeps hosted `web_search` as a provider tool, not a fake function choice.
+  - `web_fetch` remains a concrete-URL fetch function and is not a broad-search substitute.
+- online proof:
+  - Direct MiniMax S-profile proof passed after forcing the hosted server tool: `freehand-cliS adp-provider-web-search-test --url ws://127.0.0.1:4042/adp --provider minimax` -> `adp_provider_web_search_test_ok ... provider=minimax:protocol=messages:model=MiniMax-M3:hosted_tool=web_search:hosted_observed=true:semantic_outputs=6`.
+  - Ordinary Master verifier passed: `node scripts/verify-provider-hosted-web-search-online.mjs`, artifact `artifacts/webui-online/provider-hosted-web-search-20260723T182747-13017/summary.json`, fixed session `provider-hosted-web-search-online-fixed`, turn `runtime-turn-540`, one `/openai/v1/responses` provider request with hosted tool `web_search`, `external_web_access=true`, no function `web_search`, Master functions still included `task`, `timer`, and concrete-url `web_fetch`, ADP observed hosted search/query, `adpDidNotUseWebFetchAsSearch=true`, terminal Success.
+  - Restore proof after verifier: S config returned to `provider=minimax`, `provider_protocol=messages`, `base_url_host=api.minimaxi.com`, `default_model=MiniMax-M3`, `web_search=auto`, `web_search_effective=hosted_declared`; fixture env grep and active-work find returned no matches.
+- local proof:
+  - `cargo fmt --check`; `node --check scripts/verify-provider-hosted-web-search-online.mjs`; `jq empty` for touched mainline manifests; `git diff --check`.
+  - `cargo test -p freehand-runtime provider_web_search_test -- --nocapture` passed 3/3, including Anthropic/MiniMax required server-tool choice.
+  - `cargo test -p freehand-provider-anthropic web_search -- --nocapture` passed 2/2.
+  - `cargo test -p freehand-instructions --lib -- --nocapture` passed 9/9; `cargo test -p freehand-runtime live_bridge_admits_instruction_capability_manifest_as_typed_context -- --nocapture` passed.
+  - `cargo check -p freehand-cli`; `cargo test -p freehand-ui-protocol provider_web_search -- --nocapture`; `cargo test -p freehand-config provider -- --nocapture`; `cargo test -p freehand-server --lib -- --nocapture`; `cargo run -p xtask -- mainlines check`; `cargo run -p xtask -- gates check` passed.
+- supersedes:
+  - Earlier 2026-07-23 note/MEMORY statements that MiniMax hosted search remained unsupported are now superseded for the current Freehand MiniMax Anthropic-compatible Messages baseline. MiniMax native non-Anthropic hosted-search wire is still unverified and must not be hardcoded.

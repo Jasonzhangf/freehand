@@ -123,6 +123,7 @@ const settingsProviderModelInput = document.getElementById("settings-provider-mo
 const settingsProviderWebSearchInput = document.getElementById("settings-provider-web-search-input");
 const settingsProviderEnvInput = document.getElementById("settings-provider-env-input");
 const settingsProviderSaveButton = document.getElementById("settings-provider-save-button");
+const settingsProviderWebSearchTestButton = document.getElementById("settings-provider-web-search-test-button");
 const settingsApkUpdateSummary = document.getElementById("settings-apk-update-summary");
 const settingsApkUpdateSource = document.getElementById("settings-apk-update-source");
 const settingsApkUpdateStatus = document.getElementById("settings-apk-update-status");
@@ -228,6 +229,7 @@ const state = {
   configStatusError: null,
   configSaveInFlight: false,
   providerSelectionInFlight: false,
+  providerWebSearchTestInFlight: "",
   providerSelectionDraft: null,
   agentResourceDraftCount: null,
   agentResourceSaveInFlight: false,
@@ -853,6 +855,14 @@ function providerConfigUpsertReceiptStatus(receipt) {
   throw new Error("Provider definition save returned an unexpected service status.");
 }
 
+function providerWebSearchTestReceiptStatus(receipt) {
+  const status = receipt?.dispatch_status || "";
+  if (status.startsWith("provider_web_search_test_passed:")) {
+    return `Provider web_search test passed: ${status}`;
+  }
+  throw new Error("Provider web_search test returned an unexpected service status.");
+}
+
 function providerSelectionReceiptStatus(receipt) {
   if (receipt && receipt.dispatch_status === "agent_provider_selection_saved_restart_required") {
     return "Provider selection saved. Restart required.";
@@ -927,6 +937,22 @@ function setText(id, value) {
   const element = document.getElementById(id);
   if (element) {
     element.textContent = value;
+  }
+}
+
+function webSearchStatusLabel(provider) {
+  if (!provider) {
+    return "loading";
+  }
+  const configured = provider.provider_web_search || "auto";
+  const effective = provider.provider_web_search_effective || "unknown";
+  return `${configured} -> ${effective}`;
+}
+
+function setTitle(id, value) {
+  const element = document.getElementById(id);
+  if (element) {
+    element.title = value || "";
   }
 }
 
@@ -6212,7 +6238,11 @@ function renderSettingsShell() {
   setText("settings-provider-type", state.configStatus?.provider_type || "loading");
   setText("settings-provider-protocol", state.configStatus?.provider_protocol || "loading");
   setText("settings-provider-host", state.configStatus?.provider_base_url_host || "loading");
-  setText("settings-provider-web-search", state.configStatus?.provider_web_search || "loading");
+  setText("settings-provider-web-search", webSearchStatusLabel(state.configStatus));
+  setTitle("settings-provider-web-search", [
+    state.configStatus?.provider_web_search_reason,
+    state.configStatus?.provider_web_search_route_summary,
+  ].filter(Boolean).join("\n"));
   setText("settings-provider-auth", state.configStatus ? `${settingsAuthTypeLabel(state.configStatus.provider_auth_type)} · ${state.configStatus.provider_auth_source}` : "loading");
   setText("settings-restart-required", state.configStatus?.restart_required_on_change ? "restart required after changes" : "no restart flag");
   setText("settings-config-error", state.configStatusError || "none");
@@ -6380,6 +6410,8 @@ function configProviderRegistry() {
     provider_base_url_host: state.configStatus.provider_base_url_host,
     default_model: state.configStatus.default_model,
     provider_web_search: state.configStatus.provider_web_search || "auto",
+    provider_web_search_effective: state.configStatus.provider_web_search_effective || "",
+    provider_web_search_reason: state.configStatus.provider_web_search_reason || "",
     provider_auth_type: state.configStatus.provider_auth_type,
     provider_auth_source: state.configStatus.provider_auth_source,
   }];
@@ -6534,16 +6566,32 @@ function renderSettingsProviderRegistry() {
     meta.textContent = [
       `${provider.provider_type}/${provider.provider_protocol}`,
       provider.default_model,
-      `web_search=${provider.provider_web_search || "auto"}`,
+      `web_search=${webSearchStatusLabel(provider)}`,
       provider.provider_base_url_host || provider.provider_base_url,
       `${settingsAuthTypeLabel(provider.provider_auth_type)} ${provider.provider_auth_source}`,
     ].filter(Boolean).join(" · ");
+    if (provider.provider_web_search_reason) {
+      meta.title = provider.provider_web_search_reason;
+    }
     const action = document.createElement("button");
     action.className = "settings-secondary-action";
     action.type = "button";
     action.textContent = "Load into form";
     action.addEventListener("click", () => fillSettingsProviderFormFromProvider(provider));
-    card.append(title, meta, action);
+    const testAction = document.createElement("button");
+    testAction.className = "settings-secondary-action";
+    testAction.type = "button";
+    testAction.disabled = provider.enabled === false || Boolean(state.providerWebSearchTestInFlight);
+    testAction.textContent = state.providerWebSearchTestInFlight === provider.provider_id
+      ? "Testing web_search..."
+      : "Test web_search";
+    testAction.addEventListener("click", () => {
+      fillSettingsProviderFormFromProvider(provider);
+      testProviderWebSearch(provider.provider_id).catch((error) => {
+        setText("settings-provider-web-search-test-status", `Provider web_search test failed: ${error.message}`);
+      });
+    });
+    card.append(title, meta, action, testAction);
     return card;
   });
   settingsProviderRegistryList.replaceChildren(...cards);
@@ -6564,6 +6612,13 @@ function syncSettingsProviderForm() {
   if (settingsProviderSaveButton) {
     settingsProviderSaveButton.disabled = state.configSaveInFlight;
     settingsProviderSaveButton.textContent = state.configSaveInFlight ? "Saving..." : "Add/update provider";
+  }
+  if (settingsProviderWebSearchTestButton) {
+    const providerId = settingsProviderIdInput?.value.trim() || status?.provider_id || "";
+    settingsProviderWebSearchTestButton.disabled = !state.configStatus || !providerId || Boolean(state.providerWebSearchTestInFlight);
+    settingsProviderWebSearchTestButton.textContent = state.providerWebSearchTestInFlight === providerId
+      ? "Testing web_search..."
+      : "Test web_search";
   }
 }
 
@@ -6604,6 +6659,35 @@ async function submitProviderConfigUpdate(event) {
     renderSettingsShell();
   } finally {
     state.configSaveInFlight = false;
+    renderSettingsShell();
+  }
+}
+
+async function testProviderWebSearch(providerId) {
+  const targetProviderId = (providerId || settingsProviderIdInput?.value || "").trim();
+  if (!targetProviderId) {
+    setText("settings-provider-web-search-test-status", "Choose a provider id before testing web_search.");
+    return;
+  }
+  state.providerWebSearchTestInFlight = targetProviderId;
+  setText("settings-provider-web-search-test-status", `Testing provider-hosted web_search for ${targetProviderId}...`);
+  renderSettingsShell();
+  try {
+    const receipt = await adpCommand({
+      TestProviderWebSearch: {
+        provider_id: targetProviderId,
+        query: "Use web_search to find the current UTC date and one current news headline from openai.com today. Do not answer from memory.",
+      },
+    });
+    const status = providerWebSearchTestReceiptStatus(receipt);
+    setText("settings-provider-web-search-test-status", status);
+    setCommandStatus(status, { stickyMs: 8000 });
+  } catch (error) {
+    const message = `Provider web_search test failed for ${targetProviderId}: ${error.message}`;
+    setText("settings-provider-web-search-test-status", message);
+    setCommandStatus(message, { stickyMs: 10000 });
+  } finally {
+    state.providerWebSearchTestInFlight = "";
     renderSettingsShell();
   }
 }
@@ -7457,6 +7541,15 @@ if (settingsProviderSwitchButton) {
     submitProviderSelectionUpdate().catch((error) => {
       state.providerSelectionInFlight = false;
       setText("settings-provider-switch-status", `Switch failed: ${error.message}`);
+      renderSettingsShell();
+    });
+  });
+}
+if (settingsProviderWebSearchTestButton) {
+  settingsProviderWebSearchTestButton.addEventListener("click", () => {
+    testProviderWebSearch().catch((error) => {
+      state.providerWebSearchTestInFlight = "";
+      setText("settings-provider-web-search-test-status", `Provider web_search test failed: ${error.message}`);
       renderSettingsShell();
     });
   });

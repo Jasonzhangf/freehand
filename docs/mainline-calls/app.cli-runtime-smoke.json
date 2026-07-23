@@ -28,6 +28,7 @@
     "for ADP session manage, CLI connects to the same daemon `/adp` and sends protocol-owned create, rename, archive, restore, delete-as-archive, or rollback command frames for no-UI session lifecycle diagnosis",
     "for ADP task query, CLI connects to the same daemon `/adp` and sends protocol-owned task list/history query frames for no-UI task truth diagnosis",
     "for ADP task subscribe, CLI connects to the same daemon `/adp` and sends protocol-owned task list subscription frames for no-UI task push diagnosis",
+    "for ADP provider web_search test, CLI connects to the same daemon `/adp` and sends protocol-owned TestProviderWebSearch command frames for no-UI provider-hosted search capability diagnosis",
     "for ADP error query, CLI connects to the same daemon `/adp` and sends protocol-owned error-center query frames for no-UI metadata diagnosis"
   ],
   "response_mainline": [
@@ -49,6 +50,7 @@
     "ADP session manage prints command receipt status for session CRUD and rollback commands without creating a second source of session truth",
     "ADP task query prints task list count/task ids or task history event counts from protocol-owned query results",
     "ADP task subscribe prints accepted state plus task list count/task ids from the initial protocol-owned subscription event",
+    "ADP provider web_search test prints adp_provider_web_search_test_ok only when the runtime receipt starts with provider_web_search_test_passed; provider rejection stays an explicit CLI failure",
     "ADP error query prints error-center event count and domain/class/recovery/code/raw-hash summary without exposing raw metadata payloads"
   ],
   "error_mainline": [
@@ -72,6 +74,7 @@
     "ADP query-as-command must return ingress_command_kind_mismatch, proving command/query separation without mutation",
     "ADP task query failures print explicit ADP failure code/message instead of treating missing task truth as an empty success",
     "ADP task subscribe failures print explicit ADP failure code/message instead of treating missing task truth as an empty success",
+    "ADP provider web_search test timeout, unexpected receipt status, provider rejection, or missing hosted-search observation returns explicit terminal error",
     "ADP error query failures print explicit ADP failure code/message instead of treating metadata read failure as an empty success"
   ],
   "shared_functions": [
@@ -342,6 +345,17 @@
       "input_semantic": "ADP WebSocket URL plus task subscription filters",
       "output_semantic": "terminal-facing task list subscription summary or explicit ADP failure",
       "caller": "ADP task subscribe runner",
+      "callee": "daemon /adp",
+      "binding_status": "bound"
+    },
+    {
+      "step": "13a",
+      "symbol_path": "run_adp_provider_web_search_test / run_adp_provider_web_search_test_async",
+      "file_path": "apps/freehand-cli/src/main.rs",
+      "responsibility": "send protocol-owned provider web_search live-test command over ADP and require a provider-hosted success receipt",
+      "input_semantic": "--url ws://.../adp --provider <id> plus optional query",
+      "output_semantic": "terminal-facing provider web_search live-test summary or explicit ADP/provider failure",
+      "caller": "CLI dispatcher",
       "callee": "daemon /adp",
       "binding_status": "bound"
     },

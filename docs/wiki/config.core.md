@@ -26,6 +26,7 @@ Generated from `docs/mainline-calls/config.core.json`. Do not edit by hand.
 - QR/deep-link bootstrap requests enter through versioned remote daemon bootstrap bundles with expiry, nonce, selected route endpoint, and one-time credential metadata
 - provider definition upsert requests enter only through ProviderConfigUpdate and upsert_provider_config_in_path; the config owner validates provider id, provider type, protocol, base URL, model, and env-var auth before persistence without changing the selected agent binding
 - provider selection requests enter only through AgentProviderSelectionConfigUpdate and switch_agent_provider_in_path; the config owner validates existing enabled primary/fallback provider ids before atomically rewriting only the selected agent binding
+- provider capability-test requests may resolve any enabled configured provider by id through LoadedConfig::select_provider_for_test without changing the selected agent primary/fallback binding
 - legacy provider/model update requests enter only through ProviderConfigUpdate and update_provider_config_in_path; the config owner validates provider id, provider type, protocol, base URL, model, and env-var auth before persistence and preserves existing fallback binding
 - Agent resource-count update requests enter only through AgentResourceConfigUpdate and update_agent_resource_config_in_path; the config owner validates Master-only intent and `1..=5` Worker resources before persistence
 
@@ -34,6 +35,7 @@ Generated from `docs/mainline-calls/config.core.json`. Do not edit by hand.
 - validated config returns one selected agent runtime configuration plus one primary provider runtime configuration and an optional fallback provider runtime configuration
 - selected agent runtime configuration includes explicit local node id plus an ordered typed peer list containing peer name, mode, node id, allowed IP, and pair-token env metadata for runtime bootstrap
 - selected provider runtime configuration includes explicit protocol, auth source, fallback provider id, and safe projection metadata only
+- explicit provider capability-test selection returns one enabled provider runtime configuration with resolved auth source for a live test and does not persist or switch active config
 - safe provider registry projection returns every configured provider id, enabled flag, type, protocol, sanitized endpoint, model, auth type, and auth source without exposing credential values
 - remote daemon registry projection carries accounts, daemon endpoint candidates, selected active endpoint, route diagnostics, and restart-required semantics without leaking credential values
 - bootstrap link builders emit `freehand://daemon/import?payload=...` or `https://freehand.local/daemon/import?payload=...` payloads with canonical daemon `activeEndpoint` field; safe summaries redact one-time credential values
@@ -51,6 +53,7 @@ Generated from `docs/mainline-calls/config.core.json`. Do not edit by hand.
 - invalid provider definition updates, missing env-var auth, missing selected agent, invalid provider selections, disabled providers, and same-primary fallback selection fail before overwrite; failed updates must leave previous config bytes intact
 - invalid Agent resource-count updates, non-Master targets, and missing targets fail before overwrite; failed updates must leave previous config bytes intact
 - fallback provider selection fails explicitly when the referenced provider is missing, disabled, or equal to the primary provider
+- provider capability-test selection fails explicitly when the requested provider id is missing or disabled
 - safe config projection must not expose resolved provider secrets
 
 ## Shared Multi-Reference Functions
@@ -75,6 +78,7 @@ Generated from `docs/mainline-calls/config.core.json`. Do not edit by hand.
 | 10b | `switch_agent_provider_in_path` | `crates/freehand-config/src/lib.rs` | validate and atomically persist one agent primary/fallback provider selection without rewriting provider definitions | config path plus agent provider selection update | selected agent projection from saved config | runtime.ui-command-dispatch / tests | config persistence owner | config | config | config.mutate_provider_config | bound |
 | 11 | `persist_config_atomically` | `crates/freehand-config/src/lib.rs` | write new config through temp file plus rename after validation succeeds | validated TOML text | replaced canonical config file | update_provider_config_in_path | filesystem persistence |  |  |  | bound |
 | 12 | `select_provider_for_agent` | `crates/freehand-config/src/lib.rs` | resolve one typed primary or fallback provider binding and its independent auth source | provider registry plus agent name plus provider id plus route role | selected provider runtime config or route-specific explicit config error | LoadedConfig::select_agent | provider registry/auth resolver |  |  |  | bound |
+| 12a | `LoadedConfig::select_provider_for_test` | `crates/freehand-config/src/lib.rs` | resolve any enabled configured provider for an explicit capability test without changing selected agent provider bindings | loaded provider registry plus provider id plus env | selected provider runtime config or explicit config error | runtime.ui-command-dispatch provider test | provider registry/auth resolver |  |  |  | bound |
 | 13 | `AgentResourceConfigUpdate` | `crates/freehand-config/src/lib.rs` | carry owner-backed Master Worker resource-count intent | agent name plus resource count | validated config-owner update input | runtime.ui-command-dispatch | config owner DTO |  |  |  | bound |
 | 14 | `update_agent_resource_config_in_path` | `crates/freehand-config/src/lib.rs` | validate, apply, reparse, select, and atomically persist reciprocal Master/Worker resource topology changes | config path plus resource-count update | selected agent projection from saved config | runtime.ui-command-dispatch / tests | config persistence owner |  |  |  | bound |
 | 15 | `validate_remote_daemon_registry` | `crates/freehand-config/src/lib.rs` | validate account-scoped remote daemon registry, direct/relay endpoint candidates, and active endpoint invariants | raw remote daemon TOML tables or bootstrap bundle parts | RemoteDaemonRegistryConfig or explicit config error | validate_config / bootstrap validator | registry validator | config | remote_daemon_registry | config.compile_remote_daemon_registry | bound |
@@ -86,7 +90,7 @@ Generated from `docs/mainline-calls/config.core.json`. Do not edit by hand.
 
 ## Sync Status Against Mainline Call
 
-- code binding landed for config loader, parser, validator, provider registry accessor, and agent/provider selector
+- code binding landed for config loader, parser, validator, provider registry accessor, selected agent/provider selector, and explicit enabled-provider test selector
 - selected-agent projection now includes ordered reciprocal multi-peer topology metadata, one bound primary provider runtime configuration, and one optional distinct fallback provider runtime configuration
 - singular `paired_agent` schema and selected-agent fields are physically removed
 - provider protocol must be explicit and unknown provider fields are rejected

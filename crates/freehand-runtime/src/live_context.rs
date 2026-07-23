@@ -1,6 +1,8 @@
 use std::env;
 use std::path::Path;
-use std::time::Instant;
+use std::sync::mpsc;
+use std::thread;
+use std::time::{Duration, Instant};
 
 use freehand_blocks::completion_schema_guidance;
 use freehand_contracts::{
@@ -102,10 +104,12 @@ fn tool_guidance_segment(
     role: LiveReasonExecutionRole,
     execution_profile: LiveReasonExecutionProfile,
     configured_worker_set: Option<&[String]>,
+    web_search_route_guidance: Option<&str>,
 ) -> ContextSegment {
     let content = match role {
         LiveReasonExecutionRole::Master => master_task_orchestration_guidance(
             configured_worker_set.expect("Master guidance requires configured Worker"),
+            web_search_route_guidance,
         ),
         LiveReasonExecutionRole::Worker => match execution_profile {
             LiveReasonExecutionProfile::Workspace => worker_execution_guidance(),
@@ -245,14 +249,39 @@ pub(crate) fn instruction_capability_segment(
     runtime_home: &Path,
     cwd: Option<&Path>,
 ) -> Result<ContextSegment, RuntimeLiveBridgeError> {
+    let runtime_home = runtime_home.to_path_buf();
     let cwd = match cwd {
         Some(path) => path.to_path_buf(),
         None => env::current_dir()
             .map_err(|err| RuntimeLiveBridgeError::InstructionCapabilityFailed(err.to_string()))?,
     };
+    let (sender, receiver) = mpsc::sync_channel(1);
+    thread::spawn(move || {
+        let _ = sender.send(instruction_capability_segment_sync(&runtime_home, &cwd));
+    });
+    match receiver.recv_timeout(Duration::from_secs(30)) {
+        Ok(result) => result,
+        Err(mpsc::RecvTimeoutError::Timeout) => {
+            Err(RuntimeLiveBridgeError::InstructionCapabilityFailed(
+                "instruction capability build timed out after 30s while reading AGENTS.md/skills"
+                    .to_owned(),
+            ))
+        }
+        Err(mpsc::RecvTimeoutError::Disconnected) => {
+            Err(RuntimeLiveBridgeError::InstructionCapabilityFailed(
+                "instruction capability build worker disconnected".to_owned(),
+            ))
+        }
+    }
+}
+
+fn instruction_capability_segment_sync(
+    runtime_home: &Path,
+    cwd: &Path,
+) -> Result<ContextSegment, RuntimeLiveBridgeError> {
     let manifest = compile_instruction_capability_manifest(InstructionCapabilityCompileInput::new(
         runtime_home.to_path_buf(),
-        cwd,
+        cwd.to_path_buf(),
     ))
     .map_err(|err| RuntimeLiveBridgeError::InstructionCapabilityFailed(err.to_string()))?;
     let content = render_instruction_capability_context(&manifest)
@@ -395,11 +424,18 @@ pub(crate) fn configured_worker_label(configured_worker_set: Option<&[String]>) 
     configured_worker_set.join("`, `")
 }
 
-fn master_task_orchestration_guidance(configured_worker_set: &[String]) -> String {
+fn master_task_orchestration_guidance(
+    configured_worker_set: &[String],
+    web_search_route_guidance: Option<&str>,
+) -> String {
     let configured_worker_list = configured_worker_label(Some(configured_worker_set));
     let worker_capabilities = worker_capability_guidance();
+    let web_search_route_guidance = web_search_route_guidance.unwrap_or(
+        "Web Search Route Status: current provider capability was not projected. Do not infer hosted web_search availability from `web_search=auto` alone.",
+    );
     format!(
-        "{}Configured Worker ids: `{configured_worker_list}`.\n\
+        "{}\n{web_search_route_guidance}\n\
+Configured Worker ids: `{configured_worker_list}`.\n\
 {worker_capabilities}\n\
 - Current topology: assign production tasks only to one of these configured Worker ids. Historical agents returned by list_agents are persisted history, not eligible production dispatch targets.\n\
 - Worker lifecycle boundary: never put task(...), claim_next, heartbeat, record_execution, approve, reject, or close instructions into Worker task content. The Worker does not receive the task tool. The production Worker runner owns claim/heartbeat and converts the Worker completion schema into TaskReviewSubmitted or TaskBlocked truth.\n\n{}",
@@ -469,6 +505,7 @@ pub(crate) fn base_live_context_segments(
     role: LiveReasonExecutionRole,
     execution_profile: LiveReasonExecutionProfile,
     configured_worker_set: Option<&[String]>,
+    web_search_route_guidance: Option<&str>,
     runtime_home: &Path,
     cwd: Option<&Path>,
     agent_id: &AgentId,
@@ -478,6 +515,7 @@ pub(crate) fn base_live_context_segments(
         role,
         execution_profile,
         configured_worker_set,
+        web_search_route_guidance,
         runtime_home,
         cwd,
         agent_id,
@@ -490,6 +528,7 @@ pub(crate) fn base_live_context_segments_with_observer<F>(
     role: LiveReasonExecutionRole,
     execution_profile: LiveReasonExecutionProfile,
     configured_worker_set: Option<&[String]>,
+    web_search_route_guidance: Option<&str>,
     runtime_home: &Path,
     cwd: Option<&Path>,
     agent_id: &AgentId,
@@ -510,6 +549,7 @@ where
                 role,
                 execution_profile,
                 configured_worker_set,
+                web_search_route_guidance,
             ))
         })?,
         build_required_context_segment("instruction-capability", &mut observe, || {

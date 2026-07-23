@@ -94,6 +94,7 @@
 - config status query is a protocol-owned ADP/query command shape carrying the complete safe provider registry plus current primary/fallback selection, but selected config truth remains owned by `config.core` and supplied through `runtime.ui-command-dispatch`
 - provider definition upsert is a protocol-owned mutation command shape (`UpsertProviderConfig`) that carries only editable provider id/type/protocol/base URL/default model/env-var auth fields and routes to `config.core` without switching active selection
 - provider selection is a protocol-owned mutation command shape (`UpdateAgentProviderSelection`) that carries only agent name plus primary/fallback provider ids and routes to `config.core` without rewriting provider definitions
+- provider web_search live test is a protocol-owned command shape (`TestProviderWebSearch`) carrying provider id plus optional query; it routes to `provider.reason-live-bridge` and must not be handled as a UI-local query or local Freehand tool call
 - legacy provider/model update remains a protocol-owned mutation command shape (`UpdateProviderConfig`) for existing CLI callers; WebUI and CLI must not write config files directly or send raw API-key values
 - Agent resource-count update is a protocol-owned mutation command shape (`UpdateAgentResourceConfig`) that carries only agent name plus `resource_count`; protocol rejects values outside `1..=5` before runtime dispatch and routes valid intent to `config.core`
 - subscriptions may target latest active turn, specific turn, specific turn debug state, or node/progress streams
@@ -139,7 +140,13 @@
   an ordered peer list of agent name/mode/node id, and auth source type only;
   API keys, pair-token env/value fields, provider raw payloads, and full
   credential-bearing URLs are not part of the DTO
+- config status query results expose provider web_search configured/effective
+  route status and reason strings as UI-safe capability diagnostics, not as
+  secrets or provider wire payloads
 - provider/model update command receipts report owner dispatch status only; the restart-required and saved provider/model state is observed by a follow-up config status query/projection, not by protocol-local config truth
+- provider web_search test command receipts report owner dispatch status only;
+  provider success and exact provider rejection remain visible receipt text
+  supplied by runtime/provider owners
 - Agent resource-count update command receipts report owner dispatch status only; the restart-required and saved topology state is observed by a follow-up config status query/projection, not by protocol-local config truth
 - error-center subscription initial snapshots use the same `UiErrorCenterEventListProjection` as query results
 - public conversation tool summaries carry `tool_call_id` so UI clients can update one tool card instead of rendering duplicate waiting/completed cards; tool status/outcome is conveyed by the status field while the public body stays semantic and target-focused instead of echoing success/failure result text
@@ -279,6 +286,7 @@
 | 20a | `UiCommand::QueryConfigStatus` / `UiQueryResult::ConfigStatus` / `UiConfigStatusProjection` / `UiProviderConfigSummaryProjection` | `crates/freehand-ui-protocol/src/lib.rs` | define UI-safe active config query/result DTO with complete provider registry and no secrets | config status query | active agent/provider/fallback/model/auth-source/resource-count projection plus safe configured provider registry | ADP query transport | runtime query port | bound |
 | 20b | `UiProviderConfigUpdate` / `UiCommand::UpdateProviderConfig` / `UiCommand::UpsertProviderConfig` | `crates/freehand-ui-protocol/src/lib.rs` | define provider definition mutation DTOs without credential values and route them to the config owner | provider/model/base-url/env-var update | validated mutation intent routed to `config.core` | WebUI/CLI ADP command transport | runtime.ui-command-dispatch | bound |
 | 20b1 | `UiAgentProviderSelectionUpdate` / `UiCommand::UpdateAgentProviderSelection` | `crates/freehand-ui-protocol/src/lib.rs` | define active provider selection mutation DTO without credential values and route it to the config owner | agent name plus primary/fallback provider ids | validated mutation intent routed to `config.core` | WebUI/CLI ADP command transport | runtime.ui-command-dispatch | bound |
+| 20b2 | `UiCommand::TestProviderWebSearch` | `crates/freehand-ui-protocol/src/lib.rs` | define provider-hosted web_search live-test command DTO and route it to the runtime/provider bridge owner | provider id plus optional query | validated mutation intent routed to `provider.reason-live-bridge` | WebUI/CLI ADP command transport | runtime.ui-command-dispatch | bound |
 | 20c | `UiAgentResourceConfigUpdate` / `UiCommand::UpdateAgentResourceConfig` | `crates/freehand-ui-protocol/src/lib.rs` | define Agent resource-count update command DTO without provider credentials and route it to the config owner | agent name + `1..=5` resource count | validated mutation intent routed to `config.core` | WebUI/CLI ADP command transport | runtime.ui-command-dispatch | bound |
 | 21 | `UiCommand::QueryErrorCenterEvents` / `UiQueryResult::ErrorCenterEvents` | `crates/freehand-ui-protocol/src/lib.rs` | define read-only error-center query/result DTOs | session/trace/turn/domain filters | UI-safe error-center projection | ADP query transport | runtime query port | bound |
 | 22 | `UiCommand::SubscribeErrorCenterEvents` / `UiProjection::ErrorCenterEvents` | `crates/freehand-ui-protocol/src/lib.rs` | define error-center subscription command and projection event shape | error-center subscription filters | UI-safe error-center subscription event | ADP subscribe transport | protocol selector matcher | bound |
@@ -318,6 +326,7 @@
 - task list subscription projection is protocol-bound; runtime owner code publishes task list projection events into `UiProtocolState`
 - error-center query/subscription DTOs and runtime query-port routing are protocol-bound; runtime owner code supplies metadata-backed read projections
 - config status query/result DTO is protocol-bound; runtime owner code supplies complete provider registry plus selected primary/fallback projection and protocol state rejects local handling
+- provider web_search effective status fields and `TestProviderWebSearch` command routing are protocol-bound without adding a local `web_search` function tool
 - provider definition upsert and legacy provider/model update command DTOs are protocol-bound, owner-routed to `config.core`, reject invalid/empty fields, and serialize without credential/API-key values
 - active provider selection command DTO is protocol-bound, owner-routed to `config.core`, rejects empty provider ids, and serializes without credential/API-key values
 - Agent resource-count update command DTO is protocol-bound, owner-routed to `config.core`, rejects out-of-range counts, and serializes without provider credentials or live-process state

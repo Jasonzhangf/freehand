@@ -81,8 +81,8 @@ use freehand_config::{
 use freehand_contracts::{
     AgentId, ContextCachePolicy, ContextProvenance, ContextRole, ContextSegment, ContextSegmentId,
     ContextSegmentKind, ContextStability, ErrorClass, ErrorContract, ErrorErr01RuntimeClassified,
-    FeatureId, ReasonReq04ToolCall, ReasonReq05ToolResultReentry, RecoveryPolicy, SessionId,
-    ToolArgument, ToolResultContract, ToolResultStatus, TraceId, TurnId,
+    FeatureId, ReasonReq03ProviderPayload, ReasonReq04ToolCall, ReasonReq05ToolResultReentry,
+    RecoveryPolicy, SessionId, ToolArgument, ToolResultContract, ToolResultStatus, TraceId, TurnId,
 };
 use freehand_control::{
     ControlRhythmDecision, ControlStatusRejection, ControlStatusSubmission, ErrorCenterDecision,
@@ -108,7 +108,7 @@ use freehand_provider_anthropic::{
 use freehand_provider_core::{
     ProviderCapabilities, ProviderDescriptor, ProviderEventContext, ProviderFamily,
     ProviderHostedToolDefinition, ProviderProtocol, ProviderSemanticOutput,
-    ProviderSemanticRequest, ProviderToolDefinition, ProviderToolExchange,
+    ProviderSemanticRequest, ProviderToolChoice, ProviderToolDefinition, ProviderToolExchange,
     ProviderWebSearchCapability, ProviderWebSearchMode as SemanticWebSearchMode,
     build_semantic_request,
 };
@@ -162,6 +162,7 @@ use thiserror::Error;
 const PROVIDER_EXECUTOR_RETRY_CAP: u32 = 10;
 const PROVIDER_EXECUTOR_INITIAL_BACKOFF_MS: u64 = 1_000;
 const PROVIDER_EXECUTOR_MAX_BACKOFF_MS: u64 = 20_000;
+const DEFAULT_PROVIDER_WEB_SEARCH_TEST_QUERY: &str = "Use web_search to find the current UTC date and one current news headline from openai.com today. Do not answer from memory.";
 
 #[derive(Debug, Clone)]
 pub struct LiveReasonTurnRequest {
@@ -444,6 +445,27 @@ fn sanitize_identifier(value: &str) -> String {
         .collect()
 }
 
+fn compact_status_fragment(value: &str, max_chars: usize) -> String {
+    let normalized = value.split_whitespace().collect::<Vec<_>>().join(" ");
+    let mut output = String::new();
+    let mut truncated = false;
+    for (index, ch) in normalized.chars().enumerate() {
+        if index >= max_chars {
+            truncated = true;
+            break;
+        }
+        output.push(if ch == '|' { '/' } else { ch });
+    }
+    if truncated {
+        output.push_str("...");
+    }
+    if output.is_empty() {
+        "empty".to_owned()
+    } else {
+        output
+    }
+}
+
 pub(crate) fn now_unix_seconds() -> u64 {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
@@ -716,6 +738,8 @@ where
     };
     let mut provider_label = live_provider_label(active_route.provider);
     let mut active_provider_descriptor = provider_descriptor(active_route.provider)?;
+    let web_search_route_guidance =
+        provider_web_search_route_guidance(selected, &active_provider_descriptor);
     let mut executor = build_live_provider_driver(active_route.provider)?;
     let mut fallback_activated = false;
     let agent_id = AgentId::new(selected.name.clone());
@@ -947,6 +971,7 @@ where
         role,
         request.execution_profile,
         configured_worker_set,
+        Some(web_search_route_guidance.as_str()),
         &request.runtime_home,
         request.cwd.as_deref(),
         &agent_id,
@@ -1020,6 +1045,7 @@ where
                     role,
                     execution_profile: request.execution_profile,
                     configured_worker_set,
+                    web_search_route_guidance: Some(web_search_route_guidance.as_str()),
                     runtime_home: &request.runtime_home,
                     cwd: request.cwd.as_deref(),
                     agent_id: &agent_id,
@@ -1040,6 +1066,7 @@ where
                     role,
                     execution_profile: request.execution_profile,
                     configured_worker_set,
+                    web_search_route_guidance: Some(web_search_route_guidance.as_str()),
                     runtime_home: &request.runtime_home,
                     cwd: request.cwd.as_deref(),
                     agent_id: &agent_id,
@@ -1552,6 +1579,7 @@ where
                     role,
                     execution_profile: request.execution_profile,
                     configured_worker_set,
+                    web_search_route_guidance: Some(web_search_route_guidance.as_str()),
                     runtime_home: &request.runtime_home,
                     cwd: request.cwd.as_deref(),
                     agent_id: &agent_id,
@@ -1598,6 +1626,7 @@ where
                             role,
                             execution_profile: request.execution_profile,
                             configured_worker_set,
+                            web_search_route_guidance: Some(web_search_route_guidance.as_str()),
                             runtime_home: &request.runtime_home,
                             cwd: request.cwd.as_deref(),
                             agent_id: &agent_id,
@@ -1639,6 +1668,7 @@ where
                             role,
                             execution_profile: request.execution_profile,
                             configured_worker_set,
+                            web_search_route_guidance: Some(web_search_route_guidance.as_str()),
                             runtime_home: &request.runtime_home,
                             cwd: request.cwd.as_deref(),
                             agent_id: &agent_id,
@@ -1907,6 +1937,7 @@ where
                     role,
                     execution_profile: request.execution_profile,
                     configured_worker_set,
+                    web_search_route_guidance: Some(web_search_route_guidance.as_str()),
                     runtime_home: &request.runtime_home,
                     cwd: request.cwd.as_deref(),
                     agent_id: &agent_id,
@@ -1958,6 +1989,7 @@ where
                     role,
                     execution_profile: request.execution_profile,
                     configured_worker_set,
+                    web_search_route_guidance: Some(web_search_route_guidance.as_str()),
                     runtime_home: &request.runtime_home,
                     cwd: request.cwd.as_deref(),
                     agent_id: &agent_id,
@@ -2067,6 +2099,7 @@ where
                         role,
                         execution_profile: request.execution_profile,
                         configured_worker_set,
+                        web_search_route_guidance: Some(web_search_route_guidance.as_str()),
                         runtime_home: &request.runtime_home,
                         cwd: request.cwd.as_deref(),
                         agent_id: &agent_id,
@@ -2112,6 +2145,7 @@ where
                                 role,
                                 execution_profile: request.execution_profile,
                                 configured_worker_set,
+                                web_search_route_guidance: Some(web_search_route_guidance.as_str()),
                                 runtime_home: &request.runtime_home,
                                 cwd: request.cwd.as_deref(),
                                 agent_id: &agent_id,
@@ -2231,6 +2265,7 @@ where
                                 role,
                                 execution_profile: request.execution_profile,
                                 configured_worker_set,
+                                web_search_route_guidance: Some(web_search_route_guidance.as_str()),
                                 runtime_home: &request.runtime_home,
                                 cwd: request.cwd.as_deref(),
                                 agent_id: &agent_id,
@@ -2325,6 +2360,7 @@ where
                             role,
                             execution_profile: request.execution_profile,
                             configured_worker_set,
+                            web_search_route_guidance: Some(web_search_route_guidance.as_str()),
                             runtime_home: &request.runtime_home,
                             cwd: request.cwd.as_deref(),
                             agent_id: &agent_id,
@@ -2373,6 +2409,7 @@ where
                                 role,
                                 execution_profile: request.execution_profile,
                                 configured_worker_set,
+                                web_search_route_guidance: Some(web_search_route_guidance.as_str()),
                                 runtime_home: &request.runtime_home,
                                 cwd: request.cwd.as_deref(),
                                 agent_id: &agent_id,
@@ -2503,6 +2540,7 @@ where
                             role,
                             execution_profile: request.execution_profile,
                             configured_worker_set,
+                            web_search_route_guidance: Some(web_search_route_guidance.as_str()),
                             runtime_home: &request.runtime_home,
                             cwd: request.cwd.as_deref(),
                             agent_id: &agent_id,
@@ -2660,6 +2698,7 @@ where
                         role,
                         execution_profile: request.execution_profile,
                         configured_worker_set,
+                        web_search_route_guidance: Some(web_search_route_guidance.as_str()),
                         runtime_home: &request.runtime_home,
                         cwd: request.cwd.as_deref(),
                         agent_id: &agent_id,
@@ -4244,21 +4283,38 @@ fn project_config_status_for_ui(
             loaded
                 .safe_provider_registry()
                 .into_iter()
-                .map(|provider| UiProviderConfigSummaryProjection {
-                    provider_id: provider.id,
-                    enabled: provider.enabled,
-                    provider_type: provider.provider_type.as_str().to_owned(),
-                    provider_protocol: provider.protocol.as_str().to_owned(),
-                    provider_base_url: provider.base_url,
-                    provider_base_url_host: provider.base_url_host,
-                    default_model: provider.default_model,
-                    provider_web_search: provider.web_search.as_str().to_owned(),
-                    provider_auth_type: provider.auth_type.as_str().to_owned(),
-                    provider_auth_source: provider.auth_source.as_str().to_owned(),
+                .map(|provider| {
+                    let (effective, reason) = provider_web_search_effective_status(
+                        &provider.id,
+                        provider.provider_type,
+                        provider.protocol,
+                        provider.web_search,
+                    );
+                    UiProviderConfigSummaryProjection {
+                        provider_id: provider.id,
+                        enabled: provider.enabled,
+                        provider_type: provider.provider_type.as_str().to_owned(),
+                        provider_protocol: provider.protocol.as_str().to_owned(),
+                        provider_base_url: provider.base_url,
+                        provider_base_url_host: provider.base_url_host,
+                        default_model: provider.default_model,
+                        provider_web_search: provider.web_search.as_str().to_owned(),
+                        provider_web_search_effective: effective,
+                        provider_web_search_reason: reason,
+                        provider_auth_type: provider.auth_type.as_str().to_owned(),
+                        provider_auth_source: provider.auth_source.as_str().to_owned(),
+                    }
                 })
                 .collect()
         })
         .unwrap_or_default();
+    let (selected_web_search_effective, selected_web_search_reason) =
+        provider_web_search_effective_status(
+            &selected.provider.id,
+            selected.provider.provider_type,
+            selected.provider.protocol,
+            selected.provider.web_search,
+        );
     UiConfigStatusProjection {
         agent_name: selected.name.clone(),
         agent_mode: selected.mode.as_str().to_owned(),
@@ -4297,10 +4353,223 @@ fn project_config_status_for_ui(
         provider_base_url_host: provider_base_url_host_for_projection(&selected.provider.base_url),
         default_model: selected.provider.default_model.clone(),
         provider_web_search: selected.provider.web_search.as_str().to_owned(),
+        provider_web_search_effective: selected_web_search_effective,
+        provider_web_search_reason: selected_web_search_reason,
+        provider_web_search_route_summary: provider_web_search_route_summary(selected),
         provider_auth_type: selected.provider.auth_type.as_str().to_owned(),
         provider_auth_source: selected.provider.auth_source.as_str().to_owned(),
         restart_required_on_change: selected.restart_required_on_change,
     }
+}
+
+fn provider_web_search_effective_status(
+    provider_id: &str,
+    provider_type: ProviderType,
+    protocol: ConfigProviderProtocol,
+    mode: ProviderWebSearchMode,
+) -> (String, String) {
+    if mode == ProviderWebSearchMode::Disabled {
+        return (
+            "disabled".to_owned(),
+            format!("provider `{provider_id}` has web_search=disabled"),
+        );
+    }
+    match provider_web_search_capability_from_parts(provider_type, protocol, mode) {
+        ProviderWebSearchCapability::Hosted { .. } => (
+            "hosted_declared".to_owned(),
+            format!(
+                "provider `{provider_id}` declares provider-hosted web_search through `{}/{}` and can be live-tested from Settings",
+                provider_type.as_str(),
+                protocol.as_str()
+            ),
+        ),
+        ProviderWebSearchCapability::Unsupported => (
+            "protocol_unsupported".to_owned(),
+            format!(
+                "provider `{provider_id}` has web_search={} but `{}/{}` does not expose provider-hosted web_search",
+                mode.as_str(),
+                provider_type.as_str(),
+                protocol.as_str()
+            ),
+        ),
+    }
+}
+
+fn provider_web_search_route_summary(selected: &SelectedAgentConfig) -> String {
+    let descriptor = match provider_descriptor(&selected.provider) {
+        Ok(descriptor) => descriptor,
+        Err(error) => {
+            return format!("selected provider descriptor failed: {error}");
+        }
+    };
+    provider_web_search_route_guidance(selected, &descriptor)
+}
+
+fn execute_provider_web_search_test(
+    selected: &SelectedAgentConfig,
+    provider: SelectedProviderConfig,
+    query: Option<&str>,
+) -> Result<String, UiCommandDispatchPortError> {
+    let descriptor = provider_descriptor(&provider)
+        .map_err(|err| UiCommandDispatchPortError::DispatchFailed(err.to_string()))?;
+    if !descriptor.capabilities.web_search.is_hosted() {
+        return Err(UiCommandDispatchPortError::Unsupported(format!(
+            "provider `{}` protocol `{}` has web_search={} and does not declare provider-hosted web_search",
+            provider.id,
+            provider.protocol.as_str(),
+            provider.web_search.as_str()
+        )));
+    }
+    let test_query = query
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .unwrap_or(DEFAULT_PROVIDER_WEB_SEARCH_TEST_QUERY);
+    let stamp = now_unix_seconds();
+    let session_id = SessionId::new(format!("provider-web-search-test-{stamp}"));
+    let turn_id = TurnId::new("provider-web-search-test-turn");
+    let trace_id = TraceId::new(format!("provider-web-search-test-trace-{stamp}"));
+    let payload = ReasonReq03ProviderPayload {
+        session_id: session_id.clone(),
+        turn_id: turn_id.clone(),
+        trace_id: trace_id.clone(),
+        feature_id: FeatureId::new("provider.reason-live-bridge"),
+        agent_id: AgentId::new(selected.name.clone()),
+        model: provider.default_model.clone(),
+        input_segments: vec![
+            ContextSegment {
+                segment_id: ContextSegmentId::new("provider-web-search-test-instructions"),
+                kind: ContextSegmentKind::DeveloperPolicy,
+                stability: ContextStability::TurnVolatile,
+                cache_policy: ContextCachePolicy::NoCache,
+                role: ContextRole::System,
+                content:
+                    "This is a provider capability test. Use provider-hosted web_search now; do not answer from memory."
+                        .to_owned(),
+                token_budget: 96,
+                provenance: ContextProvenance {
+                    source: "provider_web_search_test".to_owned(),
+                    reference: None,
+                },
+            },
+            ContextSegment {
+                segment_id: ContextSegmentId::new("provider-web-search-test-query"),
+                kind: ContextSegmentKind::UserTurnInput,
+                stability: ContextStability::TurnVolatile,
+                cache_policy: ContextCachePolicy::NoCache,
+                role: ContextRole::User,
+                content: format!(
+                    "Run a web search for this exact query and answer in one short sentence: {test_query}"
+                ),
+                token_budget: 128,
+                provenance: ContextProvenance {
+                    source: "provider_web_search_test".to_owned(),
+                    reference: Some(provider.id.clone()),
+                },
+            },
+        ],
+    };
+    let mut semantic_request = build_semantic_request(descriptor.clone(), payload, false)
+        .map_err(|err| UiCommandDispatchPortError::DispatchFailed(err.to_string()))?;
+    semantic_request.hosted_tools = vec![ProviderHostedToolDefinition::WebSearch {
+        mode: SemanticWebSearchMode::Live,
+        external_web_access: true,
+    }];
+    semantic_request.tools = Vec::new();
+    semantic_request.tool_choice = Some(match descriptor.protocol {
+        ProviderProtocol::AnthropicMessages => ProviderToolChoice::Required {
+            name: "web_search".to_owned(),
+        },
+        _ => ProviderToolChoice::Auto,
+    });
+
+    let mut driver = build_live_provider_driver(&provider)
+        .map_err(|err| UiCommandDispatchPortError::DispatchFailed(err.to_string()))?;
+    let ctx = ProviderEventContext {
+        agent_id: AgentId::new(selected.name.clone()),
+        session_id,
+        turn_id,
+        trace_id,
+        feature_id: FeatureId::new("provider.reason-live-bridge"),
+    };
+    let outputs = driver
+        .execute_once_with_raw(&ctx, &semantic_request, &mut |_| Ok(()))
+        .map_err(|err| {
+            UiCommandDispatchPortError::DispatchFailed(format!(
+                "provider web_search test failed for `{}`: {}",
+                provider.id,
+                public_error_center_message(&err.info().terminal_message())
+            ))
+        })?;
+    if !provider_outputs_have_hosted_web_search(&outputs) {
+        return Err(UiCommandDispatchPortError::DispatchFailed(format!(
+            "provider web_search test did not observe provider-hosted web_search for `{}`; semantic_outputs={} observed_outputs={}",
+            provider.id,
+            outputs.len(),
+            provider_semantic_outputs_summary(&outputs)
+        )));
+    }
+    Ok(format!(
+        "provider_web_search_test_passed:provider={}:protocol={}:model={}:hosted_tool=web_search:hosted_observed=true:semantic_outputs={}",
+        sanitize_identifier(&provider.id),
+        provider.protocol.as_str(),
+        sanitize_identifier(&provider.default_model),
+        outputs.len()
+    ))
+}
+
+fn provider_outputs_have_hosted_web_search(outputs: &[ProviderSemanticOutput]) -> bool {
+    outputs.iter().any(|output| {
+        matches!(
+            output,
+            ProviderSemanticOutput::SemanticEvent(event)
+                if event.content.contains("provider-hosted web_search")
+        )
+    })
+}
+
+fn provider_semantic_outputs_summary(outputs: &[ProviderSemanticOutput]) -> String {
+    if outputs.is_empty() {
+        return "none".to_owned();
+    }
+    let mut parts = outputs
+        .iter()
+        .take(6)
+        .map(|output| match output {
+            ProviderSemanticOutput::SemanticEvent(event) => format!(
+                "semantic:{:?}:{}",
+                event.kind,
+                compact_status_fragment(&event.content, 160)
+            ),
+            ProviderSemanticOutput::ToolCall(tool_call) => format!(
+                "tool_call:{}",
+                compact_status_fragment(&tool_call.tool_call.tool_name, 80)
+            ),
+            ProviderSemanticOutput::ToolResultReentry(tool_result) => format!(
+                "tool_result:{:?}:{}",
+                tool_result.tool_result.status,
+                compact_status_fragment(&tool_result.tool_result.output, 120)
+            ),
+            ProviderSemanticOutput::Usage(usage) => format!(
+                "usage:finish={}:total={}",
+                usage.usage.finish_reason.as_deref().unwrap_or("unknown"),
+                usage.usage.resolved_total_tokens()
+            ),
+            ProviderSemanticOutput::Terminal(terminal) => format!(
+                "terminal:{:?}:{}",
+                terminal.status,
+                compact_status_fragment(&terminal.summary, 120)
+            ),
+            ProviderSemanticOutput::Error(error) => format!(
+                "error:{}:{}",
+                compact_status_fragment(&error.error.code, 80),
+                compact_status_fragment(&error.error.message, 120)
+            ),
+        })
+        .collect::<Vec<_>>();
+    if outputs.len() > 6 {
+        parts.push(format!("+{} more", outputs.len() - 6));
+    }
+    parts.join(";")
 }
 
 enum ControlStatusHookOutcome {
@@ -4594,6 +4863,19 @@ impl UiCommandDispatchPort for RuntimeCommandDispatcher {
             }
             let mut state = self.state.lock().expect("lock runtime dispatcher state");
             return self.dispatch_submit_user_input(&mut state, envelope, text, session_id, cwd);
+        }
+
+        if let UiCommand::TestProviderWebSearch { .. } = envelope.command.clone() {
+            let (runtime_home, agent_name) = {
+                let state = self.state.lock().expect("lock runtime dispatcher state");
+                let live = state.config.live.as_ref().ok_or_else(|| {
+                    UiCommandDispatchPortError::Unsupported(
+                        "provider web_search test requires a live runtime home".to_owned(),
+                    )
+                })?;
+                (live.runtime_home.clone(), live.selected_agent.name.clone())
+            };
+            return self.dispatch_test_provider_web_search(envelope, runtime_home, agent_name);
         }
 
         let mut state = self.state.lock().expect("lock runtime dispatcher state");
@@ -5130,6 +5412,37 @@ impl RuntimeCommandDispatcher {
             target_feature_id: envelope.target_feature_id,
             target_owner_module: envelope.target_owner_module,
             dispatch_status: "provider_config_upserted_restart_required".to_owned(),
+        })
+    }
+
+    fn dispatch_test_provider_web_search(
+        &self,
+        envelope: UiCommandDispatchEnvelope,
+        runtime_home: PathBuf,
+        agent_name: String,
+    ) -> Result<UiCommandDispatchReceipt, UiCommandDispatchPortError> {
+        let UiCommand::TestProviderWebSearch { provider_id, query } = envelope.command.clone()
+        else {
+            return Err(UiCommandDispatchPortError::Unsupported(
+                "command is not a provider web_search test".to_owned(),
+            ));
+        };
+        let config_path = runtime_home.join("config.toml");
+        let loaded = load_config_from_path(&config_path)
+            .map_err(|err| UiCommandDispatchPortError::DispatchFailed(err.to_string()))?;
+        let selected = loaded
+            .select_agent(&agent_name)
+            .map_err(|err| UiCommandDispatchPortError::DispatchFailed(err.to_string()))?;
+        let provider = loaded
+            .select_provider_for_test(&provider_id)
+            .map_err(|err| UiCommandDispatchPortError::DispatchFailed(err.to_string()))?;
+        let receipt_status =
+            execute_provider_web_search_test(&selected, provider, query.as_deref())?;
+        Ok(UiCommandDispatchReceipt {
+            ingress: envelope.ingress,
+            target_feature_id: envelope.target_feature_id,
+            target_owner_module: envelope.target_owner_module,
+            dispatch_status: receipt_status,
         })
     }
 
@@ -7054,7 +7367,7 @@ fn provider_descriptor(
         protocol,
         model: provider.default_model.clone(),
         capabilities: ProviderCapabilities {
-            web_search: provider_web_search_capability(provider, protocol),
+            web_search: provider_web_search_capability(provider),
             multimodal: provider_multimodal_capability(provider),
             vision: provider_vision_capability(provider),
             reasoning: true,
@@ -7064,27 +7377,104 @@ fn provider_descriptor(
 
 fn provider_web_search_capability(
     provider: &SelectedProviderConfig,
-    protocol: ProviderProtocol,
 ) -> ProviderWebSearchCapability {
-    if provider.web_search == ProviderWebSearchMode::Disabled {
+    provider_web_search_capability_from_parts(
+        provider.provider_type,
+        provider.protocol,
+        provider.web_search,
+    )
+}
+
+fn provider_web_search_capability_from_parts(
+    provider_type: ProviderType,
+    protocol: ConfigProviderProtocol,
+    mode: ProviderWebSearchMode,
+) -> ProviderWebSearchCapability {
+    if mode == ProviderWebSearchMode::Disabled {
         return ProviderWebSearchCapability::Unsupported;
     }
-    match (provider.provider_type, protocol) {
-        (ProviderType::OpenAi, ProviderProtocol::OpenAiResponses)
-            if openai_model_supports_hosted_web_search(&provider.default_model) =>
-        {
+    match (provider_type, protocol) {
+        (ProviderType::OpenAi, ConfigProviderProtocol::Responses)
+        | (ProviderType::Anthropic, ConfigProviderProtocol::Messages) => {
             ProviderWebSearchCapability::hosted_live_with_functions()
         }
         _ => ProviderWebSearchCapability::Unsupported,
     }
 }
 
-fn openai_model_supports_hosted_web_search(model: &str) -> bool {
-    let normalized = model.trim().to_ascii_lowercase();
-    normalized.starts_with("gpt-5")
-        || normalized.starts_with("gpt-4.1")
-        || normalized.starts_with("gpt-4o")
-        || normalized.ends_with("-search-api")
+fn provider_web_search_route_guidance(
+    selected: &SelectedAgentConfig,
+    selected_descriptor: &ProviderDescriptor,
+) -> String {
+    let selected_mode = selected.provider.web_search.as_str();
+    let (selected_effective, selected_reason) = provider_web_search_effective_status(
+        &selected.provider.id,
+        selected.provider.provider_type,
+        selected.provider.protocol,
+        selected.provider.web_search,
+    );
+    let worker_routes = provider_web_search_worker_routes(selected);
+    let route_line = if selected_descriptor
+        .capabilities
+        .web_search
+        .can_mix_with_function_tools()
+    {
+        format!(
+            "current Master provider `{}` will declare provider-hosted web_search in this request",
+            selected.provider.id
+        )
+    } else if worker_routes.is_empty() {
+        "no configured Worker clean_search route currently has verified hosted web_search"
+            .to_owned()
+    } else {
+        format!(
+            "configured Worker clean_search route available via {}; create/assign a task with execution_profile=\"clean_search\" for broad/current search, then review Worker evidence",
+            worker_routes.join(", ")
+        )
+    };
+    format!(
+        "Web Search Route Status (runtime truth): selected provider `{}` ({}/{}/{}) configured web_search={} effective={} reason=\"{}\". A local Freehand function tool named `web_search` is never exposed. Fallback provider is not automatic capability fallback for this Master turn. Route: {}.",
+        selected.provider.id,
+        selected.provider.provider_type.as_str(),
+        selected.provider.protocol.as_str(),
+        selected.provider.default_model,
+        selected_mode,
+        selected_effective,
+        selected_reason,
+        route_line
+    )
+}
+
+fn provider_web_search_worker_routes(selected: &SelectedAgentConfig) -> Vec<String> {
+    selected
+        .worker_peers()
+        .filter_map(|peer| {
+            provider_for_peer_id(selected, &peer.provider_id).map(|provider| (peer, provider))
+        })
+        .filter(|(_, provider)| provider_web_search_capability(provider).is_hosted())
+        .map(|(peer, provider)| {
+            format!(
+                "`{}` using `{}` ({}/{})",
+                peer.name,
+                provider.id,
+                provider.protocol.as_str(),
+                provider.default_model
+            )
+        })
+        .collect()
+}
+
+fn provider_for_peer_id<'a>(
+    selected: &'a SelectedAgentConfig,
+    provider_id: &str,
+) -> Option<&'a SelectedProviderConfig> {
+    if selected.provider.id == provider_id {
+        return Some(&selected.provider);
+    }
+    selected
+        .fallback_provider
+        .as_ref()
+        .filter(|provider| provider.id == provider_id)
 }
 
 fn provider_vision_capability(provider: &SelectedProviderConfig) -> bool {
@@ -7381,6 +7771,7 @@ struct LiveRoundContext<'a> {
     role: LiveReasonExecutionRole,
     execution_profile: LiveReasonExecutionProfile,
     configured_worker_set: Option<&'a [String]>,
+    web_search_route_guidance: Option<&'a str>,
     runtime_home: &'a Path,
     cwd: Option<&'a Path>,
     agent_id: &'a AgentId,
@@ -7397,6 +7788,7 @@ fn next_round_segments(
         context.role,
         context.execution_profile,
         context.configured_worker_set,
+        context.web_search_route_guidance,
         context.runtime_home,
         context.cwd,
         context.agent_id,

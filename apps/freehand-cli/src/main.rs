@@ -106,6 +106,9 @@ fn run() -> Result<String, String> {
     if flag == "adp-config-update" {
         return run_adp_config_update(args.collect());
     }
+    if flag == "adp-provider-web-search-test" {
+        return run_adp_provider_web_search_test(args.collect());
+    }
     if flag == "adp-task-query" {
         return run_adp_task_query(args.collect());
     }
@@ -120,7 +123,7 @@ fn run() -> Result<String, String> {
     }
     if flag != "--agent" {
         return Err(
-        "usage: freehand-cli --agent <name>\n   or: freehand-cli reason-e2e --agent <name> --scenario <usage-compaction|recovery-block>\n   or: freehand-cli reason-persist-smoke --agent <name>\n   or: freehand-cli reason-live --agent <name> --prompt <text> [--stream]\n   or: freehand-cli adp-smoke --url ws://127.0.0.1:4041/adp\n   or: freehand-cli adp-turn-sample --url ws://127.0.0.1:4041/adp --sample <success|failure|schema-mismatch|provider-retry>\n   or: freehand-cli session-continue-sample --url ws://127.0.0.1:4041/adp\n   or: freehand-cli task-lifecycle-sample --url ws://127.0.0.1:4041/adp\n   or: freehand-cli task-restart-seed-review --agent master --task <id> --worker <id> --execution <id> --target-cwd <path> --summary <text>\n   or: freehand-cli task-restart-seed-rejected --agent master --task <id> --worker <id> --execution <id> --target-cwd <path> --summary <text>\n   or: freehand-cli task-restart-seed-blocked --agent master --task <id> --worker <id> --execution <id> --target-cwd <path> --summary <text>\n   or: freehand-cli task-restart-seed-running --agent master --task <id> --worker <id> --execution <id> --target-cwd <path> --summary <text>\n   or: freehand-cli phase1-foundation-sample --url ws://127.0.0.1:4041/adp [--verify-task <task_id> --review-task <task_id> --execution <id> --agent <id>]\n   or: freehand-cli master-worker-foundation-sample --url ws://127.0.0.1:4041/adp [--verify-task <task_id> --execution <id> --agent <id>]\n   or: freehand-cli master-worker-autonomy-sample --url ws://127.0.0.1:4041/adp [--scenario <all|success|execution-error|reject-retry>] [--verify-task <task_id> --execution <id> --agent <id>]\n   or: freehand-cli master-poll-foundation-sample --url ws://127.0.0.1:4041/adp [--verify-task <task_id> --execution <id> --agent <id> --cursor <cursor>]\n   or: freehand-cli worker-control-foundation-sample --url ws://127.0.0.1:4041/adp [--verify-task <task_id> --execution <id> --agent <id> --control <control_id>]\n   or: freehand-cli adp-session-query --url ws://127.0.0.1:4041/adp [--session <id>]\n   or: freehand-cli adp-session-manage --url ws://127.0.0.1:4041/adp --action <create|rename|archive|restore|delete> --session <id> [--title <title>] [--cwd <path>]\n   or: freehand-cli adp-config-query --url ws://127.0.0.1:4041/adp\n   or: freehand-cli adp-config-update --url ws://127.0.0.1:4041/adp --agent <name> --provider <id> --type <openai|anthropic> --protocol <responses|chat_completions|messages> --base-url <url> --model <model> [--web-search auto|disabled] --api-key-env <ENV>\n   or: freehand-cli adp-task-query --url ws://127.0.0.1:4041/adp [--status <status>] [--agent <id>] [--history <task_id>]\n   or: freehand-cli adp-task-subscribe --url ws://127.0.0.1:4041/adp [--status <status>] [--agent <id>]\n   or: freehand-cli adp-error-query --url ws://127.0.0.1:4041/adp --session <id> [--trace <id>] [--turn <id>] [--domain <domain>]\n   or: freehand-cli remote-daemon-bootstrap-link --daemon <id> --credential-env <ENV> [--ttl-seconds <seconds>] [--web]"
+        "usage: freehand-cli --agent <name>\n   or: freehand-cli reason-e2e --agent <name> --scenario <usage-compaction|recovery-block>\n   or: freehand-cli reason-persist-smoke --agent <name>\n   or: freehand-cli reason-live --agent <name> --prompt <text> [--stream]\n   or: freehand-cli adp-smoke --url ws://127.0.0.1:4041/adp\n   or: freehand-cli adp-turn-sample --url ws://127.0.0.1:4041/adp --sample <success|failure|schema-mismatch|provider-retry>\n   or: freehand-cli session-continue-sample --url ws://127.0.0.1:4041/adp\n   or: freehand-cli task-lifecycle-sample --url ws://127.0.0.1:4041/adp\n   or: freehand-cli task-restart-seed-review --agent master --task <id> --worker <id> --execution <id> --target-cwd <path> --summary <text>\n   or: freehand-cli task-restart-seed-rejected --agent master --task <id> --worker <id> --execution <id> --target-cwd <path> --summary <text>\n   or: freehand-cli task-restart-seed-blocked --agent master --task <id> --worker <id> --execution <id> --target-cwd <path> --summary <text>\n   or: freehand-cli task-restart-seed-running --agent master --task <id> --worker <id> --execution <id> --target-cwd <path> --summary <text>\n   or: freehand-cli phase1-foundation-sample --url ws://127.0.0.1:4041/adp [--verify-task <task_id> --review-task <task_id> --execution <id> --agent <id>]\n   or: freehand-cli master-worker-foundation-sample --url ws://127.0.0.1:4041/adp [--verify-task <task_id> --execution <id> --agent <id>]\n   or: freehand-cli master-worker-autonomy-sample --url ws://127.0.0.1:4041/adp [--scenario <all|success|execution-error|reject-retry>] [--verify-task <task_id> --execution <id> --agent <id>]\n   or: freehand-cli master-poll-foundation-sample --url ws://127.0.0.1:4041/adp [--verify-task <task_id> --execution <id> --agent <id> --cursor <cursor>]\n   or: freehand-cli worker-control-foundation-sample --url ws://127.0.0.1:4041/adp [--verify-task <task_id> --execution <id> --agent <id> --control <control_id>]\n   or: freehand-cli adp-session-query --url ws://127.0.0.1:4041/adp [--session <id>]\n   or: freehand-cli adp-session-manage --url ws://127.0.0.1:4041/adp --action <create|rename|archive|restore|delete> --session <id> [--title <title>] [--cwd <path>]\n   or: freehand-cli adp-config-query --url ws://127.0.0.1:4041/adp\n   or: freehand-cli adp-provider-web-search-test --url ws://127.0.0.1:4041/adp --provider <id> [--query <text>]\n   or: freehand-cli adp-config-update --url ws://127.0.0.1:4041/adp --agent <name> --provider <id> --type <openai|anthropic> --protocol <responses|chat_completions|messages> --base-url <url> --model <model> [--web-search auto|disabled] --api-key-env <ENV>\n   or: freehand-cli adp-task-query --url ws://127.0.0.1:4041/adp [--status <status>] [--agent <id>] [--history <task_id>]\n   or: freehand-cli adp-task-subscribe --url ws://127.0.0.1:4041/adp [--status <status>] [--agent <id>]\n   or: freehand-cli adp-error-query --url ws://127.0.0.1:4041/adp --session <id> [--trace <id>] [--turn <id>] [--domain <domain>]\n   or: freehand-cli remote-daemon-bootstrap-link --daemon <id> --credential-env <ENV> [--ttl-seconds <seconds>] [--web]"
                 .to_owned(),
         );
     }
@@ -1014,6 +1017,45 @@ fn run_adp_config_update(args: Vec<String>) -> Result<String, String> {
     runtime.block_on(run_adp_config_update_async(url, update))
 }
 
+fn run_adp_provider_web_search_test(args: Vec<String>) -> Result<String, String> {
+    let usage =
+        "usage: freehand-cli adp-provider-web-search-test --url ws://127.0.0.1:4041/adp --provider <id> [--query <text>]"
+            .to_owned();
+    let mut url = None::<String>;
+    let mut provider_id = None::<String>;
+    let mut query = None::<String>;
+    let mut index = 0;
+    while index < args.len() {
+        match args[index].as_str() {
+            "--url" if index + 1 < args.len() => {
+                url = Some(args[index + 1].clone());
+                index += 2;
+            }
+            "--provider" if index + 1 < args.len() => {
+                provider_id = Some(args[index + 1].clone());
+                index += 2;
+            }
+            "--query" if index + 1 < args.len() => {
+                query = Some(args[index + 1].clone());
+                index += 2;
+            }
+            _ => return Err(usage),
+        }
+    }
+    let url = url.ok_or_else(|| usage.clone())?;
+    let provider_id = provider_id.ok_or_else(|| usage.clone())?;
+    let runtime = tokio::runtime::Builder::new_current_thread()
+        .enable_io()
+        .enable_time()
+        .build()
+        .map_err(|err| err.to_string())?;
+    runtime.block_on(run_adp_provider_web_search_test_async(
+        url,
+        provider_id,
+        query,
+    ))
+}
+
 fn run_remote_daemon_bootstrap_link(args: Vec<String>) -> Result<String, String> {
     let usage =
         "usage: freehand-cli remote-daemon-bootstrap-link --daemon <id> --credential-env <ENV> [--ttl-seconds <seconds>] [--web]"
@@ -1556,6 +1598,69 @@ async fn run_adp_config_update_async(
     }
 }
 
+async fn run_adp_provider_web_search_test_async(
+    url: String,
+    provider_id: String,
+    query: Option<String>,
+) -> Result<String, String> {
+    let (mut socket, _) = timeout(Duration::from_secs(10), connect_async(&url))
+        .await
+        .map_err(|_| format!("ADP connect timeout: {url}"))?
+        .map_err(|err| format!("ADP connect failed: {err}"))?;
+    let request_id = "cli-provider-web-search-test-1".to_owned();
+    send_adp(
+        &mut socket,
+        UiAdpRequest::Command {
+            request_id: request_id.clone(),
+            command: UiCommand::TestProviderWebSearch { provider_id, query },
+        },
+    )
+    .await?;
+    let deadline = tokio::time::Instant::now() + Duration::from_secs(120);
+    loop {
+        let now = tokio::time::Instant::now();
+        if now >= deadline {
+            let _ = socket.close(None).await;
+            return Err("ADP provider web_search test timeout".to_owned());
+        }
+        let response = timeout(deadline - now, next_adp(&mut socket))
+            .await
+            .map_err(|_| "ADP provider web_search test timeout".to_owned())??;
+        match response {
+            UiAdpResponse::CommandReceipt {
+                request_id: response_id,
+                receipt,
+            } if response_id == request_id => {
+                let _ = socket.close(None).await;
+                if !receipt
+                    .dispatch_status
+                    .starts_with("provider_web_search_test_passed:")
+                {
+                    return Err(format!(
+                        "ADP provider web_search test unexpected status {}",
+                        receipt.dispatch_status
+                    ));
+                }
+                return Ok(format!(
+                    "adp_provider_web_search_test_ok url={} status={}",
+                    url, receipt.dispatch_status
+                ));
+            }
+            UiAdpResponse::Failure {
+                request_id: response_id,
+                failure,
+            } if response_id == request_id => {
+                let _ = socket.close(None).await;
+                return Err(format!(
+                    "ADP provider web_search test failure {}: {}",
+                    failure.code, failure.message
+                ));
+            }
+            _ => {}
+        }
+    }
+}
+
 async fn run_adp_error_query_async(url: String, query: UiCommand) -> Result<String, String> {
     let (mut socket, _) = timeout(Duration::from_secs(10), connect_async(&url))
         .await
@@ -1728,12 +1833,13 @@ fn summarize_config_query_result(
                 .iter()
                 .map(|provider| {
                     format!(
-                        "{}:{}:{}:{}:{}:{}:{}:{}",
+                        "{}:{}:{}:{}:{}:{}:{}:{}:{}",
                         sanitize_config_query_token(&provider.provider_id),
                         sanitize_config_query_token(&provider.provider_type),
                         sanitize_config_query_token(&provider.provider_protocol),
                         sanitize_config_query_token(&provider.default_model),
                         sanitize_config_query_token(&provider.provider_web_search),
+                        sanitize_config_query_token(&provider.provider_web_search_effective),
                         sanitize_config_query_token(&provider.provider_base_url_host),
                         sanitize_config_query_token(&provider.provider_auth_source),
                         provider.enabled
@@ -1742,7 +1848,7 @@ fn summarize_config_query_result(
                 .collect::<Vec<_>>()
                 .join(",");
             let output = format!(
-                "adp_config_query_ok url={} agent={} mode={} node={} paired_agents={} provider={} fallback_provider={} provider_type={} provider_protocol={} base_url_host={} default_model={} web_search={} auth_type={} auth_source={} provider_registry={} restart_required_on_change={}",
+                "adp_config_query_ok url={} agent={} mode={} node={} paired_agents={} provider={} fallback_provider={} provider_type={} provider_protocol={} base_url_host={} default_model={} web_search={} web_search_effective={} web_search_route_summary={} auth_type={} auth_source={} provider_registry={} restart_required_on_change={}",
                 url,
                 status.agent_name,
                 status.agent_mode,
@@ -1755,6 +1861,8 @@ fn summarize_config_query_result(
                 status.provider_base_url_host,
                 status.default_model,
                 status.provider_web_search,
+                status.provider_web_search_effective,
+                sanitize_config_query_token(&status.provider_web_search_route_summary),
                 status.provider_auth_type,
                 status.provider_auth_source,
                 provider_registry,

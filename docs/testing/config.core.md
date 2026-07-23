@@ -17,6 +17,7 @@
   - resolve provider auth source without leaking secret projection
   - preserve safe auth source kind on selected provider config for downstream UI-safe status projection
   - project the complete configured provider registry without resolved secrets so users can select any enabled provider by id
+  - resolve any enabled configured provider by id for live capability tests without changing active agent selection
   - validate and persist owner-backed provider definition upserts without changing the selected agent provider
   - validate and persist owner-backed primary/fallback provider selection changes without rewriting provider definitions
   - retain the legacy combined provider/model update path for existing CLI callers while new UI flows use separate upsert and selection operations
@@ -73,7 +74,8 @@
   - provider failover execution remains owned by `provider.reason-live-bridge`; `config.core` owns only validated route selection truth
   - remote daemon live health probing, relay signaling/tunnel IO, and Tailscale OS auto-connect are not implemented in `config.core`; this feature owns registry, route plan, and bootstrap contract only
 - sync status between design and implementation:
-  - white-box, module black-box, and project black-box baseline cover multi-provider registry, reciprocal multi-peer topology, and selected-provider projection
+  - white-box, module black-box, and project black-box baseline cover multi-provider registry, reciprocal multi-peer topology, selected-provider projection, and explicit provider test selection
+  - `cargo test -p freehand-config select_provider_for_test_resolves_any_configured_enabled_provider -- --nocapture` covers enabled-provider capability-test selection by id
   - `cargo test -p freehand-config -- --nocapture` covers the three-Worker positive path plus legacy singular, duplicate, multi-Master Worker negative paths, remote daemon registry, route selection, and bootstrap link paths
   - `cargo test -p freehand-config remote_daemon -- --nocapture` covers the focused remote daemon route/bootstrap slice
   - selected-provider auth source is regression-locked for inline and env configurations

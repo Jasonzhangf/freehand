@@ -110,6 +110,7 @@
   - no-UI ADP session manage can verify daemon session CRUD and rollback receipt paths without WebUI DOM inspection
   - no-UI ADP task query can verify daemon task list/history visibility without WebUI DOM inspection
   - no-UI ADP task subscribe can verify daemon task list subscription visibility without WebUI DOM inspection
+  - no-UI ADP provider web_search test can verify provider-hosted search acceptance or explicit provider rejection without WebUI DOM inspection
   - no-UI ADP error query can verify daemon error-center metadata visibility without WebUI DOM inspection
   - machine-readable mainline truth remains the only source for generated wiki artifacts
 - fixtures / replay inputs / runtime evidence paths:
@@ -128,6 +129,7 @@
   - S-profile normal master-worker E2E verifier `scripts/verify-normal-master-worker-e2e.sh`
   - local Phase 2B master poll WebSocket mock in CLI tests
   - local Phase 2C worker-control WebSocket mock in CLI tests
+  - S-profile provider web_search live-test command `freehand-cliS adp-provider-web-search-test --url ws://127.0.0.1:4042/adp --provider <id>`
   - local `freehand-server webui-serve-smoke` for manual/agent positive ADP smoke
   - `~/.freehand/state/config`
   - `~/.freehand/state/turns`
@@ -160,5 +162,6 @@
   - CLI ADP session manage command is implemented for live daemon session CRUD and rollback checks
   - CLI ADP task query command is implemented for live daemon task list/history checks
   - CLI ADP task subscribe command is implemented for live daemon task list subscription checks
+  - CLI ADP provider web_search test command is implemented for live daemon provider-hosted search checks
   - CLI ADP error query command is implemented for live daemon error-center metadata checks
   - migrated mainline-call source and generated wiki are kept in sync with this test design

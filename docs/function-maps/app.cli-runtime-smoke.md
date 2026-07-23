@@ -77,6 +77,7 @@
 - for ADP session manage, CLI connects to the same daemon `/adp` and sends protocol-owned create, rename, archive, restore, delete-as-archive, or rollback command frames for no-UI session lifecycle diagnosis
 - for ADP task query, CLI connects to the same daemon `/adp` and sends protocol-owned task list/history query frames for no-UI task truth diagnosis
 - for ADP task subscribe, CLI connects to the same daemon `/adp` and sends protocol-owned task list subscription frames for no-UI task push diagnosis
+- for ADP provider web_search test, CLI connects to the same daemon `/adp` and sends protocol-owned `TestProviderWebSearch` command frames for no-UI provider-hosted search capability diagnosis
 - for ADP error query, CLI connects to the same daemon `/adp` and sends protocol-owned error-center query frames for no-UI metadata truth diagnosis
 
 ## Response Mainline
@@ -108,6 +109,7 @@
 - ADP session manage prints command receipt status for session CRUD and rollback commands without creating a second source of session truth
 - ADP task query prints task list count/task ids or task history event counts from protocol-owned query results
 - ADP task subscribe prints accepted state plus task list count/task ids from the initial protocol-owned subscription event
+- ADP provider web_search test prints `adp_provider_web_search_test_ok` only when the runtime receipt starts with `provider_web_search_test_passed:`; provider rejection stays an explicit CLI failure
 - ADP error query prints error-center event count plus compact domain/class/recovery/code/hash summaries without dumping raw metadata payloads
 
 ## Error Mainline
@@ -142,6 +144,7 @@
 - ADP query-as-command must return `ingress_command_kind_mismatch`, proving command/query separation without mutation
 - ADP task query failures print explicit ADP failure code/message instead of treating missing task truth as an empty success
 - ADP task subscribe failures print explicit ADP failure code/message instead of treating missing task truth as an empty success
+- ADP provider web_search test timeout, unexpected receipt status, provider rejection, or missing hosted-search observation returns explicit terminal error
 - ADP error query failures print explicit ADP failure code/message instead of treating metadata lookup failures as an empty success
 
 ## Shared Multi-Reference Functions
@@ -180,6 +183,7 @@
 | 11 | `run_adp_task_query_async` | `apps/freehand-cli/src/main.rs` | send task list/history query over ADP and summarize the task projection | ADP WebSocket URL + task query command | terminal-facing task list/history summary or explicit ADP failure | ADP task query runner | daemon `/adp` | bound |
 | 12 | `run_adp_task_subscribe` | `apps/freehand-cli/src/main.rs` | parse ADP task subscribe URL and optional list filters | `--url ws://.../adp [--status <status>] [--agent <id>]` | selected task subscribe command | CLI dispatcher | ADP task subscribe runner | bound |
 | 13 | `run_adp_task_subscribe_async` | `apps/freehand-cli/src/main.rs` | send task list subscription over ADP and summarize the first task list event | ADP WebSocket URL + task subscription filters | terminal-facing task list subscription summary or explicit ADP failure | ADP task subscribe runner | daemon `/adp` | bound |
+| 13a | `run_adp_provider_web_search_test` / `run_adp_provider_web_search_test_async` | `apps/freehand-cli/src/main.rs` | send protocol-owned provider web_search live-test command over ADP and require a provider-hosted success receipt | `--url ws://.../adp --provider <id> [--query <text>]` | terminal-facing provider web_search live-test summary or explicit ADP/provider failure | CLI dispatcher | daemon `/adp` | bound |
 | 14 | `run_adp_error_query` | `apps/freehand-cli/src/main.rs` | parse ADP error-center query URL and session/trace/turn/domain filters | `--url ws://.../adp --session <id> [--trace <id>] [--turn <id>] [--domain <domain>]` | selected error-center query command | CLI dispatcher | ADP error query runner | bound |
 | 15 | `run_adp_error_query_async` | `apps/freehand-cli/src/main.rs` | send error-center query over ADP and summarize the returned metadata projection | ADP WebSocket URL + error-center query command | terminal-facing error-center summary or explicit ADP failure | ADP error query runner | daemon `/adp` | bound |
 | 16 | `run_adp_session_manage` / `run_adp_session_manage_async` | `apps/freehand-cli/src/main.rs` | send protocol-owned session CRUD or rollback command over ADP and summarize the command receipt | `--url ws://.../adp --action create\|rename\|archive\|restore\|delete\|rollback --session <id> [--title <title>] [--cwd <path>]` | terminal-facing session manage receipt or explicit ADP failure | CLI dispatcher | daemon `/adp` | bound |
@@ -215,6 +219,7 @@
 - CLI ADP session manage path is implemented for no-UI session CRUD and rollback diagnosis
 - CLI ADP task list/history query path is implemented for no-UI task truth diagnosis
 - CLI ADP task list subscribe path is implemented for no-UI task push diagnosis
+- CLI ADP provider web_search test path is implemented for no-UI provider-hosted search capability diagnosis
 - CLI ADP error-center query path is implemented for no-UI metadata truth diagnosis
 - CLI Phase 1 foundation sample is implemented for no-UI TaskBoard, AgentBoard, ExecutionFact, SchedulerTick, and restart same-id proof
 - CLI Phase 2A master-worker foundation sample is implemented for no-UI assign/claim/progress/blocked/recovering/review/reject/retry/approve/close and restart same-id proof

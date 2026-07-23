@@ -79,6 +79,7 @@
 - invalid provider definition updates, missing env-var auth, missing selected agent, invalid provider selections, disabled providers, and same-primary fallback selection fail before overwrite; failed updates must leave the previous config bytes intact
 - invalid Agent resource-count updates, non-Master targets, and missing targets fail before overwrite; failed updates must leave the previous config bytes intact
 - fallback provider selection fails explicitly when the referenced provider is missing, disabled, or equal to the primary provider
+- provider capability tests may resolve any enabled provider by id without changing the selected agent primary/fallback binding
 - API keys and pair token values are runtime-only fields and must not enter UI-safe config status projection
 
 ## Shared Multi-Reference Functions
@@ -104,6 +105,7 @@
 | 10b | `switch_agent_provider_in_path` | `crates/freehand-config/src/lib.rs` | validate and atomically persist one agent primary/fallback provider selection without rewriting provider definitions | config path + agent provider selection update | selected agent projection from saved config | runtime.ui-command-dispatch / tests | config persistence owner | bound |
 | 11 | `persist_config_atomically` | `crates/freehand-config/src/lib.rs` | write new config through temp file plus rename after validation succeeds | validated TOML text | replaced canonical config file | `update_provider_config_in_path` | filesystem persistence | bound |
 | 12 | `select_provider_for_agent` | `crates/freehand-config/src/lib.rs` | resolve one typed primary or fallback provider binding and its independent auth source | provider registry + agent name + provider id + route role | selected provider runtime config or route-specific explicit config error | `LoadedConfig::select_agent` | provider registry/auth resolver | bound |
+| 12a | `LoadedConfig::select_provider_for_test` | `crates/freehand-config/src/lib.rs` | resolve any enabled configured provider for an explicit capability test without changing selected agent provider bindings | loaded provider registry + provider id + env | selected provider runtime config or explicit config error | runtime.ui-command-dispatch provider test | provider registry/auth resolver | bound |
 | 13 | `AgentResourceConfigUpdate` | `crates/freehand-config/src/lib.rs` | carry owner-backed Master Worker resource-count intent | agent name + resource count | validated config-owner update input | runtime.ui-command-dispatch | config owner DTO | bound |
 | 14 | `update_agent_resource_config_in_path` | `crates/freehand-config/src/lib.rs` | validate, apply, reparse, select, and atomically persist reciprocal Master/Worker resource topology changes | config path + resource-count update | selected agent projection from saved config | runtime.ui-command-dispatch / tests | config persistence owner | bound |
 | 15 | `validate_remote_daemon_registry` | `crates/freehand-config/src/lib.rs` | validate account-scoped remote daemon registry, direct/relay endpoint candidates, and active endpoint invariants | raw remote daemon TOML tables or bootstrap bundle parts | `RemoteDaemonRegistryConfig` or explicit config error | `validate_config` / bootstrap validator | registry validator | bound |
@@ -115,7 +117,7 @@
 
 ## Sync Status Against Code
 
-- code binding landed for config loader, parser, validator, provider registry accessor, and agent/provider selector
+- code binding landed for config loader, parser, validator, provider registry accessor, selected agent/provider selector, and explicit enabled-provider test selector
 - selected-agent projection now includes ordered reciprocal multi-peer topology metadata, one bound primary provider runtime configuration, and one optional distinct fallback provider runtime configuration
 - singular `paired_agent` schema and selected-agent fields are physically removed
 - selected-provider projection now includes `auth_source` so downstream UI-safe projections can show auth source type without exposing API keys

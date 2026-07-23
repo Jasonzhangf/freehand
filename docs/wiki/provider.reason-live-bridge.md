@@ -26,7 +26,7 @@ Generated from `docs/mainline-calls/provider.reason-live-bridge.json`. Do not ed
 - runtime emits restore lifecycle debug snapshots through `debug.core` without request text
 - runtime emits context-planning started/completed plus segment-level started/completed/failed metadata and debug snapshots before the first provider round starts, without request text or provider payload content, so UI/debug clients can observe the exact pre-provider context segment being prepared
 - live bridge bootstraps one shared metadata ledger for runtime-owned lifecycle facts plus delegated `reason.turn` producer writes
-- bridge derives provider descriptor and executor config from the active primary/fallback route without exposing provider wire DTOs; hosted search capability is selected from provider descriptor, config `web_search`, and execution profile while OpenAI wire rendering remains adapter-owned; Anthropic output budget stays at the adapter default `DEFAULT_ANTHROPIC_MAX_TOKENS=8192` without a smaller live-bridge cap
+- bridge derives provider descriptor and executor config from the active primary/fallback route without exposing provider wire DTOs; hosted search capability is selected from provider descriptor, config `web_search`, and execution profile while OpenAI Responses and Anthropic Messages wire rendering remain adapter-owned; Anthropic output budget stays at the adapter default `DEFAULT_ANTHROPIC_MAX_TOKENS=8192` without a smaller live-bridge cap
 - `reason.turn` may start multiple rounds under one logical live request when completion schema says `continue` or when schema rejection requires same-task retry
 - provider semantic request is built from each round's turn-owned provider payload
 - retryable non-stream HTTP/network failure retries on the primary route; after primary exhaustion, or immediately for failover-eligible non-retryable HTTP status such as 402, the bridge switches once to the configured fallback at the provider-neutral semantic request boundary
@@ -158,7 +158,7 @@ Generated from `docs/mainline-calls/provider.reason-live-bridge.json`. Do not ed
 ## Sync Status Against Mainline Call
 
 - current live path supports Anthropic `messages`, OpenAI-compatible `responses`, and OpenAI-compatible `chat_completions` through one provider-neutral runtime driver abstraction
-- current live path selects provider-hosted search only as provider-neutral hosted tool metadata; OpenAI wire rendering remains adapter-owned
+- current live path selects provider-hosted search only as provider-neutral hosted tool metadata; OpenAI Responses and Anthropic Messages wire rendering remain adapter-owned
 - runtime owner path preserves incremental stream apply, completion schema loop, persistence, master-safe registry-backed tool loop, matching tool-schema fingerprint wiring, shared metadata-ledger producer wiring, runtime-owned debug snapshot emission, checkpoint gating, and shared path/symlink diagnostics without duplicating adapter or path semantics
 - runtime live bridge now bootstraps one shared metadata ledger and writes restore/request/tool/terminal lifecycle metadata without request-text leakage
 - runtime live bridge now emits restore/request/tool/terminal lifecycle debug snapshots through `debug.core` without prompt, provider-payload, or tool-result leakage

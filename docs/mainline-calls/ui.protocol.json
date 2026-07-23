@@ -29,6 +29,7 @@
     "config status query is a protocol-owned read-only ADP/query shape carrying the complete safe provider registry plus current primary/fallback selection while config.core and runtime.ui-command-dispatch supply selected-agent truth",
     "provider definition upsert is a protocol-owned mutation command shape that carries only editable provider id/type/protocol/base URL/default model/env-var auth fields and routes to config.core without switching active selection",
     "provider selection is a protocol-owned mutation command shape that carries only agent name plus primary/fallback provider ids and routes to config.core without rewriting provider definitions",
+    "provider web_search live test is a protocol-owned command shape that carries provider id plus optional query and routes to provider.reason-live-bridge without adding a local Freehand web_search tool",
     "legacy provider/model update remains a protocol-owned mutation command shape for existing CLI callers and carries no raw credential values",
     "Agent resource-count update is a protocol-owned mutation command shape that carries only agent name plus resource_count, rejects values outside `1..=5`, and routes valid intent to config.core",
     "subscriptions may target latest active turn, specific turn, specific turn debug state, or node/progress streams",
@@ -70,8 +71,9 @@
     "rollback command ingress exposes append-only latest-turn rollback as a reason.persistence mutation intent; protocol does not remove turns or mutate local transcript truth",
     "error-center query results use protocol-owned UI-safe DTOs supplied through `UiRuntimeQueryPort`",
     "task list subscription events carry UI-safe task list projections published by runtime owner code",
-    "config status query results expose the active agent/provider/model/auth-source fields, ordered paired agent name/mode/node/provider list, resource count, resource limit, and shared provider id without pair tokens or provider credential values",
+    "config status query results expose the active agent/provider/model/auth-source fields, ordered paired agent name/mode/node/provider list, resource count, resource limit, shared provider id, and provider web_search configured/effective route diagnostics without pair tokens or provider credential values",
     "provider/model update command receipts report owner dispatch status only; restart-required and saved provider/model state are observed by follow-up config status projection",
+    "provider web_search live-test command receipts report owner dispatch status only; provider success and exact provider rejection remain visible receipt text supplied by runtime/provider owners",
     "Agent resource-count update command receipts report owner dispatch status only; restart-required and saved topology state is observed by follow-up config status projection",
     "Phase 2B EventInbox and MasterPoll results expose UI-safe event rows, cursor values, compact classifications, and recommended semantic action labels supplied by runtime owner code through UiRuntimeQueryPort",
     "WorkerControl query results expose UI-safe persisted control events plus optional task/agent/lifecycle/task-event projections supplied by runtime owner code"
@@ -633,6 +635,17 @@
       "responsibility": "define active provider selection mutation DTO without credential values and route it to the config owner",
       "input_semantic": "agent name plus primary/fallback provider ids",
       "output_semantic": "validated mutation intent routed to config.core",
+      "caller": "WebUI/CLI ADP command transport",
+      "callee": "runtime.ui-command-dispatch",
+      "binding_status": "bound"
+    },
+    {
+      "step": "24b2",
+      "symbol_path": "UiCommand::TestProviderWebSearch",
+      "file_path": "crates/freehand-ui-protocol/src/lib.rs",
+      "responsibility": "define provider-hosted web_search live-test command DTO and route it to the runtime/provider bridge owner",
+      "input_semantic": "provider id plus optional query",
+      "output_semantic": "validated mutation intent routed to provider.reason-live-bridge",
       "caller": "WebUI/CLI ADP command transport",
       "callee": "runtime.ui-command-dispatch",
       "binding_status": "bound"

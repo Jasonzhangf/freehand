@@ -89,7 +89,7 @@
       "owner_crate": "crates/freehand-runtime",
       "identity": "trace_id plus turn_id plus provider attempt",
       "truth_store": "provider debug ledger when enabled and live bridge attempt state",
-      "operations": ["build", "send", "retry_recoverable", "select_hosted_search", "render_hosted_search_wire"],
+      "operations": ["build", "send", "retry_recoverable", "select_hosted_search", "render_hosted_search_wire", "render_anthropic_hosted_search_wire"],
       "projections": ["provider attempt evidence", "error-center metadata"]
     },
     {
@@ -98,7 +98,7 @@
       "owner_crate": "crates/freehand-provider-core",
       "identity": "trace_id plus turn_id plus provider event index",
       "truth_store": "provider semantic event stream and debug raw ledgers",
-      "operations": ["normalize", "classify_finish", "map_tool_call", "map_error", "apply_to_turn", "observe_hosted_search_call"],
+      "operations": ["normalize", "classify_finish", "map_tool_call", "map_error", "apply_to_turn", "observe_hosted_search_call", "observe_anthropic_hosted_search_call"],
       "projections": ["reason provider output events", "error-center observed failure"]
     },
     {
@@ -302,6 +302,15 @@
       "binding_status": "bound"
     },
     {
+      "operation_id": "provider_request.render_anthropic_hosted_search_wire",
+      "owner_feature_id": "provider.anthropic-adapter",
+      "source_resource": "provider_request",
+      "target_resource": "provider_hosted_search",
+      "effect": "render provider-neutral hosted search declarations into Anthropic Messages server-tool web_search wire without runtime hardcoding",
+      "mainline_call_doc": "docs/mainline-calls/provider.anthropic-adapter.json",
+      "binding_status": "bound"
+    },
+    {
       "operation_id": "provider_response.apply_to_turn",
       "owner_feature_id": "reason.turn",
       "source_resource": "provider_response",
@@ -317,6 +326,15 @@
       "target_resource": "provider_hosted_search",
       "effect": "map OpenAI Responses web_search_call output items into provider-neutral reasoning observations without entering local tool execution",
       "mainline_call_doc": "docs/mainline-calls/provider.openai-adapter.json",
+      "binding_status": "bound"
+    },
+    {
+      "operation_id": "provider_response.observe_anthropic_hosted_search_call",
+      "owner_feature_id": "provider.anthropic-adapter",
+      "source_resource": "provider_response",
+      "target_resource": "provider_hosted_search",
+      "effect": "map Anthropic Messages server_tool_use and web_search_tool_result blocks into provider-neutral reasoning observations without entering local tool execution",
+      "mainline_call_doc": "docs/mainline-calls/provider.anthropic-adapter.json",
       "binding_status": "bound"
     },
     {
@@ -667,6 +685,17 @@
       "binding_status": "bound"
     },
     {
+      "edge_id": "provider.anthropic-adapter#01a",
+      "operation_id": "provider_request.render_anthropic_hosted_search_wire",
+      "source_resource": "provider_request",
+      "target_resource": "provider_hosted_search",
+      "mainline_call_doc": "docs/mainline-calls/provider.anthropic-adapter.json",
+      "call_table_step": "01a",
+      "file_path": "crates/freehand-provider-anthropic/src/lib.rs",
+      "symbol_path": "anthropic_messages_hosted_tool",
+      "binding_status": "bound"
+    },
+    {
       "edge_id": "reason.turn#02",
       "operation_id": "provider_response.apply_to_turn",
       "source_resource": "provider_response",
@@ -686,6 +715,17 @@
       "call_table_step": "02a",
       "file_path": "crates/freehand-provider-openai/src/lib.rs",
       "symbol_path": "provider_hosted_web_search_observation",
+      "binding_status": "bound"
+    },
+    {
+      "edge_id": "provider.anthropic-adapter#02a",
+      "operation_id": "provider_response.observe_anthropic_hosted_search_call",
+      "source_resource": "provider_response",
+      "target_resource": "provider_hosted_search",
+      "mainline_call_doc": "docs/mainline-calls/provider.anthropic-adapter.json",
+      "call_table_step": "02a",
+      "file_path": "crates/freehand-provider-anthropic/src/lib.rs",
+      "symbol_path": "anthropic_hosted_web_search_observation / anthropic_hosted_web_search_result_observation",
       "binding_status": "bound"
     },
     {

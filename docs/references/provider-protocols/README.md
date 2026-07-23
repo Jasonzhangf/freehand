@@ -12,7 +12,7 @@ Current first-version references cover:
 - Anthropic streaming messages
 - Anthropic tool use
 - Anthropic fine-grained tool streaming
-- MiniMax current Freehand provider baseline and hosted-search unsupported status
+- MiniMax current Freehand Anthropic-compatible Messages baseline and hosted-search live-test status
 
 ## Source Policy
 
@@ -28,10 +28,10 @@ Current first-version references cover:
 - `openai-chat-completions.md`
   - chat messages request shape, tool calls, stream chunks, finish reasons
 - `anthropic-messages.md`
-  - messages API shape, statelessness, stop reasons, streaming, tool-use loop
+  - messages API shape, statelessness, stop reasons, streaming, tool-use loop, hosted web_search server-tool mapping
 - `minimax.md`
   - current Freehand MiniMax Anthropic-compatible Messages baseline and
-    provider-hosted search unsupported-until-wire-verified rule
+    provider-hosted search declaration/live-test rule
 
 ## Use Rule
 

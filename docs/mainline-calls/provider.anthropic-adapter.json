@@ -6,11 +6,16 @@
   "test_design_doc": "docs/testing/provider.anthropic-adapter.md",
   "mainline_call_doc": "docs/mainline-calls/provider.anthropic-adapter.json",
   "generated_wiki_doc": "docs/wiki/provider.anthropic-adapter.md",
+  "resource_operations": [
+    "provider_request.render_anthropic_hosted_search_wire",
+    "provider_response.observe_anthropic_hosted_search_call"
+  ],
   "request_mainline": [
     "provider-neutral semantic request enters Anthropic adapter",
     "adapter renders Messages API request body with stateless conversation input",
     "adapter consumes typed `input_segments` and renders them to Anthropic wire text without owning segment admission truth",
     "adapter renders provider-neutral tool schema metadata into Anthropic `tools` and `tool_choice`",
+    "adapter renders provider-neutral hosted web_search metadata into Anthropic Messages server-tool wire without creating a local Freehand function tool",
     "adapter renders provider-neutral tool call/result exchanges into Anthropic assistant `tool_use` and user `tool_result` message content",
     "executor posts rendered requests to configured Anthropic-compatible base URL with explicit `x-api-key`, `anthropic-version`, and JSON headers"
   ],
@@ -19,6 +24,7 @@
     "raw-capable executor paths expose response bodies, HTTP error bodies, and SSE event bodies before semantic parsing so runtime can retain debug-only ledgers even when parsing fails",
     "partial tool-use input stays adapter-local until enough JSON exists to emit structured arguments",
     "streamed tool-use blocks may carry the tool id/name only on `content_block_start`; subsequent `input_json_delta` and `content_block_stop` events may carry only the stream `index`, so the adapter owns index-to-tool-call state until the block closes",
+    "server-side hosted web_search blocks become provider-neutral reasoning observations and never local `ToolCall` values",
     "live `minimonth` single-shot and SSE fixtures replay through the same parser entrypoints as synthetic tests",
     "executor single-shot path parses response body through `AnthropicAdapter::parse_response`",
     "executor stream path reads SSE event boundaries incrementally, parses `data:` payloads through `AnthropicAdapter::parse_stream_event`, and can notify callers before the HTTP response finishes"
@@ -71,6 +77,20 @@
       "binding_status": "bound"
     },
     {
+      "step": "01a",
+      "symbol_path": "anthropic_messages_hosted_tool",
+      "file_path": "crates/freehand-provider-anthropic/src/lib.rs",
+      "responsibility": "render provider-neutral hosted search declarations into Anthropic Messages server-tool wire",
+      "input_semantic": "provider semantic request hosted tool metadata",
+      "output_semantic": "Anthropic Messages hosted web_search tool JSON",
+      "caller": "AnthropicAdapter::render_request",
+      "callee": "adapter hosted-tool renderer",
+      "source_resource": "provider_request",
+      "target_resource": "provider_hosted_search",
+      "resource_operation": "provider_request.render_anthropic_hosted_search_wire",
+      "binding_status": "bound"
+    },
+    {
       "step": "02",
       "symbol_path": "AnthropicAdapter::parse_response",
       "file_path": "crates/freehand-provider-anthropic/src/lib.rs",
@@ -79,6 +99,20 @@
       "output_semantic": "provider semantic outputs",
       "caller": "runtime/provider caller",
       "callee": "adapter parser",
+      "binding_status": "bound"
+    },
+    {
+      "step": "02a",
+      "symbol_path": "anthropic_hosted_web_search_observation / anthropic_hosted_web_search_result_observation",
+      "file_path": "crates/freehand-provider-anthropic/src/lib.rs",
+      "responsibility": "map Anthropic Messages hosted web_search blocks into provider-neutral reasoning observations",
+      "input_semantic": "raw Anthropic server_tool_use or web_search_tool_result block",
+      "output_semantic": "provider semantic reasoning event",
+      "caller": "AnthropicAdapter::parse_response / AnthropicAdapter::parse_stream_event",
+      "callee": "adapter hosted-search parser",
+      "source_resource": "provider_response",
+      "target_resource": "provider_hosted_search",
+      "resource_operation": "provider_response.observe_anthropic_hosted_search_call",
       "binding_status": "bound"
     },
     {
@@ -158,6 +192,7 @@
     "request renderer now binds Anthropic `tools`, `tool_choice`, assistant `tool_use`, and user `tool_result` message rendering from provider-neutral metadata",
     "request renderer default output budget is locked by `DEFAULT_ANTHROPIC_MAX_TOKENS=8192`",
     "stream parser now binds indexed Anthropic `tool_use` events where `content_block_start` has id/name and later `input_json_delta` / `content_block_stop` events reference only `index`",
+    "hosted Anthropic Messages web_search request rendering and hosted-search response observations are adapter-owned and covered by focused web-search tests",
     "generated wiki must be regenerated from `docs/mainline-calls/provider.anthropic-adapter.json` when this function-map truth changes"
   ]
 }

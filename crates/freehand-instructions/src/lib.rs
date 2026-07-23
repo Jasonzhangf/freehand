@@ -17,6 +17,7 @@ const SKILL_FILENAME: &str = "SKILL.md";
 const MAX_SCAN_DEPTH: usize = 6;
 const MAX_SKILL_NAME_LEN: usize = 64;
 const MAX_SKILL_DESCRIPTION_LEN: usize = 1024;
+const MAX_INSTRUCTION_FILE_BYTES: u64 = 512 * 1024;
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct InstructionCapabilityCompileInput {
@@ -63,6 +64,8 @@ pub struct AgentsMdCapability {
     pub precedence: u32,
     pub content_bytes: u64,
     pub content_hash: String,
+    #[serde(skip)]
+    pub content: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -75,6 +78,8 @@ pub struct SkillCapability {
     pub precedence: u32,
     pub content_bytes: u64,
     pub content_hash: String,
+    #[serde(skip)]
+    pub content: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -218,12 +223,6 @@ pub fn render_instruction_capability_context(
         .agents
         .iter()
         .map(|entry| {
-            let content = fs::read_to_string(&entry.path).map_err(|err| {
-                InstructionCapabilityError::ReadFile {
-                    path: entry.path.clone(),
-                    message: err.to_string(),
-                }
-            })?;
             Ok(json!({
                 "scope": entry.scope,
                 "path": entry.path,
@@ -231,7 +230,7 @@ pub fn render_instruction_capability_context(
                 "precedence": entry.precedence,
                 "content_bytes": entry.content_bytes,
                 "content_hash": entry.content_hash,
-                "content": content
+                "content": entry.content
             }))
         })
         .collect::<Result<Vec<_>, InstructionCapabilityError>>()?;
@@ -239,12 +238,6 @@ pub fn render_instruction_capability_context(
         .skills
         .iter()
         .map(|entry| {
-            let content = fs::read_to_string(&entry.path).map_err(|err| {
-                InstructionCapabilityError::ReadFile {
-                    path: entry.path.clone(),
-                    message: err.to_string(),
-                }
-            })?;
             Ok(json!({
                 "scope": entry.scope,
                 "name": entry.name,
@@ -254,7 +247,7 @@ pub fn render_instruction_capability_context(
                 "precedence": entry.precedence,
                 "content_bytes": entry.content_bytes,
                 "content_hash": entry.content_hash,
-                "content": content
+                "content": entry.content
             }))
         })
         .collect::<Result<Vec<_>, InstructionCapabilityError>>()?;
@@ -303,6 +296,7 @@ fn agents_md_capability(
         precedence,
         content_bytes: content.len() as u64,
         content_hash: fnv1a_hex(content.as_bytes()),
+        content,
     })
 }
 
@@ -490,6 +484,7 @@ fn skill_capability(
         precedence,
         content_bytes: content.len() as u64,
         content_hash: fnv1a_hex(content.as_bytes()),
+        content,
     })
 }
 
@@ -568,6 +563,29 @@ fn unquote(value: &str) -> &str {
 }
 
 fn read_text_for_record(path: &Path) -> Result<String, InstructionCapabilityErrorRecord> {
+    let metadata = fs::metadata(path).map_err(|err| InstructionCapabilityErrorRecord {
+        path: path_string(&normalize_path(path)),
+        message: format!("failed to inspect file before read: {err}"),
+    })?;
+    if !metadata.is_file() {
+        return Err(InstructionCapabilityErrorRecord {
+            path: path_string(&normalize_path(path)),
+            message: "instruction capability source is not a regular file".to_owned(),
+        });
+    }
+    if metadata.len() > MAX_INSTRUCTION_FILE_BYTES {
+        return Err(InstructionCapabilityErrorRecord {
+            path: path_string(&normalize_path(path)),
+            message: format!(
+                "instruction capability source exceeds max size {MAX_INSTRUCTION_FILE_BYTES} bytes"
+            ),
+        });
+    }
+    eprintln!(
+        "[freehand-instructions] reading instruction source path={} bytes={}",
+        path_string(&normalize_path(path)),
+        metadata.len()
+    );
     fs::read_to_string(path).map_err(|err| InstructionCapabilityErrorRecord {
         path: path_string(&normalize_path(path)),
         message: format!("failed to read file: {err}"),
@@ -888,6 +906,52 @@ mod tests {
         assert!(context.contains("FH-INST-SKILL"));
         assert!(context.contains(&manifest.manifest_fingerprint));
 
+        fs::remove_dir_all(root).expect("cleanup");
+    }
+
+    #[test]
+    fn render_uses_compiled_instruction_content_without_reopening_sources() {
+        let root = temp_dir();
+        let home = root.join("home/.freehand");
+        let cwd = root.join("repo");
+        let agents_path = cwd.join("AGENTS.md");
+        fs::create_dir_all(&cwd).expect("cwd");
+        write(&cwd.join("Cargo.toml"), "[workspace]\n");
+        write(&agents_path, "local sentinel before delete\n");
+        let manifest = compile_instruction_capability_manifest(
+            InstructionCapabilityCompileInput::new(&home, &cwd),
+        )
+        .expect("manifest");
+        fs::remove_file(&agents_path).expect("remove source after compile");
+
+        let context = render_instruction_capability_context(&manifest).expect("context");
+
+        assert!(context.contains("local sentinel before delete"));
+        fs::remove_dir_all(root).expect("cleanup");
+    }
+
+    #[test]
+    fn oversized_instruction_sources_are_errors_not_capabilities() {
+        let root = temp_dir();
+        let home = root.join("home/.freehand");
+        let cwd = root.join("repo");
+        fs::create_dir_all(&cwd).expect("cwd");
+        write(&cwd.join("Cargo.toml"), "[workspace]\n");
+        fs::write(
+            cwd.join("AGENTS.md"),
+            vec![b'a'; MAX_INSTRUCTION_FILE_BYTES as usize + 1],
+        )
+        .expect("write oversized agents");
+
+        let manifest = compile_instruction_capability_manifest(
+            InstructionCapabilityCompileInput::new(&home, &cwd),
+        )
+        .expect("manifest");
+
+        assert!(manifest.agents.is_empty());
+        assert!(manifest.errors.iter().any(|entry| {
+            entry.path.ends_with("/AGENTS.md") && entry.message.contains("exceeds max size")
+        }));
         fs::remove_dir_all(root).expect("cleanup");
     }
 

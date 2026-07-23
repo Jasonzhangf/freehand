@@ -18,7 +18,7 @@
     "provider semantic request must stay provider-neutral",
     "provider metadata and request content must stay separate types",
     "provider semantic request may carry provider-neutral tool metadata as `ProviderToolDefinition`, `ProviderToolChoice`, and `ProviderToolExchange`; these are not request text and must be rendered only by adapter owners",
-    "provider semantic request may carry provider-neutral hosted tool metadata as `ProviderHostedToolDefinition`; OpenAI Responses can render that as hosted `web_search`, while unsupported providers leave it absent",
+    "provider semantic request may carry provider-neutral hosted tool metadata as `ProviderHostedToolDefinition`; OpenAI Responses and Anthropic Messages adapters can render that as provider-hosted `web_search`, while protocol-unsupported providers leave it absent",
     "`freehand-provider-core` may bridge reason to provider, but must not import `freehand-reason` implementation truth"
   ],
   "response_mainline": [

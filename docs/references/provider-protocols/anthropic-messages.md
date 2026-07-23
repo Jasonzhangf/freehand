@@ -7,6 +7,7 @@
   - `https://docs.anthropic.com/en/api/messages`
   - `https://docs.anthropic.com/en/api/messages-streaming`
   - `https://docs.anthropic.com/en/docs/build-with-claude/tool-use/overview`
+  - `https://docs.anthropic.com/en/docs/agents-and-tools/tool-use/web-search-tool`
   - `https://docs.anthropic.com/en/docs/agents-and-tools/tool-use/fine-grained-tool-streaming`
   - `https://docs.anthropic.com/en/docs/intro-to-claude`
 
@@ -34,6 +35,13 @@
 - Claude can return structured tool-use blocks
 - client tools run in caller infrastructure
 - server tools run in Anthropic infrastructure
+- hosted web search is a server tool, not a caller-executed function tool
+- Freehand renders provider-neutral hosted search as Anthropic Messages
+  `{"type":"web_search_20250305","name":"web_search","max_uses":5}` in
+  the adapter-owned `tools` array
+- hosted search response blocks use server-side shapes such as
+  `server_tool_use` and `web_search_tool_result`; these are observations of
+  provider-side work, not local `tool_use` calls for Freehand to execute
 - for client-side tool loops, docs explicitly describe:
   - Claude returns `stop_reason: "tool_use"`
   - application executes the operation
@@ -57,6 +65,8 @@
 - map normal text deltas to `SemanticEventKind::Text`
 - map thinking/reasoning-like progress to `SemanticEventKind::Reasoning` when exposed semantically
 - map structured `tool_use` blocks to `ToolCallContract`
+- map hosted `server_tool_use` / `web_search_tool_result` blocks to
+  provider-hosted reasoning observations
 - map caller-supplied `tool_result` continuation to `ReasonReq05ToolResultReentry`
 - treat SSE event shapes and block DTOs as adapter-private
 
@@ -65,3 +75,6 @@
 - do not assume Anthropic is stateful like OpenAI conversations
 - do not assume streamed tool input is always valid complete JSON
 - do not collapse `tool_use` stop reasons into final task completion
+- do not expose hosted `web_search` as a Freehand function tool; adapter-owned
+  Messages wire must be rendered only from provider-neutral hosted tool
+  metadata

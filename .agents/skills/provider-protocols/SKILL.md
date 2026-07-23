@@ -24,6 +24,7 @@ Use this skill when implementing or debugging provider protocol behavior in Free
 - map only unified semantic events into shared contracts
 - treat JSON `error:null` as absent; field presence alone is not provider failure evidence
 - retry/failover progress that can recover belongs in transient runtime/UI status, not provider semantic error truth
+- provider-hosted tool capability tests must force the provider-owned hosted tool when the protocol supports forced choice, then require a hosted-tool observation; do not treat prompt-induced `auto` non-use as proof that a declared hosted tool is unusable
 - if protocol behavior changes implementation truth, update:
   - provider design docs
   - provider test design

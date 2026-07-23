@@ -21,6 +21,8 @@ const adpUrl = process.env.FREEHAND_PROVIDER_HOSTED_SEARCH_ADP_URL || adpUrlFrom
 const fixedSessionId =
   process.env.FREEHAND_PROVIDER_HOSTED_SEARCH_SESSION ||
   'provider-hosted-web-search-online-fixed';
+const verifierCwd =
+  process.env.FREEHAND_PROVIDER_HOSTED_SEARCH_CWD || runtimeHome;
 const fixtureKeyName = 'FREEHAND_PROVIDER_HOSTED_SEARCH_FIXTURE_KEY';
 const fixtureProviderId =
   process.env.FREEHAND_PROVIDER_HOSTED_SEARCH_PROVIDER || 'provider-hosted-search-fixture';
@@ -90,6 +92,7 @@ try {
   await must(['scripts/install-launchd.sh', 'restartS']);
   await waitHealth();
   await ensureFixedSession();
+  await rollbackFixedSessionTranscript();
 
   const beforeAdp = await querySessionTurns();
   await fs.writeFile(
@@ -103,14 +106,14 @@ try {
     `Provider-hosted web_search online verifier RUN_MARKER=${runMarker}.`,
     `Use provider-native web_search if declared to search: ${searchQuery}.`,
     'Do not call web_fetch; this is a broad provider-hosted search proof.',
-    'Then answer with the required Freehand completion schema.',
+    'Then answer with the required Freehand completion schema and summarize the hosted-search result.',
   ].join(' ');
   const submitAttempt = await adpCommand(
     {
       SubmitUserInput: {
         text: prompt,
         session_id: fixedSessionId,
-        cwd: repo,
+        cwd: verifierCwd,
       },
     },
     submitReceiptTimeoutMs,
@@ -321,9 +324,52 @@ async function ensureFixedSession() {
     CreateSession: {
       session_id: fixedSessionId,
       title: 'provider hosted web_search online verifier fixed session',
-      cwd: repo,
+      cwd: verifierCwd,
     },
   });
+}
+
+async function rollbackFixedSessionTranscript() {
+  const evidence = [];
+  for (let attempt = 1; attempt <= 20; attempt += 1) {
+    const turns = sessionTurnsFromAdp(await querySessionTurns());
+    const turnIds = turns.map((turn) => turn.turn_id).filter(Boolean);
+    evidence.push({ attempt, turnIds });
+    if (turnIds.length === 0) {
+      await fs.writeFile(
+        path.join(artifactDir, 'fixed-session-reset.json'),
+        JSON.stringify({ fixedSessionId, evidence }, null, 2),
+      );
+      return;
+    }
+    const rollback = await run([
+      cli,
+      'adp-session-manage',
+      '--url',
+      adpUrl,
+      '--action',
+      'rollback',
+      '--session',
+      fixedSessionId,
+    ]);
+    evidence[evidence.length - 1].rollback = {
+      code: rollback.code,
+      stdout: rollback.stdout.trim(),
+      stderr: rollback.stderr.trim(),
+    };
+    if (rollback.code !== 0) {
+      await fs.writeFile(
+        path.join(artifactDir, 'fixed-session-reset.json'),
+        JSON.stringify({ fixedSessionId, evidence }, null, 2),
+      );
+      throw new Error(`fixed session rollback failed: ${rollback.stderr || rollback.stdout}`);
+    }
+  }
+  await fs.writeFile(
+    path.join(artifactDir, 'fixed-session-reset.json'),
+    JSON.stringify({ fixedSessionId, evidence }, null, 2),
+  );
+  throw new Error(`fixed session reset exceeded rollback limit for ${fixedSessionId}`);
 }
 
 async function captureFailureState(error) {

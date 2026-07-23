@@ -62,7 +62,7 @@
   UI/debug clients can identify the exact pre-provider segment instead of a
   silent pending submit
 - bridge derives provider descriptor and executor config from the active primary/fallback route without exposing provider wire DTOs
-- bridge derives provider-hosted search capability from config/provider descriptor and execution profile; OpenAI Responses GPT-family models with `web_search=auto` can declare hosted search, while disabled/unsupported provider-protocol-model combinations leave it absent
+- bridge derives provider-hosted search capability from config/provider descriptor and execution profile; OpenAI Responses and Anthropic Messages providers with `web_search=auto` can declare hosted search, while disabled or protocol-unsupported combinations leave it absent
 - `reason.turn` may start multiple rounds under one logical live request when completion schema says `continue` or when schema rejection requires same-task retry
 - provider semantic request is built from each round's turn-owned provider payload
 - retryable non-stream HTTP/network failure retries on the primary route; after primary exhaustion, or immediately for failover-eligible non-retryable HTTP status such as 402, the bridge switches once to the configured fallback at the provider-neutral semantic request boundary
@@ -243,7 +243,7 @@
 ## Sync Status Against Code
 
 - current live path supports Anthropic `messages`, OpenAI-compatible `responses`, and OpenAI-compatible `chat_completions` through a provider-neutral runtime driver abstraction
-- current live path selects provider-hosted search only as provider-neutral hosted tool metadata; OpenAI wire rendering remains adapter-owned
+- current live path selects provider-hosted search only as provider-neutral hosted tool metadata; OpenAI Responses and Anthropic Messages wire rendering remain adapter-owned
 - runtime owner path preserves incremental stream apply, completion schema loop, persistence, registry-backed tool loop, tool-schema fingerprint wiring, shared metadata-ledger producer wiring, runtime-owned debug snapshot emission, checkpoint gating, and shared path/symlink diagnostics without duplicating adapter or path semantics
 - runtime live bridge now bootstraps one shared metadata ledger and writes restore/request/tool/terminal lifecycle metadata without request-text leakage
 - runtime live bridge now emits restore/request/tool/terminal lifecycle debug snapshots through `debug.core` without prompt, provider-payload, or tool-result leakage

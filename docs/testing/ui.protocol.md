@@ -116,6 +116,7 @@
     roundtrip, and no-secret DTO serialization
   - provider definition upsert and legacy provider/model update cover owner routing to `config.core`, empty-field rejection, unsupported-protocol rejection, JSON roundtrip, and no credential/API-key value field in serialization
   - provider selection update covers owner routing to `config.core`, empty provider/fallback rejection, JSON roundtrip, and no credential/API-key value field in serialization
+  - provider web_search live-test command covers owner routing to `provider.reason-live-bridge`, empty provider id rejection, optional query validation, and command/query route separation
   - Agent resource-count update covers owner routing to `config.core`, zero/six rejection, JSON roundtrip, and safe status projection of configured count/max/shared provider
   - error-center subscription selector and matcher cover accepted error-center projections
 - module black-box plan:
@@ -218,3 +219,4 @@
   - error-center query/subscription commands and DTOs are landed; runtime-backed ADP error-center query is regression-locked in daemon tests
   - config status query/result DTO is landed; protocol-state rejection and secret-free serialization are regression-locked
   - provider/model update command DTO is landed; owner routing, validation rejection, and secret-free serialization are regression-locked
+  - provider web_search test command DTO is landed and regression-locked by `provider_web_search_test_routes_to_runtime_owner`

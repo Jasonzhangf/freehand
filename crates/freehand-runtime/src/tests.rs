@@ -1905,10 +1905,21 @@ provider = "provider-live"
             assert_eq!(status.provider_base_url, "https://example.invalid:8443/v1");
             assert_eq!(status.provider_base_url_host, "example.invalid");
             assert_eq!(status.default_model, "MiniMax-M2.7");
+            assert_eq!(status.provider_web_search, "auto");
+            assert_eq!(status.provider_web_search_effective, "hosted_declared");
+            assert!(
+                status
+                    .provider_web_search_reason
+                    .contains("anthropic/messages")
+            );
             assert_eq!(status.provider_auth_type, "apikey");
             assert_eq!(status.provider_auth_source, "env");
             assert_eq!(status.provider_registry.len(), 1);
             assert_eq!(status.provider_registry[0].provider_id, "provider-live");
+            assert_eq!(
+                status.provider_registry[0].provider_web_search_effective,
+                "hosted_declared"
+            );
             assert_eq!(
                 status.provider_registry[0].provider_base_url,
                 "https://example.invalid:8443/v1"
@@ -9362,13 +9373,13 @@ fn live_bridge_maps_openai_protocols_to_provider_descriptor() {
 }
 
 #[test]
-fn live_bridge_derives_hosted_web_search_only_for_supported_openai_responses() {
+fn live_bridge_derives_hosted_web_search_for_configured_provider_native_protocols() {
     let mut responses_agent = live_selected_agent_with_protocol(
         "http://127.0.0.1:1".to_owned(),
         freehand_config::ProviderType::OpenAi,
         ConfigProviderProtocol::Responses,
     );
-    responses_agent.provider.default_model = "gpt-5.5".to_owned();
+    responses_agent.provider.default_model = "custom-responses-model".to_owned();
     let responses = provider_descriptor(&responses_agent.provider).expect("responses descriptor");
     assert_eq!(
         responses.capabilities.web_search,
@@ -9415,6 +9426,24 @@ fn live_bridge_derives_hosted_web_search_only_for_supported_openai_responses() {
         chat.capabilities.web_search,
         ProviderWebSearchCapability::Unsupported
     );
+
+    let mut messages_agent = live_selected_agent_with_protocol(
+        "http://127.0.0.1:1".to_owned(),
+        freehand_config::ProviderType::Anthropic,
+        ConfigProviderProtocol::Messages,
+    );
+    messages_agent.provider.default_model = "MiniMax-M3".to_owned();
+    let messages = provider_descriptor(&messages_agent.provider).expect("messages descriptor");
+    assert_eq!(
+        messages.capabilities.web_search,
+        ProviderWebSearchCapability::hosted_live_with_functions()
+    );
+    assert_eq!(
+        LiveReasonExecutionRole::Master
+            .hosted_tool_definitions(&messages, LiveReasonExecutionProfile::Workspace)
+            .len(),
+        1
+    );
 }
 
 #[test]
@@ -9441,6 +9470,148 @@ fn live_bridge_does_not_mix_search_only_hosted_tool_with_master_functions() {
             .len(),
         1
     );
+}
+
+#[test]
+fn provider_web_search_test_declares_hosted_tool_and_requires_observation() {
+    let response = json!({
+        "id": "resp-search-test",
+        "object": "response",
+        "status": "completed",
+        "output": [
+            {
+                "type": "web_search_call",
+                "id": "ws-test",
+                "status": "completed",
+                "action": {
+                    "type": "search",
+                    "query": "Freehand provider web_search live capability test"
+                }
+            },
+            {
+                "type": "message",
+                "id": "msg-search-test",
+                "role": "assistant",
+                "status": "completed",
+                "content": [{
+                    "type": "output_text",
+                    "text": "web search completed",
+                    "annotations": []
+                }]
+            }
+        ]
+    });
+    let (base_url, rx, handle) = spawn_mock_server(200, "application/json", response.to_string());
+    let mut selected = live_selected_agent_with_protocol(
+        base_url,
+        freehand_config::ProviderType::OpenAi,
+        ConfigProviderProtocol::Responses,
+    );
+    selected.provider.default_model = "custom-responses-model".to_owned();
+
+    let status = execute_provider_web_search_test(
+        &selected,
+        selected.provider.clone(),
+        Some("Freehand provider web_search live capability test"),
+    )
+    .expect("provider web_search test");
+    let raw_request = rx.recv().expect("provider request");
+    handle.join().expect("join provider");
+    let body = http_request_body_json(&raw_request);
+    let tools = body["tools"].as_array().expect("tools");
+
+    assert!(status.starts_with("provider_web_search_test_passed:provider=provider-live"));
+    assert_eq!(tools.len(), 1);
+    assert_eq!(tools[0]["type"], json!("web_search"));
+    assert!(body.to_string().contains("provider-hosted web_search now"));
+    assert!(!body.to_string().contains("\"name\":\"web_search\""));
+    assert!(!body.to_string().contains("\"type\":\"function\""));
+}
+
+#[test]
+fn provider_web_search_test_forces_anthropic_hosted_search_tool_choice() {
+    let response = json!({
+        "content": [
+            {
+                "type": "server_tool_use",
+                "id": "srv-search-test",
+                "name": "web_search",
+                "input": {
+                    "query": "Freehand Anthropic hosted search capability test"
+                }
+            },
+            {
+                "type": "web_search_tool_result",
+                "tool_use_id": "srv-search-test",
+                "content": [
+                    {
+                        "title": "Freehand hosted search",
+                        "url": "https://example.test/freehand"
+                    }
+                ]
+            },
+            {
+                "type": "text",
+                "text": "web search completed"
+            }
+        ],
+        "stop_reason": "end_turn"
+    });
+    let (base_url, rx, handle) = spawn_mock_server(200, "application/json", response.to_string());
+    let mut selected = live_selected_agent_with_protocol(
+        base_url,
+        freehand_config::ProviderType::Anthropic,
+        ConfigProviderProtocol::Messages,
+    );
+    selected.provider.default_model = "MiniMax-M3".to_owned();
+
+    let status = execute_provider_web_search_test(
+        &selected,
+        selected.provider.clone(),
+        Some("Freehand Anthropic hosted search capability test"),
+    )
+    .expect("provider web_search test");
+    let raw_request = rx.recv().expect("provider request");
+    handle.join().expect("join provider");
+    let body = http_request_body_json(&raw_request);
+    let tools = body["tools"].as_array().expect("tools");
+
+    assert!(status.starts_with("provider_web_search_test_passed:provider=provider-live"));
+    assert_eq!(tools.len(), 1);
+    assert_eq!(tools[0]["type"], json!("web_search_20250305"));
+    assert_eq!(tools[0]["name"], json!("web_search"));
+    assert_eq!(
+        body["tool_choice"],
+        json!({"type":"tool","name":"web_search"})
+    );
+    assert!(body.to_string().contains("provider-hosted web_search now"));
+    assert!(!body.to_string().contains("\"input_schema\""));
+}
+
+#[test]
+fn provider_web_search_test_fails_when_provider_does_not_observe_hosted_search() {
+    let (base_url, _rx, handle) = spawn_mock_server(
+        200,
+        "application/json",
+        openai_responses_complete_response("plain response"),
+    );
+    let mut selected = live_selected_agent_with_protocol(
+        base_url,
+        freehand_config::ProviderType::OpenAi,
+        ConfigProviderProtocol::Responses,
+    );
+    selected.provider.default_model = "custom-responses-model".to_owned();
+
+    let err = execute_provider_web_search_test(&selected, selected.provider.clone(), None)
+        .expect_err("missing hosted observation fails");
+    handle.join().expect("join provider");
+
+    assert!(
+        err.to_string()
+            .contains("did not observe provider-hosted web_search")
+    );
+    assert!(err.to_string().contains("observed_outputs=semantic:"));
+    assert!(err.to_string().contains("plain response"));
 }
 
 #[test]

@@ -734,6 +734,18 @@ impl LoadedConfig {
             .collect()
     }
 
+    pub fn select_provider_for_test(
+        &self,
+        provider_id: &str,
+    ) -> Result<SelectedProviderConfig, ConfigError> {
+        select_provider_for_agent(
+            &self.providers,
+            "provider_test",
+            provider_id,
+            ProviderRouteRole::Primary,
+        )
+    }
+
     pub fn remote_daemon_registry(&self) -> &RemoteDaemonRegistryConfig {
         &self.remote_daemon_registry
     }
@@ -4327,6 +4339,79 @@ fallback_provider = "minimax"
         assert!(!debug.contains("token=secret"));
         assert!(!debug.contains("api_key"));
 
+        fs::remove_file(path).expect("cleanup");
+    }
+
+    #[test]
+    fn select_provider_for_test_resolves_any_configured_enabled_provider() {
+        let cc_key_env = unique_env_name("FREEHAND_SELECT_PROVIDER_TEST_CC");
+        let path = write_temp_config(&format!(
+            r#"
+[providers.cc]
+id = "cc"
+enabled = true
+type = "openai"
+protocol = "responses"
+base_url = "https://api.anyint.ai/openai/v1"
+default_model = "gpt-5.5"
+
+[providers.cc.auth]
+type = "apikey"
+api_key_env = "{cc_key_env}"
+
+[providers.minimax]
+id = "minimax"
+enabled = true
+type = "anthropic"
+protocol = "messages"
+base_url = "https://api.minimaxi.com/anthropic"
+default_model = "MiniMax-M3"
+
+[providers.minimax.auth]
+type = "apikey"
+api_key = "sk-minimax-inline"
+
+[agents.master]
+name = "master"
+mode = "master"
+node_id = "master-node"
+paired_agents = ["worker"]
+pair_token = "FREEHAND_SELECT_PROVIDER_TEST_MASTER"
+provider = "cc"
+
+[agents.worker]
+name = "worker"
+mode = "slave"
+node_id = "worker-node"
+paired_agents = ["master"]
+pair_token = "FREEHAND_SELECT_PROVIDER_TEST_WORKER"
+provider = "cc"
+"#
+        ));
+        // SAFETY: this test owns this unique variable name and removes it before exit.
+        unsafe {
+            env::set_var(&cc_key_env, "cc-secret");
+        }
+
+        let config = load_config_from_path(&path).expect("load config");
+        let minimax = config
+            .select_provider_for_test("minimax")
+            .expect("select minimax for test");
+        let cc = config
+            .select_provider_for_test("cc")
+            .expect("select cc for test");
+
+        assert_eq!(minimax.id, "minimax");
+        assert_eq!(minimax.protocol, ProviderProtocol::Messages);
+        assert_eq!(minimax.api_key, "sk-minimax-inline");
+        assert_eq!(cc.id, "cc");
+        assert_eq!(cc.protocol, ProviderProtocol::Responses);
+        assert_eq!(cc.api_key, "cc-secret");
+
+        // SAFETY: undo the test environment mutation before exit.
+        unsafe {
+            env::remove_var(&cc_key_env);
+        }
         fs::remove_file(path).expect("cleanup");
     }
 

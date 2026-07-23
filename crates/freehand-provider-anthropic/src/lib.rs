@@ -11,9 +11,9 @@ use freehand_contracts::{
     ErrorClass, TerminalStatus, TokenUsage, ToolCallContract, ToolCallId, ToolResultStatus,
 };
 use freehand_provider_core::{
-    ProviderAdapterEvent, ProviderErrorHint, ProviderEventContext, ProviderProtocol,
-    ProviderSemanticOutput, ProviderSemanticRequest, ProviderToolChoice, ProviderToolExchange,
-    map_adapter_events,
+    ProviderAdapterEvent, ProviderErrorHint, ProviderEventContext, ProviderHostedToolDefinition,
+    ProviderProtocol, ProviderSemanticOutput, ProviderSemanticRequest, ProviderToolChoice,
+    ProviderToolExchange, map_adapter_events,
 };
 use serde_json::{Value, json};
 use thiserror::Error;
@@ -291,20 +291,9 @@ impl AnthropicAdapter {
             "stream": stream,
             "messages": render_messages(&rendered_input, &request.tool_exchanges)?,
         });
-        if !request.tools.is_empty() {
-            body["tools"] = Value::Array(
-                request
-                    .tools
-                    .iter()
-                    .map(|tool| {
-                        json!({
-                            "name": tool.name,
-                            "description": tool.description,
-                            "input_schema": tool.input_schema,
-                        })
-                    })
-                    .collect(),
-            );
+        let tools = anthropic_messages_tools(request);
+        if !tools.is_empty() {
+            body["tools"] = Value::Array(tools);
         }
         if let Some(choice) = &request.tool_choice {
             body["tool_choice"] = match choice {
@@ -369,6 +358,12 @@ impl AnthropicAdapter {
                     "tool_use" => {
                         events.push(self.parse_tool_use_block(block, true)?);
                     }
+                    "server_tool_use" => {
+                        events.push(anthropic_hosted_web_search_observation(block));
+                    }
+                    "web_search_tool_result" => {
+                        events.push(anthropic_hosted_web_search_result_observation(block));
+                    }
                     "thinking" | "redacted_thinking" => {
                         if let Some(text) = block.get("thinking").and_then(Value::as_str)
                             && !text.is_empty()
@@ -421,6 +416,12 @@ impl AnthropicAdapter {
                 {
                     match kind {
                         "tool_use" => events.push(self.parse_indexed_tool_use_block(value, block)?),
+                        "server_tool_use" => {
+                            events.push(anthropic_hosted_web_search_observation(block));
+                        }
+                        "web_search_tool_result" => {
+                            events.push(anthropic_hosted_web_search_result_observation(block));
+                        }
                         "text" => {
                             if let Some(text) = block.get("text").and_then(Value::as_str)
                                 && !text.is_empty()
@@ -692,6 +693,80 @@ fn render_messages(
         }));
     }
     Ok(Value::Array(messages))
+}
+
+fn anthropic_messages_tools(request: &ProviderSemanticRequest) -> Vec<Value> {
+    let mut tools = request
+        .tools
+        .iter()
+        .map(|tool| {
+            json!({
+                "name": tool.name,
+                "description": tool.description,
+                "input_schema": tool.input_schema,
+            })
+        })
+        .collect::<Vec<_>>();
+    tools.extend(
+        request
+            .hosted_tools
+            .iter()
+            .map(anthropic_messages_hosted_tool),
+    );
+    tools
+}
+
+fn anthropic_messages_hosted_tool(tool: &ProviderHostedToolDefinition) -> Value {
+    match tool {
+        ProviderHostedToolDefinition::WebSearch { .. } => json!({
+            "type": "web_search_20250305",
+            "name": "web_search",
+            "max_uses": 5,
+        }),
+    }
+}
+
+fn anthropic_hosted_web_search_observation(block: &Value) -> ProviderAdapterEvent {
+    ProviderAdapterEvent::ReasoningDelta(format!(
+        "provider-hosted web_search {}",
+        anthropic_hosted_web_search_summary(block)
+    ))
+}
+
+fn anthropic_hosted_web_search_result_observation(block: &Value) -> ProviderAdapterEvent {
+    ProviderAdapterEvent::ReasoningDelta(format!(
+        "provider-hosted web_search_result {}",
+        anthropic_hosted_web_search_summary(block)
+    ))
+}
+
+fn anthropic_hosted_web_search_summary(block: &Value) -> String {
+    let id = block
+        .get("id")
+        .or_else(|| block.get("tool_use_id"))
+        .and_then(Value::as_str)
+        .unwrap_or("unknown");
+    let status = block
+        .get("status")
+        .and_then(Value::as_str)
+        .unwrap_or("unknown");
+    let query = block
+        .get("input")
+        .and_then(|input| input.get("query"))
+        .and_then(Value::as_str)
+        .or_else(|| block.get("query").and_then(Value::as_str));
+    let content_count = block
+        .get("content")
+        .and_then(Value::as_array)
+        .map(Vec::len)
+        .unwrap_or(0);
+    match query {
+        Some(query) => format!("id={id} status={status} query={query}"),
+        None if content_count > 0 => {
+            format!("id={id} status={status} result_items={content_count}")
+        }
+        None => format!("id={id} status={status}"),
+    }
 }
 
 #[derive(Debug, Default)]
@@ -1075,6 +1150,68 @@ mod tests {
         assert_eq!(body["messages"][2]["role"], "user");
         assert_eq!(body["messages"][2]["content"][0]["type"], "tool_result");
         assert_eq!(body["messages"][2]["content"][0]["tool_use_id"], "toolu_1");
+    }
+
+    #[test]
+    fn renders_messages_hosted_web_search_server_tool() {
+        let adapter = adapter();
+        let mut request = request();
+        request
+            .hosted_tools
+            .push(ProviderHostedToolDefinition::WebSearch {
+                mode: freehand_provider_core::ProviderWebSearchMode::Live,
+                external_web_access: true,
+            });
+
+        let rendered = adapter.render_request(&request, false).expect("rendered");
+        let body: Value = serde_json::from_str(&rendered.body).expect("json");
+
+        assert_eq!(body["tools"][0]["type"], "web_search_20250305");
+        assert_eq!(body["tools"][0]["name"], "web_search");
+        assert_eq!(body["tools"][0]["max_uses"], 5);
+        assert!(body["tools"][0].get("input_schema").is_none());
+    }
+
+    #[test]
+    fn parses_messages_hosted_web_search_blocks_as_observations() {
+        let mut adapter = adapter();
+        let outputs = adapter
+            .parse_response(
+                &ctx(),
+                ProviderProtocol::AnthropicMessages,
+                r#"{
+                    "content":[
+                        {"type":"server_tool_use","id":"srv_1","name":"web_search","input":{"query":"Freehand hosted search"}},
+                        {"type":"web_search_tool_result","tool_use_id":"srv_1","content":[{"title":"Freehand","url":"https://example.test"}]}
+                    ],
+                    "stop_reason":"end_turn"
+                }"#,
+            )
+            .expect("parsed");
+
+        assert!(outputs.iter().any(|output| {
+            matches!(
+                output,
+                ProviderSemanticOutput::SemanticEvent(event)
+                    if event.kind == freehand_contracts::SemanticEventKind::Reasoning
+                        && event.content.contains("provider-hosted web_search")
+                        && event.content.contains("query=Freehand hosted search")
+            )
+        }));
+        assert!(outputs.iter().any(|output| {
+            matches!(
+                output,
+                ProviderSemanticOutput::SemanticEvent(event)
+                    if event.kind == freehand_contracts::SemanticEventKind::Reasoning
+                        && event.content.contains("provider-hosted web_search_result")
+                        && event.content.contains("result_items=1")
+            )
+        }));
+        assert!(
+            !outputs
+                .iter()
+                .any(|output| matches!(output, ProviderSemanticOutput::ToolCall(_)))
+        );
     }
 
     #[test]

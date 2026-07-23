@@ -100,8 +100,10 @@
   - error-center runtime query coverage, including trace/turn/domain filters and no raw text in projection
   - config status runtime query coverage, including ordered multi-peer
     projection, complete configured provider registry, current primary/fallback
-    ids, sanitized base URL/host projection, auth source projection, and no API
+    ids, sanitized base URL/host projection, auth source projection,
+    provider web_search configured/effective route diagnostics, and no API
     key/pair-token leakage
+  - provider web_search live-test dispatch coverage, including hosted-only request shape, explicit no-observation failure, and no local `web_search` function tool
   - provider definition upsert dispatch coverage, including adding a provider without changing selection, invalid no-overwrite, no secret projection, and active runtime model/provider unchanged until restart
   - provider selection dispatch coverage, including switching to an existing enabled provider, preserving provider definitions, rejecting invalid/same-fallback selection without overwrite, and active runtime model/provider unchanged until restart
   - Agent resource-count update dispatch coverage, including valid grow/shrink, invalid no-overwrite, pending safe projection refresh, and active runtime peers unchanged until restart
@@ -210,6 +212,7 @@
   - daemon ADP task query bridge is covered by `daemon_adp_queries_runtime_task_truth`
   - runtime error-center query bridge is covered by `runtime_query_reads_error_center_metadata_without_raw_text`
   - runtime config status query bridge is covered by `runtime_query_projects_config_status_without_secrets`
+  - runtime provider web_search test dispatch is covered by `provider_web_search_test_declares_hosted_tool_and_requires_observation` and `provider_web_search_test_fails_when_provider_does_not_observe_hosted_search`
   - runtime provider/model update dispatch is covered by `runtime_dispatch_updates_provider_config_without_hot_reloading_active_model` and `runtime_dispatch_rejects_invalid_provider_config_without_overwrite`
   - daemon ADP error-center query bridge is covered by `daemon_adp_queries_runtime_error_center_truth`
   - runtime task list push bridge is planned for `runtime_task_tool_mutation_publishes_task_list_projection`

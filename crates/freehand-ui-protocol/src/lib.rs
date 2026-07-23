@@ -161,6 +161,11 @@ pub enum UiCommand {
     UpsertProviderConfig {
         update: UiProviderConfigUpdate,
     },
+    TestProviderWebSearch {
+        provider_id: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        query: Option<String>,
+    },
     UpdateAgentProviderSelection {
         selection: UiAgentProviderSelectionUpdate,
     },
@@ -763,6 +768,12 @@ pub struct UiConfigStatusProjection {
     pub default_model: String,
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub provider_web_search: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub provider_web_search_effective: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub provider_web_search_reason: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub provider_web_search_route_summary: String,
     pub provider_auth_type: String,
     pub provider_auth_source: String,
     pub restart_required_on_change: bool,
@@ -779,6 +790,10 @@ pub struct UiProviderConfigSummaryProjection {
     pub default_model: String,
     #[serde(default, skip_serializing_if = "String::is_empty")]
     pub provider_web_search: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub provider_web_search_effective: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub provider_web_search_reason: String,
     pub provider_auth_type: String,
     pub provider_auth_source: String,
 }
@@ -1744,6 +1759,7 @@ impl UiProtocolState {
             | UiCommand::QueryWorkerControl { .. }
             | UiCommand::RunMasterPoll { .. }
             | UiCommand::WorkerControl { .. }
+            | UiCommand::TestProviderWebSearch { .. }
             | UiCommand::QueryConfigStatus
             | UiCommand::QueryErrorCenterEvents { .. } => Err(UiProtocolError::StreamKindMismatch),
             UiCommand::QueryNodeStatus { node_id } => Ok(UiQueryResult::NodeStatus(
@@ -1995,6 +2011,12 @@ pub fn validate_command(command: &UiCommand) -> Result<(), UiProtocolError> {
         {
             Err(UiProtocolError::EmptyProviderApiKeyEnv)
         }
+        UiCommand::TestProviderWebSearch { provider_id, .. } if provider_id.trim().is_empty() => {
+            Err(UiProtocolError::EmptyProviderId)
+        }
+        UiCommand::TestProviderWebSearch {
+            query: Some(query), ..
+        } if query.trim().is_empty() => Err(UiProtocolError::EmptyUserInput),
         UiCommand::UpdateAgentProviderSelection { selection }
             if selection.agent_name.trim().is_empty() =>
         {
@@ -2803,6 +2825,7 @@ fn command_kind(command: &UiCommand) -> &'static str {
         UiCommand::QueryErrorCenterEvents { .. } => "query_error_center_events",
         UiCommand::UpdateProviderConfig { .. } => "update_provider_config",
         UiCommand::UpsertProviderConfig { .. } => "upsert_provider_config",
+        UiCommand::TestProviderWebSearch { .. } => "test_provider_web_search",
         UiCommand::UpdateAgentProviderSelection { .. } => "update_agent_provider_selection",
         UiCommand::UpdateAgentResourceConfig { .. } => "update_agent_resource_config",
         UiCommand::CreateTask { .. } => "create_task",
@@ -2841,6 +2864,7 @@ fn is_command_ingress_kind(command: &UiCommand) -> bool {
             | UiCommand::SubmitUserInput { .. }
             | UiCommand::UpdateProviderConfig { .. }
             | UiCommand::UpsertProviderConfig { .. }
+            | UiCommand::TestProviderWebSearch { .. }
             | UiCommand::UpdateAgentProviderSelection { .. }
             | UiCommand::UpdateAgentResourceConfig { .. }
             | UiCommand::CreateTask { .. }
@@ -2884,6 +2908,9 @@ fn command_dispatch_target(command: &UiCommand) -> (&'static str, &'static str) 
         | UiCommand::UpsertProviderConfig { .. }
         | UiCommand::UpdateAgentProviderSelection { .. }
         | UiCommand::UpdateAgentResourceConfig { .. } => ("config.core", "crates/freehand-config"),
+        UiCommand::TestProviderWebSearch { .. } => {
+            ("provider.reason-live-bridge", "crates/freehand-runtime")
+        }
         UiCommand::CreateTask { .. }
         | UiCommand::CreateTaskAgent { .. }
         | UiCommand::AssignTask { .. }
@@ -5477,6 +5504,8 @@ mod tests {
                 provider_base_url_host: "api.example.test".to_owned(),
                 default_model: "MiniMax-M2".to_owned(),
                 provider_web_search: "auto".to_owned(),
+                provider_web_search_effective: "unsupported".to_owned(),
+                provider_web_search_reason: "unsupported provider/protocol/model".to_owned(),
                 provider_auth_type: "apikey".to_owned(),
                 provider_auth_source: "env".to_owned(),
             }],
@@ -5492,6 +5521,9 @@ mod tests {
             provider_base_url_host: "api.example.test".to_owned(),
             default_model: "MiniMax-M2".to_owned(),
             provider_web_search: "auto".to_owned(),
+            provider_web_search_effective: "unsupported".to_owned(),
+            provider_web_search_reason: "unsupported provider/protocol/model".to_owned(),
+            provider_web_search_route_summary: "no hosted web_search route".to_owned(),
             provider_auth_type: "apikey".to_owned(),
             provider_auth_source: "env".to_owned(),
             restart_required_on_change: true,
@@ -5501,6 +5533,9 @@ mod tests {
         assert!(encoded.contains("provider_auth_source"));
         assert!(encoded.contains("provider_registry"));
         assert!(encoded.contains("provider_base_url"));
+        assert!(encoded.contains("provider_web_search_effective"));
+        assert!(encoded.contains("provider_web_search_reason"));
+        assert!(encoded.contains("provider_web_search_route_summary"));
         assert!(encoded.contains("agent_resource_count"));
         assert!(encoded.contains("agent_resource_provider_id"));
         assert!(!encoded.contains("api_key"));
@@ -5616,6 +5651,26 @@ mod tests {
             protocol_rejection(empty_selection).code,
             "empty_provider_id"
         );
+    }
+
+    #[test]
+    fn provider_web_search_test_routes_to_runtime_owner() {
+        let command = UiCommand::TestProviderWebSearch {
+            provider_id: "minimax".to_owned(),
+            query: Some("Freehand provider web_search live capability test".to_owned()),
+        };
+        validate_command(&command).expect("valid web_search test command");
+        let envelope = build_command_dispatch_envelope(&command).expect("dispatch envelope");
+        assert_eq!(envelope.target_feature_id, "provider.reason-live-bridge");
+        assert_eq!(envelope.target_owner_module, "crates/freehand-runtime");
+        assert_eq!(envelope.ingress.command_kind, "test_provider_web_search");
+
+        let err = validate_command(&UiCommand::TestProviderWebSearch {
+            provider_id: String::new(),
+            query: None,
+        })
+        .expect_err("empty provider rejected");
+        assert_eq!(err, UiProtocolError::EmptyProviderId);
     }
 
     #[test]
