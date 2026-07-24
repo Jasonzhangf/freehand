@@ -99,6 +99,21 @@ function complete(text) {
   };
 }
 
+function waiting(text) {
+  const schema = {
+    claim: "waiting",
+    next_step: `Wait for timer ${timerId} to fire, then inspect current timer truth and finish the proof.`
+  };
+  return {
+    content: [{
+      type: "text",
+      text: `${text}\n<freehand_completion>\n${JSON.stringify(schema)}\n</freehand_completion>`
+    }],
+    usage: { input_tokens: 80, output_tokens: 60 },
+    stop_reason: "end_turn"
+  };
+}
+
 const server = http.createServer((req, res) => {
   let body = "";
   req.on("data", chunk => { body += chunk; });
@@ -136,7 +151,7 @@ const server = http.createServer((req, res) => {
         stop_reason: "tool_use"
       };
     } else if (sawToolResult) {
-      response = complete("timer online proof completed after receiving scheduled tool result");
+      response = waiting("timer online proof is waiting after receiving scheduled timer tool result");
     } else if (sawTimerWakeup) {
       response = complete("timer due wakeup injected a new prompt turn into the source session");
     } else {
@@ -192,26 +207,108 @@ NODE
   curl -4fsS "$health_url" >/dev/null
   "$cli_path" adp-smoke --url "$adp_url" >/dev/null
 
-  set +e
-  sample_output="$("$cli_path" adp-turn-sample --url "$adp_url" --sample success 2>&1)"
-  sample_status="$?"
-  set -e
-  if [[ "$sample_status" != "0" ]] && ! grep -q "reason_live_turn_completed" <<<"$sample_output"; then
-    echo "$sample_output" >&2
-    echo "timer online ADP sample failed before live turn completion" >&2
-    exit 1
-  fi
-  if ! grep -q "tool_executions=1" <<<"$sample_output"; then
-    echo "$sample_output" >&2
-    echo "timer online sample did not record exactly one tool execution" >&2
-    exit 1
-  fi
-  session_id="$(printf '%s\n' "$sample_output" | sed -n 's/.* session=\([^ ]*\) .*/\1/p')"
-  if [[ -z "$session_id" ]]; then
-    echo "$sample_output" >&2
-    echo "timer online sample did not report source session id" >&2
-    exit 1
-  fi
+  session_id="timer-online-proof-session-$stamp"
+  submit_output="$(node --input-type=module - "$adp_url" "$session_id" "$timer_id" <<'NODE'
+const [adpUrl, sessionId, timerId] = process.argv.slice(2);
+
+function adpRequest(kind, payloadKey, payload, timeoutMs) {
+  const socket = new WebSocket(adpUrl);
+  const requestId = `${kind}-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => {
+      socket.close();
+      reject(new Error(`ADP ${kind} timeout request_id=${requestId}`));
+    }, timeoutMs);
+    socket.addEventListener("open", () => {
+      socket.send(JSON.stringify({ kind, request_id: requestId, [payloadKey]: payload }));
+    });
+    socket.addEventListener("message", (event) => {
+      const message = JSON.parse(event.data);
+      if (message.request_id !== requestId) {
+        return;
+      }
+      clearTimeout(timer);
+      socket.close();
+      if (message.kind === "failure") {
+        reject(new Error(message.failure?.message || message.failure?.code || "ADP failure"));
+        return;
+      }
+      if (message.kind === "query_result") {
+        resolve(message.result);
+        return;
+      }
+      if (message.kind === "command_receipt") {
+        resolve(message.receipt);
+        return;
+      }
+      reject(new Error(`unexpected ADP ${kind} response: ${message.kind}`));
+    });
+    socket.addEventListener("error", () => {
+      clearTimeout(timer);
+      reject(new Error(`ADP ${kind} socket error request_id=${requestId}`));
+    });
+  });
+}
+
+async function queryTranscript(timeoutMs) {
+  const deadline = Date.now() + timeoutMs;
+  let last = null;
+  while (Date.now() < deadline) {
+    const result = await adpRequest(
+      "query",
+      "query",
+      { QuerySessionTurns: { session_id: sessionId } },
+      10_000
+    );
+    const transcript = result?.SessionTurns || result?.session_turns || result;
+    const turns = Array.isArray(transcript?.turns) ? transcript.turns : [];
+    last = { turns: turns.length, statuses: turns.map((turn) => turn.terminal_status || "none") };
+    const toolExecutions = turns.reduce((count, turn) => {
+      const activities = Array.isArray(turn.tool_activities) ? turn.tool_activities : [];
+      return count + activities.filter((activity) => activity.tool_name === "timer").length;
+    }, 0);
+    const waitingTurn = turns.find((turn) => turn.terminal_status === "ToolPending");
+    const timerToolTurn = turns.find((turn) =>
+      Array.isArray(turn.tool_activities) &&
+      turn.tool_activities.some((activity) =>
+        activity.tool_name === "timer" &&
+        String(activity.detail || "").includes(timerId)
+      )
+    );
+    if (turns.length >= 2 && toolExecutions === 1 && waitingTurn && timerToolTurn) {
+      return {
+        turns,
+        toolExecutions,
+        waitingTurnId: waitingTurn.turn_id,
+        timerToolTurnId: timerToolTurn.turn_id
+      };
+    }
+    await new Promise((resolve) => setTimeout(resolve, 500));
+  }
+  throw new Error(`timer submit transcript did not reach waiting tool state: ${JSON.stringify(last)}`);
+}
+
+await adpRequest(
+  "command",
+  "command",
+  {
+    SubmitUserInput: {
+      text: `Timer online proof: call timer to schedule ${timerId}, then wait for the timer due wakeup instead of claiming final completion.`,
+      session_id: sessionId,
+      cwd: null,
+      metadata: null
+    }
+  },
+  120_000
+);
+const evidence = await queryTranscript(20_000);
+console.log(
+  `timer_submit_verified session=${sessionId} turns=${evidence.turns.length} ` +
+  `waiting_turn=${evidence.waitingTurnId} timer_tool_turn=${evidence.timerToolTurnId} ` +
+  `tool_executions=${evidence.toolExecutions}`
+);
+NODE
+)"
 
   mock_count="$(grep -c '"url":"/v1/messages"' "$mock_log" || true)"
   if [[ "$mock_count" -lt "2" ]]; then
@@ -298,7 +395,7 @@ NODE
   fi
   session_output="$("$cli_path" adp-session-query --url "$adp_url" --session "$session_id")"
   session_turns="$(printf '%s\n' "$session_output" | sed -n 's/.* selected_session=[^ ]* turns=\([0-9][0-9]*\).*/\1/p')"
-  if [[ -z "$session_turns" || "$session_turns" -lt 2 ]]; then
+  if [[ -z "$session_turns" || "$session_turns" -lt 3 ]]; then
     echo "$session_output" >&2
     echo "timer due wakeup did not inject a visible follow-up turn into the original user session" >&2
     exit 1
@@ -317,7 +414,7 @@ NODE
     echo "timer_tool_online_ok url=$adp_url session=$session_id timer_id=$timer_id session_turns=$session_turns mock_attempts=$mock_count"
   fi
   echo "$due_verified"
-  echo "$sample_output"
+  echo "$submit_output"
   grep '"sawToolResult":true' "$mock_log" | tail -1
   grep '"sawTimerWakeup":true' "$mock_log" | tail -1
 }

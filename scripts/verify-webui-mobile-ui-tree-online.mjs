@@ -9,7 +9,7 @@ const debugPort = Number.parseInt(process.env.FREEHAND_WEBUI_DEBUG_PORT || '9247
 const baseUrl = normalizedBaseUrl(process.env.FREEHAND_WEBUI_BASE_URL || 'http://127.0.0.1:4042/');
 const runId = `mobile-ui-tree-phase1-${new Date().toISOString().replace(/[-:.]/g, '').slice(0, 15)}-${process.pid}`;
 const artifactDir = path.join(process.cwd(), 'artifacts', 'webui-online', runId);
-const assetVersion = '20260724-mobile-ui-tree-phase1';
+const assetVersion = '20260724-timer-ui-phase2';
 const forbiddenUiTerms = [
   /rootfs/i,
   /shared-folder/i,
@@ -49,12 +49,15 @@ try {
     [
       '--headless=new',
       `--remote-debugging-port=${debugPort}`,
+      '--remote-debugging-address=0.0.0.0',
       `--user-data-dir=${chromeProfileDir}`,
       '--no-first-run',
       '--no-default-browser-check',
       '--disable-background-networking',
       '--disable-extensions',
       '--disable-sync',
+      '--disable-gpu',
+      '--no-sandbox',
       '--window-size=1280,900',
       baseUrl,
     ],
@@ -285,7 +288,7 @@ function collectPhaseOneState() {
   return {
     layoutShape: document.body.dataset.layoutShape || '',
     shellLayoutShape: shell?.dataset.layoutShape || '',
-    assetVersionSeen: html.includes('20260724-mobile-ui-tree-phase1'),
+    assetVersionSeen: html.includes('20260724-timer-ui-phase2'),
     bodyText,
     bodyWidth: document.body.scrollWidth,
     docWidth: document.documentElement.scrollWidth,

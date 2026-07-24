@@ -29,6 +29,7 @@ Generated from `docs/mainline-calls/ui.protocol.json`. Do not edit by hand.
 - Phase 1 ApplyExecutionFact and RunSchedulerTick are protocol-owned mutation intents routed to task.orchestration through runtime; protocol does not update task state or make scheduler decisions
 - Phase 2B QueryEventInbox and RunMasterPoll are protocol-owned query/mutation-intent shapes routed to task.orchestration; protocol does not store event cursor truth, classify board state, or apply master business actions
 - Phase 2C WorkerControl and QueryWorkerControl are protocol-owned command/query DTOs for already-running worker execution control; protocol validates ids, op names, and op-specific payloads before runtime dispatch
+- Timer dashboard QueryTimerList, ScheduleTimer, and CancelTimer are protocol-owned query/mutation DTOs for independent timer truth; protocol validates timer ids, schedule mode, delay/run-at/repeat fields, reason, prompt, and source session id before runtime dispatch
 - RunMasterPoll.replay_from_start is a protocol-owned cursor-mode field that defaults false for older clients and is rejected when combined with after_cursor
 - error-center query/subscribe commands are protocol-owned read-only ADP/query shapes while metadata/error truth remains runtime/error-center supplied
 - config status query is a protocol-owned read-only ADP/query shape carrying the complete safe provider registry plus current primary/fallback selection while config.core and runtime.ui-command-dispatch supply selected-agent truth
@@ -85,6 +86,7 @@ Generated from `docs/mainline-calls/ui.protocol.json`. Do not edit by hand.
 - Agent resource-count update command receipts report owner dispatch status only; restart-required and saved topology state is observed by follow-up config status projection
 - Phase 2B EventInbox and MasterPoll results expose UI-safe event rows, cursor values, compact classifications, and recommended semantic action labels supplied by runtime owner code through UiRuntimeQueryPort
 - WorkerControl query results expose UI-safe persisted control events plus optional task/agent/lifecycle/task-event projections supplied by runtime owner code
+- TimerList query results expose UI-safe timer schedule and ledger event projections supplied by runtime owner code
 
 ## Error Mainline
 
@@ -106,6 +108,7 @@ Generated from `docs/mainline-calls/ui.protocol.json`. Do not edit by hand.
 - Phase 1 execution fact commands reject empty ids and malformed facts before runtime dispatch; scheduler tick commands reject invalid threshold shape before runtime dispatch
 - Phase 2B EventInbox and MasterPoll commands reject empty cursor strings before runtime dispatch and must not treat unknown cursors as empty results
 - WorkerControl commands reject empty ids, unknown ops, missing ask_at_safe_point.question, missing add_constraint.constraint, and query-route misuse before runtime dispatch
+- Timer commands reject empty timer ids, unknown schedule modes, missing relative delay, missing absolute run-at time, missing recurring repeat rule, invalid weekdays, invalid local seconds of day, invalid cron expression, empty reason, empty prompt, and query-route misuse before runtime dispatch
 - RunMasterPoll rejects replay_from_start=true combined with after_cursor before dispatch
 - empty error-center session ids return empty_session_id and error-center query commands sent as command ingress are rejected as query-route misuse
 - task history remains query-only; task list and error-center subscribe reject non-subscription misuse through protocol stream matching
@@ -244,6 +247,7 @@ Generated from `docs/mainline-calls/ui.protocol.json`. Do not edit by hand.
 | 29 | `UiCommand::QueryEventInbox / UiQueryResult::EventInbox` | `crates/freehand-ui-protocol/src/lib.rs` | define Phase 2B EventInbox query DTOs without owning task event truth or cursor truth | event inbox query cursor | runtime-backed UI-safe event inbox projection | ADP query transport | runtime.ui-command-dispatch |  |  |  | bound |
 | 30 | `UiCommand::RunMasterPoll / UiQueryResult::MasterPoll` | `crates/freehand-ui-protocol/src/lib.rs` | define Phase 2B MasterPoll command/result DTOs routed to task.orchestration, including replay_from_start cursor-mode validation | master poll command cursor | validated mutation intent routed to task.orchestration and owner-supplied poll projection | ADP command transport | runtime.ui-command-dispatch |  |  |  | bound |
 | 28 | `UiWorkerControlCommand / UiCommand::WorkerControl / UiCommand::QueryWorkerControl / UiQueryResult::WorkerControl` | `crates/freehand-ui-protocol/src/lib.rs` | define Phase 2C worker-control command/query DTOs, validate op-specific fields, and route mutation intent to worker.control | worker-control command or event query | validated mutation intent or runtime-backed control event projection | ADP command/query transport | runtime.ui-command-dispatch |  |  |  | bound |
+| 31 | `UiTimerScheduleCommand / UiTimerRepeatCommand / UiCommand::QueryTimerList / UiCommand::ScheduleTimer / UiCommand::CancelTimer / UiQueryResult::TimerList / validate_timer_schedule_command` | `crates/freehand-ui-protocol/src/lib.rs` | define independent timer dashboard query/command DTOs, validate mode-specific timer schedule fields, and route mutation intent to runtime.master-worker-loop through runtime dispatch | timer list query, timer schedule command, or timer cancel command | validated timer query/result DTO or mutation intent routed to timer owner | ADP command/query transport | runtime.ui-command-dispatch |  |  |  | bound |
 
 ## Sync Status Against Mainline Call
 

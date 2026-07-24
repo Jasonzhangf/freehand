@@ -1,4 +1,4 @@
-import { initializeThemeToggle } from "/assets/theme.js?v=20260724-mobile-ui-tree-phase1";
+import { initializeThemeToggle } from "/assets/theme.js?v=20260724-timer-ui-phase2";
 
 initializeThemeToggle(document);
 
@@ -85,6 +85,8 @@ const mobileNewEntryButton = document.getElementById("mobile-new-entry-button");
 const closeDetailDrawerButton = document.getElementById("close-detail-drawer-button");
 const mobileHomeDashboard = document.getElementById("mobile-home-dashboard");
 const mobileHomeSessionList = document.getElementById("mobile-home-session-list");
+const mobileHomeTimerMarker = document.getElementById("mobile-home-timer-marker");
+const mobileHomeTimerList = document.getElementById("mobile-home-timer-list");
 const settingsReviewTree = document.getElementById("settings-review-tree");
 const mobileAgentSummaryStrip = document.getElementById("mobile-agent-summary-strip");
 const openMobileAgentSheetButton = document.getElementById("open-mobile-agent-sheet-button");
@@ -150,6 +152,25 @@ const newTaskPathPresets = document.getElementById("new-task-path-presets");
 const newSessionCancelButton = document.getElementById("new-session-cancel-button");
 const newSessionCloseButton = document.getElementById("new-session-close-button");
 const newSessionConfirmButton = document.getElementById("new-session-confirm-button");
+const timerDashboardDialog = document.getElementById("timer-dashboard-dialog");
+const timerDashboardForm = document.getElementById("timer-dashboard-form");
+const timerDashboardCloseButton = document.getElementById("timer-dashboard-close-button");
+const timerDashboardRefreshButton = document.getElementById("timer-dashboard-refresh-button");
+const timerDashboardStatus = document.getElementById("timer-dashboard-status");
+const timerDashboardList = document.getElementById("timer-dashboard-list");
+const timerDashboardHistory = document.getElementById("timer-dashboard-history");
+const timerModeInput = document.getElementById("timer-mode-input");
+const timerDelayInput = document.getElementById("timer-delay-input");
+const timerRunAtInput = document.getElementById("timer-run-at-input");
+const timerRepeatKindInput = document.getElementById("timer-repeat-kind-input");
+const timerIntervalInput = document.getElementById("timer-interval-input");
+const timerTimeOfDayInput = document.getElementById("timer-time-of-day-input");
+const timerWeekdaysInput = document.getElementById("timer-weekdays-input");
+const timerCronInput = document.getElementById("timer-cron-input");
+const timerMaxRunsInput = document.getElementById("timer-max-runs-input");
+const timerSourceSessionInput = document.getElementById("timer-source-session-input");
+const timerReasonInput = document.getElementById("timer-reason-input");
+const timerPromptInput = document.getElementById("timer-prompt-input");
 const composerForm = document.getElementById("composer-form");
 const composerInput = document.getElementById("composer-input");
 const cancelButton = document.getElementById("cancel-button");
@@ -272,6 +293,9 @@ const state = {
   eventInbox: null,
   taskHistory: null,
   workerControl: null,
+  timerList: null,
+  timerStatusError: null,
+  timerCommandInFlight: false,
   phase2StatusError: null,
   phase2LastRefreshAt: null,
   workerControlInFlight: false,
@@ -933,6 +957,22 @@ function agentResourceConfigReceiptStatus(receipt, expectedCount) {
     return `Worker limit saved: ${expectedCount}. Restart required.`;
   }
   throw new Error("Agent resource save returned an unexpected service status.");
+}
+
+function timerScheduleReceiptStatus(receipt) {
+  const status = receipt?.dispatch_status || "";
+  if (status.startsWith("timer_scheduled:timer_id=")) {
+    return `Timer scheduled: ${status}`;
+  }
+  throw new Error("Timer schedule returned an unexpected service status.");
+}
+
+function timerCancelReceiptStatus(receipt) {
+  const status = receipt?.dispatch_status || "";
+  if (status.startsWith("timer_cancelled:timer_id=")) {
+    return `Timer cancelled: ${status}`;
+  }
+  throw new Error("Timer cancel returned an unexpected service status.");
 }
 
 function setBackgroundCommandStatus(message) {
@@ -5240,19 +5280,86 @@ function renderMobileHomeDashboard() {
     : selected
       ? compactSentence(selected.latest_summary || selected.latest_status || "Persisted session selected", 132)
       : "Select a persisted session or create a new conversation.";
-  const timerCopy = liveObservation
-    ? `Active wake/retry context: ${compactSentence(liveObservation.sessionId, 48)}`
-    : "Phase 1 only shows the timer entrance; create/list/cancel wiring belongs to Phase 2.";
+  const timerStats = timerDashboardStats();
+  const timerCopy = state.timerStatusError
+    ? `Timer query failed: ${compactSentence(state.timerStatusError, 96)}`
+    : state.timerList
+      ? timerDashboardSummary(timerStats)
+      : "waiting for owner-backed timer projection";
   setText("mobile-home-current-title", compactSentence(title, 80));
   setText("mobile-home-current-copy", copy);
   setText(
     "mobile-home-current-metrics",
     `${counts.activeCount} running · ${counts.reviewCount} review · ${counts.blockedCount} blocked · ${counts.closedCount} closed`,
   );
-  setText("mobile-home-timer-title", liveObservation ? "Timer / retry observable" : "Timer UI-only");
+  setText("mobile-home-timer-title", state.timerList ? "Timer owner truth" : "Timer loading");
   setText("mobile-home-timer-copy", timerCopy);
+  if (mobileHomeTimerMarker) {
+    mobileHomeTimerMarker.classList.toggle("ok", !state.timerStatusError && timerStats.activeCount > 0);
+    mobileHomeTimerMarker.classList.toggle("attention", !!state.timerStatusError || timerStats.activeCount === 0);
+  }
+  renderMobileHomeTimerList();
   setText("mobile-home-session-count", `${state.sessions.length} persisted session(s)`);
   renderMobileHomeSessionList();
+}
+
+function timerDashboardStats() {
+  const timers = (state.timerList && state.timerList.timers) || [];
+  return {
+    totalCount: timers.length,
+    activeCount: timers.filter((timer) => ["active", "running"].includes(timer.status)).length,
+    terminalCount: timers.filter((timer) => ["completed", "cancelled"].includes(timer.status)).length,
+    next: timers
+      .filter((timer) => ["active", "running"].includes(timer.status))
+      .slice()
+      .sort((left, right) => Number(left.next_due_at || 0) - Number(right.next_due_at || 0))[0] || null,
+  };
+}
+
+function timerDashboardSummary(stats = timerDashboardStats()) {
+  if (!state.timerList) {
+    return "waiting for timer truth";
+  }
+  const next = stats.next ? ` · next ${formatUnixTime(stats.next.next_due_at)}` : "";
+  return `${stats.activeCount} active · ${stats.terminalCount} terminal${next}`;
+}
+
+function renderMobileHomeTimerList() {
+  if (!mobileHomeTimerList) {
+    return;
+  }
+  mobileHomeTimerList.replaceChildren();
+  if (state.timerStatusError) {
+    mobileHomeTimerList.textContent = compactSentence(state.timerStatusError, 96);
+    return;
+  }
+  const timers = ((state.timerList && state.timerList.timers) || [])
+    .slice()
+    .sort((left, right) => Number(left.next_due_at || 0) - Number(right.next_due_at || 0))
+    .slice(0, 3);
+  if (timers.length === 0) {
+    mobileHomeTimerList.textContent = state.timerList ? "No timers." : "waiting for timer truth";
+    return;
+  }
+  timers.forEach((timer) => {
+    const item = document.createElement("button");
+    item.className = "mobile-home-session-item";
+    item.type = "button";
+    item.dataset.timerId = timer.timer_id || "";
+    const marker = document.createElement("span");
+    marker.className = `settings-status-marker ${["active", "running"].includes(timer.status) ? "ok" : "attention"}`;
+    marker.setAttribute("aria-hidden", "true");
+    const copy = document.createElement("span");
+    copy.className = "mobile-home-session-copy";
+    const title = document.createElement("strong");
+    title.textContent = compactSentence(timer.reason || timer.timer_id, 72);
+    const meta = document.createElement("small");
+    meta.textContent = compactSentence(`${timer.status} · ${formatUnixTime(timer.next_due_at)}`, 72);
+    copy.append(title, meta);
+    item.append(marker, copy);
+    item.addEventListener("click", () => openTimerDashboard());
+    mobileHomeTimerList.appendChild(item);
+  });
 }
 
 function renderMobileHomeSessionList() {
@@ -5416,6 +5523,14 @@ function applyPhase2QueryResult(result) {
     state.taskHistory = taskHistory;
     state.phase2StatusError = null;
     renderPhase2Dashboard();
+    return true;
+  }
+  const timerList = variantPayload(result, "TimerList");
+  if (timerList !== undefined) {
+    state.timerList = timerList;
+    state.timerStatusError = null;
+    renderTimerDashboard();
+    renderMobileHomeDashboard();
     return true;
   }
   return false;
@@ -6467,11 +6582,281 @@ function compactSentence(value, maxLength = 96) {
   return `${text.slice(0, Math.max(0, maxLength - 1)).trim()}…`;
 }
 
+function formatUnixTime(value) {
+  const seconds = Number(value);
+  if (!Number.isFinite(seconds) || seconds <= 0) {
+    return "no due time";
+  }
+  return new Date(seconds * 1000).toLocaleString(undefined, {
+    month: "2-digit",
+    day: "2-digit",
+    hour: "2-digit",
+    minute: "2-digit",
+    second: "2-digit",
+  });
+}
+
+function renderTimerDashboard() {
+  renderTimerSourceOptions();
+  if (timerDashboardStatus) {
+    timerDashboardStatus.textContent = state.timerStatusError
+      ? `timer query failed: ${state.timerStatusError}`
+      : state.timerList
+        ? timerDashboardSummary()
+        : "waiting for timer projection";
+  }
+  renderTimerDashboardList();
+  renderTimerDashboardHistory();
+}
+
+function renderTimerSourceOptions() {
+  if (!timerSourceSessionInput) {
+    return;
+  }
+  const selectedValue = timerSourceSessionInput.value || currentTimerSourceSessionId() || "";
+  timerSourceSessionInput.replaceChildren();
+  const internal = document.createElement("option");
+  internal.value = "";
+  internal.textContent = "Internal wakeup";
+  timerSourceSessionInput.appendChild(internal);
+  state.sessions.forEach((session) => {
+    if (!session || !session.session_id || internalRuntimeSessionId(session.session_id)) {
+      return;
+    }
+    const option = document.createElement("option");
+    option.value = session.session_id;
+    option.textContent = compactSentence(session.title || session.session_id, 80);
+    timerSourceSessionInput.appendChild(option);
+  });
+  timerSourceSessionInput.value = Array.from(timerSourceSessionInput.options)
+    .some((option) => option.value === selectedValue)
+    ? selectedValue
+    : "";
+}
+
+function currentTimerSourceSessionId() {
+  const selected = selectedParentSessionSummary() || sessionSummaryForSelected();
+  if (selected && selected.session_id && !internalRuntimeSessionId(selected.session_id)) {
+    return selected.session_id;
+  }
+  return "";
+}
+
+function renderTimerDashboardList() {
+  if (!timerDashboardList) {
+    return;
+  }
+  timerDashboardList.replaceChildren();
+  if (state.timerStatusError) {
+    timerDashboardList.textContent = state.timerStatusError;
+    return;
+  }
+  const timers = ((state.timerList && state.timerList.timers) || [])
+    .slice()
+    .sort((left, right) => Number(left.next_due_at || 0) - Number(right.next_due_at || 0));
+  if (timers.length === 0) {
+    timerDashboardList.textContent = state.timerList ? "No timer schedules." : "waiting for timer truth";
+    return;
+  }
+  timers.forEach((timer) => {
+    const row = document.createElement("section");
+    row.className = "timer-row";
+    row.dataset.timerId = timer.timer_id || "";
+    const marker = document.createElement("span");
+    marker.className = `settings-status-marker ${["active", "running"].includes(timer.status) ? "ok" : "attention"}`;
+    marker.setAttribute("aria-hidden", "true");
+    const body = document.createElement("div");
+    body.className = "timer-row-body";
+    const title = document.createElement("strong");
+    title.textContent = compactSentence(timer.reason || timer.timer_id, 96);
+    const meta = document.createElement("small");
+    const repeat = timer.repeat_summary ? ` · ${timer.repeat_summary}` : "";
+    meta.textContent = compactSentence(`${timer.status} · due ${formatUnixTime(timer.next_due_at)} · ${timer.fired_count}/${timer.max_runs}${repeat}`, 150);
+    const prompt = document.createElement("p");
+    prompt.textContent = compactSentence(timer.prompt || "no wakeup prompt", 180);
+    body.append(title, meta, prompt);
+    row.append(marker, body);
+    if (["active", "running"].includes(timer.status)) {
+      const cancel = document.createElement("button");
+      cancel.className = "session-bulk-button timer-cancel-button";
+      cancel.type = "button";
+      cancel.textContent = "Cancel";
+      cancel.addEventListener("click", () => cancelTimer(timer.timer_id));
+      row.appendChild(cancel);
+    }
+    timerDashboardList.appendChild(row);
+  });
+}
+
+function renderTimerDashboardHistory() {
+  if (!timerDashboardHistory) {
+    return;
+  }
+  timerDashboardHistory.replaceChildren();
+  const events = ((state.timerList && state.timerList.events) || []).slice(-8).reverse();
+  if (events.length === 0) {
+    timerDashboardHistory.textContent = state.timerList ? "No timer ledger events." : "waiting for timer ledger";
+    return;
+  }
+  events.forEach((event) => {
+    const row = document.createElement("div");
+    row.className = "timer-event-row";
+    const marker = document.createElement("span");
+    marker.className = `settings-status-marker ${event.event_type === "TimerScheduled" || event.event_type === "TimerFired" ? "ok" : "attention"}`;
+    marker.setAttribute("aria-hidden", "true");
+    const copy = document.createElement("span");
+    copy.textContent = compactSentence(`${event.event_type} · ${formatUnixTime(event.occurred_at)} · ${event.summary}`, 180);
+    row.append(marker, copy);
+    timerDashboardHistory.appendChild(row);
+  });
+}
+
+async function openTimerDashboard() {
+  if (timerDashboardDialog && typeof timerDashboardDialog.showModal === "function" && !timerDashboardDialog.open) {
+    timerDashboardDialog.showModal();
+  }
+  renderTimerDashboard();
+  await refreshTimerDashboard();
+}
+
+async function refreshTimerDashboard() {
+  try {
+    const result = await adpQuery({ QueryTimerList: { include_terminal: true } });
+    applyPhase2QueryResult(result);
+    setCommandStatus("Timer projection refreshed.");
+  } catch (error) {
+    state.timerStatusError = error.message;
+    setCommandStatus(`timer refresh failed: ${error.message}`, { stickyMs: 9000 });
+    renderTimerDashboard();
+    renderMobileHomeDashboard();
+  }
+}
+
+function buildTimerSchedulePayload() {
+  const mode = (timerModeInput && timerModeInput.value) || "relative";
+  const maxRuns = positiveIntegerValue(timerMaxRunsInput, 1);
+  const payload = {
+    mode,
+    reason: (timerReasonInput && timerReasonInput.value || "").trim(),
+    prompt: (timerPromptInput && timerPromptInput.value || "").trim(),
+    max_runs: maxRuns,
+  };
+  const sourceSession = (timerSourceSessionInput && timerSourceSessionInput.value || "").trim();
+  if (sourceSession) {
+    payload.source_session_id = sourceSession;
+  }
+  if (mode === "relative") {
+    payload.delay_seconds = positiveIntegerValue(timerDelayInput, 0);
+  } else if (mode === "absolute") {
+    payload.run_at_unix_seconds = nonNegativeIntegerValue(timerRunAtInput);
+  } else if (mode === "recurring") {
+    payload.repeat = buildTimerRepeatPayload(maxRuns);
+  }
+  return payload;
+}
+
+function buildTimerRepeatPayload(maxRuns) {
+  const kind = (timerRepeatKindInput && timerRepeatKindInput.value) || "interval";
+  if (kind === "interval") {
+    return {
+      kind,
+      interval_seconds: positiveIntegerValue(timerIntervalInput, 0),
+      max_runs: maxRuns,
+    };
+  }
+  if (kind === "daily") {
+    return {
+      kind,
+      time_of_day_seconds_local: nonNegativeIntegerValue(timerTimeOfDayInput),
+      skip_weekends: false,
+      max_runs: maxRuns,
+    };
+  }
+  if (kind === "weekly") {
+    return {
+      kind,
+      time_of_day_seconds_local: nonNegativeIntegerValue(timerTimeOfDayInput),
+      weekdays: parseWeekdayList(timerWeekdaysInput && timerWeekdaysInput.value),
+      max_runs: maxRuns,
+    };
+  }
+  if (kind === "cron") {
+    return {
+      kind,
+      expression: (timerCronInput && timerCronInput.value || "").trim(),
+      max_runs: maxRuns,
+    };
+  }
+  throw new Error(`unsupported timer repeat kind: ${kind}`);
+}
+
+function positiveIntegerValue(input, fallback) {
+  const value = Number.parseInt(input && input.value, 10);
+  return Number.isFinite(value) && value > 0 ? value : fallback;
+}
+
+function nonNegativeIntegerValue(input) {
+  const value = Number.parseInt(input && input.value, 10);
+  return Number.isFinite(value) && value >= 0 ? value : 0;
+}
+
+function parseWeekdayList(value) {
+  const days = `${value || ""}`
+    .split(",")
+    .map((item) => Number.parseInt(item.trim(), 10))
+    .filter((item) => Number.isInteger(item));
+  if (days.length === 0 || days.some((day) => day < 0 || day > 6)) {
+    throw new Error("weekdays must be comma-separated integers 0..6");
+  }
+  return days;
+}
+
+async function scheduleTimerFromForm() {
+  const timer = buildTimerSchedulePayload();
+  state.timerCommandInFlight = true;
+  renderTimerDashboard();
+  try {
+    const receipt = await adpCommand({ ScheduleTimer: { timer } });
+    const message = timerScheduleReceiptStatus(receipt);
+    setCommandStatus(message, { stickyMs: 8000 });
+    await refreshTimerDashboard();
+  } catch (error) {
+    state.timerStatusError = error.message;
+    setCommandStatus(`timer schedule failed: ${error.message}`, { stickyMs: 9000 });
+  } finally {
+    state.timerCommandInFlight = false;
+    renderTimerDashboard();
+    renderMobileHomeDashboard();
+  }
+}
+
+async function cancelTimer(timerId) {
+  if (!timerId) {
+    return;
+  }
+  state.timerCommandInFlight = true;
+  renderTimerDashboard();
+  try {
+    const receipt = await adpCommand({ CancelTimer: { timer_id: timerId } });
+    const message = timerCancelReceiptStatus(receipt);
+    setCommandStatus(message, { stickyMs: 8000 });
+    await refreshTimerDashboard();
+  } catch (error) {
+    state.timerStatusError = error.message;
+    setCommandStatus(`timer cancel failed: ${error.message}`, { stickyMs: 9000 });
+  } finally {
+    state.timerCommandInFlight = false;
+    renderTimerDashboard();
+    renderMobileHomeDashboard();
+  }
+}
+
 async function refreshPhase2Status() {
   try {
     applyPhase2QueryResult(await adpQuery({ QueryTaskBoard: { include_terminal: true } }));
     applyPhase2QueryResult(await adpQuery("QueryAgentBoard"));
     applyPhase2QueryResult(await adpQuery({ QueryEventInbox: { limit: 30 } }));
+    applyPhase2QueryResult(await adpQuery({ QueryTimerList: { include_terminal: true } }));
     const historyTarget = currentTaskHistoryTarget();
     if (historyTarget && historyTarget.task_id) {
       applyPhase2QueryResult(await adpQuery({ QueryTaskHistory: { task_id: historyTarget.task_id } }));
@@ -7817,7 +8202,27 @@ if (mobileNewEntryButton) {
 }
 if (openTimerDashboardButton) {
   openTimerDashboardButton.addEventListener("click", () => {
-    setCommandStatus("Timer entry is UI-only in Phase 1. Relative, absolute, cron, recurrence, and durable wakeups are Phase 2.", { stickyMs: 7000 });
+    openTimerDashboard().catch((error) => {
+      state.timerStatusError = error.message;
+      setCommandStatus(`timer dashboard failed: ${error.message}`, { stickyMs: 9000 });
+      renderTimerDashboard();
+    });
+  });
+}
+if (timerDashboardCloseButton) {
+  timerDashboardCloseButton.addEventListener("click", () => {
+    timerDashboardDialog?.close();
+  });
+}
+if (timerDashboardRefreshButton) {
+  timerDashboardRefreshButton.addEventListener("click", () => {
+    refreshTimerDashboard();
+  });
+}
+if (timerDashboardForm) {
+  timerDashboardForm.addEventListener("submit", (event) => {
+    event.preventDefault();
+    scheduleTimerFromForm();
   });
 }
 if (openToolsDashboardButton) {

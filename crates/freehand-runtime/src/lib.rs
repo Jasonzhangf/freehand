@@ -19,14 +19,12 @@ pub use master_runner::{
 };
 pub(crate) use path_diagnostics::{expand_leading_tilde_path, path_resolution_diagnostic_text};
 pub(crate) use timer_store::{
-    DueTimerSchedule, TimerStore, claim_due_timer_schedule, complete_due_timer_schedule,
-    fail_due_timer_schedule,
+    DueTimerSchedule, TimerScheduleMode, TimerScheduleRequest, TimerStore,
+    claim_due_timer_schedule, complete_due_timer_schedule, fail_due_timer_schedule,
 };
+pub(crate) use timer_store::{TimerRepeatRule, TimerSchedule, parse_cron_expression};
 #[cfg(test)]
-pub(crate) use timer_store::{
-    TimerRepeatRule, TimerSchedule, local_datetime, next_daily_due, next_weekly_due,
-    parse_cron_expression,
-};
+pub(crate) use timer_store::{local_datetime, next_daily_due, next_weekly_due};
 pub(crate) use turn_projection::{
     current_runtime_turn_for_projection, persist_prepared_live_submit_active_turn,
     project_runtime_turn, project_runtime_turn_history, publish_live_cancelled_projection,
@@ -153,8 +151,9 @@ use freehand_ui_protocol::{
     UiTaskCreateCommand, UiTaskDispatchCommand, UiTaskEventInboxEntryProjection,
     UiTaskEventInboxProjection, UiTaskHistoryProjection, UiTaskLedgerEventProjection,
     UiTaskListProjection, UiTaskReviewCommand, UiTaskReviewRejectionCommand,
-    UiTaskSnapshotProjection, UiTurnProjection, UiTurnTimingProjection, UiWorkerControlCommand,
-    UiWorkerControlEventProjection, UiWorkerControlProjection,
+    UiTaskSnapshotProjection, UiTimerEventProjection, UiTimerListProjection, UiTimerProjection,
+    UiTimerRepeatCommand, UiTimerScheduleCommand, UiTurnProjection, UiTurnTimingProjection,
+    UiWorkerControlCommand, UiWorkerControlEventProjection, UiWorkerControlProjection,
     checkpoint_projection_from_runtime_summary, turn_projection_for_client,
     turn_projection_from_events,
 };
@@ -3355,6 +3354,24 @@ impl RuntimeCommandDispatcher {
                     ),
                 ))))
             }
+            UiCommand::QueryTimerList { include_terminal } => {
+                let Some(live) = state.config.live.as_ref() else {
+                    return Ok(None);
+                };
+                let store = TimerStore::new(&live.runtime_home, &state.config.reason_agent_id);
+                let schedules = store
+                    .load_schedules()
+                    .map_err(|err| UiCommandDispatchPortError::DispatchFailed(err.to_string()))?;
+                let events = store
+                    .load_events()
+                    .map_err(|err| UiCommandDispatchPortError::DispatchFailed(err.to_string()))?;
+                Ok(Some(UiQueryResult::TimerList(project_timer_list_for_ui(
+                    state.config.reason_agent_id.clone(),
+                    *include_terminal,
+                    schedules,
+                    events,
+                ))))
+            }
             UiCommand::QueryEventInbox {
                 after_cursor,
                 limit,
@@ -5008,6 +5025,12 @@ impl UiCommandDispatchPort for RuntimeCommandDispatcher {
             UiCommand::WorkerControl { control } => {
                 self.dispatch_worker_control(&mut state, envelope, control)
             }
+            UiCommand::ScheduleTimer { timer } => {
+                self.dispatch_schedule_timer(&mut state, envelope, timer)
+            }
+            UiCommand::CancelTimer { timer_id } => {
+                self.dispatch_cancel_timer(&mut state, envelope, timer_id)
+            }
             UiCommand::ResumeTurn { turn_id } => self.dispatch_resume_turn(envelope, turn_id),
             UiCommand::SendDirectMessageToSlave { node_id, text } => {
                 self.dispatch_direct_message(&mut state, envelope, node_id, text)
@@ -5391,6 +5414,66 @@ impl RuntimeCommandDispatcher {
             dispatch_status: format!(
                 "worker_control_applied:{}:{}:{}",
                 event.op, event.control_id, event.status
+            ),
+        })
+    }
+
+    fn dispatch_schedule_timer(
+        &self,
+        state: &mut RuntimeCommandDispatcherState,
+        envelope: UiCommandDispatchEnvelope,
+        timer: UiTimerScheduleCommand,
+    ) -> Result<UiCommandDispatchReceipt, UiCommandDispatchPortError> {
+        let Some(live) = state.config.live.as_ref() else {
+            return Err(UiCommandDispatchPortError::Unsupported(
+                "timer scheduling requires a live runtime home".to_owned(),
+            ));
+        };
+        let store = TimerStore::new(&live.runtime_home, &state.config.reason_agent_id);
+        let schedule = store
+            .schedule_from_request(ui_timer_schedule_to_runtime_request(timer)?)
+            .map_err(|err| UiCommandDispatchPortError::DispatchFailed(err.to_string()))
+            .and_then(|schedule| {
+                store
+                    .upsert_schedule(schedule)
+                    .map_err(|err| UiCommandDispatchPortError::DispatchFailed(err.to_string()))
+            })?;
+        Ok(UiCommandDispatchReceipt {
+            ingress: envelope.ingress,
+            target_feature_id: envelope.target_feature_id,
+            target_owner_module: envelope.target_owner_module,
+            dispatch_status: format!(
+                "timer_scheduled:timer_id={} next_due_at={} status={}",
+                schedule.timer_id, schedule.next_due_at, schedule.status
+            ),
+        })
+    }
+
+    fn dispatch_cancel_timer(
+        &self,
+        state: &mut RuntimeCommandDispatcherState,
+        envelope: UiCommandDispatchEnvelope,
+        timer_id: String,
+    ) -> Result<UiCommandDispatchReceipt, UiCommandDispatchPortError> {
+        let Some(live) = state.config.live.as_ref() else {
+            return Err(UiCommandDispatchPortError::Unsupported(
+                "timer cancellation requires a live runtime home".to_owned(),
+            ));
+        };
+        let store = TimerStore::new(&live.runtime_home, &state.config.reason_agent_id);
+        let schedule = store.cancel(timer_id.trim()).map_err(|err| match err {
+            timer_store::TimerStoreError::NotFound(timer_id) => {
+                UiCommandDispatchPortError::TargetNotFound(timer_id)
+            }
+            other => UiCommandDispatchPortError::DispatchFailed(other.to_string()),
+        })?;
+        Ok(UiCommandDispatchReceipt {
+            ingress: envelope.ingress,
+            target_feature_id: envelope.target_feature_id,
+            target_owner_module: envelope.target_owner_module,
+            dispatch_status: format!(
+                "timer_cancelled:timer_id={} status={}",
+                schedule.timer_id, schedule.status
             ),
         })
     }
@@ -6182,6 +6265,158 @@ fn project_master_poll_classification_for_ui(
     }
 }
 
+fn project_timer_list_for_ui(
+    source_agent_id: AgentId,
+    include_terminal: bool,
+    schedules: Vec<TimerSchedule>,
+    events: Vec<timer_store::TimerLedgerEvent>,
+) -> UiTimerListProjection {
+    let mut timers = schedules
+        .into_iter()
+        .filter(|schedule| include_terminal || timer_schedule_is_nonterminal(schedule))
+        .map(project_timer_schedule_for_ui)
+        .collect::<Vec<_>>();
+    timers.sort_by_key(|timer| (timer.next_due_at, timer.timer_id.clone()));
+    let mut events = events
+        .into_iter()
+        .filter(|event| include_terminal || timer_event_is_nonterminal(event))
+        .map(project_timer_event_for_ui)
+        .collect::<Vec<_>>();
+    events.sort_by_key(|event| (event.occurred_at, event.event_id.clone()));
+    UiTimerListProjection {
+        source_agent_id,
+        generated_at: now_unix_seconds(),
+        include_terminal,
+        timers,
+        events,
+    }
+}
+
+fn timer_schedule_is_nonterminal(schedule: &TimerSchedule) -> bool {
+    matches!(schedule.status.as_str(), "active" | "running")
+}
+
+fn timer_event_is_nonterminal(event: &timer_store::TimerLedgerEvent) -> bool {
+    matches!(
+        event.event_type.as_str(),
+        "TimerScheduled" | "TimerFired" | "TimerFailed"
+    )
+}
+
+fn project_timer_schedule_for_ui(schedule: TimerSchedule) -> UiTimerProjection {
+    let (repeat_kind, repeat_summary) = timer_repeat_projection(schedule.repeat.as_ref());
+    UiTimerProjection {
+        timer_id: schedule.timer_id,
+        agent_id: schedule.agent_id,
+        status: schedule.status,
+        reason: schedule.reason,
+        prompt: schedule.prompt,
+        next_due_at: schedule.next_due_at,
+        created_at: schedule.created_at,
+        updated_at: schedule.updated_at,
+        fired_count: schedule.fired_count,
+        max_runs: schedule.max_runs,
+        repeat_kind,
+        repeat_summary,
+        source_session_id: schedule.source_session_id,
+        source_turn_id: schedule.source_turn_id,
+    }
+}
+
+fn timer_repeat_projection(repeat: Option<&TimerRepeatRule>) -> (String, String) {
+    match repeat {
+        Some(TimerRepeatRule::Interval {
+            interval_seconds, ..
+        }) => ("interval".to_owned(), format!("every {interval_seconds}s")),
+        Some(TimerRepeatRule::Daily {
+            time_of_day_seconds_local,
+            skip_weekends,
+            ..
+        }) => {
+            let extra = if *skip_weekends {
+                ", skip weekends"
+            } else {
+                ""
+            };
+            (
+                "daily".to_owned(),
+                format!("daily at local +{}s{}", time_of_day_seconds_local, extra),
+            )
+        }
+        Some(TimerRepeatRule::Weekly {
+            time_of_day_seconds_local,
+            weekdays,
+            ..
+        }) => (
+            "weekly".to_owned(),
+            format!(
+                "weekly {:?} at local +{}s",
+                weekdays, time_of_day_seconds_local
+            ),
+        ),
+        Some(TimerRepeatRule::Cron { expression, .. }) => {
+            ("cron".to_owned(), format!("cron `{expression}`"))
+        }
+        None => (String::new(), String::new()),
+    }
+}
+
+fn project_timer_event_for_ui(event: timer_store::TimerLedgerEvent) -> UiTimerEventProjection {
+    let summary = match event.event_type.as_str() {
+        "TimerScheduled" => format!(
+            "scheduled next_due_at={} max_runs={}",
+            event
+                .payload
+                .get("next_due_at")
+                .and_then(Value::as_u64)
+                .unwrap_or(0),
+            event
+                .payload
+                .get("max_runs")
+                .and_then(Value::as_u64)
+                .unwrap_or(0)
+        ),
+        "TimerFired" => format!(
+            "fired at {}",
+            event
+                .payload
+                .get("fired_at")
+                .and_then(Value::as_u64)
+                .unwrap_or(event.occurred_at)
+        ),
+        "TimerCompleted" => format!(
+            "completed status={} fired_count={}",
+            event
+                .payload
+                .get("status")
+                .and_then(Value::as_str)
+                .unwrap_or("completed"),
+            event
+                .payload
+                .get("fired_count")
+                .and_then(Value::as_u64)
+                .unwrap_or(0)
+        ),
+        "TimerCancelled" => "cancelled".to_owned(),
+        "TimerFailed" => format!(
+            "failed: {}",
+            event
+                .payload
+                .get("error")
+                .and_then(Value::as_str)
+                .unwrap_or("unknown timer error")
+        ),
+        other => other.to_owned(),
+    };
+    UiTimerEventProjection {
+        event_id: event.event_id,
+        timer_id: event.timer_id,
+        event_type: event.event_type,
+        occurred_at: event.occurred_at,
+        summary,
+    }
+}
+
 fn query_error_center_events_for_ui(
     runtime_home: &Path,
     source_agent_id: &AgentId,
@@ -6477,6 +6712,84 @@ fn task_dispatch_from_ui(dispatch: Option<UiTaskDispatchCommand>) -> TaskDispatc
         None | Some(UiTaskDispatchCommand::SelfAgent) => TaskDispatchRequest::SelfAgent,
         Some(UiTaskDispatchCommand::None) => TaskDispatchRequest::None,
         Some(UiTaskDispatchCommand::Agent { agent_id }) => TaskDispatchRequest::Agent { agent_id },
+    }
+}
+
+fn ui_timer_schedule_to_runtime_request(
+    timer: UiTimerScheduleCommand,
+) -> Result<TimerScheduleRequest, UiCommandDispatchPortError> {
+    let mode = match timer.mode.trim() {
+        "relative" => TimerScheduleMode::Relative {
+            delay_seconds: timer.delay_seconds.unwrap_or(0),
+        },
+        "absolute" => TimerScheduleMode::Absolute {
+            run_at_unix_seconds: timer.run_at_unix_seconds.unwrap_or(0),
+        },
+        "recurring" => TimerScheduleMode::Recurring {
+            repeat: ui_timer_repeat_to_runtime(timer.repeat.ok_or_else(|| {
+                UiCommandDispatchPortError::DispatchFailed(
+                    "timer recurring schedule requires repeat".to_owned(),
+                )
+            })?)?,
+        },
+        other => {
+            return Err(UiCommandDispatchPortError::DispatchFailed(format!(
+                "unsupported timer mode `{other}`"
+            )));
+        }
+    };
+    Ok(TimerScheduleRequest {
+        timer_id: timer.timer_id,
+        mode,
+        reason: timer.reason,
+        prompt: timer.prompt,
+        max_runs: timer.max_runs,
+        source_session_id: timer.source_session_id,
+        source_turn_id: None,
+        source_trace_id: None,
+    })
+}
+
+fn ui_timer_repeat_to_runtime(
+    repeat: UiTimerRepeatCommand,
+) -> Result<TimerRepeatRule, UiCommandDispatchPortError> {
+    match repeat {
+        UiTimerRepeatCommand::Interval {
+            interval_seconds,
+            max_runs,
+        } => Ok(TimerRepeatRule::Interval {
+            interval_seconds,
+            max_runs,
+        }),
+        UiTimerRepeatCommand::Daily {
+            time_of_day_seconds_local,
+            skip_weekends,
+            max_runs,
+        } => Ok(TimerRepeatRule::Daily {
+            time_of_day_seconds_local,
+            skip_weekends,
+            max_runs,
+        }),
+        UiTimerRepeatCommand::Weekly {
+            time_of_day_seconds_local,
+            weekdays,
+            max_runs,
+        } => Ok(TimerRepeatRule::Weekly {
+            time_of_day_seconds_local,
+            weekdays,
+            max_runs,
+        }),
+        UiTimerRepeatCommand::Cron {
+            expression,
+            max_runs,
+        } => {
+            parse_cron_expression(&expression)
+                .map_err(|err| UiCommandDispatchPortError::DispatchFailed(err.to_string()))?;
+            Ok(TimerRepeatRule::Cron {
+                expression,
+                max_runs,
+            })
+        }
     }
 }
 

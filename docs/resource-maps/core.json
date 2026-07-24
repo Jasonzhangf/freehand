@@ -180,7 +180,7 @@
       "identity": "timer_id",
       "truth_store": "~/.freehand/state/timers and ~/.freehand/ledgers/timers",
       "operations": ["schedule", "cancel", "list", "fire_due", "fire_master_wakeup", "reschedule_recurring"],
-      "projections": ["timer tool result", "source-session injected prompt turn", "source-less internal master wakeup turn"]
+      "projections": ["timer tool result", "timer dashboard UI projection", "source-session injected prompt turn", "source-less internal master wakeup turn"]
     },
     {
       "resource_type": "master_work",
@@ -487,6 +487,33 @@
       "source_resource": "timer",
       "target_resource": "turn",
       "effect": "inject a source-backed due timer's persisted prompt as a new turn in its original session, or execute a source-less timer as an internal wakeup",
+      "mainline_call_doc": "docs/mainline-calls/runtime.master-worker-loop.json",
+      "binding_status": "bound"
+    },
+    {
+      "operation_id": "timer.schedule",
+      "owner_feature_id": "runtime.master-worker-loop",
+      "source_resource": "timer",
+      "target_resource": "timer",
+      "effect": "persist an independent relative, absolute, or recurring timer schedule plus wakeup prompt into timer schedule and ledger truth",
+      "mainline_call_doc": "docs/mainline-calls/runtime.master-worker-loop.json",
+      "binding_status": "bound"
+    },
+    {
+      "operation_id": "timer.cancel",
+      "owner_feature_id": "runtime.master-worker-loop",
+      "source_resource": "timer",
+      "target_resource": "timer",
+      "effect": "mark an existing independent timer schedule cancelled and append timer ledger truth without touching task lifecycle state",
+      "mainline_call_doc": "docs/mainline-calls/runtime.master-worker-loop.json",
+      "binding_status": "bound"
+    },
+    {
+      "operation_id": "timer.list",
+      "owner_feature_id": "runtime.master-worker-loop",
+      "source_resource": "timer",
+      "target_resource": "ui_projection",
+      "effect": "project timer schedules and ledger events into UI-safe dashboard rows without exposing runtime metadata or task truth",
       "mainline_call_doc": "docs/mainline-calls/runtime.master-worker-loop.json",
       "binding_status": "bound"
     },
@@ -993,6 +1020,39 @@
       "binding_status": "bound"
     },
     {
+      "edge_id": "runtime.master-worker-loop#13a",
+      "operation_id": "timer.schedule",
+      "source_resource": "timer",
+      "target_resource": "timer",
+      "mainline_call_doc": "docs/mainline-calls/runtime.master-worker-loop.json",
+      "call_table_step": "13a",
+      "file_path": "crates/freehand-runtime/src/timer_store.rs",
+      "symbol_path": "TimerStore::schedule_from_request",
+      "binding_status": "bound"
+    },
+    {
+      "edge_id": "runtime.master-worker-loop#13b",
+      "operation_id": "timer.cancel",
+      "source_resource": "timer",
+      "target_resource": "timer",
+      "mainline_call_doc": "docs/mainline-calls/runtime.master-worker-loop.json",
+      "call_table_step": "13b",
+      "file_path": "crates/freehand-runtime/src/timer_store.rs",
+      "symbol_path": "TimerStore::cancel",
+      "binding_status": "bound"
+    },
+    {
+      "edge_id": "runtime.master-worker-loop#13c",
+      "operation_id": "timer.list",
+      "source_resource": "timer",
+      "target_resource": "ui_projection",
+      "mainline_call_doc": "docs/mainline-calls/runtime.master-worker-loop.json",
+      "call_table_step": "13c",
+      "file_path": "crates/freehand-runtime/src/lib.rs",
+      "symbol_path": "project_timer_list_for_ui",
+      "binding_status": "bound"
+    },
+    {
       "edge_id": "runtime.master-worker-loop#11e",
       "operation_id": "master_work.resolve_attention",
       "source_resource": "master_work",
@@ -1458,6 +1518,22 @@
       "allowed_direct": true,
       "via_resources": [],
       "reason": "Due timers inject a persisted wakeup prompt as a new source-session turn when source truth exists, or use an internal wakeup turn when source-less."
+    },
+    {
+      "rule_id": "timer-mutates-own-schedule-direct",
+      "source_resource": "timer",
+      "target_resource": "timer",
+      "allowed_direct": true,
+      "via_resources": [],
+      "reason": "The timer owner may schedule and cancel independent timer truth inside the timer schedule store and ledger without Task Center state."
+    },
+    {
+      "rule_id": "timer-projects-ui-direct",
+      "source_resource": "timer",
+      "target_resource": "ui_projection",
+      "allowed_direct": true,
+      "via_resources": [],
+      "reason": "The timer owner may expose UI-safe schedule and ledger projections through protocol DTOs without making WebUI or Task Center the timer truth owner."
     },
     {
       "rule_id": "master-work-resolves-task-attention-direct",

@@ -20,6 +20,9 @@
 - resource map: `docs/resource-maps/core.json`
 - resource operations:
   - `timer.fire_master_wakeup`
+  - `timer.schedule`
+  - `timer.cancel`
+  - `timer.list`
   - `master_work.resolve_attention`
   - `master_work.admit_resolution_context`
   - `agent.heartbeat`
@@ -46,8 +49,12 @@
   - `request_context`
   - `task`
   - `agent`
+  - `ui_projection`
 - resource operations:
   - `timer.fire_master_wakeup`
+  - `timer.schedule`
+  - `timer.cancel`
+  - `timer.list`
   - `master_work.resolve_attention`
   - `master_work.admit_resolution_context`
   - `agent.heartbeat`
@@ -146,6 +153,9 @@ continue other ready work rather than dead-waiting in the current turn
 - Master completion evidence must not say a timer was scheduled unless the same
   turn contains a successful `timer` tool result; a verbal "scheduled" summary
   without timer ledger truth is not accepted as durable wakeup truth
+- Timer schedule, cancel, and list operations remain independent timer owner
+  truth. UI command/query wiring may call the timer owner through runtime, but
+  neither WebUI nor Task Center becomes timer truth.
 - Master provider guidance tells the model to preserve user-supplied paths,
   avoid repeated Master-side probes outside runtime home, require Worker
   symlink/canonical-path evidence, and never invent `/workspace`, `/tmp`, or
@@ -209,6 +219,9 @@ continue other ready work rather than dead-waiting in the current turn
   polling; the model never waits for a future Worker event inside that turn
 - persisted timer wakeup prompts tell the future Master turn what current truth
   to inspect, what waited condition to revisit, and what decision to make
+- Timer list projections expose only schedule and ledger fields as UI-safe
+  dashboard rows; they do not expose runtime debug metadata and do not turn
+  timer state into task lifecycle state.
 - lifecycle decision rounds are finite; exhaustion closes blocked and leaves
   the event cursor retryable
 - retryable lifecycle executor and missing-decision failures keep the durable

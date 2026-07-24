@@ -27,6 +27,10 @@
   - app boundary can serve ADP runtime-query-port results without importing runtime/task/error-center owner crates
   - app boundary can serve ADP task list and error-center subscription initial snapshots through the runtime query port without importing runtime/task/error-center owner crates
   - WebUI Phase 2D status drawer can query and render TaskBoard, AgentBoard, EventInbox, TaskHistory, and WorkerControl owner projections without browser-persisted task/control truth
+  - WebUI Timer dashboard can query `QueryTimerList`, submit
+    `ScheduleTimer`, submit `CancelTimer`, and render owner-projected
+    schedule/ledger truth without browser-persisted timer state or Task Center
+    state
   - WebUI mobile Agent Dashboard derives one presentation model from owner-backed projections; the Header shows current running Agent count, Worker task lifecycle buckets, and active/review/blocked task title, while the first tap opens only the current session's Worker child-task list
   - WebUI Header session relationship surface is canonical for Master/Worker navigation: collapsed state is a compact dashbar, expanded state is a dropdown session tree capped at half the viewport, and the Worker return path is in the Header
   - WebUI Master/Worker relationship tests lock schema fields, not UI copy: persisted session metadata is the Master source, and `UiTaskSnapshotProjection.parent_session_id`, `attached_session_ids`, `worker_session_id`, and `task_id` are the only Worker relationship source; DOM `data-session-id` / `data-task-id` are checked only as projections of those fields
@@ -63,6 +67,11 @@
   - WebUI theme and shared logo asset smoke
   - WebUI JS asset smoke
   - WebUI Phase 1 mobile UI tree asset smoke for `open-settings-drawer-button`, `open-timer-dashboard-button`, `open-tools-dashboard-button`, `mobile-new-entry-button`, `open-session-drawer-button`, `mobile-home-dashboard`, `settings-review-tree`, `internalRuntimeSessionId`, `topLevelPersistedSessions`, `renderMobileHomeDashboard`, `renderMobileHomeSessionList`, `phaseOneSettingsTree`, `renderSettingsReviewTree`, small hollow status markers, logo green, and no production UI storage-management wording for Android
+  - WebUI Timer dashboard asset smoke for `QueryTimerList`,
+    `ScheduleTimer`, `CancelTimer`, `openTimerDashboard`,
+    `refreshTimerDashboard`, `renderTimerDashboard`,
+    `renderTimerDashboardList`, `renderTimerDashboardHistory`,
+    `renderMobileHomeTimerList`, `scheduleTimerFromForm`, and `cancelTimer`
   - Android update route smoke for env/sidecar manifest JSON, explicit missing-sidecar failure, and explicit missing-APK 404
   - WebUI JS asset smoke locks ADP WebSocket command/query usage, rejects `fetch` as a live path, and requires `EventSource` only for latest-turn SSE display refresh
   - WebUI ADP subscription accepted/waiting status rendering smoke
@@ -157,6 +166,12 @@
 - WebUI online black-box coverage must remove existing sessions through ADP before `/new`, then assert the new draft session has `selectedTurn=-`, zero chat messages, clean empty-state text, and no prior success/failure/tool/waiting-data leakage
 - WebUI online anti-regression coverage must prove the negative case where ADP session list is empty while `QueryLatestActiveTurn` can still return an old turn from a non-destructively deleted session; after browser refresh, the page must show a clean empty conversation with no selected turn, no chat cards, and no old `runtime-turn-*` text
 - WebUI online Phase 2D coverage must query the same service endpoint for TaskBoard, AgentBoard, EventInbox, TaskHistory, and WorkerControl, then assert lifecycle observer status text/card counts match service truth, the mobile Header shows current running Agent count plus Worker task lifecycle buckets, the first tap renders only current-session child tasks, every current child task is inspectable without a fixed list cap, a task tap queries its owner-projected Worker session and renders that conversation, and the visible drawer text does not expose raw `ADP`, `runtime-turn-*`, task id, or execution id plumbing
+- WebUI online Timer dashboard coverage uses
+  `node scripts/verify-webui-timer-dashboard-online.mjs`: it opens the
+  production S-profile WebUI, schedules a verifier-owned relative timer
+  through the browser, observes the TimerStore-backed `QueryTimerList` row,
+  cancels it through the DOM, verifies `TimerCancelled` ledger truth, and
+  proves top-level persisted session ids are unchanged by timer schedule/cancel
 - WebUI mobile Agent Dashboard positive coverage must prove the Header and child-task list come from current-session TaskBoard/AgentBoard truth and that task selection refreshes `QuerySessionTurns` for the projected Worker session; `scripts/verify-worker-subtasks-online.py --parent-session <id>` is the read-only ADP checker for enumerating every current child task and verifying each projected Worker transcript one by one
 - `node scripts/verify-webui-path-diagnostic-online.mjs` is the fixed-session
   WebUI online closure for path-tool diagnostics: it creates/reuses the fixed
@@ -205,6 +220,9 @@
   - app boundary proves WebUI can consume `freehand-ui-protocol` without owning reason/provider semantics
   - app boundary gives diagnostics a repeatable way to generate success/failure ADP scenarios from WebUI without a second transport path or persistent composer buttons
   - app boundary proves it does not need direct reason/provider/node/config imports
+  - app boundary proves the Timer dashboard can consume runtime timer owner
+    projections and command receipts without becoming timer schedule, ledger,
+    due-fire, or recurrence truth
   - machine-readable mainline truth remains the only source for generated wiki artifacts
 - fixtures / replay inputs / runtime evidence paths:
   - `~/.freehand/state/ui`
@@ -229,6 +247,8 @@
   - mobile Agent capacity control is config truth: no localStorage capacity, no synthetic AgentBoard rows, and no claim that added Workers are live before restart/process startup
 - WebUI online verifier owns its Settings valid-save fixture: it backs up S-profile config/env, injects a verifier-only credential env before the browser run, edits the currently selected primary provider instead of switching the agent to a configured fallback provider, and restores config/env afterward so Settings proof does not depend on stale local launchd environment or violate the primary/fallback-distinct config contract
   - WebUI online verifier now captures Phase 2D drawer proof by querying service truth through the same endpoint and comparing TaskBoard, AgentBoard, EventInbox, TaskHistory, and WorkerControl status text plus visible card counts
+  - WebUI Timer dashboard list/schedule/cancel wiring is landed and covered by
+    `node scripts/verify-webui-timer-dashboard-online.mjs`
   - WebUI New dialog task path selection and composer cwd input are landed; new conversation creates protocol-owned session metadata through ADP `CreateSession` without cwd, while new task requires an explicit selected or typed cwd and creates a cwd-bound session through ADP `CreateSession`
   - WebUI root shell intentionally does not expose persistent success/failure buttons, while WebUI JS still carries paired diagnostic prompts for slash commands and shortcuts
   - WebUI terminal display defaults to summary-only; evidence, learned notes, and completion reason require debug details to be enabled

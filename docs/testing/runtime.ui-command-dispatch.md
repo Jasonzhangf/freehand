@@ -33,6 +33,9 @@
   - runtime-backed Phase 2C WorkerControl and QueryWorkerControl route to
     `worker.control`; runtime only projects owner DTOs and does not own
     safe-point control semantics or Task Center consequences
+  - runtime-backed Timer dashboard QueryTimerList, ScheduleTimer, and
+    CancelTimer route to independent TimerStore truth; runtime converts DTOs
+    and projects owner truth without creating Task Center lifecycle state
   - runtime-backed read-only error-center queries route to metadata ledger projection and return UI-safe rows without becoming error truth writers
   - runtime-backed read-only config status queries reload config-owner truth and project the complete safe provider registry plus current primary/fallback selection without becoming config truth writers
   - runtime-backed provider definition upsert commands route to `config.core` persistence without changing the active provider binding, then expose pending restart-required projection without hot-reloading active runtime config
@@ -107,6 +110,9 @@
   - Phase 2C WorkerControl dispatch/query coverage, including safe-point event
     projection, pause/resume/cancel consequence evidence, invalid target
     failure, and no runtime-local success projection
+  - Timer dashboard command/query coverage, including schedule persistence,
+    cancel persistence, include_terminal list projection, invalid shape failure,
+    missing live runtime-home failure, and no Task Center mutation
   - missing task history query target-not-found coverage
   - error-center runtime query coverage, including trace/turn/domain filters and no raw text in projection
   - config status runtime query coverage, including ordered multi-peer
@@ -166,6 +172,8 @@
     finite page limit
   - daemon ADP WorkerControl smoke over the shared runtime query/command path,
     with same-id proof using persisted worker-control ledger truth
+  - daemon/WebUI Timer dashboard smoke over the shared runtime query/command
+    path, with schedule/cancel/list evidence from timer owner ledger truth
 - project black-box impact:
   - runtime command execution stays outside app boundary while remaining compatible with protocol-owned transport contracts
 - fixtures / replay inputs / runtime evidence paths:
@@ -216,6 +224,9 @@
   - runtime Phase 2C WorkerControl dispatch/query bridge is covered by
     `runtime_dispatches_worker_control_to_task_owner` and
     `runtime_worker_control_invalid_target_returns_explicit_failure`
+  - runtime Timer dashboard schedule/cancel/list bridge is covered by
+    `runtime_timer_ui_commands_persist_and_project_owner_truth` and
+    `runtime_timer_ui_commands_reject_non_live_dispatcher`
   - runtime task mutation command bridge is covered through CLI ADP lifecycle smoke and must remain a thin route to `task.orchestration`
   - Phase 2A master-worker command bridge is covered by
     `runtime_dispatches_phase2a_master_worker_loop_into_task_truth`

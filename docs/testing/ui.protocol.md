@@ -38,6 +38,9 @@
   - Phase 2C WorkerControl/QueryWorkerControl ADP frames use protocol-owned
     DTOs while runtime/worker-control owners supply safe-point control event
     truth and Task Center consequence evidence
+  - Timer dashboard QueryTimerList/ScheduleTimer/CancelTimer ADP frames use
+    protocol-owned DTOs while runtime/timer owners supply independent timer
+    schedule, cancel, ledger, and UI projection truth
   - task list ADP subscribe frames use protocol-owned subscription shape and receive runtime-supplied task list projections without making protocol state the task truth owner
   - error-center ADP query/subscribe frames use protocol-owned commands and UI-safe DTOs while runtime owner code supplies metadata-backed truth
   - config status ADP query frames use protocol-owned command/result DTOs for complete safe provider registry plus current primary/fallback selection while runtime owner code supplies config.core-backed truth
@@ -113,6 +116,10 @@
   - Phase 2C WorkerControl validation covers owner-routing to
     `worker.control`, query-route misuse, unknown op rejection, and
     op-specific `question`/`constraint` required fields
+  - Timer dashboard validation covers QueryTimerList route separation,
+    ScheduleTimer owner-routing, CancelTimer owner-routing, mode-specific
+    relative/absolute/recurring fields, repeat validation, and TimerList DTO
+    JSON roundtrip without protocol-owned timer persistence
   - task list subscription selector and matcher cover accepted task list projections and rejection of task query/history misuse on subscribe route
   - error-center query command validation covers empty session id and command-ingress rejection for query-route misuse
   - config status query covers command-ingress rejection, runtime-owned
@@ -155,6 +162,9 @@
   - ADP Phase 2C WorkerControl smoke proves protocol frames can carry
     owner-routed safe-point control events without protocol-owned control
     ledger storage
+  - ADP Timer dashboard smoke proves protocol frames can carry TimerList
+    projections plus schedule/cancel mutation intents without protocol-owned
+    timer schedule or ledger storage
   - `command_to_projection_smoke` asserts turn `created_at` survives protocol
     projection
   - ADP task list subscription smoke proves initial task list projection and subsequent runtime-published task changes use the same subscription channel
@@ -175,6 +185,8 @@
   - protocol can expose runtime error-center query DTOs without becoming metadata/error truth
   - protocol can expose runtime config status DTOs without becoming config truth or leaking key material
   - protocol can route runtime config mutation intents without becoming config persistence truth or adding a credential value DTO
+  - protocol can expose timer dashboard DTOs without becoming timer schedule,
+    due-fire, recurrence, or ledger truth
   - ADP gives WebUI, Android, CLI, and headless smoke tests one shared control/status protocol
 - mainline/wiki sync:
   - wiki generated from mainline call must stay in sync with protocol owner code and function map updates
@@ -225,3 +237,5 @@
   - config status query/result DTO is landed; protocol-state rejection and secret-free serialization are regression-locked
   - provider/model update command DTO is landed; owner routing, validation rejection, and secret-free serialization are regression-locked
   - provider web_search test command DTO is landed and regression-locked by `provider_web_search_test_routes_to_runtime_owner`
+  - Timer dashboard command/query DTOs are landed and regression-locked by
+    `cargo test -p freehand-ui-protocol timer_ -- --nocapture`

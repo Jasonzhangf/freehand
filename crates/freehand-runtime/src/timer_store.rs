@@ -99,6 +99,25 @@ pub(crate) enum TimerStoreError {
     InvalidRepeat(String),
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) struct TimerScheduleRequest {
+    pub(crate) timer_id: Option<String>,
+    pub(crate) mode: TimerScheduleMode,
+    pub(crate) reason: String,
+    pub(crate) prompt: String,
+    pub(crate) max_runs: Option<u32>,
+    pub(crate) source_session_id: Option<SessionId>,
+    pub(crate) source_turn_id: Option<TurnId>,
+    pub(crate) source_trace_id: Option<TraceId>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub(crate) enum TimerScheduleMode {
+    Relative { delay_seconds: u64 },
+    Absolute { run_at_unix_seconds: u64 },
+    Recurring { repeat: TimerRepeatRule },
+}
+
 pub(crate) struct TimerStore {
     runtime_home: PathBuf,
     agent_id: AgentId,
@@ -166,6 +185,63 @@ impl TimerStore {
             source_session_id: Some(turn.request.session_id.clone()),
             source_turn_id: Some(turn.request.turn_id.clone()),
             source_trace_id: Some(turn.request.trace_id.clone()),
+        })
+    }
+
+    pub(crate) fn schedule_from_request(
+        &self,
+        request: TimerScheduleRequest,
+    ) -> Result<TimerSchedule, TimerStoreError> {
+        let now = now_unix_seconds();
+        let (next_due_at, repeat) = match request.mode {
+            TimerScheduleMode::Relative { delay_seconds } => {
+                if delay_seconds == 0 {
+                    return Err(TimerStoreError::MissingField("delay_seconds"));
+                }
+                (now.saturating_add(delay_seconds), None)
+            }
+            TimerScheduleMode::Absolute {
+                run_at_unix_seconds,
+            } => (run_at_unix_seconds, None),
+            TimerScheduleMode::Recurring { repeat } => {
+                let next_due_at = next_due_after(now, &repeat).ok_or_else(|| {
+                    TimerStoreError::InvalidRepeat("cannot compute next recurring fire".to_owned())
+                })?;
+                (next_due_at, Some(repeat))
+            }
+        };
+        let max_runs = request
+            .max_runs
+            .or_else(|| repeat.as_ref().and_then(repeat_max_runs))
+            .unwrap_or(1);
+        if max_runs == 0 {
+            return Err(TimerStoreError::MissingField("max_runs"));
+        }
+        Ok(TimerSchedule {
+            schema_version: 1,
+            timer_id: request
+                .timer_id
+                .filter(|value| !value.trim().is_empty())
+                .unwrap_or_else(|| {
+                    generated_timer_id_from_parts(
+                        &self.agent_id,
+                        request.source_session_id.as_ref(),
+                        request.source_turn_id.as_ref(),
+                    )
+                }),
+            agent_id: self.agent_id.clone(),
+            status: "active".to_owned(),
+            reason: request.reason,
+            prompt: request.prompt,
+            next_due_at,
+            created_at: now,
+            updated_at: now,
+            fired_count: 0,
+            max_runs,
+            repeat,
+            source_session_id: request.source_session_id,
+            source_turn_id: request.source_turn_id,
+            source_trace_id: request.source_trace_id,
         })
     }
 
@@ -359,7 +435,6 @@ impl TimerStore {
         writeln!(file, "{line}").map_err(|error| TimerStoreError::Persistence(error.to_string()))
     }
 
-    #[cfg(test)]
     pub(crate) fn load_events(&self) -> Result<Vec<TimerLedgerEvent>, TimerStoreError> {
         use std::io::{BufRead, BufReader};
 
@@ -434,6 +509,32 @@ fn generated_timer_id(turn: &TurnRecord) -> String {
         sanitize_identifier(turn.request.agent_id.as_str()),
         sanitize_identifier(turn.request.session_id.as_str()),
         sanitize_identifier(turn.request.turn_id.as_str()),
+        nanos,
+        sequence
+    )
+}
+
+fn generated_timer_id_from_parts(
+    agent_id: &AgentId,
+    session_id: Option<&SessionId>,
+    turn_id: Option<&TurnId>,
+) -> String {
+    let nanos = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .map(|duration| duration.as_nanos())
+        .unwrap_or(0);
+    let sequence = GENERATED_TIMER_ID_SEQUENCE.fetch_add(1, Ordering::Relaxed);
+    let session = session_id
+        .map(|id| sanitize_identifier(id.as_str()))
+        .unwrap_or_else(|| "source-less".to_owned());
+    let turn = turn_id
+        .map(|id| sanitize_identifier(id.as_str()))
+        .unwrap_or_else(|| "ui".to_owned());
+    format!(
+        "timer-{}-{}-{}-{}-{}",
+        sanitize_identifier(agent_id.as_str()),
+        session,
+        turn,
         nanos,
         sequence
     )

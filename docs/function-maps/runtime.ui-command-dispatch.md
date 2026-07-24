@@ -21,9 +21,11 @@
   - `input_attachment`
   - `provider_request`
   - `ui_projection`
+  - `timer`
 - resource operations:
   - `input_attachment.prepare_provider_input` (`input_attachment` -> `provider_request`)
   - `input_attachment.project_to_ui` (`input_attachment` -> `ui_projection`)
+  - timer bridge references `runtime.master-worker-loop` owner operations `timer.schedule`, `timer.cancel`, and `timer.list`
 - forbidden shortcuts:
   - Runtime must not persist image base64 in reason/session history or project it to UI history.
   - Provider adapters must consume only provider-neutral attachment semantics; runtime must not construct protocol-specific image wire payloads.
@@ -69,6 +71,10 @@
 - Phase 2C WorkerControl command and QueryWorkerControl query shapes route as
   thin ADP dispatch/query into `worker.control`; runtime converts DTOs and does
   not own control semantics, safe-point queues, or Task Center consequences
+- Phase 2 Timer dashboard command and query shapes route through runtime into
+  independent timer owner truth. Runtime converts protocol DTOs into timer
+  schedule requests, calls TimerStore schedule/cancel/list APIs, and never
+  mutates Task Center truth for timer actions.
 
 ## Response Mainline
 
@@ -132,6 +138,9 @@
 - runtime-backed WorkerControl dispatch returns owner receipt evidence only
   after `worker.control` accepts the command, and QueryWorkerControl returns
   persisted control events for same-id restart verification
+- runtime-backed Timer dashboard dispatch returns owner receipt evidence only
+  after TimerStore persists schedule/cancel truth; QueryTimerList returns
+  UI-safe schedule and ledger rows from timer owner truth
 
 ## Error Mainline
 
@@ -162,6 +171,9 @@
 - invalid worker-control targets, unknown operations, missing op-specific
   payloads, terminal tasks, and Task Center consequence failures map to
   explicit dispatch failures from `worker.control`
+- invalid timer schedules, unknown timer ids, missing live runtime home, and
+  TimerStore persistence failures map to explicit dispatch failures; runtime
+  must not create task truth or fake a browser-local timer projection
 
 ## Shared Multi-Reference Functions
 
@@ -265,6 +277,8 @@
 | 23 | `RuntimeCommandDispatcher::dispatch_run_master_poll` / `project_master_poll_for_ui` | `crates/freehand-runtime/src/lib.rs` | route Phase 2B MasterPoll command into task.orchestration and project classifications without business mutations; replay_from_start plus omitted limit drains all rows before cursor persistence | master poll command | MasterPoll projection and persisted cursor receipt | runtime ADP command dispatch / CLI sample | task owner | bound |
 | 24 | `RuntimeCommandDispatcher::dispatch_worker_control` / `project_worker_control_for_ui` | `crates/freehand-runtime/src/lib.rs` | route Phase 2C WorkerControl commands into worker.control and project accepted event receipt without owning control semantics | worker-control dispatch envelope | dispatch receipt with control id/op/status | `RuntimeCommandDispatcher::dispatch` | `TaskRuntime::apply_worker_control` | bound |
 | 25 | `RuntimeCommandDispatcher::query_runtime` / `project_worker_control_events_for_ui` | `crates/freehand-runtime/src/lib.rs` | route QueryWorkerControl into worker.control persisted event truth for restart verification | task id plus execution id query | `UiWorkerControlProjection` event list | ADP query transport | `TaskRuntime::query_worker_control_events` | bound |
+| 26 | `RuntimeCommandDispatcher::query_runtime` / `project_timer_list_for_ui` | `crates/freehand-runtime/src/lib.rs` | route QueryTimerList into timer owner schedule and ledger truth, then project UI-safe TimerList rows | include_terminal timer query flag | `UiTimerListProjection` or explicit timer-store failure | ADP query transport | `TimerStore::load_schedules` / `TimerStore::load_events` | bound |
+| 27 | `RuntimeCommandDispatcher::dispatch_schedule_timer` / `RuntimeCommandDispatcher::dispatch_cancel_timer` | `crates/freehand-runtime/src/lib.rs` | route ScheduleTimer and CancelTimer command envelopes into TimerStore owner mutation APIs and return user-safe timer receipts | validated timer schedule or cancel command | `timer_scheduled` or `timer_cancelled` receipt, or explicit owner failure | `RuntimeCommandDispatcher::dispatch` | `TimerStore::schedule_from_request` / `TimerStore::upsert_schedule` / `TimerStore::cancel` | bound |
 
 ## Sync Status Against Code
 

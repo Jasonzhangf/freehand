@@ -8,6 +8,9 @@
   "generated_wiki_doc": "docs/wiki/runtime.master-worker-loop.md",
   "resource_operations": [
     "timer.fire_master_wakeup",
+    "timer.schedule",
+    "timer.cancel",
+    "timer.list",
     "master_work.resolve_attention",
     "master_work.admit_resolution_context",
     "agent.heartbeat"
@@ -401,6 +404,48 @@
       "output_semantic": "running, completed, or active timer truth",
       "caller": "Master timer tool and Master runner",
       "callee": "timer store owner",
+      "binding_status": "bound"
+    },
+    {
+      "step": "13a",
+      "symbol_path": "TimerStore::schedule_from_request",
+      "file_path": "crates/freehand-runtime/src/timer_store.rs",
+      "responsibility": "build an independent timer schedule from a validated relative, absolute, interval, daily, weekly, or cron request while preserving the wakeup prompt and optional source session",
+      "input_semantic": "timer schedule request",
+      "output_semantic": "active timer schedule with persisted timing/repeat fields",
+      "caller": "timer tool execution and runtime UI command bridge",
+      "callee": "timer store owner",
+      "source_resource": "timer",
+      "target_resource": "timer",
+      "resource_operation": "timer.schedule",
+      "binding_status": "bound"
+    },
+    {
+      "step": "13b",
+      "symbol_path": "TimerStore::cancel",
+      "file_path": "crates/freehand-runtime/src/timer_store.rs",
+      "responsibility": "mark one independent timer schedule cancelled and append TimerCancelled ledger truth without mutating Task Center state",
+      "input_semantic": "timer id",
+      "output_semantic": "cancelled timer schedule plus ledger event",
+      "caller": "timer tool execution and runtime UI command bridge",
+      "callee": "timer store owner",
+      "source_resource": "timer",
+      "target_resource": "timer",
+      "resource_operation": "timer.cancel",
+      "binding_status": "bound"
+    },
+    {
+      "step": "13c",
+      "symbol_path": "project_timer_list_for_ui",
+      "file_path": "crates/freehand-runtime/src/lib.rs",
+      "responsibility": "project timer schedules and ledger events into UI-safe timer dashboard rows while filtering terminal truth only when the query asks for nonterminal rows",
+      "input_semantic": "timer schedules and timer ledger events",
+      "output_semantic": "UiTimerListProjection",
+      "caller": "RuntimeCommandDispatcher::query_runtime",
+      "callee": "ui.protocol DTOs",
+      "source_resource": "timer",
+      "target_resource": "ui_projection",
+      "resource_operation": "timer.list",
       "binding_status": "bound"
     },
     {

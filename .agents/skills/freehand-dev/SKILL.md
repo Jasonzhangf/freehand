@@ -261,6 +261,13 @@ Use this skill for any non-trivial work in this repo.
 - Do not accept verbal timer claims as proof. Master may say a timer was
   scheduled only after the `timer` tool returns `Timer scheduled` in that turn;
   otherwise the wakeup is not durable truth and must be fixed in guidance/tests.
+- Timer online verifiers must be timer-specific. Do not reuse generic
+  `adp-turn-sample --sample success`: its fixed transcript evidence can fail
+  before due handling and trigger fixture restoration, letting the real provider
+  handle the wakeup. A valid timer proof must keep the fixture alive, require
+  post-schedule `claim="waiting"` / `TerminalStatus::ToolPending`, then prove
+  the due/restart-due follow-up by mock provider request, same source session
+  turn count, timer state, and timer ledger truth before restoring config.
 - writable file-mutation tools may not reach the live provider path without a preview path in `freehand-tools` and checkpoint/rewind gating in `freehand-runtime`
 - `reason.session-history` inside `freehand-reason` owns base context, rewrite mode/version, rewrite ledger, and persisted session-history snapshots.
 - `reason.persistence` inside `freehand-reason` owns authoritative snapshot and reason-ledger persistence; UI sidecars and provider raw ledgers remain derived or debug-only.

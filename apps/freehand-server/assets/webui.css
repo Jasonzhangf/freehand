@@ -5007,6 +5007,130 @@ body[data-layout-shape="tablet_portrait"] .mobile-home-dashboard {
   font-size: 9.5px;
 }
 
+.timer-dashboard-dialog {
+  width: min(720px, calc(100vw - 24px));
+  max-height: min(780px, calc(100vh - 28px));
+  padding: 0;
+  border: 1px solid rgba(31, 108, 88, 0.18);
+  border-radius: 22px;
+  background: rgba(255, 255, 255, 0.96);
+  color: var(--text);
+  box-shadow: 0 28px 72px rgba(20, 33, 29, 0.20);
+}
+
+.timer-dashboard-dialog::backdrop {
+  background: rgba(12, 20, 17, 0.22);
+  backdrop-filter: blur(2px);
+}
+
+.timer-dashboard-panel {
+  display: grid;
+  gap: 12px;
+  max-height: inherit;
+  padding: 18px;
+  overflow: auto;
+}
+
+.timer-form-grid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.timer-form-grid label,
+.timer-text-control {
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+  color: var(--text-soft);
+  font-size: 11px;
+}
+
+.timer-form-grid input,
+.timer-form-grid select,
+.timer-text-control input,
+.timer-text-control textarea {
+  width: 100%;
+  min-width: 0;
+  border: 1px solid rgba(31, 108, 88, 0.18);
+  border-radius: 12px;
+  background: rgba(247, 251, 248, 0.86);
+  color: var(--text);
+  padding: 9px 10px;
+}
+
+.timer-text-control textarea {
+  min-height: 88px;
+  resize: vertical;
+}
+
+.timer-dashboard-list,
+.timer-dashboard-history {
+  display: grid;
+  gap: 8px;
+}
+
+.timer-row,
+.timer-event-row {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: 9px;
+  align-items: start;
+  padding: 10px;
+  border: 1px solid rgba(31, 108, 88, 0.12);
+  border-radius: 14px;
+  background: rgba(247, 251, 248, 0.72);
+}
+
+.timer-event-row {
+  grid-template-columns: auto minmax(0, 1fr);
+  color: var(--text-soft);
+  font-size: 11px;
+}
+
+.timer-row-body {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.timer-row-body strong,
+.timer-row-body small,
+.timer-row-body p {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.timer-row-body strong {
+  color: var(--text);
+  font-size: 12px;
+}
+
+.timer-row-body small,
+.timer-row-body p {
+  margin: 0;
+  color: var(--text-soft);
+  font-size: 10.5px;
+}
+
+.timer-cancel-button {
+  white-space: nowrap;
+}
+
+body[data-layout-shape="phone_portrait"] .timer-dashboard-dialog,
+body[data-layout-shape="tall_phone"] .timer-dashboard-dialog,
+body[data-layout-shape="tablet_portrait"] .timer-dashboard-dialog {
+  width: calc(100vw - 18px);
+  max-height: min(78vh, 720px);
+}
+
+body[data-layout-shape="phone_portrait"] .timer-form-grid,
+body[data-layout-shape="tall_phone"] .timer-form-grid,
+body[data-layout-shape="tablet_portrait"] .timer-form-grid {
+  grid-template-columns: 1fr;
+}
+
 body[data-layout-shape="phone_portrait"] .conversation-region,
 body[data-layout-shape="tall_phone"] .conversation-region,
 body[data-layout-shape="tablet_portrait"] .conversation-region {

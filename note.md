@@ -7995,3 +7995,34 @@ Current real root cause split:
   - `cargo check -p freehand-cli`; `cargo test -p freehand-ui-protocol provider_web_search -- --nocapture`; `cargo test -p freehand-config provider -- --nocapture`; `cargo test -p freehand-server --lib -- --nocapture`; `cargo run -p xtask -- mainlines check`; `cargo run -p xtask -- gates check` passed.
 - supersedes:
   - Earlier 2026-07-23 note/MEMORY statements that MiniMax hosted search remained unsupported are now superseded for the current Freehand MiniMax Anthropic-compatible Messages baseline. MiniMax native non-Anthropic hosted-search wire is still unverified and must not be hardcoded.
+# 2026-07-24 mobile UI tree Phase 2 timer dashboard slice
+
+- scope:
+  - Phase 1 production WebUI shell was already committed as `be03a49`.
+  - Current work closes only the Phase 2 Timer dashboard function slice: WebUI list/schedule/cancel/fired history projection through ADP/runtime TimerStore owner truth.
+  - Full Phase 2 remains open for Provider management, model groups, Tools registry page, New/session/search, Android update/permission/notification settings, and persisted-session search.
+- implementation:
+  - `ui.protocol` now has `QueryTimerList`, `ScheduleTimer`, `CancelTimer`, timer schedule/repeat/list/event DTOs, route validation, and `TimerList` query result.
+  - `runtime.master-worker-loop` now schedules/cancels/lists timers through `TimerStore` and projects UI-safe timer rows/events without Task Center truth.
+  - WebUI Timer dashboard opens from the mobile quick entry, queries `QueryTimerList`, schedules relative/absolute/recurring/cron forms through `ScheduleTimer`, cancels active timers through `CancelTimer`, refreshes owner truth after receipts, and updates the mobile home timer summary from owner projection.
+  - `scripts/verify-timer-tool-online.sh` was repaired after root cause: it wrongly reused generic `adp-turn-sample --sample success`, whose fixed transcript evidence fails when the timer fixture intentionally calls the timer. The verifier now submits a timer-specific ADP prompt, requires the post-schedule turn to terminalize as `ToolPending`/`claim="waiting"`, keeps the fixture provider alive, and only restores config after mock request 3 observes the due wakeup.
+- online proof:
+  - S-profile stayed on `ws://127.0.0.1:4042/adp` / `http://127.0.0.1:4042`.
+  - `node scripts/verify-webui-mobile-ui-tree-online.mjs` passed: `mobile_ui_tree_phase1_ok`, artifact `artifacts/webui-online/mobile-ui-tree-phase1-20260724T140115-46451`.
+  - `node scripts/verify-webui-timer-dashboard-online.mjs` passed: `webui_timer_dashboard_ok`, timer `timer-master-source-less-ui-1784901696810754000-1`, artifact `artifacts/webui-online/webui-timer-dashboard-20260724T140133-47790`; proof includes DOM schedule row, ADP TimerList row, DOM cancel action, TimerCancelled ledger, and unchanged top-level SessionList ids.
+  - `bash scripts/verify-timer-tool-online.sh` passed: timer `timer-online-proof-1784901474-25671`, session `timer-online-proof-session-1784901474-25671`, `session_turns=3`, `mock_attempts=3`, `timer_submit_verified ... waiting_turn=runtime-turn-544-r2 timer_tool_turn=runtime-turn-544 tool_executions=1`, `timer_due_verified ... status=completed fired_count=1`, and mock request 3 had `sawToolResult=true` plus `sawTimerWakeup=true`.
+  - `FREEHAND_TIMER_VERIFY_MODE=restart-due bash scripts/verify-timer-tool-online.sh` passed: timer `timer-online-proof-1784901568-34363`, session `timer-online-proof-session-1784901568-34363`, `session_turns=3`, `mock_attempts=3`, `timer_submit_verified ... waiting_turn=runtime-turn-546-r2 timer_tool_turn=runtime-turn-546 tool_executions=1`, `timer_due_verified ... status=completed fired_count=1`, and mock request 3 had `sawToolResult=true` plus `sawTimerWakeup=true` after service-scoped `restartS`.
+  - Final config restore check returned `provider=minimax`, `provider_protocol=messages`, `base_url_host=api.minimaxi.com`, `default_model=MiniMax-M3`, `web_search=auto`, `web_search_effective=hosted_declared`, `auth_source=inline`; fixture env grep returned 0 matches.
+- local proof:
+  - `bash -n scripts/verify-timer-tool-online.sh` passed.
+  - `node --check scripts/verify-webui-timer-dashboard-online.mjs` and `node --check scripts/verify-webui-mobile-ui-tree-online.mjs` passed.
+  - `jq empty docs/resource-maps/core.json docs/mainline-calls/runtime.master-worker-loop.json docs/mainline-calls/runtime.ui-command-dispatch.json docs/mainline-calls/ui.protocol.json docs/mainline-calls/app.webui-smoke.json` passed.
+  - `cargo test -p freehand-ui-protocol timer_ -- --nocapture` passed 4/4.
+  - `cargo test -p freehand-runtime runtime_timer_ui_commands -- --nocapture` passed 2/2.
+  - `cargo test -p freehand-runtime timer -- --nocapture` passed 13/13.
+  - `cargo test -p freehand-server --lib -- --nocapture` passed 19/19; the printed dispatch-worker panic is the intentional join-failure negative test.
+  - `cargo fmt --check`, `cargo run -p xtask -- mainlines generate`, `cargo run -p xtask -- mainlines check`, `cargo run -p xtask -- gates check`, and `git diff --check` passed.
+- remaining gaps:
+  - Phase 2 as a whole is not complete; only Timer dashboard owner wiring is closed.
+  - Android true-device proof was not run in this slice.
+  - In the Codex shell, direct shebang execution of `scripts/verify-timer-tool-online.sh` returned `137` before creating a new timer temp dir; explicit `bash scripts/verify-timer-tool-online.sh` is the verified entrance in this environment.

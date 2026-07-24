@@ -148,6 +148,10 @@ pub enum UiCommand {
         task_id: String,
         execution_id: String,
     },
+    QueryTimerList {
+        #[serde(default)]
+        include_terminal: bool,
+    },
     QueryErrorCenterEvents {
         session_id: SessionId,
         #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -167,6 +171,12 @@ pub enum UiCommand {
         provider_id: String,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         query: Option<String>,
+    },
+    ScheduleTimer {
+        timer: UiTimerScheduleCommand,
+    },
+    CancelTimer {
+        timer_id: String,
     },
     UpdateAgentProviderSelection {
         selection: UiAgentProviderSelectionUpdate,
@@ -976,6 +986,95 @@ pub struct UiSchedulerTickCommand {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct UiTimerScheduleCommand {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub timer_id: Option<String>,
+    pub mode: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub delay_seconds: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub run_at_unix_seconds: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub repeat: Option<UiTimerRepeatCommand>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub max_runs: Option<u32>,
+    pub reason: String,
+    pub prompt: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source_session_id: Option<SessionId>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+pub enum UiTimerRepeatCommand {
+    Interval {
+        interval_seconds: u64,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        max_runs: Option<u32>,
+    },
+    Daily {
+        time_of_day_seconds_local: u32,
+        #[serde(default)]
+        skip_weekends: bool,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        max_runs: Option<u32>,
+    },
+    Weekly {
+        time_of_day_seconds_local: u32,
+        weekdays: Vec<u8>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        max_runs: Option<u32>,
+    },
+    Cron {
+        expression: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        max_runs: Option<u32>,
+    },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct UiTimerProjection {
+    pub timer_id: String,
+    pub agent_id: AgentId,
+    pub status: String,
+    pub reason: String,
+    pub prompt: String,
+    pub next_due_at: u64,
+    pub created_at: u64,
+    pub updated_at: u64,
+    pub fired_count: u32,
+    pub max_runs: u32,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub repeat_kind: String,
+    #[serde(default, skip_serializing_if = "String::is_empty")]
+    pub repeat_summary: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source_session_id: Option<SessionId>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source_turn_id: Option<TurnId>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct UiTimerEventProjection {
+    pub event_id: String,
+    pub timer_id: String,
+    pub event_type: String,
+    pub occurred_at: u64,
+    pub summary: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct UiTimerListProjection {
+    pub source_agent_id: AgentId,
+    pub generated_at: u64,
+    pub include_terminal: bool,
+    #[serde(default)]
+    pub timers: Vec<UiTimerProjection>,
+    #[serde(default)]
+    pub events: Vec<UiTimerEventProjection>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct UiWorkerControlCommand {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub control_id: Option<String>,
@@ -1077,6 +1176,7 @@ pub enum UiQueryResult {
     TaskHistory(UiTaskHistoryProjection),
     ErrorCenterEvents(UiErrorCenterEventListProjection),
     ConfigStatus(UiConfigStatusProjection),
+    TimerList(UiTimerListProjection),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -1289,6 +1389,24 @@ pub enum UiProtocolError {
     EmptyWorkerControlConstraint,
     #[error("worker-control command requires non-empty note when provided")]
     EmptyWorkerControlNote,
+    #[error("timer command requires non-empty timer id when provided")]
+    EmptyTimerId,
+    #[error("timer schedule requires non-empty mode")]
+    EmptyTimerMode,
+    #[error("timer schedule mode `{0}` is not supported")]
+    UnknownTimerMode(String),
+    #[error("timer schedule requires non-empty reason")]
+    EmptyTimerReason,
+    #[error("timer schedule requires non-empty prompt")]
+    EmptyTimerPrompt,
+    #[error("timer schedule requires a positive delay_seconds for relative mode")]
+    MissingTimerDelay,
+    #[error("timer schedule requires run_at_unix_seconds for absolute mode")]
+    MissingTimerRunAt,
+    #[error("timer recurring schedule requires a repeat rule")]
+    MissingTimerRepeat,
+    #[error("timer repeat rule is invalid: {0}")]
+    InvalidTimerRepeat(String),
     #[error("event cursor must be non-empty when provided")]
     EmptyEventCursor,
     #[error("master poll replay_from_start cannot be combined with after_cursor")]
@@ -1811,9 +1929,12 @@ impl UiProtocolState {
             | UiCommand::QueryAgentLifecycle { .. }
             | UiCommand::QueryTaskHistory { .. }
             | UiCommand::QueryWorkerControl { .. }
+            | UiCommand::QueryTimerList { .. }
             | UiCommand::RunMasterPoll { .. }
             | UiCommand::WorkerControl { .. }
             | UiCommand::TestProviderWebSearch { .. }
+            | UiCommand::ScheduleTimer { .. }
+            | UiCommand::CancelTimer { .. }
             | UiCommand::QueryConfigStatus
             | UiCommand::QueryErrorCenterEvents { .. } => Err(UiProtocolError::StreamKindMismatch),
             UiCommand::QueryNodeStatus { node_id } => Ok(UiQueryResult::NodeStatus(
@@ -2047,6 +2168,10 @@ pub fn validate_command(command: &UiCommand) -> Result<(), UiProtocolError> {
             Err(UiProtocolError::EmptyTaskId)
         }
         UiCommand::WorkerControl { control } => validate_worker_control_command(control),
+        UiCommand::ScheduleTimer { timer } => validate_timer_schedule_command(timer),
+        UiCommand::CancelTimer { timer_id } if timer_id.trim().is_empty() => {
+            Err(UiProtocolError::EmptyTimerId)
+        }
         UiCommand::UpdateProviderConfig { update } | UiCommand::UpsertProviderConfig { update }
             if update.agent_name.trim().is_empty() =>
         {
@@ -2141,6 +2266,130 @@ fn invalid_input_attachment(attachment: &UiInputAttachment) -> bool {
             .data_base64
             .as_deref()
             .is_none_or(|data| data.trim().is_empty())
+}
+
+fn validate_timer_schedule_command(timer: &UiTimerScheduleCommand) -> Result<(), UiProtocolError> {
+    if timer
+        .timer_id
+        .as_deref()
+        .is_some_and(|value| value.trim().is_empty())
+    {
+        return Err(UiProtocolError::EmptyTimerId);
+    }
+    if timer.mode.trim().is_empty() {
+        return Err(UiProtocolError::EmptyTimerMode);
+    }
+    if timer.reason.trim().is_empty() {
+        return Err(UiProtocolError::EmptyTimerReason);
+    }
+    if timer.prompt.trim().is_empty() {
+        return Err(UiProtocolError::EmptyTimerPrompt);
+    }
+    if timer
+        .source_session_id
+        .as_ref()
+        .is_some_and(|session_id| session_id.as_str().trim().is_empty())
+    {
+        return Err(UiProtocolError::EmptySessionId);
+    }
+    if timer.max_runs == Some(0) {
+        return Err(UiProtocolError::InvalidTimerRepeat(
+            "max_runs must be greater than zero".to_owned(),
+        ));
+    }
+    match timer.mode.trim() {
+        "relative" => {
+            if timer.delay_seconds.unwrap_or(0) == 0 {
+                return Err(UiProtocolError::MissingTimerDelay);
+            }
+        }
+        "absolute" => {
+            if timer.run_at_unix_seconds.is_none() {
+                return Err(UiProtocolError::MissingTimerRunAt);
+            }
+        }
+        "recurring" => {
+            let Some(repeat) = timer.repeat.as_ref() else {
+                return Err(UiProtocolError::MissingTimerRepeat);
+            };
+            validate_timer_repeat_command(repeat)?;
+        }
+        other => return Err(UiProtocolError::UnknownTimerMode(other.to_owned())),
+    }
+    Ok(())
+}
+
+fn validate_timer_repeat_command(repeat: &UiTimerRepeatCommand) -> Result<(), UiProtocolError> {
+    match repeat {
+        UiTimerRepeatCommand::Interval {
+            interval_seconds,
+            max_runs,
+        } => {
+            if *interval_seconds == 0 {
+                return Err(UiProtocolError::InvalidTimerRepeat(
+                    "interval_seconds must be greater than zero".to_owned(),
+                ));
+            }
+            if *max_runs == Some(0) {
+                return Err(UiProtocolError::InvalidTimerRepeat(
+                    "repeat max_runs must be greater than zero".to_owned(),
+                ));
+            }
+        }
+        UiTimerRepeatCommand::Daily {
+            time_of_day_seconds_local,
+            max_runs,
+            ..
+        } => {
+            if *time_of_day_seconds_local >= 86_400 {
+                return Err(UiProtocolError::InvalidTimerRepeat(
+                    "time_of_day_seconds_local must be in 0..86400".to_owned(),
+                ));
+            }
+            if *max_runs == Some(0) {
+                return Err(UiProtocolError::InvalidTimerRepeat(
+                    "repeat max_runs must be greater than zero".to_owned(),
+                ));
+            }
+        }
+        UiTimerRepeatCommand::Weekly {
+            time_of_day_seconds_local,
+            weekdays,
+            max_runs,
+        } => {
+            if *time_of_day_seconds_local >= 86_400 {
+                return Err(UiProtocolError::InvalidTimerRepeat(
+                    "time_of_day_seconds_local must be in 0..86400".to_owned(),
+                ));
+            }
+            if weekdays.is_empty() || weekdays.iter().any(|day| *day > 6) {
+                return Err(UiProtocolError::InvalidTimerRepeat(
+                    "weekdays must contain integers 0..6".to_owned(),
+                ));
+            }
+            if *max_runs == Some(0) {
+                return Err(UiProtocolError::InvalidTimerRepeat(
+                    "repeat max_runs must be greater than zero".to_owned(),
+                ));
+            }
+        }
+        UiTimerRepeatCommand::Cron {
+            expression,
+            max_runs,
+        } => {
+            if expression.trim().is_empty() {
+                return Err(UiProtocolError::InvalidTimerRepeat(
+                    "cron expression must be non-empty".to_owned(),
+                ));
+            }
+            if *max_runs == Some(0) {
+                return Err(UiProtocolError::InvalidTimerRepeat(
+                    "repeat max_runs must be greater than zero".to_owned(),
+                ));
+            }
+        }
+    }
+    Ok(())
 }
 
 fn validate_worker_control_command(
@@ -2241,6 +2490,15 @@ pub fn protocol_rejection(err: UiProtocolError) -> UiProtocolRejection {
         UiProtocolError::EmptyWorkerControlQuestion => "empty_worker_control_question",
         UiProtocolError::EmptyWorkerControlConstraint => "empty_worker_control_constraint",
         UiProtocolError::EmptyWorkerControlNote => "empty_worker_control_note",
+        UiProtocolError::EmptyTimerId => "empty_timer_id",
+        UiProtocolError::EmptyTimerMode => "empty_timer_mode",
+        UiProtocolError::UnknownTimerMode(_) => "unknown_timer_mode",
+        UiProtocolError::EmptyTimerReason => "empty_timer_reason",
+        UiProtocolError::EmptyTimerPrompt => "empty_timer_prompt",
+        UiProtocolError::MissingTimerDelay => "missing_timer_delay",
+        UiProtocolError::MissingTimerRunAt => "missing_timer_run_at",
+        UiProtocolError::MissingTimerRepeat => "missing_timer_repeat",
+        UiProtocolError::InvalidTimerRepeat(_) => "invalid_timer_repeat",
         UiProtocolError::EmptyEventCursor => "empty_event_cursor",
         UiProtocolError::ConflictingMasterPollCursorMode => "conflicting_master_poll_cursor_mode",
         UiProtocolError::EmptyTaskAgentId => "empty_task_agent_id",
@@ -2912,10 +3170,13 @@ fn command_kind(command: &UiCommand) -> &'static str {
         UiCommand::QueryAgentLifecycle { .. } => "query_agent_lifecycle",
         UiCommand::QueryTaskHistory { .. } => "query_task_history",
         UiCommand::QueryWorkerControl { .. } => "query_worker_control",
+        UiCommand::QueryTimerList { .. } => "query_timer_list",
         UiCommand::QueryErrorCenterEvents { .. } => "query_error_center_events",
         UiCommand::UpdateProviderConfig { .. } => "update_provider_config",
         UiCommand::UpsertProviderConfig { .. } => "upsert_provider_config",
         UiCommand::TestProviderWebSearch { .. } => "test_provider_web_search",
+        UiCommand::ScheduleTimer { .. } => "schedule_timer",
+        UiCommand::CancelTimer { .. } => "cancel_timer",
         UiCommand::UpdateAgentProviderSelection { .. } => "update_agent_provider_selection",
         UiCommand::UpdateAgentResourceConfig { .. } => "update_agent_resource_config",
         UiCommand::CreateTask { .. } => "create_task",
@@ -2955,6 +3216,8 @@ fn is_command_ingress_kind(command: &UiCommand) -> bool {
             | UiCommand::UpdateProviderConfig { .. }
             | UiCommand::UpsertProviderConfig { .. }
             | UiCommand::TestProviderWebSearch { .. }
+            | UiCommand::ScheduleTimer { .. }
+            | UiCommand::CancelTimer { .. }
             | UiCommand::UpdateAgentProviderSelection { .. }
             | UiCommand::UpdateAgentResourceConfig { .. }
             | UiCommand::CreateTask { .. }
@@ -3000,6 +3263,9 @@ fn command_dispatch_target(command: &UiCommand) -> (&'static str, &'static str) 
         | UiCommand::UpdateAgentResourceConfig { .. } => ("config.core", "crates/freehand-config"),
         UiCommand::TestProviderWebSearch { .. } => {
             ("provider.reason-live-bridge", "crates/freehand-runtime")
+        }
+        UiCommand::ScheduleTimer { .. } | UiCommand::CancelTimer { .. } => {
+            ("runtime.master-worker-loop", "crates/freehand-runtime")
         }
         UiCommand::CreateTask { .. }
         | UiCommand::CreateTaskAgent { .. }
@@ -3838,6 +4104,162 @@ mod tests {
         let encoded = serde_json::to_string(&response).expect("worker control response json");
         assert!(encoded.contains("WorkerControl"));
         assert!(encoded.contains("observed"));
+        let decoded: UiAdpResponse = serde_json::from_str(&encoded).expect("response decode");
+        assert_eq!(decoded, response);
+    }
+
+    #[test]
+    fn timer_commands_validate_and_route_to_runtime_master_worker_loop() {
+        let schedule = UiCommand::ScheduleTimer {
+            timer: UiTimerScheduleCommand {
+                timer_id: Some("timer-ui-phase2".to_owned()),
+                mode: "relative".to_owned(),
+                delay_seconds: Some(180),
+                run_at_unix_seconds: None,
+                repeat: None,
+                max_runs: Some(1),
+                reason: "recheck worker status".to_owned(),
+                prompt: "Inspect TaskBoard and decide whether the waiting work is complete."
+                    .to_owned(),
+                source_session_id: Some(SessionId::new("session-ui-phase2")),
+            },
+        };
+
+        validate_command(&schedule).expect("valid timer schedule");
+        let envelope = build_command_dispatch_envelope(&schedule).expect("timer schedule envelope");
+        assert_eq!(envelope.ingress.command_kind, "schedule_timer");
+        assert_eq!(envelope.target_feature_id, "runtime.master-worker-loop");
+        assert_eq!(envelope.target_owner_module, "crates/freehand-runtime");
+
+        let cancel = UiCommand::CancelTimer {
+            timer_id: "timer-ui-phase2".to_owned(),
+        };
+        validate_command(&cancel).expect("valid timer cancel");
+        let envelope = build_command_dispatch_envelope(&cancel).expect("timer cancel envelope");
+        assert_eq!(envelope.ingress.command_kind, "cancel_timer");
+        assert_eq!(envelope.target_feature_id, "runtime.master-worker-loop");
+
+        let query = UiCommand::QueryTimerList {
+            include_terminal: true,
+        };
+        validate_command(&query).expect("valid timer query");
+        let err = accept_command_ingress(&query).expect_err("timer query is not command ingress");
+        assert_eq!(err, UiProtocolError::IngressCommandKindMismatch);
+        let err = UiProtocolState::default()
+            .query(&query)
+            .expect_err("protocol-only state cannot answer runtime timer query");
+        assert_eq!(err, UiProtocolError::StreamKindMismatch);
+    }
+
+    #[test]
+    fn timer_commands_reject_bad_shapes() {
+        let base = UiTimerScheduleCommand {
+            timer_id: Some("timer-ui-phase2".to_owned()),
+            mode: "relative".to_owned(),
+            delay_seconds: Some(180),
+            run_at_unix_seconds: None,
+            repeat: None,
+            max_runs: Some(1),
+            reason: "recheck worker status".to_owned(),
+            prompt: "Inspect TaskBoard and decide what to do next.".to_owned(),
+            source_session_id: Some(SessionId::new("session-ui-phase2")),
+        };
+
+        let mut zero_delay = base.clone();
+        zero_delay.delay_seconds = Some(0);
+        let err = validate_command(&UiCommand::ScheduleTimer { timer: zero_delay })
+            .expect_err("zero delay rejected");
+        assert_eq!(protocol_rejection(err).code, "missing_timer_delay");
+
+        let mut blank_prompt = base.clone();
+        blank_prompt.prompt = " ".to_owned();
+        let err = validate_command(&UiCommand::ScheduleTimer {
+            timer: blank_prompt,
+        })
+        .expect_err("blank prompt rejected");
+        assert_eq!(protocol_rejection(err).code, "empty_timer_prompt");
+
+        let mut bad_weekly = base.clone();
+        bad_weekly.mode = "recurring".to_owned();
+        bad_weekly.repeat = Some(UiTimerRepeatCommand::Weekly {
+            time_of_day_seconds_local: 9 * 60 * 60,
+            weekdays: vec![1, 7],
+            max_runs: Some(2),
+        });
+        let err = validate_command(&UiCommand::ScheduleTimer { timer: bad_weekly })
+            .expect_err("bad weekday rejected");
+        assert_eq!(protocol_rejection(err).code, "invalid_timer_repeat");
+
+        let err = validate_command(&UiCommand::CancelTimer {
+            timer_id: " ".to_owned(),
+        })
+        .expect_err("empty cancel id rejected");
+        assert_eq!(protocol_rejection(err).code, "empty_timer_id");
+    }
+
+    #[test]
+    fn timer_adp_roundtrip_carries_owner_projection() {
+        let request = UiAdpRequest::Command {
+            request_id: "timer-schedule-command".to_owned(),
+            command: UiCommand::ScheduleTimer {
+                timer: UiTimerScheduleCommand {
+                    timer_id: Some("timer-cron-ui-phase2".to_owned()),
+                    mode: "recurring".to_owned(),
+                    delay_seconds: None,
+                    run_at_unix_seconds: None,
+                    repeat: Some(UiTimerRepeatCommand::Cron {
+                        expression: "*/15 9-17 * * 1-5".to_owned(),
+                        max_runs: Some(4),
+                    }),
+                    max_runs: Some(4),
+                    reason: "business hours review".to_owned(),
+                    prompt: "Inspect current session and decide whether scheduled work closed."
+                        .to_owned(),
+                    source_session_id: Some(SessionId::new("session-timer-ui")),
+                },
+            },
+        };
+        let encoded = serde_json::to_string(&request).expect("timer request json");
+        assert!(encoded.contains("ScheduleTimer"));
+        assert!(encoded.contains("timer-cron-ui-phase2"));
+        let decoded: UiAdpRequest = serde_json::from_str(&encoded).expect("request decode");
+        assert_eq!(decoded, request);
+
+        let response = UiAdpResponse::QueryResult {
+            request_id: "timer-list-query".to_owned(),
+            result: UiQueryResult::TimerList(UiTimerListProjection {
+                source_agent_id: AgentId::new("master"),
+                generated_at: 100,
+                include_terminal: true,
+                timers: vec![UiTimerProjection {
+                    timer_id: "timer-cron-ui-phase2".to_owned(),
+                    agent_id: AgentId::new("master"),
+                    status: "active".to_owned(),
+                    reason: "business hours review".to_owned(),
+                    prompt: "Inspect current session and decide whether scheduled work closed."
+                        .to_owned(),
+                    next_due_at: 120,
+                    created_at: 100,
+                    updated_at: 100,
+                    fired_count: 0,
+                    max_runs: 4,
+                    repeat_kind: "cron".to_owned(),
+                    repeat_summary: "cron `*/15 9-17 * * 1-5`".to_owned(),
+                    source_session_id: Some(SessionId::new("session-timer-ui")),
+                    source_turn_id: Some(TurnId::new("runtime-turn-1")),
+                }],
+                events: vec![UiTimerEventProjection {
+                    event_id: "timer-event-1".to_owned(),
+                    timer_id: "timer-cron-ui-phase2".to_owned(),
+                    event_type: "TimerScheduled".to_owned(),
+                    occurred_at: 100,
+                    summary: "scheduled next_due_at=120 max_runs=4".to_owned(),
+                }],
+            }),
+        };
+        let encoded = serde_json::to_string(&response).expect("timer response json");
+        assert!(encoded.contains("TimerList"));
+        assert!(encoded.contains("TimerScheduled"));
         let decoded: UiAdpResponse = serde_json::from_str(&encoded).expect("response decode");
         assert_eq!(decoded, response);
     }

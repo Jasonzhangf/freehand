@@ -1838,6 +1838,156 @@ fn runtime_dispatches_session_crud_into_shared_ui_projection() {
 }
 
 #[test]
+fn runtime_timer_ui_commands_persist_and_project_owner_truth() {
+    let runtime_home = temp_runtime_home();
+    let runtime = RuntimeCommandDispatcher::from_selected_agent_with_live(
+        &live_selected_agent(
+            "http://127.0.0.1:1".to_owned(),
+            freehand_config::ProviderType::Anthropic,
+        ),
+        runtime_home.clone(),
+        false,
+    )
+    .expect("runtime bootstrap");
+
+    match runtime
+        .query_runtime(&UiCommand::QueryTimerList {
+            include_terminal: true,
+        })
+        .expect("timer query")
+        .expect("runtime timer projection")
+    {
+        UiQueryResult::TimerList(list) => {
+            assert!(list.timers.is_empty());
+            assert!(list.events.is_empty());
+            assert_eq!(list.source_agent_id, AgentId::new("agent-live"));
+        }
+        other => panic!("unexpected timer query result: {other:?}"),
+    }
+
+    let schedule = build_command_dispatch_envelope(&UiCommand::ScheduleTimer {
+        timer: UiTimerScheduleCommand {
+            timer_id: Some("timer-ui-dispatch-proof".to_owned()),
+            mode: "relative".to_owned(),
+            delay_seconds: Some(300),
+            run_at_unix_seconds: None,
+            repeat: None,
+            max_runs: Some(1),
+            reason: "recheck delegated work".to_owned(),
+            prompt: "Inspect TaskBoard and decide whether waiting work closed.".to_owned(),
+            source_session_id: Some(SessionId::new("session-ui-dispatch")),
+        },
+    })
+    .expect("schedule envelope");
+    let receipt = runtime.dispatch(schedule).expect("schedule timer");
+    assert_eq!(receipt.target_feature_id, "runtime.master-worker-loop");
+    assert!(
+        receipt
+            .dispatch_status
+            .starts_with("timer_scheduled:timer_id=timer-ui-dispatch-proof ")
+    );
+
+    match runtime
+        .query_runtime(&UiCommand::QueryTimerList {
+            include_terminal: false,
+        })
+        .expect("timer query")
+        .expect("runtime timer projection")
+    {
+        UiQueryResult::TimerList(list) => {
+            assert_eq!(list.timers.len(), 1);
+            assert_eq!(list.timers[0].timer_id, "timer-ui-dispatch-proof");
+            assert_eq!(list.timers[0].status, "active");
+            assert_eq!(list.timers[0].reason, "recheck delegated work");
+            assert_eq!(
+                list.timers[0].source_session_id,
+                Some(SessionId::new("session-ui-dispatch"))
+            );
+            assert_eq!(list.events.len(), 1);
+            assert_eq!(list.events[0].event_type, "TimerScheduled");
+        }
+        other => panic!("unexpected timer query result: {other:?}"),
+    }
+
+    let cancel = build_command_dispatch_envelope(&UiCommand::CancelTimer {
+        timer_id: "timer-ui-dispatch-proof".to_owned(),
+    })
+    .expect("cancel envelope");
+    let receipt = runtime.dispatch(cancel).expect("cancel timer");
+    assert_eq!(
+        receipt.dispatch_status,
+        "timer_cancelled:timer_id=timer-ui-dispatch-proof status=cancelled"
+    );
+
+    match runtime
+        .query_runtime(&UiCommand::QueryTimerList {
+            include_terminal: true,
+        })
+        .expect("timer query")
+        .expect("runtime timer projection")
+    {
+        UiQueryResult::TimerList(list) => {
+            assert_eq!(list.timers.len(), 1);
+            assert_eq!(list.timers[0].status, "cancelled");
+            assert!(
+                list.events
+                    .iter()
+                    .any(|event| event.event_type == "TimerCancelled")
+            );
+        }
+        other => panic!("unexpected timer query result: {other:?}"),
+    }
+
+    let missing = build_command_dispatch_envelope(&UiCommand::CancelTimer {
+        timer_id: "missing-timer".to_owned(),
+    })
+    .expect("missing cancel envelope");
+    let err = runtime.dispatch(missing).expect_err("missing timer fails");
+    assert_eq!(
+        err,
+        UiCommandDispatchPortError::TargetNotFound("missing-timer".to_owned())
+    );
+
+    fs::remove_dir_all(runtime_home).expect("cleanup runtime home");
+}
+
+#[test]
+fn runtime_timer_ui_commands_reject_non_live_dispatcher() {
+    let runtime = runtime();
+    let schedule = build_command_dispatch_envelope(&UiCommand::ScheduleTimer {
+        timer: UiTimerScheduleCommand {
+            timer_id: Some("timer-non-live".to_owned()),
+            mode: "relative".to_owned(),
+            delay_seconds: Some(60),
+            run_at_unix_seconds: None,
+            repeat: None,
+            max_runs: Some(1),
+            reason: "non live proof".to_owned(),
+            prompt: "This must not pretend to schedule without runtime home.".to_owned(),
+            source_session_id: None,
+        },
+    })
+    .expect("schedule envelope");
+    let err = runtime
+        .dispatch(schedule)
+        .expect_err("non-live schedule fails");
+    assert_eq!(
+        err,
+        UiCommandDispatchPortError::Unsupported(
+            "timer scheduling requires a live runtime home".to_owned()
+        )
+    );
+    assert!(
+        runtime
+            .query_runtime(&UiCommand::QueryTimerList {
+                include_terminal: true,
+            })
+            .expect("non-live timer query")
+            .is_none()
+    );
+}
+
+#[test]
 fn runtime_query_projects_config_status_without_secrets() {
     let runtime_home = temp_runtime_home();
     fs::create_dir_all(&runtime_home).expect("create runtime home");

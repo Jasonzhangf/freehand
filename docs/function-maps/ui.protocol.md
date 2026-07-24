@@ -93,6 +93,11 @@
   command/query shapes for already-running worker execution control; protocol
   validates IDs/op payloads and routes mutation intent to `worker.control`
   while task/runtime owners supply control-event truth
+- Timer dashboard `QueryTimerList`, `ScheduleTimer`, and `CancelTimer` are
+  protocol-owned query/mutation shapes for independent timer truth. Protocol
+  validates timer ids, schedule mode, relative/absolute/recurring fields,
+  reason, prompt, and source session id before runtime dispatch; protocol does
+  not write timer schedules or infer timer state.
 - task list subscriptions are protocol-owned ADP/subscribe command shapes; task list projection contents must be supplied by runtime/task owners and remain read-only UI DTOs
 - error-center event queries and subscriptions are protocol-owned ADP/query/subscribe command shapes, but metadata truth remains owned by `metadata.core` and classified by `error.center`
 - config status query is a protocol-owned ADP/query command shape carrying the complete safe provider registry plus current primary/fallback selection, but selected config truth remains owned by `config.core` and supplied through `runtime.ui-command-dispatch`
@@ -139,6 +144,8 @@
 - Phase 2C WorkerControl query results expose UI-safe control events and
   optional task/agent/lifecycle/task-event projections supplied by runtime
   owner code through `UiRuntimeQueryPort`
+- TimerList query results expose UI-safe timer schedules and ledger event rows
+  supplied by runtime owner code through `UiRuntimeQueryPort`
 - task list subscription events expose the same UI-safe task list projection as query results so task panels can refresh from push without polling or app-local task state
 - error-center event query results expose UI-safe watermarked metadata fields plus raw hash only; raw provider/tool/request/user/assistant text is not part of the protocol DTO
 - config status query results expose UI-safe active agent/provider/model fields,
@@ -196,6 +203,10 @@
 - Phase 2C WorkerControl commands reject empty ids, unknown ops, missing
   `ask_at_safe_point.question`, and missing `add_constraint.constraint` before
   runtime dispatch; `QueryWorkerControl` stays query-only
+- Timer commands reject empty timer ids, unknown modes, missing relative delay,
+  missing absolute run-at time, missing recurring repeat rule, invalid repeat
+  parameters, empty reason, empty prompt, and query-route misuse before runtime
+  dispatch
 - source identity fields remain explicit across success and error paths
 - cancelled terminal projection stays explicit and is not collapsed into failed or completed UI status
 - UI-side commands may request mutations, but mutation success/failure is decided by owner modules and reflected back as projections or errors
@@ -303,6 +314,7 @@
 | 26 | `UiCommand::QueryEventInbox` / `UiQueryResult::EventInbox` | `crates/freehand-ui-protocol/src/lib.rs` | define Phase 2B EventInbox query DTOs without owning task event truth or cursor truth | event inbox query cursor | runtime-backed UI-safe event inbox projection | ADP query transport | runtime.ui-command-dispatch | bound |
 | 27 | `UiCommand::RunMasterPoll` / `UiQueryResult::MasterPoll` | `crates/freehand-ui-protocol/src/lib.rs` | define Phase 2B MasterPoll command/result DTOs routed to task.orchestration, including replay_from_start cursor-mode validation | master poll command cursor mode | validated mutation intent routed to task.orchestration and owner-supplied poll projection | ADP command transport | runtime.ui-command-dispatch | bound |
 | 28 | `UiWorkerControlCommand` / `UiCommand::WorkerControl` / `UiCommand::QueryWorkerControl` / `UiQueryResult::WorkerControl` | `crates/freehand-ui-protocol/src/lib.rs` | define Phase 2C worker-control command/query DTOs, validate op-specific fields, and route mutation intent to worker.control | worker-control command or event query | validated mutation intent or runtime-backed control event projection | ADP command/query transport | runtime.ui-command-dispatch | bound |
+| 29 | `UiTimerScheduleCommand` / `UiTimerRepeatCommand` / `UiCommand::QueryTimerList` / `UiCommand::ScheduleTimer` / `UiCommand::CancelTimer` / `UiQueryResult::TimerList` / `validate_timer_schedule_command` | `crates/freehand-ui-protocol/src/lib.rs` | define independent timer dashboard query/command DTOs, validate mode-specific schedule fields, and route mutation intent to runtime.master-worker-loop through runtime dispatch | timer list query, schedule command, or cancel command | validated timer query/result DTO or mutation intent routed to timer owner | ADP command/query transport | runtime.ui-command-dispatch | bound |
 
 ## Sync Status Against Code
 
@@ -340,4 +352,5 @@
 - task mutation command DTOs are protocol-bound, owner-routed to `task.orchestration`, and rejected at the protocol boundary when required task, worker, execution, or review fields are empty
 - Phase 2A worker agent, assignment, claim, review rejection, and dispatch-mode DTOs are landed and locked by protocol owner tests
 - Phase 2C worker-control command/query DTOs are landed and locked by protocol owner tests
+- Timer dashboard command/query DTOs are landed and locked by protocol owner tests
 - the generated wiki must be regenerated from `docs/mainline-calls/ui.protocol.json` when this function-map truth changes
