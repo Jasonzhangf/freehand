@@ -7763,6 +7763,26 @@ Current real root cause split:
   - Runtime failed-tool tests must prove Worker unknown-tool and boundary re-entry text gives exact recovery guidance without saying external read/query is allowed.
   - Online S-profile proof must inspect real provider/Worker ledgers, not just static tests.
 
+# 2026-07-24 mobile UI tree static prototype
+
+- Jason requested a static UI tree first, before gap analysis or flow implementation.
+- Scope is review-only prototype under `docs/prototypes/mobile-ui-tree/`; no ADP/runtime wiring and no production WebUI changes.
+- UI tree roots captured: icon-only top-left Config, icon-only top-right Timer and Built-in Tools, icon-only bottom-left New Conversation, icon-only bottom-right Session Search.
+- Home page content is persisted history session list, timer dashboard, and current session dashboard. It must not render Worker session contents as a first-level session list entry; Worker details belong after entering the owning session.
+- Config entrance audit now has `docs/prototypes/mobile-ui-tree/config.html`: provider registry/model groups, daemon connection, Worker capability, memory, skills, MCP, env, runtime directories, Android shell permissions/update, logs, and about. It explicitly excludes phone-local rootfs/shared-folder/mount-directory management.
+- Visual direction after review: structure is accepted; palette is black/white plus logo green `#75daa7`. Avoid large black blocks and high-saturation category colors. Status is represented by small hollow square markers: green for normal/available, red for needs attention/error.
+- Verification: custom Python HTML structure/link check passed; Playwright rendered mobile and desktop screenshots under `artifacts/prototypes/mobile-ui-tree-20260724/`; `git diff --check` passed for touched docs/prototype files.
+
+# 2026-07-24 mobile UI tree Phase 1 production closeout
+
+- Scope stayed Phase 1 UI-only: production WebUI shell, mobile home dashboard, icon-only quick entries, persisted-session-only global session list, and Settings review tree. No timer/search/provider/tool/runtime command semantics were added.
+- Online proof passed on S-profile `http://127.0.0.1:4042/`: `node scripts/verify-webui-mobile-ui-tree-online.mjs` -> `mobile_ui_tree_phase1_ok`, artifact `artifacts/webui-online/mobile-ui-tree-phase1-20260724T115954-78332`.
+- Browser proof checked asset version `20260724-mobile-ui-tree-phase1`, 390/430/844/1280 viewports, no horizontal overflow, icon-only separated quick entries, mobile dashboard, settings tree provider/model entries, no phone-local storage-management terms, no top-level worker temporary sessions, and hollow green/red status markers.
+- S-profile stayed restored: `freehand-cliS adp-config-query` returned `provider=minimax`, `provider_protocol=messages`, `base_url_host=api.minimaxi.com`, `default_model=MiniMax-M3`, `auth_source=inline`, `web_search=auto`, `web_search_effective=hosted_declared`; fixture env grep returned zero matches.
+- Local proof passed: `node --check apps/freehand-server/assets/webui.js`, `node --check scripts/verify-webui-mobile-ui-tree-online.mjs`, `jq empty docs/mainline-calls/app.webui-smoke.json`, `node scripts/verify-webui-layout-shapes.mjs`, `cargo test -p freehand-reason restore_ignores_leftover_atomic_tmp_turn_files -- --nocapture`, `cargo test -p freehand-server --lib -- --nocapture`, `cargo fmt --check`, `cargo run -p xtask -- mainlines generate`, `cargo run -p xtask -- mainlines check`, `cargo run -p xtask -- gates check`, and `git diff --check`.
+- Online S bootstrap blocker was not a new Phase 1 bug: current `reason.persistence` source already ignores non-`.json` atomic temp files and the focused regression passed. After current S binary was in service, 4042 health returned `ok`.
+- Android true-device proof remains unclosed for this slice because `adb devices -l` returned an empty device list.
+
 # 2026-07-22 turn timing observability request
 
 - Jason requested that every turn records and displays wait duration and first-token/first-byte time, including historical turns after completion. Route as a separate UI/protocol observability feature: owner likely ui.protocol + reason.persistence projection for durable timing fields, with WebUI rendering after owner map/test design review. Do not mix into the current Worker tool-guidance fix.

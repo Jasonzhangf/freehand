@@ -1398,7 +1398,13 @@ mod tests {
         assert!(html.contains("id=\"task-cwd-input\""));
         assert!(html.contains("id=\"settings-shell-toggle\""));
         assert!(html.contains("id=\"open-settings-drawer-button\""));
+        assert!(html.contains("id=\"open-timer-dashboard-button\""));
+        assert!(html.contains("id=\"open-tools-dashboard-button\""));
+        assert!(html.contains("id=\"mobile-new-entry-button\""));
+        assert!(html.contains("class=\"mobile-bottom-entries\""));
+        assert!(html.contains("id=\"mobile-home-dashboard\""));
         assert!(html.contains("id=\"settings-shell\""));
+        assert!(html.contains("id=\"settings-review-tree\""));
         assert!(html.contains("id=\"settings-provider-form\""));
         assert!(html.contains("id=\"settings-provider-current-select\""));
         assert!(html.contains("id=\"settings-provider-fallback-select\""));
@@ -1409,6 +1415,9 @@ mod tests {
         assert!(html.contains("id=\"settings-apk-update-check-button\""));
         assert!(html.contains("id=\"settings-apk-update-status\""));
         assert!(html.contains("Check APK update"));
+        assert!(!html.contains("rootfs"));
+        assert!(!html.contains("shared-folder"));
+        assert!(!html.contains("mount-directory"));
         assert!(!html.contains("Skill settings pending"));
         assert!(!html.contains("Task settings pending"));
         assert!(!html.contains("Active agent"));
@@ -1456,8 +1465,10 @@ mod tests {
             "<main class=\"app-shell\" data-webui-shell=\"true\" data-layout-client=\"android-webview\" data-layout-shape=\"tablet_portrait\""
         ));
         assert!(html.contains("id=\"open-session-drawer-button\""));
-        assert!(html.contains("id=\"open-detail-drawer-button\""));
         assert!(html.contains("id=\"open-settings-drawer-button\""));
+        assert!(html.contains("id=\"open-timer-dashboard-button\""));
+        assert!(html.contains("id=\"open-tools-dashboard-button\""));
+        assert!(html.contains("id=\"mobile-new-entry-button\""));
     }
 
     #[tokio::test]
@@ -1573,7 +1584,13 @@ mod tests {
         assert!(root_body.contains("id=\"session-delete-selected-button\""));
         assert!(root_body.contains("id=\"settings-shell-toggle\""));
         assert!(root_body.contains("id=\"open-settings-drawer-button\""));
+        assert!(root_body.contains("id=\"open-timer-dashboard-button\""));
+        assert!(root_body.contains("id=\"open-tools-dashboard-button\""));
+        assert!(root_body.contains("id=\"mobile-new-entry-button\""));
+        assert!(root_body.contains("class=\"mobile-bottom-entries\""));
+        assert!(root_body.contains("id=\"mobile-home-dashboard\""));
         assert!(root_body.contains("id=\"settings-shell\""));
+        assert!(root_body.contains("id=\"settings-review-tree\""));
         assert!(root_body.contains("id=\"settings-provider-host\""));
         assert!(root_body.contains("id=\"settings-provider-auth\""));
         assert!(root_body.contains("id=\"settings-config-error\""));
@@ -1626,6 +1643,9 @@ mod tests {
         assert!(!root_body.contains("Sessions and workspace"));
         assert!(!root_body.contains("type=\"password\""));
         assert!(!root_body.contains("api-key"));
+        assert!(!root_body.contains("rootfs"));
+        assert!(!root_body.contains("shared-folder"));
+        assert!(!root_body.contains("mount-directory"));
         assert!(root_body.contains("data-checkpoint-query=\"/ui/query/checkpoints\""));
         assert!(root_body.contains("id=\"debug-details-toggle\""));
         assert!(!root_body.contains(">Success</button>"));
@@ -1723,6 +1743,13 @@ mod tests {
         assert!(webui_css_body.contains(".settings-provider-switch"));
         assert!(webui_css_body.contains(".settings-provider-registry"));
         assert!(webui_css_body.contains(".settings-provider-card"));
+        assert!(webui_css_body.contains(".mobile-corner-button svg"));
+        assert!(webui_css_body.contains(".mobile-home-dashboard"));
+        assert!(webui_css_body.contains(".mobile-bottom-entries"));
+        assert!(webui_css_body.contains(".settings-review-tree"));
+        assert!(webui_css_body.contains(".settings-status-marker"));
+        assert!(webui_css_body.contains("border: 2px solid var(--fail)"));
+        assert!(webui_css_body.contains("border-color: var(--logo-green)"));
         assert!(webui_css_body.contains(".phase2-board-block"));
         assert!(webui_css_body.contains(".phase2-list"));
         assert!(webui_css_body.contains(".phase2-card"));
@@ -1830,6 +1857,19 @@ mod tests {
         assert!(js_body.contains("function closeVisibleNavigationSurface"));
         assert!(js_body.contains("function showInspectorPanel"));
         assert!(js_body.contains("function renderSettingsShell"));
+        assert!(js_body.contains("function topLevelPersistedSessions"));
+        assert!(js_body.contains("function renderMobileHomeDashboard"));
+        assert!(js_body.contains("function renderMobileHomeSessionList"));
+        assert!(js_body.contains("phaseOneSettingsTree"));
+        assert!(js_body.contains("function renderSettingsReviewTree"));
+        assert!(js_body.contains("Add provider family"));
+        assert!(js_body.contains("Provider detail"));
+        assert!(js_body.contains("Model group"));
+        assert!(js_body.contains("Timer entry is UI-only in Phase 1"));
+        assert!(js_body.contains("Built-in Tools entry is UI-only in Phase 1"));
+        assert!(!js_body.contains("rootfs"));
+        assert!(!js_body.contains("shared-folder"));
+        assert!(!js_body.contains("mount-directory"));
         assert!(js_body.contains("QueryConfigStatus"));
         assert!(js_body.contains("QueryTaskBoard"));
         assert!(js_body.contains("QueryAgentBoard"));

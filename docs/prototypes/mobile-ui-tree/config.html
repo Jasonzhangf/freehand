@@ -1,0 +1,232 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Freehand Config UI Audit</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <main class="page-shell settings-page">
+      <section class="brief">
+        <div class="kicker">review-only static config tree</div>
+        <h1>配置入口审计</h1>
+        <p>
+          本页只做配置入口的静态页面树，不接 ADP、不保存配置。Freehand Android 是 Agent shell，
+          配置真源在 daemon / runtime home，不设计手机本地文件系统管理。
+        </p>
+      </section>
+
+      <section class="config-stage" aria-label="Config screens">
+        <div class="config-phone primary-config-phone">
+          <header class="config-topbar">
+            <a class="back-link" href="./index.html" aria-label="返回主界面">‹</a>
+            <h2>设置</h2>
+          </header>
+
+          <section class="settings-group">
+            <h3>LLM 提供商</h3>
+            <div class="settings-list">
+              <div class="settings-item">
+                <span class="settings-icon provider-icon"></span>
+                <div><strong>管理提供商</strong><p>API key、OAuth、Base URL、能力测试</p></div>
+                <span class="chevron">›</span>
+              </div>
+              <div class="settings-item">
+                <span class="settings-icon model-icon"></span>
+                <div><strong>模型组</strong><p>主模型、辅助模型、回退与负载均衡</p></div>
+                <span class="chevron">›</span>
+              </div>
+              <div class="settings-item">
+                <span class="settings-icon usage-icon"></span>
+                <div><strong>Token 用量</strong><p>按 provider / session 查看使用情况</p></div>
+                <span class="chevron">›</span>
+              </div>
+            </div>
+          </section>
+
+          <section class="settings-group">
+            <h3>外观</h3>
+            <div class="settings-list">
+              <div class="settings-item">
+                <span class="settings-icon appearance-icon"></span>
+                <div><strong>外观</strong><p>主题、字号、密度、手机显示策略</p></div>
+                <span class="chevron">›</span>
+              </div>
+            </div>
+          </section>
+
+          <section class="settings-group">
+            <h3>Agent 运行时</h3>
+            <div class="settings-list">
+              <div class="settings-item">
+                <span class="settings-icon skill-icon"></span>
+                <div><strong>Skills</strong><p>Freehand skill 根、项目 skill、兼容导入</p></div>
+                <span class="chevron">›</span>
+              </div>
+              <div class="settings-item">
+                <span class="settings-icon memory-icon"></span>
+                <div><strong>记忆</strong><p>session history、持久记忆、清理策略</p></div>
+                <span class="chevron">›</span>
+              </div>
+              <div class="settings-item">
+                <span class="settings-icon mcp-icon"></span>
+                <div><strong>MCP / 集成</strong><p>外部工具服务和账号连接</p></div>
+                <span class="chevron">›</span>
+              </div>
+              <div class="settings-item">
+                <span class="settings-icon env-icon"></span>
+                <div><strong>环境变量</strong><p>daemon 注入变量，不暴露 secret</p></div>
+                <span class="chevron">›</span>
+              </div>
+              <div class="settings-item">
+                <span class="settings-icon runtime-icon"></span>
+                <div><strong>运行时目录</strong><p>只读展示 daemon runtime home 和状态目录</p></div>
+                <span class="chevron">›</span>
+              </div>
+            </div>
+          </section>
+
+          <section class="settings-group">
+            <h3>Daemon 与手机壳</h3>
+            <div class="settings-list">
+              <div class="settings-item">
+                <span class="settings-icon daemon-icon"></span>
+                <div><strong>Daemon 连接</strong><p>本机、Tailscale、Relay、二维码导入</p></div>
+                <span class="chevron">›</span>
+              </div>
+              <div class="settings-item">
+                <span class="settings-icon worker-icon"></span>
+                <div><strong>Worker 能力</strong><p>数量上限、capability、状态一致性</p></div>
+                <span class="chevron">›</span>
+              </div>
+              <div class="settings-item">
+                <span class="settings-icon android-icon"></span>
+                <div><strong>Android 更新与权限</strong><p>APK 更新、通知、文件访问授权</p></div>
+                <span class="chevron">›</span>
+              </div>
+            </div>
+          </section>
+
+          <section class="settings-group">
+            <h3>观测与关于</h3>
+            <div class="settings-list">
+              <div class="settings-item">
+                <span class="settings-icon logs-icon"></span>
+                <div><strong>日志</strong><p>导出 UI / daemon / provider 诊断包</p></div>
+                <span class="chevron">›</span>
+              </div>
+              <div class="settings-item">
+                <span class="settings-icon about-icon"></span>
+                <div><strong>关于 Freehand</strong><p>版本、隐私、反馈</p></div>
+                <span class="chevron">›</span>
+              </div>
+            </div>
+          </section>
+        </div>
+
+        <div class="config-phone secondary-config-phone">
+          <header class="config-topbar compact">
+            <span class="back-link">‹</span>
+            <h2>管理提供商</h2>
+            <span class="plus-action">+</span>
+          </header>
+
+          <section class="provider-stack">
+            <h3>ACTIVE</h3>
+            <article class="provider-card active-provider">
+              <span class="status-dot"></span>
+              <div><strong>MiniMax M3</strong><p>Anthropic Messages · web_search auto</p></div>
+              <span class="chevron">›</span>
+            </article>
+            <article class="provider-card">
+              <span class="status-dot idle"></span>
+              <div><strong>CC GPT</strong><p>OpenAI Responses · web_search auto</p></div>
+              <span class="chevron">›</span>
+            </article>
+          </section>
+
+          <section class="provider-detail-card">
+            <span class="node-id">Provider Detail</span>
+            <h3>新增 / 编辑提供商</h3>
+            <label>标签 <strong>OpenAI Compatible</strong></label>
+            <label>认证 <strong>API Key / OAuth</strong></label>
+            <label>端点 <strong>https://api.example.com</strong></label>
+            <label>协议 <strong>Responses / Chat / Messages</strong></label>
+            <label>能力 <strong>web search · vision · tools</strong></label>
+            <button type="button" class="test-button">测试 provider 能力</button>
+          </section>
+
+          <section class="provider-family-card">
+            <span class="node-id">Add Provider</span>
+            <h3>添加 AI 服务商</h3>
+            <div class="family-row"><span class="family-dot openai"></span><strong>OpenAI / Compatible API</strong><p>Responses、Chat Completions、兼容端点</p></div>
+            <div class="family-row"><span class="family-dot anthropic"></span><strong>Anthropic / Compatible API</strong><p>Messages、MiniMax Anthropic-compatible</p></div>
+            <div class="family-row"><span class="family-dot gemini"></span><strong>Google Gemini</strong><p>Gemini 系列与 Google AI Studio</p></div>
+            <div class="family-row"><span class="family-dot xai"></span><strong>xAI / Grok</strong><p>Grok 系列模型</p></div>
+            <div class="family-row"><span class="family-dot router"></span><strong>OpenRouter</strong><p>聚合 GPT、Claude、Gemini、Llama</p></div>
+          </section>
+
+          <section class="model-group-card">
+            <span class="node-id">Model Group</span>
+            <h3>Default Models</h3>
+            <div class="model-line"><strong>Primary</strong><span>MiniMax-M3</span></div>
+            <div class="model-line"><strong>Sub</strong><span>gpt-5.5 title/search</span></div>
+            <div class="model-line"><strong>Policy</strong><span>fallback + load balance</span></div>
+          </section>
+        </div>
+      </section>
+
+      <section class="config-audit-panel">
+        <div class="panel-head">
+          <span class="step-pill">Config Contract</span>
+          <h2>配置页面树与边界</h2>
+        </div>
+        <div class="config-contract-grid">
+          <article>
+            <h3>Provider / 模型组</h3>
+            <p>Provider 是 registry，可以新增多个实例；模型组选择 primary / sub / search 等用途模型。能力来自 provider 配置和测试结果，不靠 UI 猜。</p>
+          </article>
+          <article>
+            <h3>记忆位置</h3>
+            <p>产品记忆在 daemon runtime home：session/turn truth 与 session-history。手机只展示和触发管理命令，不保存原始记忆真源。</p>
+          </article>
+          <article>
+            <h3>Skill 位置</h3>
+            <p>Freehand 当前真源是 `~/.freehand/skills` 和项目 `.agents/skills`，编译到 instruction capability manifest 后进入模型上下文。</p>
+          </article>
+          <article>
+            <h3>兼容 Codex</h3>
+            <p>Codex / 其他全局 skills 只能作为显式兼容导入源审计，默认不直接扫描。导入后必须进入 Freehand manifest 才能暴露给模型。</p>
+          </article>
+          <article>
+            <h3>手机壳边界</h3>
+            <p>不做手机本地文件系统配置。Android 只处理连接、通知、APK 更新和必要权限申请。</p>
+          </article>
+          <article>
+            <h3>观测边界</h3>
+            <p>日志和诊断包只用于证据导出，不作为 debug 主导航，不替代 session / worker 生命周期可观察状态。</p>
+          </article>
+        </div>
+
+        <div class="path-audit">
+          <article>
+            <span class="node-id">Memory Truth</span>
+            <h3>记忆在哪里</h3>
+            <p>Daemon 侧：`~/.freehand/state/turns/&lt;agent&gt;/&lt;session&gt;/session-history.json` 及 turn/session truth。手机只读投影，不保存原片段。</p>
+          </article>
+          <article>
+            <span class="node-id">Skill Truth</span>
+            <h3>Skills 在哪里</h3>
+            <p>Freehand 全局：`~/.freehand/skills`。项目局部：`&lt;project&gt;/.agents/skills`。编译结果：`~/.freehand/state/instructions/capability-manifest.json`。</p>
+          </article>
+          <article>
+            <span class="node-id">Compat Import</span>
+            <h3>Codex 兼容策略</h3>
+            <p>`~/.codex/skills`、`~/.agents/skills` 等外部来源只作为显式导入候选。导入要生成 Freehand manifest 记录和错误报告。</p>
+          </article>
+        </div>
+      </section>
+    </main>
+  </body>
+</html>

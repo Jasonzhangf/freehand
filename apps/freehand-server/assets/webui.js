@@ -1,4 +1,4 @@
-import { initializeThemeToggle } from "/assets/theme.js?v=20260724-attachments-notifications";
+import { initializeThemeToggle } from "/assets/theme.js?v=20260724-mobile-ui-tree-phase1";
 
 initializeThemeToggle(document);
 
@@ -79,7 +79,13 @@ const openSessionDrawerButton = document.getElementById("open-session-drawer-but
 const closeSessionDrawerButton = document.getElementById("close-session-drawer-button");
 const openDetailDrawerButton = document.getElementById("open-detail-drawer-button");
 const openSettingsDrawerButton = document.getElementById("open-settings-drawer-button");
+const openTimerDashboardButton = document.getElementById("open-timer-dashboard-button");
+const openToolsDashboardButton = document.getElementById("open-tools-dashboard-button");
+const mobileNewEntryButton = document.getElementById("mobile-new-entry-button");
 const closeDetailDrawerButton = document.getElementById("close-detail-drawer-button");
+const mobileHomeDashboard = document.getElementById("mobile-home-dashboard");
+const mobileHomeSessionList = document.getElementById("mobile-home-session-list");
+const settingsReviewTree = document.getElementById("settings-review-tree");
 const mobileAgentSummaryStrip = document.getElementById("mobile-agent-summary-strip");
 const openMobileAgentSheetButton = document.getElementById("open-mobile-agent-sheet-button");
 const closeMobileAgentSheetButton = document.getElementById("close-mobile-agent-sheet-button");
@@ -166,6 +172,49 @@ const samplePrompts = {
   failure:
     'Call the task tool exactly once with {"op":"query","task_id":"definitely-missing-freehand-task"}, then use the failed tool result to continue and report success through the required Freehand completion schema.',
 };
+
+const phaseOneSettingsTree = [
+  {
+    title: "LLM 提供商",
+    items: [
+      ["Active provider", "当前 provider / model / auth / web_search safe projection", "ok"],
+      ["Provider registry", "已配置 provider 列表和加载到表单", "ok"],
+      ["Add provider family", "OpenAI / Anthropic / Gemini / xAI / OpenRouter family review UI", "attention"],
+      ["Provider detail", "API key / OAuth / Base URL / protocol / capability test", "ok"],
+      ["Model group", "primary / sub / search / fallback / load balance review UI", "attention"],
+      ["Token 用量", "provider / session 用量投影，Phase 2 接 owner truth", "attention"],
+    ],
+  },
+  {
+    title: "外观",
+    items: [["外观", "主题、字号、密度、手机显示策略", "attention"]],
+  },
+  {
+    title: "Agent 运行时",
+    items: [
+      ["Skills", "Freehand skills、项目 skills、兼容导入审计", "attention"],
+      ["记忆", "daemon runtime home 中的 session/turn/history", "attention"],
+      ["MCP / 集成", "外部工具服务和账号连接", "attention"],
+      ["环境变量", "daemon 注入变量，只显示安全投影", "attention"],
+      ["运行时目录", "只读展示 runtime home 和状态目录", "attention"],
+    ],
+  },
+  {
+    title: "Daemon 与手机壳",
+    items: [
+      ["Daemon 连接", "本机、Tailscale、Relay、二维码导入", "attention"],
+      ["Worker 能力", "数量上限、capability、状态一致性", "ok"],
+      ["Android 更新与权限", "APK 更新、通知、文件访问授权", "ok"],
+    ],
+  },
+  {
+    title: "观测与关于",
+    items: [
+      ["日志", "导出 UI / daemon / provider 诊断包", "attention"],
+      ["关于 Freehand", "版本、隐私、反馈", "attention"],
+    ],
+  },
+];
 
 const selectedSessionStorageKey = "freehand-webui-selected-session";
 const selectedCwdStorageKey = "freehand-webui-selected-cwd";
@@ -3652,7 +3701,7 @@ async function startNewTask(options = {}) {
 }
 
 function setSessionList(projection) {
-  state.sessions = (projection && projection.sessions) || [];
+  state.sessions = topLevelPersistedSessions((projection && projection.sessions) || []);
   state.sessionListLoaded = true;
   const knownSessionIds = new Set(state.sessions.map((session) => session.session_id));
   for (const sessionId of Array.from(state.selectedSessionIds)) {
@@ -3682,6 +3731,17 @@ function setSessionList(projection) {
   }
 }
 
+function internalRuntimeSessionId(sessionId) {
+  const id = `${sessionId || ""}`.trim();
+  return id.startsWith("worker-task-") || id.startsWith("master-lifecycle-") || id.startsWith("master-timer-");
+}
+
+function topLevelPersistedSessions(sessions) {
+  return (sessions || []).filter((session) =>
+    session && session.session_id && !session.temporary && !internalRuntimeSessionId(session.session_id)
+  );
+}
+
 function selectedManagedSessionIds() {
   return Array.from(state.selectedSessionIds).filter((sessionId) =>
     state.sessions.some((session) => session.session_id === sessionId),
@@ -3708,7 +3768,7 @@ function clearSessionSelection() {
 function selectAllSessions() {
   state.selectedSessionIds.clear();
   state.sessions.forEach((session) => {
-    if (session && session.session_id && !isDraftSessionId(session.session_id)) {
+    if (session && session.session_id && !isDraftSessionId(session.session_id) && !internalRuntimeSessionId(session.session_id)) {
       state.selectedSessionIds.add(session.session_id);
     }
   });
@@ -5107,7 +5167,7 @@ function renderSessionAgentGroup(sessions) {
   const sessionNodes = document.createElement("div");
   sessionNodes.className = "session-agent-sessions";
   sessions.forEach((session) => {
-    sessionNodes.appendChild(renderSessionWithWorkerChildren(session));
+    sessionNodes.appendChild(renderSessionItem(session));
   });
 
   toggle.addEventListener("click", () => {
@@ -5162,6 +5222,103 @@ function renderSessions() {
 
   sessionList.appendChild(renderSessionAgentGroup(state.sessions));
   renderSessionBulkToolbar();
+}
+
+function renderMobileHomeDashboard() {
+  if (!mobileHomeDashboard) {
+    return;
+  }
+  const selected = selectedParentSessionSummary() || sessionSummaryForSelected() || state.sessions[state.sessions.length - 1] || null;
+  const tasks = currentSessionTasks();
+  const counts = currentSessionTaskCounts(tasks);
+  const liveObservation = globalLiveSessionObservation();
+  const title = selected
+    ? selected.title || selected.session_id
+    : state.draftSessionId || "No session selected";
+  const copy = liveObservation
+    ? liveObservationLine(liveObservation)
+    : selected
+      ? compactSentence(selected.latest_summary || selected.latest_status || "Persisted session selected", 132)
+      : "Select a persisted session or create a new conversation.";
+  const timerCopy = liveObservation
+    ? `Active wake/retry context: ${compactSentence(liveObservation.sessionId, 48)}`
+    : "Phase 1 only shows the timer entrance; create/list/cancel wiring belongs to Phase 2.";
+  setText("mobile-home-current-title", compactSentence(title, 80));
+  setText("mobile-home-current-copy", copy);
+  setText(
+    "mobile-home-current-metrics",
+    `${counts.activeCount} running · ${counts.reviewCount} review · ${counts.blockedCount} blocked · ${counts.closedCount} closed`,
+  );
+  setText("mobile-home-timer-title", liveObservation ? "Timer / retry observable" : "Timer UI-only");
+  setText("mobile-home-timer-copy", timerCopy);
+  setText("mobile-home-session-count", `${state.sessions.length} persisted session(s)`);
+  renderMobileHomeSessionList();
+}
+
+function renderMobileHomeSessionList() {
+  if (!mobileHomeSessionList) {
+    return;
+  }
+  mobileHomeSessionList.replaceChildren();
+  const sessions = state.sessions.slice(-3).reverse();
+  if (sessions.length === 0) {
+    mobileHomeSessionList.textContent = state.sessionListLoaded ? "No persisted sessions." : "waiting for session truth";
+    return;
+  }
+  sessions.forEach((session) => {
+    const item = document.createElement("button");
+    item.className = "mobile-home-session-item";
+    item.type = "button";
+    item.dataset.sessionId = session.session_id || "";
+    const marker = document.createElement("span");
+    marker.className = `settings-status-marker ${sessionHasObservableActiveStatus(session) ? "ok" : ""}`;
+    marker.setAttribute("aria-hidden", "true");
+    const copy = document.createElement("span");
+    copy.className = "mobile-home-session-copy";
+    const title = document.createElement("strong");
+    title.textContent = compactSentence(session.title || session.session_id, 72);
+    const meta = document.createElement("small");
+    meta.textContent = compactSentence(`${sessionKindLabel(session)} · ${session.latest_status || "session"}`, 72);
+    copy.append(title, meta);
+    item.append(marker, copy);
+    item.addEventListener("click", () => switchConversationSession(session.session_id));
+    mobileHomeSessionList.appendChild(item);
+  });
+}
+
+function renderSettingsReviewTree() {
+  if (!settingsReviewTree) {
+    return;
+  }
+  const sections = phaseOneSettingsTree.map((section) => {
+    const block = document.createElement("section");
+    block.className = "settings-review-section";
+    const title = document.createElement("h3");
+    title.textContent = section.title;
+    const list = document.createElement("div");
+    list.className = "settings-review-list";
+    section.items.forEach(([name, detail, tone]) => {
+      const row = document.createElement("article");
+      row.className = "settings-review-row";
+      const marker = document.createElement("span");
+      marker.className = `settings-status-marker ${tone === "ok" ? "ok" : "attention"}`;
+      marker.setAttribute("aria-hidden", "true");
+      const copy = document.createElement("span");
+      const label = document.createElement("strong");
+      label.textContent = name;
+      const note = document.createElement("small");
+      note.textContent = detail;
+      copy.append(label, note);
+      row.append(marker, copy);
+      list.append(row);
+    });
+    block.append(title, list);
+    return block;
+  });
+  const note = document.createElement("p");
+  note.className = "settings-review-note";
+  note.textContent = "Phase 1 audit tree: unconnected rows are UI-only placeholders until owner-backed Phase 2 wiring lands. Android remains a daemon-hosted WebUI shell; phone-local filesystem management is not part of this surface.";
+  settingsReviewTree.replaceChildren(note, ...sections);
 }
 
 function renderDraftSessionItem() {
@@ -6430,6 +6587,7 @@ function renderSettingsShell() {
   renderSettingsProviderRegistry();
   renderSystemAgentResourceConfig();
   renderAndroidApkUpdateSettings();
+  renderSettingsReviewTree();
   showInspectorPanel(state.inspectorPanel);
 }
 
@@ -6997,6 +7155,7 @@ function renderAll() {
   renderDebug();
   renderCheckpoints();
   renderPhase2Dashboard();
+  renderMobileHomeDashboard();
   renderSettingsShell();
   renderCommandStatus();
 }
@@ -7649,7 +7808,21 @@ if (debugDetailsToggle) {
 }
 if (openSessionDrawerButton) {
   openSessionDrawerButton.addEventListener("click", () => {
+    setCommandStatus("Session Search entry is UI-only in Phase 1; opening persisted session list. Full search index is Phase 2.", { stickyMs: 6000 });
     setMobileDrawer(state.mobileDrawer === "sessions" ? null : "sessions");
+  });
+}
+if (mobileNewEntryButton) {
+  mobileNewEntryButton.addEventListener("click", () => openNewSessionDialog("conversation"));
+}
+if (openTimerDashboardButton) {
+  openTimerDashboardButton.addEventListener("click", () => {
+    setCommandStatus("Timer entry is UI-only in Phase 1. Relative, absolute, cron, recurrence, and durable wakeups are Phase 2.", { stickyMs: 7000 });
+  });
+}
+if (openToolsDashboardButton) {
+  openToolsDashboardButton.addEventListener("click", () => {
+    setCommandStatus("Built-in Tools entry is UI-only in Phase 1. Tool schema registry and examples are Phase 2.", { stickyMs: 7000 });
   });
 }
 if (closeSessionDrawerButton) {

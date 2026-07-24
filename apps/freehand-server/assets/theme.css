@@ -9,6 +9,7 @@
   --text: #1f211e;
   --text-soft: #696861;
   --text-faint: #9a968a;
+  --logo-green: #75daa7;
   --master: #176b55;
   --master-soft: #e3f0ea;
   --user: #335f83;
@@ -37,6 +38,7 @@ body.theme-dark {
   --text: #eef4f0;
   --text-soft: #9fb0a7;
   --text-faint: #72837b;
+  --logo-green: #75daa7;
   --master: #58b08d;
   --master-soft: rgba(88, 176, 141, 0.14);
   --user: #7db0dd;

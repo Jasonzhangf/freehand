@@ -1,0 +1,350 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Freehand Mobile UI Tree Prototype</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <main class="page-shell">
+      <section class="brief">
+        <div class="kicker">review-only static prototype</div>
+        <h1>Freehand 手机入口 UI Tree</h1>
+        <p>
+          本页只整理入口和页面树，不接 ADP、不读运行时、不实现功能。首页先展示历史 session、
+          定时任务和当前 session dashboard；worker 只进入 session 后作为内部关系展示。
+        </p>
+      </section>
+
+      <section class="tree-panel" aria-label="UI tree">
+        <div class="panel-head">
+          <span class="step-pill">Step 1</span>
+          <h2>静态 UI Tree</h2>
+        </div>
+
+        <div class="tree-root">
+          <div class="tree-node root-node">
+            <span class="node-id">Root</span>
+            <strong>Mobile Shell / Home</strong>
+            <em>首页为历史 session + timer + 当前 session dashboard</em>
+          </div>
+
+          <div class="tree-grid">
+            <article class="tree-card settings">
+              <span class="node-id">A · 左上</span>
+              <h3>配置入口</h3>
+              <p>进入所有低频系统配置，不承载当前任务状态。</p>
+              <ul>
+                <li>Provider / 模型组</li>
+                <li>Daemon / 远程连接</li>
+                <li>Worker 数量与能力</li>
+                <li>Android 更新与权限状态</li>
+                <li><a href="./config.html">查看配置入口审计</a></li>
+              </ul>
+            </article>
+
+            <article class="tree-card timers">
+              <span class="node-id">B · 右上前</span>
+              <h3>定时任务</h3>
+              <p>查看和创建 timer，不混进 task 或 debug。</p>
+              <ul>
+                <li>相对时间 timer</li>
+                <li>绝对时间 timer</li>
+                <li>Cron / 循环 / 跳过规则</li>
+                <li>到期唤醒提示词</li>
+              </ul>
+            </article>
+
+            <article class="tree-card tools">
+              <span class="node-id">C · 右上后</span>
+              <h3>内置工具</h3>
+              <p>展示可用工具入口和说明，不显示任务执行流水。</p>
+              <ul>
+                <li>Select</li>
+                <li>Shell terminal</li>
+                <li>Daemon workspace tools</li>
+                <li>Open browser / Browser settings</li>
+              </ul>
+            </article>
+
+            <article class="tree-card new-conversation">
+              <span class="node-id">D · 左下</span>
+              <h3>New Conversation</h3>
+              <p>只负责创建持久化用户会话。</p>
+              <ul>
+                <li>新建普通 session</li>
+                <li>新建 task session</li>
+                <li>选择工作目录</li>
+                <li>保留当前草稿</li>
+              </ul>
+            </article>
+
+            <article class="tree-card search">
+              <span class="node-id">E · 右下</span>
+              <h3>Session Search</h3>
+              <p>只搜索已持久化 session 内容，不创建新会话。</p>
+              <ul>
+                <li>全文搜索</li>
+                <li>按 session / 时间筛选</li>
+                <li>结果跳转到对应 turn</li>
+                <li>不显示临时 worker 为顶层结果</li>
+              </ul>
+            </article>
+
+            <article class="tree-card conversation">
+              <span class="node-id">Center</span>
+              <h3>首页内容</h3>
+              <p>一级入口只显示持久化 session、定时任务和当前 session dashboard。</p>
+              <ul>
+                <li>历史 session 列表</li>
+                <li>定时任务 dashboard</li>
+                <li>当前 session dashboard</li>
+                <li>不在首页一级展示 worker session 内容</li>
+              </ul>
+            </article>
+          </div>
+        </div>
+      </section>
+
+      <section class="mock-panel" aria-label="Static mobile screen">
+        <div class="phone">
+          <header class="phone-top">
+            <a class="corner-button icon-only top-left" href="./config.html" aria-label="配置">
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M12 8.2a3.8 3.8 0 1 0 0 7.6 3.8 3.8 0 0 0 0-7.6Z" />
+                <path d="M20.4 13.4v-2.8l-2.2-.5a7 7 0 0 0-.7-1.6l1.2-1.9-2-2-1.9 1.2a7 7 0 0 0-1.6-.7L12.8 3h-2.8l-.5 2.2a7 7 0 0 0-1.6.7L6 4.7l-2 2 1.2 1.9a7 7 0 0 0-.7 1.6l-2.2.5v2.8l2.2.5c.2.6.4 1.1.7 1.6L4 17.4l2 2 1.9-1.2c.5.3 1 .5 1.6.7l.5 2.2h2.8l.5-2.2c.6-.2 1.1-.4 1.6-.7l1.9 1.2 2-2-1.2-1.9c.3-.5.5-1 .7-1.6l2.1-.5Z" />
+              </svg>
+            </a>
+            <div class="top-right-stack">
+              <button class="corner-button icon-only timer-button" type="button" aria-label="定时任务">
+                <svg viewBox="0 0 24 24" aria-hidden="true">
+                  <circle cx="12" cy="12" r="8.5" />
+                  <path d="M12 6.8v5.5l3.6 2.2" />
+                </svg>
+              </button>
+              <button class="corner-button icon-only tools-button" type="button" aria-label="内置工具">
+                <svg viewBox="0 0 24 24" aria-hidden="true">
+                  <path d="M4 6h16v12H4z" />
+                  <path d="m8 10 3 2-3 2" />
+                  <path d="M13 15h4" />
+                </svg>
+              </button>
+            </div>
+          </header>
+
+          <section class="home-overview" aria-label="Home dashboard preview">
+            <article class="current-dashboard">
+              <span class="small-label">current session dashboard</span>
+              <h2>project-analysis-0724</h2>
+              <div class="metric-grid">
+                <span>running</span>
+                <span>last turn 09:44</span>
+                <span>2 active workers</span>
+              </div>
+              <p>只显示当前 session 总览；worker 详情进入该 session 后再展开。</p>
+            </article>
+
+            <article class="timer-dashboard">
+              <div class="section-title-line">
+                <h3>定时任务</h3>
+                <span>3 active</span>
+              </div>
+              <div class="timer-row">
+                <strong>10:30</strong>
+                <p>回来检查 worker review</p>
+              </div>
+              <div class="timer-row">
+                <strong>cron</strong>
+                <p>每天同步 provider 状态</p>
+              </div>
+            </article>
+
+            <section class="session-history" aria-label="Persisted session list">
+              <div class="section-title-line">
+                <h3>历史 Session</h3>
+                <span>persisted only</span>
+              </div>
+              <article class="session-row active-session">
+                <span class="session-mark chat-mark"></span>
+                <div>
+                  <div class="session-title-line">
+                    <strong>兰州黄河地理知识</strong>
+                    <time>47 分钟前</time>
+                  </div>
+                  <p>黄河穿兰州城而过...</p>
+                </div>
+              </article>
+              <article class="session-row">
+                <span class="session-mark config-mark"></span>
+                <div>
+                  <div class="session-title-line">
+                    <strong>T-Mobile 三星 S25 Ultra</strong>
+                    <time>昨天</time>
+                  </div>
+                  <p>Confirmed: SM-S...</p>
+                </div>
+              </article>
+              <article class="session-row">
+                <span class="session-mark search-mark"></span>
+                <div>
+                  <div class="session-title-line">
+                    <strong>搜索 GitHub 手机远控</strong>
+                    <time>本周</time>
+                  </div>
+                  <p>根据 GitHub 搜索结果...</p>
+                </div>
+              </article>
+            </section>
+          </section>
+
+          <footer class="phone-bottom">
+            <button class="corner-button icon-only bottom-left" type="button" aria-label="新建会话">
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <path d="M5 6h14v9H9l-4 3V6Z" />
+                <path d="M12 8.5v4" />
+                <path d="M10 10.5h4" />
+              </svg>
+            </button>
+            <div class="home-label">Home</div>
+            <button class="corner-button icon-only bottom-right" type="button" aria-label="搜索 session">
+              <svg viewBox="0 0 24 24" aria-hidden="true">
+                <circle cx="10.5" cy="10.5" r="5.8" />
+                <path d="m15 15 4.5 4.5" />
+              </svg>
+            </button>
+          </footer>
+        </div>
+
+        <aside class="drawer-preview">
+          <div class="drawer-title">打开后页面树示意</div>
+          <div class="drawer-list">
+            <span>Config -> provider / daemon / worker / android</span>
+            <span>Timer -> relative / absolute / cron / recurrence</span>
+            <span>Tools -> select / shell / daemon workspace / browser</span>
+            <span>New -> conversation / task / cwd</span>
+            <span>Search -> persisted sessions only</span>
+            <span>Home -> history sessions / timers / current dashboard</span>
+          </div>
+        </aside>
+      </section>
+
+      <section class="rules-panel">
+        <div class="panel-head">
+          <span class="step-pill">Step 2</span>
+          <h2>UI 要做的事情</h2>
+        </div>
+        <div class="rules-grid">
+          <article>
+            <h3>入口边界</h3>
+            <p>每个角只做一类事：配置、定时、工具、新建、搜索互不混用。</p>
+          </article>
+          <article>
+            <h3>会话边界</h3>
+            <p>首页一级列表只显示持久化 session；worker 临时会话不作为首页 session 内容展示。</p>
+          </article>
+          <article>
+            <h3>状态边界</h3>
+            <p>当前 session dashboard 只给总览；进入 session 后再看 turn、worker、retry、error。</p>
+          </article>
+          <article>
+            <h3>下一步</h3>
+            <p>这张 tree 过审后，再按入口逐个列 gap 和流程，不在本原型里偷偷接功能。</p>
+          </article>
+        </div>
+      </section>
+
+      <section class="audit-panel" aria-label="Local entrance audit">
+        <div class="panel-head">
+          <span class="step-pill">Step 3</span>
+          <h2>局部入口审计</h2>
+        </div>
+
+        <div class="design-lock">
+          <span class="node-id">Design Lock</span>
+          <p>
+            主界面锁定为四角图标入口 + 首页三块内容：历史持久化 session、定时任务、当前 session
+            dashboard。首页一级列表禁止显示 worker session 内容；worker 关系只在进入所属 session 后展开。
+          </p>
+        </div>
+
+        <div class="audit-grid">
+          <article class="audit-card settings">
+            <span class="node-id">A · Config</span>
+            <h3>配置入口</h3>
+            <dl>
+              <dt>页面树</dt>
+              <dd>Provider / 模型组 -> Daemon / 远程连接 -> Worker 能力 -> Android 更新与权限。</dd>
+              <dt>职责</dt>
+              <dd>管理低频系统配置和能力声明，配置变更给出重启或测试入口。</dd>
+              <dt>禁止</dt>
+              <dd>不显示当前任务流水，不混入 session 搜索，不替代实时 dashboard。</dd>
+              <dt>Gap</dt>
+              <dd>需要把 provider test、升级检查、权限状态整理成同一配置树，但各自保留 owner。</dd>
+            </dl>
+          </article>
+
+          <article class="audit-card timers">
+            <span class="node-id">B · Timer</span>
+            <h3>定时任务入口</h3>
+            <dl>
+              <dt>页面树</dt>
+              <dd>Timer list -> Create relative -> Create absolute -> Cron / recurrence -> Fired history。</dd>
+              <dt>职责</dt>
+              <dd>只管理 timer 本身：触发时间、本地时区、循环次数、唤醒提示词、到期记录。</dd>
+              <dt>禁止</dt>
+              <dd>不把 timer 当 task，不显示 worker 执行明细，不作为 debug 面板。</dd>
+              <dt>Gap</dt>
+              <dd>需要后续核对 timer 持久化、过期处理、重启后补触发和 UI 可见状态。</dd>
+            </dl>
+          </article>
+
+          <article class="audit-card tools">
+            <span class="node-id">C · Tools</span>
+            <h3>内置工具入口</h3>
+            <dl>
+              <dt>页面树</dt>
+              <dd>Tool catalog -> Shell terminal -> Daemon workspace tools -> Browser -> Tool guide examples。</dd>
+              <dt>职责</dt>
+              <dd>展示工具能力、权限边界、最小示例和可手动打开的工具面。</dd>
+              <dt>禁止</dt>
+              <dd>不渲染某个 session 的工具执行 turn，不吞工具错误，不用统计 debug 代替工具证据。</dd>
+              <dt>Gap</dt>
+              <dd>需要把工具 schema、绝对路径/软链接规则、失败样本解释整理成可读工具指南。</dd>
+            </dl>
+          </article>
+
+          <article class="audit-card new-conversation">
+            <span class="node-id">D · New</span>
+            <h3>新建入口</h3>
+            <dl>
+              <dt>页面树</dt>
+              <dd>New conversation -> New task session -> Workspace directory -> Attachments -> Create draft。</dd>
+              <dt>职责</dt>
+              <dd>创建持久化用户 session 或 task session，并锁定工作目录、草稿和当前提交元数据。</dd>
+              <dt>禁止</dt>
+              <dd>不创建 worker 临时 session 作为顶层会话，不丢草稿，不用失败回执清空页面。</dd>
+              <dt>Gap</dt>
+              <dd>需要确认 new task 与普通 new session 的文案差异、cwd 必填规则和图片选择池入口。</dd>
+            </dl>
+          </article>
+
+          <article class="audit-card search">
+            <span class="node-id">E · Search</span>
+            <h3>搜索入口</h3>
+            <dl>
+              <dt>页面树</dt>
+              <dd>Query input -> Session filters -> Result list -> Jump to turn -> Restore context。</dd>
+              <dt>职责</dt>
+              <dd>搜索已持久化 session 内容，并跳转到对应 session / turn。</dd>
+              <dt>禁止</dt>
+              <dd>不创建 session，不把 worker 临时会话作为顶层结果，不搜索未持久化 transient debug。</dd>
+              <dt>Gap</dt>
+              <dd>需要定义搜索索引来源、worker 子结果如何挂回 parent session、结果跳转后的返回路径。</dd>
+            </dl>
+          </article>
+        </div>
+      </section>
+    </main>
+  </body>
+</html>
