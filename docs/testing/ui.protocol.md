@@ -127,6 +127,9 @@
   - Tools dashboard validation covers QueryToolRegistry route separation,
     ToolRegistry DTO JSON roundtrip, protocol-state local rejection, no local
     `web_search` function row, and no protocol-owned tool execution
+  - Search dashboard validation covers QuerySessionSearch route separation,
+    empty-query rejection, protocol-state local rejection, and no
+    protocol-owned session index/search truth
   - task list subscription selector and matcher cover accepted task list projections and rejection of task query/history misuse on subscribe route
   - error-center query command validation covers empty session id and command-ingress rejection for query-route misuse
   - config status query covers command-ingress rejection, runtime-owned
@@ -175,6 +178,9 @@
     timer schedule or ledger storage
   - ADP Tools dashboard smoke proves protocol frames can carry ToolRegistry
     projections without protocol-owned registry storage or tool execution
+  - ADP Search dashboard smoke proves protocol frames can carry SessionSearch
+    projections without protocol-owned session index storage or worker-session
+    top-level promotion
   - `command_to_projection_smoke` asserts turn `created_at` survives protocol
     projection
   - ADP task list subscription smoke proves initial task list projection and subsequent runtime-published task changes use the same subscription channel
@@ -255,3 +261,5 @@
     `cargo test -p freehand-ui-protocol timer_ -- --nocapture`
   - Tools dashboard query/result DTOs are landed and regression-locked by
     `cargo test -p freehand-ui-protocol tool_registry -- --nocapture`
+  - Search dashboard query/result DTOs are landed and regression-locked by
+    `cargo test -p freehand-ui-protocol session_search -- --nocapture --test-threads=1`

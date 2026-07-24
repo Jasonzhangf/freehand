@@ -275,6 +275,15 @@
       "binding_status": "bound"
     },
     {
+      "operation_id": "session.list_persisted",
+      "owner_feature_id": "reason.persistence",
+      "source_resource": "session",
+      "target_resource": "ui_projection",
+      "effect": "read persisted session index and metadata sidecars for UI-safe session list/search projection without making UI or worker transcripts top-level session truth",
+      "mainline_call_doc": "docs/mainline-calls/reason.persistence.json",
+      "binding_status": "bound"
+    },
+    {
       "operation_id": "turn.plan_request_context",
       "owner_feature_id": "reason.context-planner",
       "source_resource": "turn",
@@ -771,6 +780,17 @@
       "call_table_step": "06",
       "file_path": "crates/freehand-reason/src/persistence.rs",
       "symbol_path": "ReasonPersistence::record_turn_started",
+      "binding_status": "bound"
+    },
+    {
+      "edge_id": "reason.persistence#18",
+      "operation_id": "session.list_persisted",
+      "source_resource": "session",
+      "target_resource": "ui_projection",
+      "mainline_call_doc": "docs/mainline-calls/reason.persistence.json",
+      "call_table_step": "18",
+      "file_path": "crates/freehand-reason/src/persistence.rs",
+      "symbol_path": "ReasonPersistence::list_persisted_sessions",
       "binding_status": "bound"
     },
     {
@@ -1409,6 +1429,14 @@
       "allowed_direct": true,
       "via_resources": [],
       "reason": "Session persistence owner may append turn truth under the persisted session."
+    },
+    {
+      "rule_id": "session-projects-persisted-list-direct",
+      "source_resource": "session",
+      "target_resource": "ui_projection",
+      "allowed_direct": true,
+      "via_resources": [],
+      "reason": "Session persistence owner may project persisted session index and metadata to UI-safe list/search DTOs while UI remains read-only."
     },
     {
       "rule_id": "turn-plans-request-context-direct",

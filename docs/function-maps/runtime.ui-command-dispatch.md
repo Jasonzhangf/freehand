@@ -22,6 +22,8 @@
   - `input_attachment`
   - `provider_request`
   - `ui_projection`
+  - `session`
+  - `task`
   - `timer`
   - `tool_call`
 - resource operations:
@@ -29,6 +31,7 @@
   - `input_attachment.project_to_ui` (`input_attachment` -> `ui_projection`)
   - timer bridge references `runtime.master-worker-loop` owner operations `timer.schedule`, `timer.cancel`, and `timer.list`
   - tool registry bridge references `tool.registry` owner operation `tool_call.project_registry_to_ui`
+  - search bridge references `reason.persistence` owner operation `session.list_persisted` and `task.orchestration` parent-session truth for Worker child nesting
 - forbidden shortcuts:
   - Runtime must not persist image base64 in reason/session history or project it to UI history.
   - Provider adapters must consume only provider-neutral attachment semantics; runtime must not construct protocol-specific image wire payloads.
@@ -85,6 +88,11 @@
   `BuiltinToolRegistry::registry_projection` rows into UI DTOs and does not
   execute tools, persist registry truth, or synthesize provider-hosted
   `web_search` as a local tool.
+- Phase 2 Search dashboard `QuerySessionSearch` routes through runtime into
+  `reason.persistence` persisted session index/metadata truth and
+  `task.orchestration` TaskBoard parent-session truth. Runtime returns only
+  persisted Master/user sessions as top-level results and nests Worker matches
+  under the owning parent session.
 
 ## Response Mainline
 
@@ -156,6 +164,10 @@
   `BuiltinToolRegistry::registry_projection`, including schema, examples,
   guidance, scope, implemented/read-only state, and Master/Worker exposure
   flags without tool execution
+- runtime-backed Search dashboard query returns UI-safe persisted session
+  results from `ReasonPersistence::list_persisted_sessions` plus metadata
+  sidecars and nests Worker hits via TaskBoard `worker_session_id` /
+  `parent_session_id` truth instead of exposing Worker sessions at top level
 
 ## Error Mainline
 
@@ -192,6 +204,8 @@
   must not create task truth or fake a browser-local timer projection
 - tool registry projection failure maps to explicit query failure; runtime must
   not fall back to a hardcoded browser/runtime tool list
+- persisted session search failures map to explicit query failure; runtime must
+  not fall back to browser-local session filtering or id-prefix guessing
 
 ## Shared Multi-Reference Functions
 
@@ -300,6 +314,7 @@
 | 26 | `RuntimeCommandDispatcher::query_runtime` / `project_timer_list_for_ui` | `crates/freehand-runtime/src/lib.rs` | route QueryTimerList into timer owner schedule and ledger truth, then project UI-safe TimerList rows | include_terminal timer query flag | `UiTimerListProjection` or explicit timer-store failure | ADP query transport | `TimerStore::load_schedules` / `TimerStore::load_events` | bound |
 | 27 | `RuntimeCommandDispatcher::dispatch_schedule_timer` / `RuntimeCommandDispatcher::dispatch_cancel_timer` | `crates/freehand-runtime/src/lib.rs` | route ScheduleTimer and CancelTimer command envelopes into TimerStore owner mutation APIs and return user-safe timer receipts | validated timer schedule or cancel command | `timer_scheduled` or `timer_cancelled` receipt, or explicit owner failure | `RuntimeCommandDispatcher::dispatch` | `TimerStore::schedule_from_request` / `TimerStore::upsert_schedule` / `TimerStore::cancel` | bound |
 | 28 | `RuntimeCommandDispatcher::query_runtime` / `project_tool_registry_for_ui` | `crates/freehand-runtime/src/lib.rs` | route QueryToolRegistry into tool.registry owner projection and convert rows into UI-safe protocol DTOs without executing tools | tool registry query | `UiToolRegistryProjection` or explicit query failure | ADP query transport | `BuiltinToolRegistry::registry_projection` | bound |
+| 29 | `RuntimeCommandDispatcher::query_runtime` / `query_session_search_for_ui` / `worker_parent_session_map` | `crates/freehand-runtime/src/lib.rs` | route QuerySessionSearch into reason.persistence persisted session index/metadata truth, join Worker matches through TaskBoard parent-session truth, and return only persisted Master/user sessions as top-level results | search query plus optional limit | `UiSessionSearchProjection` or explicit search/query failure | ADP query transport | `ReasonPersistence::list_persisted_sessions` / `ReasonPersistence::load_session_metadata` / `TaskRuntime::query_task_board` | bound |
 
 ## Sync Status Against Code
 
@@ -350,6 +365,9 @@
 - runtime Tools dashboard query bridge is implemented as a thin projection route
   to `tool.registry` and is covered by
   `runtime_query_projects_tool_registry_owner_truth`
+- runtime Search dashboard query bridge is implemented as a thin projection route
+  to reason.persistence plus task parent truth and is covered by
+  `runtime_query_session_search_returns_worker_hits_under_parent_session`
 - final live projection now keeps each runtime round as its own UI turn so earlier-round tool activity cannot be merged into the final latest turn
 - failed live bridge tool execution now refreshes runtime UI state from persisted failed turn truth before returning the dispatch error, so WebUI query/SSE can observe failure instead of waiting forever
 - early live provider/protocol failure now creates a persisted failed turn and session projection instead of falling back to non-live submit or returning transport-only dispatch failure

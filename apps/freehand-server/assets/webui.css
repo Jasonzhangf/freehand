@@ -5036,7 +5036,8 @@ body[data-layout-shape="tablet_portrait"] .mobile-home-dashboard {
   font-size: 9.5px;
 }
 
-.timer-dashboard-dialog {
+.timer-dashboard-dialog,
+.session-search-dialog {
   width: min(720px, calc(100vw - 24px));
   max-height: min(780px, calc(100vh - 28px));
   padding: 0;
@@ -5047,12 +5048,14 @@ body[data-layout-shape="tablet_portrait"] .mobile-home-dashboard {
   box-shadow: 0 28px 72px rgba(20, 33, 29, 0.20);
 }
 
-.timer-dashboard-dialog::backdrop {
+.timer-dashboard-dialog::backdrop,
+.session-search-dialog::backdrop {
   background: rgba(12, 20, 17, 0.22);
   backdrop-filter: blur(2px);
 }
 
-.timer-dashboard-panel {
+.timer-dashboard-panel,
+.session-search-panel {
   display: grid;
   gap: 12px;
   max-height: inherit;
@@ -5145,6 +5148,111 @@ body[data-layout-shape="tablet_portrait"] .mobile-home-dashboard {
 
 .timer-cancel-button {
   white-space: nowrap;
+}
+
+.session-search-control {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: end;
+}
+
+.session-search-control label {
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+  color: var(--text-soft);
+  font-size: 11px;
+}
+
+.session-search-control input {
+  width: 100%;
+  min-width: 0;
+  border: 1px solid rgba(31, 108, 88, 0.18);
+  border-radius: 12px;
+  background: rgba(247, 251, 248, 0.86);
+  color: var(--text);
+  padding: 9px 10px;
+}
+
+.session-search-results {
+  display: grid;
+  gap: 8px;
+  max-height: 360px;
+  overflow: auto;
+  color: var(--text-soft);
+  font-size: 11px;
+}
+
+.session-search-card {
+  display: grid;
+  gap: 7px;
+  padding: 10px;
+  border: 1px solid rgba(31, 108, 88, 0.14);
+  border-radius: 14px;
+  background: rgba(247, 251, 248, 0.72);
+}
+
+.session-search-card-head,
+.session-search-child {
+  width: 100%;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  font: inherit;
+  text-align: left;
+  cursor: pointer;
+}
+
+.session-search-card-head {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 8px;
+  align-items: start;
+  padding: 0;
+}
+
+.session-search-title {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+}
+
+.session-search-title strong,
+.session-search-title small,
+.session-search-snippet,
+.session-search-fields {
+  overflow: hidden;
+  text-overflow: ellipsis;
+}
+
+.session-search-title strong {
+  color: var(--text);
+  font-size: 12px;
+}
+
+.session-search-title small,
+.session-search-snippet,
+.session-search-fields {
+  margin: 0;
+  color: var(--text-soft);
+  font-size: 10.5px;
+  line-height: 1.45;
+}
+
+.session-search-child-list {
+  display: grid;
+  gap: 6px;
+  padding-left: 16px;
+}
+
+.session-search-child {
+  border-left: 2px solid rgba(31, 108, 88, 0.22);
+  border-radius: 9px;
+  background: rgba(255, 255, 255, 0.58);
+  padding: 7px 8px;
+  color: var(--text-soft);
+  font-size: 10.5px;
 }
 
 .tools-dashboard-dialog {
@@ -5296,6 +5404,9 @@ body[data-layout-shape="tablet_portrait"] .mobile-home-dashboard {
 body[data-layout-shape="phone_portrait"] .timer-dashboard-dialog,
 body[data-layout-shape="tall_phone"] .timer-dashboard-dialog,
 body[data-layout-shape="tablet_portrait"] .timer-dashboard-dialog,
+body[data-layout-shape="phone_portrait"] .session-search-dialog,
+body[data-layout-shape="tall_phone"] .session-search-dialog,
+body[data-layout-shape="tablet_portrait"] .session-search-dialog,
 body[data-layout-shape="phone_portrait"] .tools-dashboard-dialog,
 body[data-layout-shape="tall_phone"] .tools-dashboard-dialog,
 body[data-layout-shape="tablet_portrait"] .tools-dashboard-dialog {
@@ -5305,7 +5416,10 @@ body[data-layout-shape="tablet_portrait"] .tools-dashboard-dialog {
 
 body[data-layout-shape="phone_portrait"] .timer-form-grid,
 body[data-layout-shape="tall_phone"] .timer-form-grid,
-body[data-layout-shape="tablet_portrait"] .timer-form-grid {
+body[data-layout-shape="tablet_portrait"] .timer-form-grid,
+body[data-layout-shape="phone_portrait"] .session-search-control,
+body[data-layout-shape="tall_phone"] .session-search-control,
+body[data-layout-shape="tablet_portrait"] .session-search-control {
   grid-template-columns: 1fr;
 }
 

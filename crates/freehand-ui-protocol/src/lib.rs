@@ -116,6 +116,11 @@ pub enum UiCommand {
     QuerySessionTurns {
         session_id: SessionId,
     },
+    QuerySessionSearch {
+        query: String,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        limit: Option<usize>,
+    },
     QueryConfigStatus,
     QueryTaskList {
         #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -585,6 +590,42 @@ pub struct UiSessionTranscriptProjection {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cwd: Option<String>,
     pub turns: Vec<UiTurnProjection>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct UiSessionSearchProjection {
+    pub query: String,
+    pub results: Vec<UiSessionSearchResultProjection>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct UiSessionSearchResultProjection {
+    pub session_id: SessionId,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub title: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cwd: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub latest_turn_id: Option<TurnId>,
+    pub latest_status: String,
+    pub snippet: String,
+    pub matched_fields: Vec<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub child_matches: Vec<UiSessionSearchChildProjection>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct UiSessionSearchChildProjection {
+    pub session_id: SessionId,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub task_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub title: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub latest_turn_id: Option<TurnId>,
+    pub latest_status: String,
+    pub snippet: String,
+    pub matched_fields: Vec<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -1274,6 +1315,7 @@ pub enum UiQueryResult {
     Turn(Option<UiTurnProjection>),
     SessionList(UiSessionListProjection),
     SessionTurns(UiSessionTranscriptProjection),
+    SessionSearch(UiSessionSearchProjection),
     NodeStatus(Option<NodeStatusSnapshot>),
     Progress(Option<TaskProgressSnapshot>),
     Debug(Option<DebugStateSnapshot>),
@@ -2043,7 +2085,8 @@ impl UiProtocolState {
                     &self.session_metadata,
                 )))
             }
-            UiCommand::QueryTaskList { .. }
+            UiCommand::QuerySessionSearch { .. }
+            | UiCommand::QueryTaskList { .. }
             | UiCommand::QueryTaskBoard { .. }
             | UiCommand::QueryEventInbox { .. }
             | UiCommand::QueryAgentBoard
@@ -2349,6 +2392,9 @@ pub fn validate_command(command: &UiCommand) -> Result<(), UiProtocolError> {
         UiCommand::TestProviderWebSearch {
             query: Some(query), ..
         } if query.trim().is_empty() => Err(UiProtocolError::EmptyUserInput),
+        UiCommand::QuerySessionSearch { query, .. } if query.trim().is_empty() => {
+            Err(UiProtocolError::EmptyUserInput)
+        }
         UiCommand::UpdateAgentProviderSelection { selection }
             if selection.agent_name.trim().is_empty() =>
         {
@@ -3346,6 +3392,7 @@ fn command_kind(command: &UiCommand) -> &'static str {
         UiCommand::QuerySessionList => "query_session_list",
         UiCommand::QueryArchivedSessionList => "query_archived_session_list",
         UiCommand::QuerySessionTurns { .. } => "query_session_turns",
+        UiCommand::QuerySessionSearch { .. } => "query_session_search",
         UiCommand::QueryConfigStatus => "query_config_status",
         UiCommand::QueryTaskList { .. } => "query_task_list",
         UiCommand::QueryTaskBoard { .. } => "query_task_board",
@@ -4686,6 +4733,34 @@ mod tests {
                 other => panic!("unexpected internal transcript result: {other:?}"),
             }
         }
+    }
+
+    #[test]
+    fn session_search_query_is_runtime_owned_and_validated() {
+        let command = UiCommand::QuerySessionSearch {
+            query: "roadmap".to_owned(),
+            limit: Some(10),
+        };
+        validate_command(&command).expect("valid search query");
+        assert_eq!(command_kind(&command), "query_session_search");
+        assert_eq!(
+            accept_command_ingress(&command).expect_err("query is not command ingress"),
+            UiProtocolError::IngressCommandKindMismatch
+        );
+        assert_eq!(
+            UiProtocolState::default()
+                .query(&command)
+                .expect_err("runtime-owned query must not use local UI truth"),
+            UiProtocolError::StreamKindMismatch
+        );
+
+        let err = validate_command(&UiCommand::QuerySessionSearch {
+            query: "   ".to_owned(),
+            limit: None,
+        })
+        .expect_err("empty query rejected");
+        assert_eq!(err, UiProtocolError::EmptyUserInput);
+        assert_eq!(protocol_rejection(err).code, "empty_user_input");
     }
 
     #[test]

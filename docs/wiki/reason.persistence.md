@@ -11,6 +11,7 @@ Generated from `docs/mainline-calls/reason.persistence.json`. Do not edit by han
 ## Resource Operation Backlinks
 
 - session.append_turn_to_turn
+- session.list_persisted
 
 ## Request Mainline
 
@@ -33,6 +34,7 @@ Generated from `docs/mainline-calls/reason.persistence.json`. Do not edit by han
 - authoritative closed-turn restore consumes only `*.json` turn snapshots; leftover atomic temp files such as `*.tmp-*` are write artifacts, not session truth, and must not wedge daemon bootstrap
 - terminal turn persistence yields immutable per-turn truth plus updated session cursor truth
 - derived UI and index sidecars are regenerated from authoritative reason truth after durable writes complete
+- persisted session index reads expose only derived index rows and session metadata sidecars for UI list/search projection; worker task transcripts are not promoted to top-level persisted user sessions by this owner operation
 - session display metadata (`title`, `archived`) is persisted as reason-owned sidecar truth for multi-UI session management and stays separate from provider-visible session history
 - session rollback appends a durable marker, filters effective transcript restore by logical turn key, and retains raw closed-turn files for audit
 
@@ -126,6 +128,7 @@ Generated from `docs/mainline-calls/reason.persistence.json`. Do not edit by han
 | 14q | `ReasonPersistence::restore_turn_snapshots_for_ui` | `crates/freehand-reason/src/persistence.rs` | restore exact per-round UI snapshots, backfilling incomplete authoritative snapshot truth from reason-ledger rows when a selected transcript is queried | session id plus authoritative turn snapshots or reason ledger rows | exact runtime-turn-N / runtime-turn-N-rM UI snapshots with rolled-back logical turns filtered | selected QuerySessionTurns / rollback refresh | persistence owner |  |  |  | bound |
 | 15 | `ReasonPersistence::create_session_metadata / ReasonPersistence::rename_session / ReasonPersistence::archive_session / ReasonPersistence::restore_session / ReasonPersistence::delete_session` | `crates/freehand-reason/src/persistence.rs` | persist shared session display metadata mutations without mutating turn transcript truth | session id plus metadata mutation intent | updated session metadata sidecar | runtime UI command dispatch | persistence owner |  |  |  | bound |
 | 16 | `ReasonPersistence::rollback_latest_session_turn` | `crates/freehand-reason/src/persistence.rs` | append latest-logical-turn rollback marker and advance effective cursor/projection state without deleting raw turn files | session id | rollback marker with target turn, previous effective head, and restored user text | runtime UI command dispatch | persistence owner |  |  |  | bound |
+| 18 | `ReasonPersistence::list_persisted_sessions` | `crates/freehand-reason/src/persistence.rs` | expose derived persisted session index rows and session metadata sidecar truth for UI-safe list/search projection without reading provider raw ledgers or treating worker transcripts as global sessions | session index sidecar plus metadata sidecar | persisted session index/metadata rows for runtime UI projection | runtime.ui-command-dispatch QuerySessionList / QuerySessionSearch | persistence owner | session | ui_projection | session.list_persisted | bound |
 
 ## Sync Status Against Mainline Call
 
@@ -133,3 +136,4 @@ Generated from `docs/mainline-calls/reason.persistence.json`. Do not edit by han
 - CLI and shared-harness smoke both bind to the persistence owner path without duplicating persistence semantics in the app layer
 - live Anthropic `reason-live` path now persists start/output/rejection/terminal events plus provider raw debug bodies/events through `ReasonPersistence`
 - generated wiki must be regenerated from `docs/mainline-calls/reason.persistence.json` when this function-map truth changes
+- session.list_persisted is bound through ReasonPersistence::list_persisted_sessions and load_session_metadata for UI-safe list/search projections

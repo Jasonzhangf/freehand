@@ -45,6 +45,7 @@ Generated from `docs/mainline-calls/app.webui-smoke.json`. Do not edit by hand.
 - front-end Phase 2D status drawer queries TaskBoard, AgentBoard, EventInbox, TaskHistory, and WorkerControl through the existing ADP/runtime query path; the browser only caches transient render data and must not persist task/control truth
 - front-end Timer dashboard queries QueryTimerList through ADP/runtime owner truth, submits ScheduleTimer and CancelTimer only as protocol commands, and must not store timer schedules, infer timer status, or encode timer state as task/browser truth
 - front-end Tools dashboard queries QueryToolRegistry through ADP/runtime owner truth and renders only owner-projected schema, examples, guidance, execution scope, and Master/Worker exposure without executing tools, rendering session-specific tool turns, synthesizing a local web_search tool, or storing browser-local registry truth
+- front-end Search dashboard queries QuerySessionSearch through ADP/runtime owner truth and renders only owner-projected persisted session search rows; it must not search browser-local session state, create a new session, or promote Worker/subagent sessions into top-level global results
 - front-end Worker labels derive from Worker-only resource ordinals; the Master AgentBoard row must not offset configured Worker labels
 - transport-facing app routes expose SSE subscribe for latest turn and per-turn debug snapshot
 - HTTP query and POST command ingress remain compatibility routes; SSE latest-turn subscribe is consumed by WebUI as a display-refresh mirror without owning command dispatch
@@ -76,6 +77,7 @@ Generated from `docs/mainline-calls/app.webui-smoke.json`. Do not edit by hand.
 - WebUI Phase 2D status drawer renders compact TaskBoard, AgentBoard, EventInbox, task history, and WorkerControl cards from owner query results; worker-control buttons submit WorkerControl commands and then re-query owner truth before updating the drawer
 - WebUI Timer dashboard renders owner-projected active/completed/cancelled/failed timer schedules and ledger history, disables duplicate schedule/cancel actions while commands are in flight, and refreshes QueryTimerList after every owner-backed receipt
 - WebUI Tools dashboard renders owner-projected tool registry rows, global guidance, schemas, examples, read-only/implemented state, scope, and Master/Worker exposure flags from QueryToolRegistry; repeated refreshes replace only the registry projection and never create sessions, tasks, timers, or tool executions
+- WebUI Search dashboard renders owner-projected persisted session search rows from QuerySessionSearch; parent rows open persisted Master/user sessions, Worker child matches are indented under that parent, and repeated searches never mutate session/task truth
 - WebUI forwards selected cwd through SubmitUserInput.cwd and keeps draft-session empty state out of the chat stream
 - WebUI selected empty sessions render a clean empty prompt and ignore latest-active turns from other sessions until the selected session has its own transcript or live turn
 - WebUI Escape behavior is stateful: active/submit-in-flight cancels, non-empty composer clears, empty composer first Esc arms rollback, and second Esc calls `RollbackLatestSessionTurn` before refilling composer from the rolled-back user text
@@ -133,6 +135,7 @@ Generated from `docs/mainline-calls/app.webui-smoke.json`. Do not edit by hand.
 - Android APK update bridge absence, desktop/browser use, malformed payloads, JavaScript bridge call failures, missing update sidecar truth, or missing staged APK artifacts render explicit failures and must not pretend an update check started or that the APK is current
 - Timer dashboard QueryTimerList, ScheduleTimer, and CancelTimer failures render explicit user-visible timer status errors and must not backfill timer rows from local browser guesses or task state
 - Tools dashboard QueryToolRegistry failures render explicit user-visible status errors and must not backfill tool rows from local browser guesses, static arrays, or provider capability text
+- Search dashboard QuerySessionSearch failures render explicit user-visible status errors and must not backfill results from local browser guesses, DOM session rows, or worker id prefixes
 
 ## Shared Multi-Reference Functions
 
@@ -181,6 +184,7 @@ Generated from `docs/mainline-calls/app.webui-smoke.json`. Do not edit by hand.
 | 14 | `handle_command_ingress` | `apps/freehand-server/src/lib.rs` | keep dispatch-port and spawn-blocking join failures explicit at the HTTP compatibility transport boundary | dispatch port error or join error | explicit HTTP 500 failure payload | command ingress | protocol failure mapper |  |  |  | bound |
 | 15 | `loadSamplePrompt` | `apps/freehand-server/assets/webui.js` | load hidden success/failure diagnostic prompts into the composer without inventing a second command path or rendering persistent sample buttons | sample kind | composer text plus visible command status | WebUI shell | normal ADP submit path |  |  |  | bound |
 | 16 | `initial_adp_subscription_projection` | `apps/freehand-server/src/lib.rs` | serve initial ADP subscription snapshot including runtime-backed task list and error-center projections | subscription command plus protocol state plus runtime query port | optional UI projection or failure | handle_adp_subscribe | UiRuntimeQueryPort::query_runtime / UiProtocolState::query |  |  |  | bound |
+| 11l | `openSessionSearchDashboard / submitSessionSearch / renderSessionSearchDashboard / renderSessionSearchResult / openSessionSearchResult` | `apps/freehand-server/assets/webui.js` | render persisted-session Search from owner-projected SessionSearch truth, submit query text through QuerySessionSearch, show Worker child matches only under parent sessions, and open parent sessions without browser-local search/index truth | Search quick-entry click, query form submit, and UiQueryResult::SessionSearch | owner-backed persisted session search rows, nested Worker child matches, explicit empty/error status, or selected parent session switch | WebUI mobile home Search entry | runtime session search owner projection through ADP |  |  |  | bound |
 
 ## Sync Status Against Mainline Call
 
@@ -215,6 +219,7 @@ Generated from `docs/mainline-calls/app.webui-smoke.json`. Do not edit by hand.
 - WebUI WorkerControl buttons now send WorkerControl commands through ADP and re-query the owner projection; the visible receipt hides internal feature ids
 - WebUI Timer dashboard now queries QueryTimerList, schedules timers through ScheduleTimer, cancels through CancelTimer, updates the mobile home Timer summary from owner projection, and keeps schedule/history truth in the runtime timer owner instead of browser state
 - WebUI Tools dashboard now queries QueryToolRegistry, renders owner projection rows and guidance, proves no local web_search function row, and keeps session-specific tool turns in conversation rendering instead of this registry/settings surface
+- WebUI Search dashboard now queries QuerySessionSearch, renders owner persisted session rows plus nested Worker child matches, and keeps global session history free of worker/subagent temporary sessions
 - generated wiki must be regenerated from `docs/mainline-calls/app.webui-smoke.json` when this function-map truth changes
 - WebUI Cancel button and Escape key now send CancelTurn through protocol command ingress instead of only clearing local input
 - WebUI cancel path now covers the submit-in-flight window with CancelLatestActiveTurn

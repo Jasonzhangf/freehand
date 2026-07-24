@@ -8106,3 +8106,29 @@ Current real root cause split:
 - restore proof:
   - Final config query returned `provider=minimax`, `fallback_provider=cc`, `provider_protocol=messages`, `base_url_host=api.minimaxi.com`, `default_model=MiniMax-M3`, `web_search=auto`, `web_search_effective=hosted_declared`, `auth_source=inline`.
   - Fixture env grep for provider registry/provider retry/master autonomy keys returned 0 matches.
+# 2026-07-25 mobile UI tree Phase 2 persisted-session Search slice
+
+- scope:
+  - Current work closes only the Phase 2 persisted-session Search dashboard slice.
+  - Full Phase 2 remains open for New/session/task/attachments, current-session lifecycle dashboard, Android update/permissions/notifications true-device closure, and diagnostics.
+- implementation:
+  - `ui.protocol` owns `QuerySessionSearch`, `UiSessionSearchProjection`, parent result DTOs, child result DTOs, and empty-query validation; local protocol state rejects the query so runtime owner must answer.
+  - `runtime.ui-command-dispatch` routes Search to `reason.persistence` persisted session index plus session metadata truth and `task.orchestration` TaskBoard parent truth; metadata-only sessions created by WebUI are valid persisted parent sessions and are included as top-level search candidates.
+  - Worker `worker-task-*` transcript matches are nested under the owning persisted parent session through TaskBoard `parent_session_id` / canonical worker session id; worker/debug/internal sessions are never top-level Search results.
+  - WebUI Search opens from the session/history entry, queries ADP `QuerySessionSearch`, renders parent cards plus indented child matches, and clicking a result opens the parent session.
+- online proof:
+  - `FREEHAND_SESSION_SEARCH_CHROME=$HOME/Library/Caches/ms-playwright/chromium_headless_shell-1194/chrome-mac/headless_shell node scripts/verify-webui-session-search-online.mjs` passed on S-profile.
+  - Artifact: `artifacts/webui-online/webui-session-search-1784932659523`.
+  - Output: `webui_session_search_ok url=http://127.0.0.1:4042/ adp=ws://127.0.0.1:4042/adp session=webui-session-search-fixed`.
+  - Summary checks true: owner projection contains fixed session, browser dialog opened, DOM rows match owner projection, no top-level worker result cards/sessions, fixed session opens, dialog closes after open, no unexpected top-level sessions, no horizontal overflow, asset version served.
+- local proof:
+  - `node --check scripts/verify-webui-session-search-online.mjs` and `node --check apps/freehand-server/assets/webui.js` passed.
+  - `CARGO_TARGET_DIR=/tmp/freehand-target-session-search cargo test -p freehand-ui-protocol session_search -- --nocapture --test-threads=1` passed 1/1.
+  - `CARGO_TARGET_DIR=/tmp/freehand-target-session-search cargo test -p freehand-runtime runtime_query_session_search_returns_worker_hits_under_parent_session -- --nocapture --test-threads=1` passed 1/1 and now covers metadata-only parent search plus nested Worker hit.
+  - `CARGO_TARGET_DIR=/tmp/freehand-target-session-search cargo test -p freehand-server --lib -- --nocapture --test-threads=1` passed 19/19; dispatch-worker panic row is the intentional negative test.
+  - `cargo fmt --check`, `cargo run -p xtask -- mainlines check`, `cargo run -p xtask -- gates check`, and `git diff --check` passed.
+- restore proof:
+  - Final S config query returned `provider=minimax`, `fallback_provider=cc`, `provider_protocol=messages`, `base_url_host=api.minimaxi.com`, `default_model=MiniMax-M3`, `web_search=auto`, `web_search_effective=hosted_declared`, `auth_source=inline`.
+  - Fixture env grep for provider retry/master autonomy keys returned 0 matches.
+- lesson:
+  - Search/list verifiers must include metadata-only sessions created by WebUI; treating persisted index rows as the only persisted-session truth misses valid newly-created empty sessions.

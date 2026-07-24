@@ -35,6 +35,10 @@
     owner-projected registry rows, schema previews, examples, guidance,
     execution scopes, and Master/Worker exposure flags without executing tools,
     creating tasks/timers/sessions, or storing browser-local registry truth
+  - WebUI Search dashboard can query `QuerySessionSearch` and render
+    owner-projected persisted session rows plus nested Worker child matches
+    without browser-local search state, new session creation, or top-level
+    Worker promotion
   - WebUI mobile Agent Dashboard derives one presentation model from owner-backed projections; the Header shows current running Agent count, Worker task lifecycle buckets, and active/review/blocked task title, while the first tap opens only the current session's Worker child-task list
   - WebUI Header session relationship surface is canonical for Master/Worker navigation: collapsed state is a compact dashbar, expanded state is a dropdown session tree capped at half the viewport, and the Worker return path is in the Header
   - WebUI Master/Worker relationship tests lock schema fields, not UI copy: persisted session metadata is the Master source, and `UiTaskSnapshotProjection.parent_session_id`, `attached_session_ids`, `worker_session_id`, and `task_id` are the only Worker relationship source; DOM `data-session-id` / `data-task-id` are checked only as projections of those fields
@@ -88,6 +92,10 @@
     `refreshToolsDashboard`, `renderToolRegistryGuidance`,
     `renderToolRegistryList`, `renderToolRegistryCard`,
     `tool.exposed_to_master`, and `tool.exposed_to_worker`
+  - WebUI Search dashboard asset smoke for `session-search-dialog`,
+    `session-search-results`, `QuerySessionSearch`,
+    `renderSessionSearchDashboard`, `submitSessionSearch`,
+    `renderSessionSearchResult`, and `openSessionSearchResult`
   - Android update route smoke for env/sidecar manifest JSON, explicit missing-sidecar failure, and explicit missing-APK 404
   - WebUI JS asset smoke locks ADP WebSocket command/query usage, rejects `fetch` as a live path, and requires `EventSource` only for latest-turn SSE display refresh
   - WebUI ADP subscription accepted/waiting status rendering smoke
@@ -203,6 +211,13 @@
   `web_search` row, verifies path guidance for locked workspace, absolute,
   symlink, and leading-tilde rules, and proves top-level persisted session ids
   are unchanged
+- WebUI online Search dashboard coverage uses
+  `node scripts/verify-webui-session-search-online.mjs`: it opens the
+  production S-profile WebUI, creates/reuses one fixed persisted session
+  through ADP, searches from the browser quick-entry, proves visible rows match
+  `QuerySessionSearch` owner projection truth, proves worker sessions are not
+  top-level rows, clicks the result, and proves no extra top-level session ids
+  were created
 - WebUI mobile Agent Dashboard positive coverage must prove the Header and child-task list come from current-session TaskBoard/AgentBoard truth and that task selection refreshes `QuerySessionTurns` for the projected Worker session; `scripts/verify-worker-subtasks-online.py --parent-session <id>` is the read-only ADP checker for enumerating every current child task and verifying each projected Worker transcript one by one
 - `node scripts/verify-webui-path-diagnostic-online.mjs` is the fixed-session
   WebUI online closure for path-tool diagnostics: it creates/reuses the fixed
@@ -334,6 +349,9 @@
 - WebUI selected-session startup/manual-click priority is landed: `refreshAllProtocolState` queries latest active turn only when no selected session exists, while ADP/SSE latest-turn updates from other sessions are ignored for the selected transcript
 - WebUI draft-session empty state is landed without the old selected-session/no-turns system feedback card
 - WebUI assistant text stays in its owning round card, and raw `<freehand_completion>` blocks do not pollute the main chat stream
+  - WebUI Search dashboard is landed for persisted session search through
+    `QuerySessionSearch`; browser rows stay projection-only and Worker matches
+    remain nested under parent sessions
   - protocol-only transport library reuse is landed
   - app remains protocol-only by dependency gate
   - migrated mainline-call source and generated wiki are kept in sync with this test design

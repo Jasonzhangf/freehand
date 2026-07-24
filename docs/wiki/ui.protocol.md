@@ -31,6 +31,7 @@ Generated from `docs/mainline-calls/ui.protocol.json`. Do not edit by hand.
 - Phase 2C WorkerControl and QueryWorkerControl are protocol-owned command/query DTOs for already-running worker execution control; protocol validates ids, op names, and op-specific payloads before runtime dispatch
 - Timer dashboard QueryTimerList, ScheduleTimer, and CancelTimer are protocol-owned query/mutation DTOs for independent timer truth; protocol validates timer ids, schedule mode, delay/run-at/repeat fields, reason, prompt, and source session id before runtime dispatch
 - Tools dashboard QueryToolRegistry is a protocol-owned read-only ADP query shape; protocol defines ToolRegistry DTOs while runtime/tool registry owners supply registry rows, schema, examples, guidance, execution scopes, and Master/Worker exposure truth
+- Search dashboard QuerySessionSearch is a protocol-owned read-only ADP query shape; protocol defines persisted-session search DTOs while runtime/reason/task owners supply persisted index rows, metadata, and Worker parent attachment truth
 - RunMasterPoll.replay_from_start is a protocol-owned cursor-mode field that defaults false for older clients and is rejected when combined with after_cursor
 - error-center query/subscribe commands are protocol-owned read-only ADP/query shapes while metadata/error truth remains runtime/error-center supplied
 - config status query is a protocol-owned read-only ADP/query shape carrying the complete safe provider registry plus current primary/fallback selection while config.core and runtime.ui-command-dispatch supply selected-agent truth
@@ -93,6 +94,7 @@ Generated from `docs/mainline-calls/ui.protocol.json`. Do not edit by hand.
 - WorkerControl query results expose UI-safe persisted control events plus optional task/agent/lifecycle/task-event projections supplied by runtime owner code
 - TimerList query results expose UI-safe timer schedule and ledger event projections supplied by runtime owner code
 - ToolRegistry query results expose UI-safe built-in tool schema/guidance/exposure projections supplied by runtime owner code without executing tools, storing tool truth, or exposing provider-hosted broad search as a local web_search function tool
+- SessionSearch query results expose UI-safe persisted session search rows supplied by runtime owner code; Worker matches are nested under the owning persisted Master session and never projected as top-level session results
 
 ## Error Mainline
 
@@ -122,6 +124,7 @@ Generated from `docs/mainline-calls/ui.protocol.json`. Do not edit by hand.
 - model group commands reject empty agent/group ids, empty route providers/models, and zero load-balance weights before dispatch; credential/API-key value fields do not exist in the DTO
 - Agent resource-count update commands reject empty agent names and counts outside `1..=5` before dispatch; provider credentials and live process state do not exist in the DTO
 - QueryToolRegistry sent to command ingress or handled by protocol state locally is rejected as route/source misuse instead of returning a protocol-local hardcoded tool list
+- QuerySessionSearch with an empty query, command-ingress use, or protocol-state local handling is rejected explicitly instead of returning browser/protocol-local session search results
 
 ## Shared Multi-Reference Functions
 
@@ -258,6 +261,7 @@ Generated from `docs/mainline-calls/ui.protocol.json`. Do not edit by hand.
 | 28 | `UiWorkerControlCommand / UiCommand::WorkerControl / UiCommand::QueryWorkerControl / UiQueryResult::WorkerControl` | `crates/freehand-ui-protocol/src/lib.rs` | define Phase 2C worker-control command/query DTOs, validate op-specific fields, and route mutation intent to worker.control | worker-control command or event query | validated mutation intent or runtime-backed control event projection | ADP command/query transport | runtime.ui-command-dispatch |  |  |  | bound |
 | 31 | `UiTimerScheduleCommand / UiTimerRepeatCommand / UiCommand::QueryTimerList / UiCommand::ScheduleTimer / UiCommand::CancelTimer / UiQueryResult::TimerList / validate_timer_schedule_command` | `crates/freehand-ui-protocol/src/lib.rs` | define independent timer dashboard query/command DTOs, validate mode-specific timer schedule fields, and route mutation intent to runtime.master-worker-loop through runtime dispatch | timer list query, timer schedule command, or timer cancel command | validated timer query/result DTO or mutation intent routed to timer owner | ADP command/query transport | runtime.ui-command-dispatch |  |  |  | bound |
 | 32 | `UiCommand::QueryToolRegistry / UiQueryResult::ToolRegistry / UiToolRegistryProjection / UiToolRegistryToolProjection` | `crates/freehand-ui-protocol/src/lib.rs` | define read-only Tools dashboard query/result DTOs without owning tool registry truth or executing tools | tool registry query | runtime-backed UI-safe built-in tool registry projection or protocol-state route rejection | ADP query transport | runtime.ui-command-dispatch |  |  |  | bound |
+| 33 | `UiCommand::QuerySessionSearch / UiQueryResult::SessionSearch / UiSessionSearchProjection / UiSessionSearchResultProjection / UiSessionSearchChildProjection` | `crates/freehand-ui-protocol/src/lib.rs` | define read-only persisted-session Search dashboard query/result DTOs without owning session index truth or promoting Worker sessions to top-level results | search query text plus optional limit | runtime-backed UI-safe persisted session search projection or protocol-state route rejection | ADP query transport | runtime.ui-command-dispatch |  |  |  | bound |
 
 ## Sync Status Against Mainline Call
 
@@ -292,3 +296,4 @@ Generated from `docs/mainline-calls/ui.protocol.json`. Do not edit by hand.
 - Phase 2B EventInbox/MasterPoll DTOs are landed and locked by phase2b_event_inbox_and_master_poll_validate_and_route_to_task_orchestration, including replay_from_start conflict validation
 - Phase 2C WorkerControl command/query DTOs are landed and locked by protocol owner tests
 - Tools dashboard query/result DTOs are landed and locked by `cargo test -p freehand-ui-protocol tool_registry -- --nocapture`; protocol-state local query rejection proves runtime/tool owner code supplies the registry projection
+- Search dashboard query/result DTOs are landed and locked by `cargo test -p freehand-ui-protocol session_search -- --nocapture --test-threads=1`; protocol-state local query rejection proves runtime/reason owners supply the search projection

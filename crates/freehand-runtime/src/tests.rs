@@ -887,6 +887,196 @@ Injected timer prompt:\ninspect current Task Center truth";
 }
 
 #[test]
+fn runtime_query_session_search_returns_worker_hits_under_parent_session() {
+    let runtime_home = temp_runtime_home();
+    let selected = live_selected_agent(
+        "http://127.0.0.1:1".to_owned(),
+        freehand_config::ProviderType::Anthropic,
+    );
+    let runtime = RuntimeCommandDispatcher::from_selected_agent_with_live(
+        &selected,
+        runtime_home.clone(),
+        false,
+    )
+    .expect("runtime bootstrap");
+    let master_agent_id = AgentId::new(selected.name.clone());
+    let worker_agent_id = AgentId::new("agent-live-worker");
+    let parent_session_id = SessionId::new("webui-search-parent-session");
+    let task_id = TaskId::new("task-search-child");
+    let worker_session_id = worker_session_id_for_task(&task_id);
+    let metadata_only_session_id = SessionId::new("webui-search-metadata-only-session");
+
+    let master_persistence = ReasonPersistence::new(runtime_home.clone(), master_agent_id.clone());
+    master_persistence
+        .create_session_metadata(
+            parent_session_id.clone(),
+            Some("Roadmap Search Parent".to_owned()),
+            None,
+        )
+        .expect("persist parent metadata");
+    master_persistence
+        .create_session_metadata(
+            metadata_only_session_id.clone(),
+            Some("Metadata Only needle-metadata".to_owned()),
+            None,
+        )
+        .expect("persist metadata-only session");
+    persist_search_fixture_turn(
+        &master_persistence,
+        &master_agent_id,
+        &parent_session_id,
+        "runtime-turn-parent",
+        "parent turn summary with roadmap keyword",
+    );
+
+    let task_runtime =
+        TaskRuntime::boot(&runtime_home, master_agent_id.clone()).expect("task runtime");
+    task_runtime
+        .create_task(TaskCreateRequest {
+            task_id: Some(task_id.clone()),
+            title: "Worker child search task".to_owned(),
+            content: "worker child content".to_owned(),
+            goal: "prove child search result parenting".to_owned(),
+            deliverables: vec!["child result".to_owned()],
+            acceptance: vec!["child result is nested".to_owned()],
+            priority: 10,
+            target_cwd: None,
+            execution_profile: TaskExecutionProfile::Workspace,
+            dispatch: TaskDispatchRequest::None,
+            parent: TaskParentRef {
+                session_id: Some(parent_session_id.clone()),
+                turn_id: Some(TurnId::new("runtime-turn-parent")),
+                trace_id: None,
+            },
+            actor: lifecycle_test_actor(),
+            watermark: lifecycle_test_watermark("session-search-child-task"),
+        })
+        .expect("create parented task");
+
+    let worker_persistence = ReasonPersistence::new(runtime_home.clone(), worker_agent_id);
+    persist_search_fixture_turn(
+        &worker_persistence,
+        &AgentId::new("agent-live-worker"),
+        &worker_session_id,
+        "worker-turn-child",
+        "worker child transcript contains rare needle-token",
+    );
+
+    match runtime
+        .query_runtime(&UiCommand::QuerySessionSearch {
+            query: "needle-token".to_owned(),
+            limit: Some(10),
+        })
+        .expect("runtime query")
+        .expect("runtime-owned session search")
+    {
+        UiQueryResult::SessionSearch(search) => {
+            assert_eq!(search.query, "needle-token");
+            assert_eq!(search.results.len(), 1);
+            let result = &search.results[0];
+            assert_eq!(result.session_id, parent_session_id);
+            assert!(
+                !result.session_id.as_str().starts_with("worker-task-"),
+                "worker sessions must not be top-level search results"
+            );
+            assert_eq!(result.child_matches.len(), 1);
+            assert_eq!(result.child_matches[0].session_id, worker_session_id);
+            assert_eq!(
+                result.child_matches[0].task_id.as_deref(),
+                Some(task_id.as_str())
+            );
+            assert!(result.child_matches[0].snippet.contains("needle-token"));
+        }
+        other => panic!("unexpected session search result: {other:?}"),
+    }
+
+    match runtime
+        .query_runtime(&UiCommand::QuerySessionSearch {
+            query: "Roadmap".to_owned(),
+            limit: Some(10),
+        })
+        .expect("runtime query")
+        .expect("runtime-owned session search")
+    {
+        UiQueryResult::SessionSearch(search) => {
+            assert_eq!(search.results.len(), 1);
+            assert_eq!(search.results[0].session_id, parent_session_id);
+            assert!(
+                search.results[0]
+                    .matched_fields
+                    .contains(&"title".to_owned())
+            );
+        }
+        other => panic!("unexpected session search result: {other:?}"),
+    }
+
+    match runtime
+        .query_runtime(&UiCommand::QuerySessionSearch {
+            query: "needle-metadata".to_owned(),
+            limit: Some(10),
+        })
+        .expect("runtime query")
+        .expect("runtime-owned session search")
+    {
+        UiQueryResult::SessionSearch(search) => {
+            assert_eq!(search.results.len(), 1);
+            assert_eq!(search.results[0].session_id, metadata_only_session_id);
+            assert_eq!(search.results[0].latest_status, "session");
+            assert!(
+                search.results[0]
+                    .matched_fields
+                    .contains(&"title".to_owned())
+            );
+        }
+        other => panic!("unexpected session search result: {other:?}"),
+    }
+
+    fs::remove_dir_all(runtime_home).expect("cleanup");
+}
+
+fn persist_search_fixture_turn(
+    persistence: &ReasonPersistence,
+    agent_id: &AgentId,
+    session_id: &SessionId,
+    turn_id: &str,
+    summary: &str,
+) {
+    let mut history = SessionHistory::new(session_id.clone(), Vec::new()).expect("session history");
+    let engine = ReasonTurnEngine::new();
+    let mut turn = engine
+        .start_turn(
+            &mut history,
+            TurnStartInput {
+                session_id: session_id.clone(),
+                turn_id: TurnId::new(turn_id),
+                trace_id: TraceId::new(format!("{turn_id}-trace")),
+                feature_id: FeatureId::new("reason.persistence"),
+                agent_id: agent_id.clone(),
+                user_text: format!("search fixture prompt for {turn_id}"),
+                planned_context_segments: Vec::new(),
+                tool_schema_fingerprint: None,
+                model: "search-fixture-model".to_owned(),
+            },
+        )
+        .expect("start search fixture turn");
+    persistence
+        .record_turn_started(&history, &turn, 0)
+        .expect("persist fixture start");
+    turn.terminal_event = Some(freehand_contracts::ReasonResp03TerminalEvent {
+        session_id: session_id.clone(),
+        turn_id: turn.request.turn_id.clone(),
+        trace_id: turn.request.trace_id.clone(),
+        feature_id: FeatureId::new("reason.persistence"),
+        agent_id: agent_id.clone(),
+        status: TerminalStatus::Success,
+        summary: summary.to_owned(),
+    });
+    persistence
+        .record_turn_closed(&history, &turn, 0)
+        .expect("persist fixture close");
+}
+
+#[test]
 fn runtime_query_session_turns_preserves_live_provider_retry_activity() {
     let runtime_home = temp_runtime_home();
     let selected = live_selected_agent(

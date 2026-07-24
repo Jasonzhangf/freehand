@@ -6,6 +6,7 @@
 - resource map: `docs/resource-maps/core.json`
 - resource operations:
   - `session.append_turn_to_turn`
+  - `session.list_persisted`
 - owner entry symbols:
   - `ReasonPersistence::record_turn_started`
   - `ReasonPersistence::record_provider_output_applied`
@@ -29,8 +30,10 @@
   - `session`
 - touched resources:
   - `turn`
+  - `ui_projection`
 - resource operations:
   - `session.append_turn_to_turn`
+  - `session.list_persisted`
 - forbidden shortcuts:
   - UI projection must not synthesize persisted sessions from turn-only or worker sessions.
   - Session truth must not be recovered from provider raw ledgers or UI sidecars.
@@ -65,6 +68,7 @@
 - UI restore preserves one latest snapshot per exact turn id, so `runtime-turn-N` / `runtime-turn-N-rM` provider/tool/repair rounds remain chronological UI cards; only append-only rollback markers remove every round that belongs to the rolled-back logical turn key
 - terminal turn persistence yields immutable per-turn truth plus updated session cursor truth
 - derived UI and index sidecars are regenerated from authoritative reason truth after durable writes complete
+- persisted session index reads expose only derived index rows and session metadata sidecars for UI list/search projection; worker task transcripts are not promoted to top-level persisted user sessions by this owner operation
 - session display metadata (`title`, `archived`) is persisted as reason-owned sidecar truth for multi-UI session management; it is separate from provider-visible session history and turn transcript truth
 - session rollback is persisted as an append-only reason-ledger marker; effective transcript restore filters rolled-back logical turns while raw closed-turn files remain on disk for audit
 
@@ -166,6 +170,7 @@
 | 15 | `ReasonPersistence::create_session_metadata` / `rename_session` / `archive_session` / `restore_session` | `crates/freehand-reason/src/persistence.rs` | persist session display metadata sidecar mutations for shared UI CRUD | session id + title/archive intent | updated session metadata sidecar | runtime UI command dispatch | persistence owner | bound |
 | 16 | `ReasonPersistence::rollback_latest_session_turn` | `crates/freehand-reason/src/persistence.rs` | append latest-logical-turn rollback marker and update effective cursor/projection state without deleting raw turn files | session id | rollback marker with target turn, previous effective head, and restored user text | runtime UI command dispatch | persistence owner | bound |
 | 17 | `ReasonPersistence::restore_turn_snapshots_for_ui` | `crates/freehand-reason/src/persistence.rs` | rebuild exact per-round UI snapshots from reason ledger when authoritative snapshot truth is absent or missing earlier observed rounds, applying rollback markers during rebuild | reason ledger rows | exact per-round UI snapshots with rolled-back logical turns filtered | selected `QuerySessionTurns` / rollback refresh | persistence owner | bound |
+| 18 | `ReasonPersistence::list_persisted_sessions` | `crates/freehand-reason/src/persistence.rs` | expose derived persisted session index rows and session metadata sidecar truth for UI-safe list/search projection without reading provider raw ledgers or treating worker transcripts as global sessions | session index sidecar plus metadata sidecar | persisted session index/metadata rows for runtime UI projection | runtime.ui-command-dispatch `QuerySessionList` / `QuerySessionSearch` | persistence owner | bound |
 
 ## Metadata / Request Isolation Notes
 

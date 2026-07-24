@@ -1,4 +1,4 @@
-import { initializeThemeToggle } from "/assets/theme.js?v=20260724-tools-registry-ui";
+import { initializeThemeToggle } from "/assets/theme.js?v=20260725-session-search-ui";
 
 initializeThemeToggle(document);
 
@@ -185,6 +185,13 @@ const toolsDashboardRefreshButton = document.getElementById("tools-dashboard-ref
 const toolsDashboardStatus = document.getElementById("tools-dashboard-status");
 const toolsDashboardGuidance = document.getElementById("tools-dashboard-guidance");
 const toolsDashboardList = document.getElementById("tools-dashboard-list");
+const sessionSearchDialog = document.getElementById("session-search-dialog");
+const sessionSearchForm = document.getElementById("session-search-form");
+const sessionSearchCloseButton = document.getElementById("session-search-close-button");
+const sessionSearchInput = document.getElementById("session-search-input");
+const sessionSearchSubmitButton = document.getElementById("session-search-submit-button");
+const sessionSearchStatus = document.getElementById("session-search-status");
+const sessionSearchResults = document.getElementById("session-search-results");
 const timerModeInput = document.getElementById("timer-mode-input");
 const timerDelayInput = document.getElementById("timer-delay-input");
 const timerRunAtInput = document.getElementById("timer-run-at-input");
@@ -325,6 +332,9 @@ const state = {
   toolRegistry: null,
   toolRegistryError: null,
   toolRegistryInFlight: false,
+  sessionSearch: null,
+  sessionSearchError: null,
+  sessionSearchInFlight: false,
   phase2StatusError: null,
   phase2LastRefreshAt: null,
   workerControlInFlight: false,
@@ -5588,6 +5598,13 @@ function applyPhase2QueryResult(result) {
     renderToolsDashboard();
     return true;
   }
+  const sessionSearch = variantPayload(result, "SessionSearch");
+  if (sessionSearch !== undefined) {
+    state.sessionSearch = sessionSearch;
+    state.sessionSearchError = null;
+    renderSessionSearchDashboard();
+    return true;
+  }
   return false;
 }
 
@@ -7100,6 +7117,143 @@ async function refreshToolsDashboard() {
   } finally {
     state.toolRegistryInFlight = false;
     renderToolsDashboard();
+  }
+}
+
+function renderSessionSearchDashboard() {
+  if (sessionSearchStatus) {
+    sessionSearchStatus.textContent = state.sessionSearchError
+      ? `session search failed: ${state.sessionSearchError}`
+      : state.sessionSearch
+        ? `query "${state.sessionSearch.query || ""}" · ${sessionSearchResultsList().length} parent results`
+        : "Enter a query to search persisted sessions.";
+  }
+  if (sessionSearchSubmitButton) {
+    sessionSearchSubmitButton.disabled = state.sessionSearchInFlight;
+    sessionSearchSubmitButton.textContent = state.sessionSearchInFlight ? "Searching..." : "Search";
+  }
+  if (!sessionSearchResults) {
+    return;
+  }
+  sessionSearchResults.replaceChildren();
+  if (state.sessionSearchError) {
+    sessionSearchResults.textContent = state.sessionSearchError;
+    return;
+  }
+  if (state.sessionSearchInFlight) {
+    sessionSearchResults.textContent = "querying persisted session index...";
+    return;
+  }
+  const results = sessionSearchResultsList();
+  if (results.length === 0) {
+    sessionSearchResults.textContent = state.sessionSearch ? "No persisted session matches." : "No query yet.";
+    return;
+  }
+  results.forEach((result) => {
+    sessionSearchResults.appendChild(renderSessionSearchResult(result));
+  });
+}
+
+function sessionSearchResultsList() {
+  return Array.isArray(state.sessionSearch?.results) ? state.sessionSearch.results : [];
+}
+
+function renderSessionSearchResult(result) {
+  const card = document.createElement("article");
+  card.className = "session-search-card";
+  card.dataset.sessionId = result.session_id || "";
+  const head = document.createElement("button");
+  head.className = "session-search-card-head";
+  head.type = "button";
+  const marker = document.createElement("span");
+  marker.className = "settings-status-marker ok";
+  marker.setAttribute("aria-hidden", "true");
+  const title = document.createElement("span");
+  title.className = "session-search-title";
+  const strong = document.createElement("strong");
+  strong.textContent = compactSentence(result.title || result.session_id || "session", 96);
+  const small = document.createElement("small");
+  small.textContent = compactSentence([
+    result.latest_status || "session",
+    result.latest_turn_id ? `turn ${result.latest_turn_id}` : "",
+    result.cwd || "",
+  ].filter(Boolean).join(" · "), 110);
+  title.append(strong, small);
+  head.append(marker, title);
+  head.addEventListener("click", () => openSessionSearchResult(result.session_id));
+  card.appendChild(head);
+
+  const snippet = document.createElement("p");
+  snippet.className = "session-search-snippet";
+  snippet.textContent = result.snippet || "Matched persisted session metadata.";
+  card.appendChild(snippet);
+
+  const fields = document.createElement("div");
+  fields.className = "session-search-fields";
+  fields.textContent = `matched: ${(result.matched_fields || []).join(", ") || "session"}`;
+  card.appendChild(fields);
+
+  const childMatches = Array.isArray(result.child_matches) ? result.child_matches : [];
+  if (childMatches.length > 0) {
+    const children = document.createElement("div");
+    children.className = "session-search-child-list";
+    childMatches.forEach((child) => {
+      const childRow = document.createElement("button");
+      childRow.className = "session-search-child";
+      childRow.type = "button";
+      childRow.dataset.parentSessionId = result.session_id || "";
+      childRow.dataset.childSessionId = child.session_id || "";
+      childRow.textContent = compactSentence([
+        `Worker child: ${child.title || child.task_id || child.session_id}`,
+        child.latest_status || "session",
+        child.snippet || "",
+      ].filter(Boolean).join(" · "), 180);
+      childRow.addEventListener("click", () => openSessionSearchResult(result.session_id));
+      children.appendChild(childRow);
+    });
+    card.appendChild(children);
+  }
+  return card;
+}
+
+function openSessionSearchResult(sessionId) {
+  if (!sessionId) {
+    return;
+  }
+  sessionSearchDialog?.close();
+  closeMobileDrawer();
+  switchConversationSession(sessionId);
+}
+
+async function openSessionSearchDashboard() {
+  if (sessionSearchDialog && typeof sessionSearchDialog.showModal === "function" && !sessionSearchDialog.open) {
+    sessionSearchDialog.showModal();
+  }
+  window.setTimeout(() => sessionSearchInput?.focus(), 0);
+  renderSessionSearchDashboard();
+}
+
+async function submitSessionSearch(event) {
+  event?.preventDefault?.();
+  const query = `${sessionSearchInput?.value || ""}`.trim();
+  if (!query) {
+    state.sessionSearchError = "Enter a non-empty search query.";
+    renderSessionSearchDashboard();
+    return;
+  }
+  state.sessionSearchInFlight = true;
+  state.sessionSearchError = null;
+  renderSessionSearchDashboard();
+  try {
+    const result = await adpQuery({ QuerySessionSearch: { query, limit: 20 } });
+    applyPhase2QueryResult(result);
+    setCommandStatus("Persisted session search refreshed.");
+  } catch (error) {
+    state.sessionSearchError = error.message;
+    setCommandStatus(`session search failed: ${error.message}`, { stickyMs: 9000 });
+  } finally {
+    state.sessionSearchInFlight = false;
+    renderSessionSearchDashboard();
   }
 }
 
@@ -8793,8 +8947,11 @@ if (debugDetailsToggle) {
 }
 if (openSessionDrawerButton) {
   openSessionDrawerButton.addEventListener("click", () => {
-    setCommandStatus("Session Search entry is UI-only in Phase 1; opening persisted session list. Full search index is Phase 2.", { stickyMs: 6000 });
-    setMobileDrawer(state.mobileDrawer === "sessions" ? null : "sessions");
+    openSessionSearchDashboard().catch((error) => {
+      state.sessionSearchError = error.message;
+      setCommandStatus(`session search failed: ${error.message}`, { stickyMs: 9000 });
+      renderSessionSearchDashboard();
+    });
   });
 }
 if (mobileNewEntryButton) {
@@ -8842,6 +8999,16 @@ if (toolsDashboardCloseButton) {
 if (toolsDashboardRefreshButton) {
   toolsDashboardRefreshButton.addEventListener("click", () => {
     refreshToolsDashboard();
+  });
+}
+if (sessionSearchCloseButton) {
+  sessionSearchCloseButton.addEventListener("click", () => {
+    sessionSearchDialog?.close();
+  });
+}
+if (sessionSearchForm) {
+  sessionSearchForm.addEventListener("submit", (event) => {
+    submitSessionSearch(event);
   });
 }
 if (closeSessionDrawerButton) {

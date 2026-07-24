@@ -118,8 +118,8 @@ use freehand_provider_openai::{
     OpenAiExecutor, OpenAiExecutorConfig, OpenAiExecutorError, OpenAiRawCapture,
 };
 use freehand_reason::{
-    PersistedSessionMetadataEntry, ProviderRawLedgerWrite, ProviderRawScenePosition,
-    ReasonBroadcastEvent, ReasonPersistence, ReasonPersistenceError,
+    PersistedSessionIndexEntry, PersistedSessionMetadataEntry, ProviderRawLedgerWrite,
+    ProviderRawScenePosition, ReasonBroadcastEvent, ReasonPersistence, ReasonPersistenceError,
     ReasonResp04CompletionSchemaRejected, ReasonResp05ModelContinuationWaiting, ReasonTurnEngine,
     SessionHistory, SessionRollbackMarker, TurnRecord, TurnStartInput,
 };
@@ -152,16 +152,18 @@ use freehand_ui_protocol::{
     UiModelTransportActivity, UiModelTransportKind, UiModelWeightedRouteProjection,
     UiModelWeightedRouteUpdate, UiProtocolState, UiProviderConfigSummaryProjection,
     UiProviderConfigUpdate, UiQueryResult, UiRuntimeQueryPort, UiSchedulerTickCommand,
-    UiSessionMetadataProjection, UiSubmitMetadata, UiTaskAgentCreateCommand, UiTaskAssignCommand,
-    UiTaskBoardProjection, UiTaskClaimCommand, UiTaskCreateCommand, UiTaskDispatchCommand,
-    UiTaskEventInboxEntryProjection, UiTaskEventInboxProjection, UiTaskHistoryProjection,
-    UiTaskLedgerEventProjection, UiTaskListProjection, UiTaskReviewCommand,
-    UiTaskReviewRejectionCommand, UiTaskSnapshotProjection, UiTimerEventProjection,
-    UiTimerListProjection, UiTimerProjection, UiTimerRepeatCommand, UiTimerScheduleCommand,
-    UiToolRegistryProjection, UiToolRegistryToolProjection, UiTurnProjection,
-    UiTurnTimingProjection, UiWorkerControlCommand, UiWorkerControlEventProjection,
-    UiWorkerControlProjection, checkpoint_projection_from_runtime_summary,
-    turn_projection_for_client, turn_projection_from_events,
+    UiSessionMetadataProjection, UiSessionSearchChildProjection, UiSessionSearchProjection,
+    UiSessionSearchResultProjection, UiSubmitMetadata, UiTaskAgentCreateCommand,
+    UiTaskAssignCommand, UiTaskBoardProjection, UiTaskClaimCommand, UiTaskCreateCommand,
+    UiTaskDispatchCommand, UiTaskEventInboxEntryProjection, UiTaskEventInboxProjection,
+    UiTaskHistoryProjection, UiTaskLedgerEventProjection, UiTaskListProjection,
+    UiTaskReviewCommand, UiTaskReviewRejectionCommand, UiTaskSnapshotProjection,
+    UiTimerEventProjection, UiTimerListProjection, UiTimerProjection, UiTimerRepeatCommand,
+    UiTimerScheduleCommand, UiToolRegistryProjection, UiToolRegistryToolProjection,
+    UiTurnProjection, UiTurnTimingProjection, UiWorkerControlCommand,
+    UiWorkerControlEventProjection, UiWorkerControlProjection,
+    checkpoint_projection_from_runtime_summary, turn_projection_for_client,
+    turn_projection_from_events,
 };
 use serde_json::{Map, Value, json};
 use thiserror::Error;
@@ -3182,6 +3184,14 @@ impl RuntimeCommandDispatcher {
     ) -> Result<Option<UiQueryResult>, UiCommandDispatchPortError> {
         let state = self.state.lock().expect("lock runtime dispatcher state");
         match command {
+            UiCommand::QuerySessionSearch { query, limit } => {
+                let Some(live) = state.config.live.as_ref() else {
+                    return Ok(None);
+                };
+                Ok(Some(UiQueryResult::SessionSearch(
+                    query_session_search_for_ui(&state.config, live, query, *limit)?,
+                )))
+            }
             UiCommand::QuerySessionTurns { session_id } => {
                 let Some(live) = state.config.live.as_ref() else {
                     return Ok(None);
@@ -5902,6 +5912,257 @@ fn queryable_reason_agent_ids(config: &RuntimeCommandDispatcherConfig) -> Vec<Ag
 fn push_unique_agent_id(agent_ids: &mut Vec<AgentId>, agent_id: AgentId) {
     if !agent_ids.iter().any(|known| known == &agent_id) {
         agent_ids.push(agent_id);
+    }
+}
+
+fn query_session_search_for_ui(
+    config: &RuntimeCommandDispatcherConfig,
+    live: &RuntimeLiveDispatcherConfig,
+    query: &str,
+    limit: Option<usize>,
+) -> Result<UiSessionSearchProjection, UiCommandDispatchPortError> {
+    let query = query.trim();
+    let normalized_query = query.to_lowercase();
+    let result_limit = limit.unwrap_or(20).clamp(1, 50);
+    let master_persistence =
+        ReasonPersistence::new(live.runtime_home.clone(), config.reason_agent_id.clone());
+    let mut master_index = master_persistence
+        .list_persisted_sessions()
+        .map_err(map_session_search_persistence_error)?;
+    let parent_metadata_by_session = master_persistence
+        .load_session_metadata()
+        .map_err(map_session_search_persistence_error)?
+        .into_iter()
+        .filter(|metadata| !metadata.archived && !internal_runtime_session_id(&metadata.session_id))
+        .map(|metadata| (metadata.session_id.clone(), metadata))
+        .collect::<BTreeMap<_, _>>();
+    for metadata in parent_metadata_by_session.values() {
+        if !master_index
+            .iter()
+            .any(|entry| entry.session_id == metadata.session_id)
+        {
+            master_index.push(PersistedSessionIndexEntry {
+                agent_id: metadata.agent_id.clone(),
+                session_id: metadata.session_id.clone(),
+                latest_turn_id: None,
+                active_turn_id: None,
+                latest_terminal_summary: None,
+            });
+        }
+    }
+    let parent_index_by_session = master_index
+        .iter()
+        .map(|entry| (entry.session_id.clone(), entry.clone()))
+        .collect::<BTreeMap<_, _>>();
+    let mut results = BTreeMap::<SessionId, UiSessionSearchResultProjection>::new();
+
+    for entry in &master_index {
+        let Some(metadata) = parent_metadata_by_session.get(&entry.session_id) else {
+            continue;
+        };
+        if let Some((matched_fields, snippet)) =
+            session_search_match(entry, Some(metadata), &normalized_query)
+        {
+            results.insert(
+                entry.session_id.clone(),
+                parent_session_search_result(entry, metadata, matched_fields, snippet),
+            );
+        }
+    }
+
+    let worker_parent_by_session =
+        worker_parent_session_map(&live.runtime_home, &config.reason_agent_id)?;
+    for agent_id in queryable_reason_agent_ids(config)
+        .into_iter()
+        .filter(|agent_id| agent_id != &config.reason_agent_id)
+    {
+        let persistence = ReasonPersistence::new(live.runtime_home.clone(), agent_id);
+        let index = persistence
+            .list_persisted_sessions()
+            .map_err(map_session_search_persistence_error)?;
+        for child in index {
+            let Some((parent_session_id, task_id, task_title)) =
+                worker_parent_by_session.get(&child.session_id)
+            else {
+                continue;
+            };
+            let Some(parent_metadata) = parent_metadata_by_session.get(parent_session_id) else {
+                continue;
+            };
+            let Some((matched_fields, snippet)) =
+                session_search_match(&child, None, &normalized_query)
+            else {
+                continue;
+            };
+            let parent_entry = parent_index_by_session
+                .get(parent_session_id)
+                .cloned()
+                .unwrap_or_else(|| PersistedSessionIndexEntry {
+                    agent_id: config.reason_agent_id.clone(),
+                    session_id: parent_session_id.clone(),
+                    latest_turn_id: None,
+                    active_turn_id: None,
+                    latest_terminal_summary: None,
+                });
+            let result = results.entry(parent_session_id.clone()).or_insert_with(|| {
+                parent_session_search_result(
+                    &parent_entry,
+                    parent_metadata,
+                    vec!["worker_child".to_owned()],
+                    format!(
+                        "Worker child match in {}",
+                        task_title.as_deref().unwrap_or(child.session_id.as_str())
+                    ),
+                )
+            });
+            result.child_matches.push(UiSessionSearchChildProjection {
+                session_id: child.session_id.clone(),
+                task_id: Some(task_id.clone()),
+                title: task_title.clone(),
+                latest_turn_id: child.latest_turn_id.clone(),
+                latest_status: session_index_status(&child),
+                snippet,
+                matched_fields,
+            });
+        }
+    }
+
+    let mut results = results.into_values().collect::<Vec<_>>();
+    results.sort_by(|left, right| right.session_id.cmp(&left.session_id));
+    results.truncate(result_limit);
+    Ok(UiSessionSearchProjection {
+        query: query.to_owned(),
+        results,
+    })
+}
+
+fn map_session_search_persistence_error(err: ReasonPersistenceError) -> UiCommandDispatchPortError {
+    UiCommandDispatchPortError::DispatchFailed(format!(
+        "failed to query persisted session index: {err}"
+    ))
+}
+
+fn worker_parent_session_map(
+    runtime_home: &Path,
+    source_agent_id: &AgentId,
+) -> Result<BTreeMap<SessionId, (SessionId, String, Option<String>)>, UiCommandDispatchPortError> {
+    let task_runtime =
+        TaskRuntime::boot(runtime_home, source_agent_id.clone()).map_err(map_task_query_error)?;
+    let board = task_runtime
+        .query_task_board(TaskBoardQuery {
+            status: None,
+            assignee: None,
+            include_terminal: true,
+        })
+        .map_err(map_task_query_error)?;
+    let mut map = BTreeMap::new();
+    for task in board.tasks {
+        let Some(parent_session_id) = task.parent.session_id.clone() else {
+            continue;
+        };
+        map.insert(
+            worker_session_id_for_task(&task.task_id),
+            (
+                parent_session_id,
+                task.task_id.as_str().to_owned(),
+                Some(task.title),
+            ),
+        );
+    }
+    Ok(map)
+}
+
+fn internal_runtime_session_id(session_id: &SessionId) -> bool {
+    let id = session_id.as_str();
+    id.starts_with("worker-task-")
+        || id.starts_with("master-lifecycle-")
+        || id.starts_with("master-timer-")
+}
+
+fn session_search_match(
+    entry: &PersistedSessionIndexEntry,
+    metadata: Option<&PersistedSessionMetadataEntry>,
+    normalized_query: &str,
+) -> Option<(Vec<String>, String)> {
+    let mut matched_fields = Vec::new();
+    let mut snippet = None;
+    for (field, value) in session_search_fields(entry, metadata) {
+        if value.to_lowercase().contains(normalized_query) {
+            matched_fields.push(field);
+            if snippet.is_none() {
+                snippet = Some(search_snippet(&value, normalized_query));
+            }
+        }
+    }
+    if matched_fields.is_empty() {
+        None
+    } else {
+        Some((matched_fields, snippet.unwrap_or_default()))
+    }
+}
+
+fn session_search_fields(
+    entry: &PersistedSessionIndexEntry,
+    metadata: Option<&PersistedSessionMetadataEntry>,
+) -> Vec<(String, String)> {
+    let mut fields = vec![
+        (
+            "session_id".to_owned(),
+            entry.session_id.as_str().to_owned(),
+        ),
+        ("agent_id".to_owned(), entry.agent_id.as_str().to_owned()),
+    ];
+    if let Some(turn_id) = &entry.latest_turn_id {
+        fields.push(("latest_turn_id".to_owned(), turn_id.as_str().to_owned()));
+    }
+    if let Some(summary) = &entry.latest_terminal_summary {
+        fields.push(("latest_summary".to_owned(), summary.clone()));
+    }
+    if let Some(metadata) = metadata {
+        if let Some(title) = &metadata.title {
+            fields.push(("title".to_owned(), title.clone()));
+        }
+        if let Some(cwd) = &metadata.cwd {
+            fields.push(("cwd".to_owned(), cwd.clone()));
+        }
+    }
+    fields
+}
+
+fn search_snippet(value: &str, normalized_query: &str) -> String {
+    let _ = normalized_query;
+    value
+        .chars()
+        .take(180)
+        .collect::<String>()
+        .replace('\n', " ")
+}
+
+fn parent_session_search_result(
+    entry: &PersistedSessionIndexEntry,
+    metadata: &PersistedSessionMetadataEntry,
+    matched_fields: Vec<String>,
+    snippet: String,
+) -> UiSessionSearchResultProjection {
+    UiSessionSearchResultProjection {
+        session_id: entry.session_id.clone(),
+        title: metadata.title.clone(),
+        cwd: metadata.cwd.clone(),
+        latest_turn_id: entry.latest_turn_id.clone(),
+        latest_status: session_index_status(entry),
+        snippet,
+        matched_fields,
+        child_matches: Vec::new(),
+    }
+}
+
+fn session_index_status(entry: &PersistedSessionIndexEntry) -> String {
+    if entry.active_turn_id.is_some() {
+        "running".to_owned()
+    } else if entry.latest_turn_id.is_some() {
+        "completed".to_owned()
+    } else {
+        "session".to_owned()
     }
 }
 

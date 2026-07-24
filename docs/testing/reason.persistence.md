@@ -5,12 +5,14 @@
 - resource map: `docs/resource-maps/core.json`
 - resource operation coverage:
   - `session.append_turn_to_turn`
+  - `session.list_persisted`
 
 ## Resource Operation Test Coverage
 
 | resource operation | status | white-box | module black-box | project black-box |
 | --- | --- | --- | --- | --- |
 | `session.append_turn_to_turn` | bound | `cargo test -p freehand-reason -- --nocapture` covers session snapshot, reason-ledger append, sequence, rollback, and recovery tests | `cargo test -p freehand-reason -- --nocapture` covers persistence save/reload, active-turn update, terminal materialization, sidecar rebuild, and metadata reload smokes | `cargo test -p freehand-runtime session_continue -- --nocapture` covers CLI/shared runtime persistence restore smokes and replay/debug inspection without provider raw truth |
+| `session.list_persisted` | bound | `cargo test -p freehand-runtime runtime_query_session_search_returns_worker_hits_under_parent_session -- --nocapture --test-threads=1` covers persisted index/metadata rows consumed through runtime search projection | `cargo test -p freehand-ui-protocol session_search -- --nocapture --test-threads=1` covers route separation and DTO validation while persistence remains owner truth | `node scripts/verify-webui-session-search-online.mjs` covers WebUI Search querying persisted session index truth and keeping worker matches out of the top-level result list |
 
 - lifecycle path under test:
   - authoritative session rewrite truth is snapshotted under `~/.freehand/state/turns`
@@ -26,6 +28,7 @@
     `TurnStarted` rows, honors rollback markers, and preserves first-round user
     intent even when effective UI snapshots only retain a repaired round
   - derived UI and index sidecars rebuild from authoritative truth and are never recovery truth
+  - persisted session list/search reads consume derived index and metadata sidecars only; worker/subagent transcript sessions remain child/debug truth unless task parent truth attaches them to a persisted Master session
   - reason-owned session display metadata stores `title` and `archived` state for shared UI CRUD without entering provider-visible session history
   - append-only rollback markers filter effective transcript restore while preserving raw closed-turn files for audit
   - authoritative restore and rollback persistence filter model-visible
