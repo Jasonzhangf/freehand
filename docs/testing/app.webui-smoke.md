@@ -2,6 +2,15 @@
 
 - feature_id: `app.webui-smoke`
 - owner: `apps/freehand-server`
+- resource map: `docs/resource-maps/core.json`
+- resource operations:
+  - `ui_projection.post_android_turn_finished_notification`
+
+## Resource Operation Test Coverage
+
+| resource operation | status | white-box | module black-box | project black-box |
+| --- | --- | --- | --- | --- |
+| `ui_projection.post_android_turn_finished_notification` | bound | `cargo test -p freehand-server --lib android -- --nocapture` locks the Android bridge asset surface | `cargo test -p freehand-server --lib android -- --nocapture` verifies daemon-served WebUI notification bridge wiring without importing Android semantics | `node scripts/verify-webui-image-attachment-online.mjs` proves one live nonterminal-to-terminal transition emits one Android notification payload while restored historical terminal turns emit none |
 - lifecycle path under test:
   - app boundary receives protocol-owned query/projection truth
   - app boundary receives protocol-owned command ingress intent and returns dispatch receipt/failure only
@@ -36,8 +45,8 @@
   - WebUI mobile session/settings drawers must keep a sticky visible header with close control while drawer content scrolls; Android/browser back intent must blur focused form controls first and then close the WebUI dialog/Header tree/Agent sheet/mobile drawer before app-level exit/navigation
   - WebUI session drawer renders persisted sessions as agent -> session hierarchy, with task/global labels derived from protocol cwd and CRUD still routed by protocol session id
   - WebUI session rail exposes rename, remove via `DeleteSession`, and double-Esc rollback as protocol commands instead of local session truth; archive/restore affordances are intentionally absent from WebUI
-  - WebUI attachment lifecycle keeps draft attachments session-scoped, clears them only after successful send, and preserves them across send failure for retry
-  - WebUI transcript history renders attachment placeholders rather than raw payload blobs
+  - WebUI image attachment lifecycle keeps drafts session-scoped, previews/removes multiple selected images, clears them only after successful send, and preserves them across send failure for retry
+  - WebUI current-submit command carries image bytes only in neutral metadata; transcript history renders persisted attachment metadata and never raw base64
   - HTTP query and POST command ingress remain compatibility transport routes; latest-turn SSE subscribe refreshes visible turn display without owning command dispatch
   - WebUI Cancel button and Escape key send `CancelTurn` through command ingress when a nonterminal turn is active
   - WebUI Escape sends latest-active cancellation during submit-in-flight before a concrete `turn_id` is known
@@ -62,7 +71,7 @@
   - WebUI hidden success/failure diagnostic prompt asset smoke and no persistent sample-button smoke
   - WebUI keyboard shortcut smoke for submit, cancel, refresh, focus composer, and sample loading
   - WebUI slash command smoke for `/help`, `/sessions`, `/reload`, `/success`, `/failure`, `/cancel`, and `/clear`
-  - WebUI attachment control smoke for add/remove/preview and session-scoped draft retention
+  - WebUI attachment control smoke for multi-image add/remove/preview and session-scoped draft retention
   - WebUI attachment success-clear smoke
   - WebUI attachment failure-retain smoke
 - WebUI settings shell smoke for desktop/mobile entry points, complete registry rendering without a fixed provider count, owner-backed current/fallback selectors that keep fallback truth on initial load and provider upsert until the operator explicitly edits selector draft state, owner-backed definition add/update and selection command wiring, Android-only APK update card/bridge/status callback wiring, visible invalid-save errors, visible restart-required success, absence of unsupported read-only status cards, no API-key/password inputs, no credential text, and no direct config write helpers
@@ -234,7 +243,7 @@
   - ADP query/subscription now drive WebUI command/query truth, while latest-turn SSE also refreshes visible chat bubbles and HTTP query remains compatibility coverage
   - debug query remains snapshot-only, while ADP debug subscriptions wait for late debug snapshots so turn/debug timing races are not user-visible failures; ADP failure frames render visible status/cards instead of stale pending
   - latest-turn SSE compatibility and WebUI ADP asset checks now have regression coverage for tool waiting/completed status updates, default ADP routing, and EventSource display refresh wiring
-  - attachment placeholder and draft-retention semantics are now part of the design contract and must stay session-scoped
+  - image submit metadata, metadata-only history, and draft-retention semantics are part of the design contract and must stay session-scoped
 - WebUI tool cards no longer normalize by `tool_call_id`; waiting state animation assets are served, and submit clears the composer immediately while preserving pending user input in the stream
 - WebUI submit/dispatch pending state and tool waiting state now both refresh with visible elapsed time instead of static waiting text
 - WebUI model-response waiting state is driven by protocol-projected typed `model_request.kind`, not local-only guessing or non-empty detail strings; lifecycle clocks are keyed by session/turn/model phase instead of a single global `modelRequestStartedAt`

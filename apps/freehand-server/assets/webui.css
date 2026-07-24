@@ -2403,14 +2403,15 @@ body.theme-dark .composer-input {
 }
 
 .attachment-chip {
+  position: relative;
   display: inline-flex;
   gap: 8px;
   align-items: center;
   max-width: 100%;
   border: 1px solid rgba(31, 108, 88, 0.2);
-  border-radius: 999px;
+  border-radius: 14px;
   background: rgba(232, 243, 238, 0.8);
-  padding: 6px 7px 6px 10px;
+  padding: 6px 28px 6px 8px;
 }
 
 .attachment-chip.metadata-only {
@@ -2428,13 +2429,85 @@ body.theme-dark .composer-input {
 }
 
 .attachment-remove {
+  position: absolute;
+  top: -7px;
+  right: -7px;
   border: 0;
   border-radius: 999px;
-  background: rgba(255, 255, 255, 0.62);
-  color: var(--text-soft);
-  padding: 4px 7px;
+  width: 23px;
+  height: 23px;
+  background: rgba(22, 31, 29, 0.82);
+  color: #fff;
+  padding: 0;
   font-size: 11px;
+  line-height: 23px;
   cursor: pointer;
+}
+
+.attachment-thumb-button {
+  display: inline-flex;
+  border: 0;
+  border-radius: 11px;
+  background: transparent;
+  padding: 0;
+  cursor: zoom-in;
+}
+
+.attachment-thumb {
+  width: 54px;
+  height: 54px;
+  border-radius: 11px;
+  object-fit: cover;
+  box-shadow: inset 0 0 0 1px rgba(16, 24, 20, 0.08);
+}
+
+.attachment-preview-overlay {
+  position: fixed;
+  inset: 0;
+  z-index: 80;
+  display: grid;
+  place-items: center;
+  padding: 22px;
+  background: rgba(10, 14, 12, 0.72);
+  backdrop-filter: blur(14px);
+}
+
+.attachment-preview-panel {
+  position: relative;
+  display: grid;
+  gap: 10px;
+  max-width: min(860px, 96vw);
+  max-height: 92vh;
+  border-radius: 20px;
+  background: rgba(250, 253, 250, 0.96);
+  padding: 14px;
+  box-shadow: 0 24px 80px rgba(0, 0, 0, 0.28);
+}
+
+.attachment-preview-image {
+  max-width: 100%;
+  max-height: 76vh;
+  border-radius: 14px;
+  object-fit: contain;
+}
+
+.attachment-preview-close {
+  position: absolute;
+  top: -10px;
+  right: -10px;
+  width: 34px;
+  height: 34px;
+  border: 0;
+  border-radius: 999px;
+  background: rgba(22, 31, 29, 0.9);
+  color: #fff;
+  font-size: 22px;
+  cursor: pointer;
+}
+
+.attachment-preview-caption {
+  color: var(--text-soft);
+  font-size: 12px;
 }
 
 body.theme-dark .control-chip,
@@ -2451,7 +2524,11 @@ body.theme-dark .attachment-chip.metadata-only {
 }
 
 body.theme-dark .attachment-remove {
-  background: rgba(255, 255, 255, 0.08);
+  background: rgba(255, 255, 255, 0.18);
+}
+
+body.theme-dark .attachment-preview-panel {
+  background: rgba(20, 27, 24, 0.96);
 }
 
 .button {
@@ -3322,6 +3399,28 @@ body[data-layout-shape="tablet_portrait"] .command-status {
   display: none;
 }
 
+body[data-layout-shape="phone_portrait"][data-has-attachments="true"] .attachment-tray,
+body[data-layout-shape="tall_phone"][data-has-attachments="true"] .attachment-tray,
+body[data-layout-shape="tablet_portrait"][data-has-attachments="true"] .attachment-tray {
+  display: grid;
+  max-height: 86px;
+  overflow-x: auto;
+  overflow-y: hidden;
+  padding: 4px 2px 0;
+}
+
+body[data-layout-shape="phone_portrait"][data-has-attachments="true"] .attachment-summary,
+body[data-layout-shape="tall_phone"][data-has-attachments="true"] .attachment-summary,
+body[data-layout-shape="tablet_portrait"][data-has-attachments="true"] .attachment-summary {
+  display: none;
+}
+
+body[data-layout-shape="phone_portrait"][data-has-attachments="true"] .attachment-list,
+body[data-layout-shape="tall_phone"][data-has-attachments="true"] .attachment-list,
+body[data-layout-shape="tablet_portrait"][data-has-attachments="true"] .attachment-list {
+  flex-wrap: nowrap;
+}
+
 body[data-layout-shape="phone_portrait"] .sidebar .session-list,
 body[data-layout-shape="tall_phone"] .sidebar .session-list,
 body[data-layout-shape="tablet_portrait"] .sidebar .session-list {
@@ -3575,6 +3674,12 @@ body[data-layout-shape="phone_portrait"][data-composer-focused="true"] .attachme
 body[data-layout-shape="tall_phone"][data-composer-focused="true"] .attachment-tray,
 body[data-layout-shape="tablet_portrait"][data-composer-focused="true"] .attachment-tray {
   display: none;
+}
+
+body[data-layout-shape="phone_portrait"][data-composer-focused="true"][data-has-attachments="true"] .attachment-tray,
+body[data-layout-shape="tall_phone"][data-composer-focused="true"][data-has-attachments="true"] .attachment-tray,
+body[data-layout-shape="tablet_portrait"][data-composer-focused="true"][data-has-attachments="true"] .attachment-tray {
+  display: grid;
 }
 
 body[data-layout-shape="phone_portrait"][data-composer-focused="true"] .command-status,

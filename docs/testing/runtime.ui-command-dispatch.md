@@ -2,6 +2,17 @@
 
 - feature_id: `runtime.ui-command-dispatch`
 - owner: `crates/freehand-runtime`
+- resource map: `docs/resource-maps/core.json`
+- resource operations:
+  - `input_attachment.prepare_provider_input`
+  - `input_attachment.project_to_ui`
+
+## Resource Operation Test Coverage
+
+| resource operation | status | white-box | module black-box | project black-box |
+| --- | --- | --- | --- | --- |
+| `input_attachment.prepare_provider_input` | bound | `cargo test -p freehand-runtime live_bridge_sends_image_payload_once_and_persists_metadata_only -- --nocapture` verifies current-submit image payload enters provider semantics only on round one | `cargo test -p freehand-runtime live_bridge_sends_image_payload_once_and_persists_metadata_only -- --nocapture` verifies continuation rounds and persisted turn truth do not retain image base64 | `node scripts/verify-webui-image-attachment-online.mjs` proves the daemon-served WebUI emits protocol attachment metadata/base64 only in the current submit command |
+| `input_attachment.project_to_ui` | bound | `cargo test -p freehand-runtime live_bridge_sends_image_payload_once_and_persists_metadata_only -- --nocapture` verifies turn projection contains metadata only | `cargo test -p freehand-ui-protocol image -- --nocapture` verifies image submit/projection contract validation without raw payload history | `node scripts/verify-webui-image-attachment-online.mjs` proves restored turn cards show attachment metadata and never raw base64 |
 - lifecycle path under test:
   - config-selected bootstrap becomes one runtime dispatcher
   - config-selected live bootstrap may seed one shared node metadata ledger before the first command

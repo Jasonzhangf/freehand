@@ -271,6 +271,7 @@ fn spawn_adp_sample_mock_server(kind: MockAdpSampleKind) -> (String, thread::Joi
                                     text: text.clone(),
                                     session_id: Some(session_id.clone()),
                                     cwd: None,
+                                    metadata: None,
                                 })
                                 .expect("sample envelope");
                             send_adp_response(
@@ -1486,6 +1487,7 @@ fn spawn_adp_master_worker_autonomy_mock_server_with_connections(
                                     text: text.clone(),
                                     session_id: Some(session_id.clone()),
                                     cwd: None,
+                                    metadata: None,
                                 })
                                 .expect("master autonomy envelope");
                             send_adp_response(
@@ -2952,6 +2954,7 @@ fn master_autonomy_turn_projection(truth: &MockMasterWorkerAutonomyTruth) -> UiT
         timing: None,
         cwd: Some("/tmp/cli-session".to_owned()),
         user_text: Some(truth.prompt.clone()),
+        attachments: Vec::new(),
         model_request: None,
         reasoning: Vec::new(),
         text: vec![format!("master autonomy {} complete", truth.scenario)],
@@ -3102,6 +3105,7 @@ fn test_turn_projection() -> UiTurnProjection {
         timing: None,
         cwd: Some("/tmp/cli-session".to_owned()),
         user_text: Some("cli adp smoke".to_owned()),
+        attachments: Vec::new(),
         model_request: None,
         reasoning: Vec::new(),
         text: Vec::new(),
@@ -3145,6 +3149,7 @@ fn test_sample_turn_projection(
         timing: None,
         cwd: Some("/tmp/cli-session".to_owned()),
         user_text: Some(prompt.to_owned()),
+        attachments: Vec::new(),
         model_request: None,
         reasoning: Vec::new(),
         text: if failed_tool {

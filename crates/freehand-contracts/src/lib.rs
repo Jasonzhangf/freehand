@@ -75,6 +75,22 @@ pub enum ContextRole {
     Tool,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum InputAttachmentKind {
+    Image,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct InputAttachmentMetadata {
+    pub attachment_id: String,
+    pub kind: InputAttachmentKind,
+    pub media_type: String,
+    pub name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub size_bytes: Option<u64>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ContextProvenance {
     pub source: String,

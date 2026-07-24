@@ -5,6 +5,7 @@
 - resource map: `docs/resource-maps/core.json`
 - resource operations:
   - `provider_request.render_hosted_search_wire`
+  - `provider_request.render_openai_image_input_wire`
   - `provider_response.observe_hosted_search_call`
 
 ## Resource Operation Test Coverage
@@ -12,6 +13,7 @@
 | resource operation | status | white-box | module black-box | project black-box |
 | --- | --- | --- | --- | --- |
 | `provider_request.render_hosted_search_wire` | bound | `cargo test -p freehand-provider-openai web_search -- --nocapture` covers hosted `web_search` wire rendering for `ProviderHostedToolDefinition::WebSearch` | `cargo test -p freehand-provider-openai web_search -- --nocapture` verifies the rendered Responses body includes hosted `{"type":"web_search","external_web_access":true}` and keeps the hosted tool outside local function-tool schema | `node scripts/verify-provider-hosted-web-search-online.mjs` proves the live S-profile request truth declares hosted `web_search` and not a local Freehand function tool |
+| `provider_request.render_openai_image_input_wire` | bound | `cargo test -p freehand-provider-openai image_input -- --nocapture` covers Responses and Chat Completions image wire rendering | `cargo test -p freehand-provider-openai image_input -- --nocapture` verifies data URLs contain media type/base64 while attachment id/name do not leak | `node scripts/verify-webui-image-attachment-online.mjs` proves the online WebUI current-submit contract reaches provider-neutral image input without persisting raw image history |
 | `provider_response.observe_hosted_search_call` | bound | `cargo test -p freehand-provider-openai web_search -- --nocapture` covers `web_search_call` observation from both response and stream parsing | `cargo test -p freehand-provider-openai web_search -- --nocapture` verifies `web_search_call` becomes provider-hosted reasoning text and not a local tool execution | `node scripts/verify-provider-hosted-web-search-online.mjs` proves the ADP transcript retains provider-hosted web search observation in the current turn |
 
 - lifecycle path under test:

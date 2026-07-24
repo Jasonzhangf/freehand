@@ -8,6 +8,7 @@
   "generated_wiki_doc": "docs/wiki/provider.openai-adapter.md",
   "resource_operations": [
     "provider_request.render_hosted_search_wire",
+    "provider_request.render_openai_image_input_wire",
     "provider_response.observe_hosted_search_call"
   ],
   "request_mainline": [
@@ -15,7 +16,8 @@
     "adapter renders either `responses` or `chat completions` request body based on selected protocol",
     "adapter consumes typed `input_segments` and renders them to OpenAI wire text without owning segment admission truth",
     "adapter renders provider-neutral tool definitions and tool-result re-entry into the selected OpenAI wire shape so runtime never hardcodes protocol-specific tool wire",
-    "adapter renders provider-neutral `ProviderHostedToolDefinition::WebSearch` into OpenAI Responses hosted `{\"type\":\"web_search\",\"external_web_access\":true}` wire when the live bridge declares it"
+    "adapter renders provider-neutral `ProviderHostedToolDefinition::WebSearch` into OpenAI Responses hosted `{\"type\":\"web_search\",\"external_web_access\":true}` wire when the live bridge declares it",
+    "adapter renders current-submit provider-neutral image attachments into OpenAI Responses `input_image` data URLs or Chat Completions `image_url.url` data URLs without leaking attachment ids or filenames"
   ],
   "response_mainline": [
     "OpenAI single-shot body or stream chunk becomes provider-neutral semantic output",
@@ -70,6 +72,20 @@
       "source_resource": "provider_request",
       "target_resource": "provider_hosted_search",
       "resource_operation": "provider_request.render_hosted_search_wire",
+      "binding_status": "bound"
+    },
+    {
+      "step": "01b",
+      "symbol_path": "openai_responses_attachment_content / openai_chat_attachment_content",
+      "file_path": "crates/freehand-provider-openai/src/lib.rs",
+      "responsibility": "render provider-neutral current-submit image attachments into OpenAI image wire content",
+      "input_semantic": "ProviderInputAttachment image metadata plus base64 payload",
+      "output_semantic": "OpenAI Responses input_image or Chat Completions image_url data URL content without attachment id/name leakage",
+      "caller": "OpenAiAdapter::render_request",
+      "callee": "adapter image renderer",
+      "source_resource": "provider_request",
+      "target_resource": "input_attachment",
+      "resource_operation": "provider_request.render_openai_image_input_wire",
       "binding_status": "bound"
     },
     {

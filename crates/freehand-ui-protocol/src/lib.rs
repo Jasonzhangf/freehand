@@ -76,6 +76,8 @@ pub enum UiCommand {
         session_id: Option<SessionId>,
         #[serde(default, skip_serializing_if = "Option::is_none")]
         cwd: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        metadata: Option<UiSubmitMetadata>,
     },
     SubscribeLatestActiveTurn {
         client: UiClientKind,
@@ -268,6 +270,52 @@ pub struct UiAgentResourceConfigUpdate {
     pub resource_count: usize,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+pub struct UiSubmitMetadata {
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub attachments: Vec<UiInputAttachment>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct UiInputAttachment {
+    pub attachment_id: String,
+    pub kind: UiInputAttachmentKind,
+    pub media_type: String,
+    pub name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub size_bytes: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub data_base64: Option<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum UiInputAttachmentKind {
+    Image,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct UiAttachmentMetadataProjection {
+    pub attachment_id: String,
+    pub kind: UiInputAttachmentKind,
+    pub media_type: String,
+    pub name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub size_bytes: Option<u64>,
+}
+
+impl UiInputAttachment {
+    pub fn metadata_projection(&self) -> UiAttachmentMetadataProjection {
+        UiAttachmentMetadataProjection {
+            attachment_id: self.attachment_id.clone(),
+            kind: self.kind,
+            media_type: self.media_type.clone(),
+            name: self.name.clone(),
+            size_bytes: self.size_bytes,
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct UiTurnProjection {
     pub source: UiSource,
@@ -280,6 +328,8 @@ pub struct UiTurnProjection {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cwd: Option<String>,
     pub user_text: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub attachments: Vec<UiAttachmentMetadataProjection>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub model_request: Option<UiModelRequestActivity>,
     pub reasoning: Vec<String>,
@@ -1203,6 +1253,10 @@ pub enum UiProtocolError {
     EmptySessionTitle,
     #[error("submit user input command requires non-empty text")]
     EmptyUserInput,
+    #[error("input attachment requires non-empty id, name, media type, and base64 data")]
+    InvalidInputAttachment,
+    #[error("input attachment kind is not supported")]
+    UnsupportedInputAttachmentKind,
     #[error("session cwd must be non-empty when provided")]
     EmptySessionCwd,
     #[error("direct slave message requires non-empty text")]
@@ -1803,6 +1857,7 @@ impl UiProtocolState {
                 timing: None,
                 cwd: self.session_cwds.get(session_id).cloned(),
                 user_text: None,
+                attachments: Vec::new(),
                 model_request: None,
                 reasoning: Vec::new(),
                 text: Vec::new(),
@@ -1878,8 +1933,24 @@ pub fn validate_command(command: &UiCommand) -> Result<(), UiProtocolError> {
         {
             Err(UiProtocolError::EmptySessionId)
         }
-        UiCommand::SubmitUserInput { text, .. } if text.trim().is_empty() => {
+        UiCommand::SubmitUserInput { text, metadata, .. }
+            if text.trim().is_empty() && submit_metadata_attachments(metadata).is_empty() =>
+        {
             Err(UiProtocolError::EmptyUserInput)
+        }
+        UiCommand::SubmitUserInput { metadata, .. }
+            if submit_metadata_attachments(metadata)
+                .iter()
+                .any(|attachment| invalid_input_attachment(attachment)) =>
+        {
+            Err(UiProtocolError::InvalidInputAttachment)
+        }
+        UiCommand::SubmitUserInput { metadata, .. }
+            if submit_metadata_attachments(metadata)
+                .iter()
+                .any(|attachment| attachment.kind != UiInputAttachmentKind::Image) =>
+        {
+            Err(UiProtocolError::UnsupportedInputAttachmentKind)
         }
         UiCommand::SubmitUserInput { cwd: Some(cwd), .. } if cwd.trim().is_empty() => {
             Err(UiProtocolError::EmptySessionCwd)
@@ -2055,6 +2126,23 @@ pub fn validate_command(command: &UiCommand) -> Result<(), UiProtocolError> {
     }
 }
 
+fn submit_metadata_attachments(metadata: &Option<UiSubmitMetadata>) -> &[UiInputAttachment] {
+    metadata
+        .as_ref()
+        .map(|metadata| metadata.attachments.as_slice())
+        .unwrap_or(&[])
+}
+
+fn invalid_input_attachment(attachment: &UiInputAttachment) -> bool {
+    attachment.attachment_id.trim().is_empty()
+        || attachment.name.trim().is_empty()
+        || attachment.media_type.trim().is_empty()
+        || attachment
+            .data_base64
+            .as_deref()
+            .is_none_or(|data| data.trim().is_empty())
+}
+
 fn validate_worker_control_command(
     control: &UiWorkerControlCommand,
 ) -> Result<(), UiProtocolError> {
@@ -2135,6 +2223,8 @@ pub fn protocol_rejection(err: UiProtocolError) -> UiProtocolRejection {
         UiProtocolError::EmptySessionId => "empty_session_id",
         UiProtocolError::EmptySessionTitle => "empty_session_title",
         UiProtocolError::EmptyUserInput => "empty_user_input",
+        UiProtocolError::InvalidInputAttachment => "invalid_input_attachment",
+        UiProtocolError::UnsupportedInputAttachmentKind => "unsupported_input_attachment_kind",
         UiProtocolError::EmptySessionCwd => "empty_session_cwd",
         UiProtocolError::EmptySlaveMessage => "empty_slave_message",
         UiProtocolError::EmptyCheckpointId => "empty_checkpoint_id",
@@ -2968,6 +3058,7 @@ pub fn turn_projection_from_events(input: TurnProjectionInput) -> UiTurnProjecti
         timing: input.timing,
         cwd: input.cwd,
         user_text: input.user_text,
+        attachments: Vec::new(),
         model_request: None,
         reasoning,
         text,
@@ -3224,6 +3315,7 @@ mod tests {
             text: "hello".to_owned(),
             session_id: None,
             cwd: None,
+            metadata: None,
         })
         .expect("valid");
 
@@ -3244,6 +3336,7 @@ mod tests {
             text: "hello new session".to_owned(),
             session_id: Some(SessionId::new("webui-session-test")),
             cwd: None,
+            metadata: None,
         };
         validate_command(&command).expect("valid command");
         let encoded = serde_json::to_string(&command).expect("json");
@@ -3258,6 +3351,7 @@ mod tests {
             text: "hello cwd session".to_owned(),
             session_id: Some(SessionId::new("webui-session-cwd")),
             cwd: Some("/tmp/freehand-cwd".to_owned()),
+            metadata: None,
         };
         validate_command(&command).expect("valid cwd command");
         let encoded = serde_json::to_string(&command).expect("json");
@@ -3269,10 +3363,59 @@ mod tests {
             text: "bad cwd".to_owned(),
             session_id: None,
             cwd: Some("   ".to_owned()),
+            metadata: None,
         })
         .expect_err("blank cwd must be rejected");
         assert_eq!(err, UiProtocolError::EmptySessionCwd);
         assert_eq!(protocol_rejection(err).code, "empty_session_cwd");
+    }
+
+    #[test]
+    fn submit_user_input_accepts_image_only_metadata() {
+        let command = UiCommand::SubmitUserInput {
+            text: "   ".to_owned(),
+            session_id: Some(SessionId::new("webui-session-image")),
+            cwd: None,
+            metadata: Some(UiSubmitMetadata {
+                attachments: vec![UiInputAttachment {
+                    attachment_id: "att-1".to_owned(),
+                    kind: UiInputAttachmentKind::Image,
+                    media_type: "image/png".to_owned(),
+                    name: "screen.png".to_owned(),
+                    size_bytes: Some(42),
+                    data_base64: Some("aW1hZ2U=".to_owned()),
+                }],
+            }),
+        };
+        validate_command(&command).expect("image-only metadata is valid");
+
+        let encoded = serde_json::to_string(&command).expect("json");
+        assert!(encoded.contains("\"metadata\""));
+        assert!(encoded.contains("\"data_base64\""));
+        let decoded: UiCommand = serde_json::from_str(&encoded).expect("decode");
+        assert_eq!(decoded, command);
+    }
+
+    #[test]
+    fn submit_user_input_rejects_metadata_image_without_payload() {
+        let err = validate_command(&UiCommand::SubmitUserInput {
+            text: "look".to_owned(),
+            session_id: Some(SessionId::new("webui-session-image")),
+            cwd: None,
+            metadata: Some(UiSubmitMetadata {
+                attachments: vec![UiInputAttachment {
+                    attachment_id: "att-1".to_owned(),
+                    kind: UiInputAttachmentKind::Image,
+                    media_type: "image/png".to_owned(),
+                    name: "screen.png".to_owned(),
+                    size_bytes: Some(42),
+                    data_base64: None,
+                }],
+            }),
+        })
+        .expect_err("image payload must be present on submit");
+        assert_eq!(err, UiProtocolError::InvalidInputAttachment);
+        assert_eq!(protocol_rejection(err).code, "invalid_input_attachment");
     }
 
     #[test]
@@ -4373,6 +4516,7 @@ mod tests {
             timing: None,
             cwd: None,
             user_text: Some("run the task".to_owned()),
+            attachments: Vec::new(),
             model_request: None,
             reasoning: vec!["thinking".to_owned()],
             text: vec!["answer".to_owned()],
@@ -5210,6 +5354,7 @@ mod tests {
             text: "ship it".to_owned(),
             session_id: None,
             cwd: None,
+            metadata: None,
         })
         .expect("ack");
         assert!(ack.accepted);
@@ -5253,6 +5398,7 @@ mod tests {
             text: "run task".to_owned(),
             session_id: None,
             cwd: None,
+            metadata: None,
         })
         .expect("envelope");
         assert_eq!(envelope.ingress.command_kind, "submit_user_input");
@@ -5377,6 +5523,7 @@ mod tests {
             text: "run task".to_owned(),
             session_id: None,
             cwd: None,
+            metadata: None,
         })
         .expect("envelope");
         let port = StaticUiCommandDispatchPort::new("queued_by_test_port");

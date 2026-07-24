@@ -1720,6 +1720,8 @@ Task snapshot:\n{task_json}\n\
 \n\
 Trigger event:\n{event_json}"
         ),
+        attachments: Vec::new(),
+        attachment_metadata: Vec::new(),
         cwd: Some(runtime_home.to_path_buf()),
         execution_profile: LiveReasonExecutionProfile::Workspace,
         stream: false,
@@ -2086,6 +2088,8 @@ Original user objective history:\n\
 \n\
 Completed subtask and accepted review truth:\n{subtasks_json}"
         ),
+        attachments: Vec::new(),
+        attachment_metadata: Vec::new(),
         cwd: Some(runtime_home.to_path_buf()),
         execution_profile: LiveReasonExecutionProfile::Workspace,
         stream: false,
@@ -2122,6 +2126,8 @@ Original user objective history:\n{objectives_json}\n\
 \n\
 Blocked child truth:\n{blocked_json}"
         ),
+        attachments: Vec::new(),
+        attachment_metadata: Vec::new(),
         cwd: Some(runtime_home.to_path_buf()),
         execution_profile: LiveReasonExecutionProfile::Workspace,
         stream: false,
@@ -2203,6 +2209,8 @@ Timer schedule truth:\n{timer_json}\n\
 Injected timer prompt:\n{}",
             due.schedule.prompt
         ),
+        attachments: Vec::new(),
+        attachment_metadata: Vec::new(),
         cwd: Some(runtime_home.to_path_buf()),
         execution_profile: LiveReasonExecutionProfile::Workspace,
         stream: false,

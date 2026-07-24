@@ -57,6 +57,15 @@
       "projections": ["FreehandFileAccess logcat rows", "Android runtime permission dialog", "Android all-files-access settings intent", "startup permission status"]
     },
     {
+      "resource_type": "android_notification",
+      "owner_feature_id": "app.android-client",
+      "owner_crate": "apps/freehand-android",
+      "identity": "installed Android package install/update marker plus session_id plus turn_id plus terminal status",
+      "truth_store": "Android package notification permission state plus app-owned shared preferences for per-turn notification de-duplication",
+      "operations": ["request_startup_permission", "post_turn_finished", "project_status"],
+      "projections": ["FreehandNotification logcat rows", "Android runtime notification permission dialog", "Android notification drawer entry", "tap intent returning to MainActivity"]
+    },
+    {
       "resource_type": "session",
       "owner_feature_id": "reason.persistence",
       "owner_crate": "crates/freehand-reason",
@@ -75,6 +84,15 @@
       "projections": ["public conversation", "runtime turn status"]
     },
     {
+      "resource_type": "input_attachment",
+      "owner_feature_id": "ui.protocol",
+      "owner_crate": "crates/freehand-ui-protocol",
+      "identity": "session_id plus turn_id plus attachment_id for one SubmitUserInput metadata payload",
+      "truth_store": "SubmitUserInput.metadata for transient raw payload plus TurnRecord.attachments metadata-only persisted projection; raw image bytes are not session-history truth",
+      "operations": ["validate_submit_metadata", "prepare_provider_input", "project_to_ui"],
+      "projections": ["SubmitUserInput metadata DTO", "metadata-only UiTurnProjection.attachments", "provider-neutral current-submit input attachment"]
+    },
+    {
       "resource_type": "request_context",
       "owner_feature_id": "reason.context-planner",
       "owner_crate": "crates/freehand-blocks",
@@ -89,7 +107,7 @@
       "owner_crate": "crates/freehand-runtime",
       "identity": "trace_id plus turn_id plus provider attempt",
       "truth_store": "provider debug ledger when enabled and live bridge attempt state",
-      "operations": ["build", "send", "retry_recoverable", "select_hosted_search", "render_hosted_search_wire", "render_anthropic_hosted_search_wire"],
+      "operations": ["build", "send", "retry_recoverable", "select_hosted_search", "render_hosted_search_wire", "render_anthropic_hosted_search_wire", "render_openai_image_input_wire", "render_anthropic_image_input_wire"],
       "projections": ["provider attempt evidence", "error-center metadata"]
     },
     {
@@ -206,7 +224,7 @@
       "owner_crate": "crates/freehand-ui-protocol",
       "identity": "query type plus resource id",
       "truth_store": "derived protocol projection, not independent truth",
-      "operations": ["query", "subscribe", "project_public_state", "dispatch_command"],
+      "operations": ["query", "subscribe", "project_public_state", "dispatch_command", "post_android_turn_finished_notification"],
       "projections": ["CLI/WebUI/Android protocol frames"]
     },
     {
@@ -311,6 +329,24 @@
       "binding_status": "bound"
     },
     {
+      "operation_id": "provider_request.render_openai_image_input_wire",
+      "owner_feature_id": "provider.openai-adapter",
+      "source_resource": "provider_request",
+      "target_resource": "input_attachment",
+      "effect": "render current-submit provider-neutral image attachments into OpenAI Responses or Chat Completions image wire without leaking attachment ids or filenames",
+      "mainline_call_doc": "docs/mainline-calls/provider.openai-adapter.json",
+      "binding_status": "bound"
+    },
+    {
+      "operation_id": "provider_request.render_anthropic_image_input_wire",
+      "owner_feature_id": "provider.anthropic-adapter",
+      "source_resource": "provider_request",
+      "target_resource": "input_attachment",
+      "effect": "render current-submit provider-neutral image attachments into Anthropic Messages image source blocks without leaking attachment ids or filenames",
+      "mainline_call_doc": "docs/mainline-calls/provider.anthropic-adapter.json",
+      "binding_status": "bound"
+    },
+    {
       "operation_id": "provider_response.apply_to_turn",
       "owner_feature_id": "reason.turn",
       "source_resource": "provider_response",
@@ -362,6 +398,42 @@
       "target_resource": "ui_projection",
       "effect": "project task truth to UI without UI owning task state",
       "mainline_call_doc": "docs/mainline-calls/ui.protocol.json",
+      "binding_status": "bound"
+    },
+    {
+      "operation_id": "input_attachment.validate_submit_metadata",
+      "owner_feature_id": "ui.protocol",
+      "source_resource": "input_attachment",
+      "target_resource": "input_attachment",
+      "effect": "validate SubmitUserInput image metadata payloads and reject empty id/name/media type/base64 before runtime dispatch",
+      "mainline_call_doc": "docs/mainline-calls/ui.protocol.json",
+      "binding_status": "bound"
+    },
+    {
+      "operation_id": "input_attachment.prepare_provider_input",
+      "owner_feature_id": "runtime.ui-command-dispatch",
+      "source_resource": "input_attachment",
+      "target_resource": "provider_request",
+      "effect": "convert transient SubmitUserInput base64 image payloads into current-submit provider-neutral input attachments while keeping only metadata for session truth",
+      "mainline_call_doc": "docs/mainline-calls/runtime.ui-command-dispatch.json",
+      "binding_status": "bound"
+    },
+    {
+      "operation_id": "input_attachment.project_to_ui",
+      "owner_feature_id": "runtime.ui-command-dispatch",
+      "source_resource": "input_attachment",
+      "target_resource": "ui_projection",
+      "effect": "project persisted attachment metadata into UiTurnProjection.attachments without raw/base64 image payload",
+      "mainline_call_doc": "docs/mainline-calls/runtime.ui-command-dispatch.json",
+      "binding_status": "bound"
+    },
+    {
+      "operation_id": "ui_projection.post_android_turn_finished_notification",
+      "owner_feature_id": "app.webui-smoke",
+      "source_resource": "ui_projection",
+      "target_resource": "android_notification",
+      "effect": "after observing a live Android WebView turn transition from nonterminal to terminal, call the native notification bridge once for that session/turn/status",
+      "mainline_call_doc": "docs/mainline-calls/app.webui-smoke.json",
       "binding_status": "bound"
     },
     {
@@ -590,6 +662,33 @@
       "binding_status": "bound"
     },
     {
+      "operation_id": "android_notification.request_startup_permission",
+      "owner_feature_id": "app.android-client",
+      "source_resource": "android_notification",
+      "target_resource": "android_notification",
+      "effect": "on Android 13 and newer, request POST_NOTIFICATIONS once per package install/update marker before later turn-finished notifications are needed",
+      "mainline_call_doc": "docs/mainline-calls/app.android-client.json",
+      "binding_status": "bound"
+    },
+    {
+      "operation_id": "android_notification.post_turn_finished",
+      "owner_feature_id": "app.android-client",
+      "source_resource": "android_notification",
+      "target_resource": "android_notification",
+      "effect": "post one native task-complete notification for a terminal turn and route notification taps back to MainActivity",
+      "mainline_call_doc": "docs/mainline-calls/app.android-client.json",
+      "binding_status": "bound"
+    },
+    {
+      "operation_id": "android_notification.project_status",
+      "owner_feature_id": "app.android-client",
+      "source_resource": "android_notification",
+      "target_resource": "android_notification",
+      "effect": "record startup permission state, duplicate suppression, missing permission, and posted notification outcomes in FreehandNotification logcat rows",
+      "mainline_call_doc": "docs/mainline-calls/app.android-client.json",
+      "binding_status": "bound"
+    },
+    {
       "operation_id": "node_pairing.project_to_ui",
       "owner_feature_id": "node.master-slave",
       "source_resource": "node_pairing",
@@ -696,6 +795,28 @@
       "binding_status": "bound"
     },
     {
+      "edge_id": "provider.openai-adapter#01b",
+      "operation_id": "provider_request.render_openai_image_input_wire",
+      "source_resource": "provider_request",
+      "target_resource": "input_attachment",
+      "mainline_call_doc": "docs/mainline-calls/provider.openai-adapter.json",
+      "call_table_step": "01b",
+      "file_path": "crates/freehand-provider-openai/src/lib.rs",
+      "symbol_path": "openai_responses_attachment_content / openai_chat_attachment_content",
+      "binding_status": "bound"
+    },
+    {
+      "edge_id": "provider.anthropic-adapter#01b",
+      "operation_id": "provider_request.render_anthropic_image_input_wire",
+      "source_resource": "provider_request",
+      "target_resource": "input_attachment",
+      "mainline_call_doc": "docs/mainline-calls/provider.anthropic-adapter.json",
+      "call_table_step": "01b",
+      "file_path": "crates/freehand-provider-anthropic/src/lib.rs",
+      "symbol_path": "anthropic_attachment_content",
+      "binding_status": "bound"
+    },
+    {
       "edge_id": "reason.turn#02",
       "operation_id": "provider_response.apply_to_turn",
       "source_resource": "provider_response",
@@ -759,6 +880,50 @@
       "call_table_step": "26",
       "file_path": "crates/freehand-ui-protocol/src/lib.rs",
       "symbol_path": "UiCommand::QueryTaskBoard / UiCommand::QueryAgentBoard / UiCommand::QueryAgentLifecycle",
+      "binding_status": "bound"
+    },
+    {
+      "edge_id": "ui.protocol#01a",
+      "operation_id": "input_attachment.validate_submit_metadata",
+      "source_resource": "input_attachment",
+      "target_resource": "input_attachment",
+      "mainline_call_doc": "docs/mainline-calls/ui.protocol.json",
+      "call_table_step": "01a",
+      "file_path": "crates/freehand-ui-protocol/src/lib.rs",
+      "symbol_path": "validate_command",
+      "binding_status": "bound"
+    },
+    {
+      "edge_id": "runtime.ui-command-dispatch#07a",
+      "operation_id": "input_attachment.prepare_provider_input",
+      "source_resource": "input_attachment",
+      "target_resource": "provider_request",
+      "mainline_call_doc": "docs/mainline-calls/runtime.ui-command-dispatch.json",
+      "call_table_step": "07a",
+      "file_path": "crates/freehand-runtime/src/lib.rs",
+      "symbol_path": "submit_attachment_inputs",
+      "binding_status": "bound"
+    },
+    {
+      "edge_id": "runtime.ui-command-dispatch#07b",
+      "operation_id": "input_attachment.project_to_ui",
+      "source_resource": "input_attachment",
+      "target_resource": "ui_projection",
+      "mainline_call_doc": "docs/mainline-calls/runtime.ui-command-dispatch.json",
+      "call_table_step": "07b",
+      "file_path": "crates/freehand-runtime/src/turn_projection.rs",
+      "symbol_path": "project_runtime_turn_history / persist_prepared_live_submit_active_turn",
+      "binding_status": "bound"
+    },
+    {
+      "edge_id": "app.webui-smoke#11g",
+      "operation_id": "ui_projection.post_android_turn_finished_notification",
+      "source_resource": "ui_projection",
+      "target_resource": "android_notification",
+      "mainline_call_doc": "docs/mainline-calls/app.webui-smoke.json",
+      "call_table_step": "11g",
+      "file_path": "apps/freehand-server/assets/webui.js",
+      "symbol_path": "maybeNotifyAndroidTurnFinished",
       "binding_status": "bound"
     },
     {
@@ -1059,6 +1224,39 @@
       "binding_status": "bound"
     },
     {
+      "edge_id": "app.android-client#16",
+      "operation_id": "android_notification.request_startup_permission",
+      "source_resource": "android_notification",
+      "target_resource": "android_notification",
+      "mainline_call_doc": "docs/mainline-calls/app.android-client.json",
+      "call_table_step": "16",
+      "file_path": "apps/freehand-android/app/src/main/java/com/freehand/android/ui/MainActivity.kt / apps/freehand-android/app/src/main/java/com/freehand/android/ui/NotificationPermissionPolicy.kt",
+      "symbol_path": "com.freehand.android.ui.MainActivity::requestInstallNotificationPermissionIfNeeded / NotificationPermissionPolicy::shouldPromptForInstall",
+      "binding_status": "bound"
+    },
+    {
+      "edge_id": "app.android-client#17",
+      "operation_id": "android_notification.post_turn_finished",
+      "source_resource": "android_notification",
+      "target_resource": "android_notification",
+      "mainline_call_doc": "docs/mainline-calls/app.android-client.json",
+      "call_table_step": "17",
+      "file_path": "apps/freehand-android/app/src/main/java/com/freehand/android/ui/MainActivity.kt",
+      "symbol_path": "com.freehand.android.ui.MainActivity::showTurnFinishedNotification",
+      "binding_status": "bound"
+    },
+    {
+      "edge_id": "app.android-client#18",
+      "operation_id": "android_notification.project_status",
+      "source_resource": "android_notification",
+      "target_resource": "android_notification",
+      "mainline_call_doc": "docs/mainline-calls/app.android-client.json",
+      "call_table_step": "18",
+      "file_path": "apps/freehand-android/app/src/main/java/com/freehand/android/ui/MainActivity.kt",
+      "symbol_path": "com.freehand.android.ui.MainActivity::logNotificationStatus",
+      "binding_status": "bound"
+    },
+    {
       "edge_id": "node.master-slave#08",
       "operation_id": "node_pairing.project_to_ui",
       "source_resource": "node_pairing",
@@ -1148,6 +1346,38 @@
       "allowed_direct": true,
       "via_resources": [],
       "reason": "Provider adapters may map hosted search response items into provider-neutral observations without routing through local tool execution."
+    },
+    {
+      "rule_id": "input-attachment-validates-self-direct",
+      "source_resource": "input_attachment",
+      "target_resource": "input_attachment",
+      "allowed_direct": true,
+      "via_resources": [],
+      "reason": "UI protocol owns the input attachment DTO contract and may reject unsupported or incomplete attachment metadata before runtime dispatch."
+    },
+    {
+      "rule_id": "input-attachment-prepares-provider-request-direct",
+      "source_resource": "input_attachment",
+      "target_resource": "provider_request",
+      "allowed_direct": true,
+      "via_resources": [],
+      "reason": "Runtime command dispatch may carry current-submit image payloads into provider-neutral request metadata exactly once while keeping raw bytes out of persisted session history."
+    },
+    {
+      "rule_id": "input-attachment-projects-ui-direct",
+      "source_resource": "input_attachment",
+      "target_resource": "ui_projection",
+      "allowed_direct": true,
+      "via_resources": [],
+      "reason": "Runtime may project metadata-only attachment rows into UI protocol so uploaded images remain observable after refresh without rehydrating raw payloads."
+    },
+    {
+      "rule_id": "provider-request-renders-image-input-direct",
+      "source_resource": "provider_request",
+      "target_resource": "input_attachment",
+      "allowed_direct": true,
+      "via_resources": [],
+      "reason": "Provider adapters may render current-submit provider-neutral image attachments into their private wire DTOs; runtime must not hardcode the wire shape."
     },
     {
       "rule_id": "tool-call-executes-workspace-path-direct",
@@ -1324,6 +1554,22 @@
       "allowed_direct": true,
       "via_resources": [],
       "reason": "Android owns only its package runtime permission request, all-files settings handoff, and startup permission status logging; file operation semantics remain with their existing owners."
+    },
+    {
+      "rule_id": "android-notification-self-owned-direct",
+      "source_resource": "android_notification",
+      "target_resource": "android_notification",
+      "allowed_direct": true,
+      "via_resources": [],
+      "reason": "Android owns only notification permission, turn-finished notification posting, duplicate suppression, tap return intent, and status logging for its package."
+    },
+    {
+      "rule_id": "ui-projection-posts-android-notification-direct",
+      "source_resource": "ui_projection",
+      "target_resource": "android_notification",
+      "allowed_direct": true,
+      "via_resources": [],
+      "reason": "The daemon-hosted WebUI may call the Android notification bridge only from protocol turn projection truth after observing a live same-turn terminal transition."
     },
     {
       "rule_id": "node-pairing-through-ui-projection",

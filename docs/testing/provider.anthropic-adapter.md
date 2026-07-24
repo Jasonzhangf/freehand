@@ -5,6 +5,7 @@
 - resource map: `docs/resource-maps/core.json`
 - resource operations:
   - `provider_request.render_anthropic_hosted_search_wire`
+  - `provider_request.render_anthropic_image_input_wire`
   - `provider_response.observe_anthropic_hosted_search_call`
 
 ## Resource Operation Test Coverage
@@ -12,6 +13,7 @@
 | resource operation | status | white-box | module black-box | project black-box |
 | --- | --- | --- | --- | --- |
 | `provider_request.render_anthropic_hosted_search_wire` | bound | `cargo test -p freehand-provider-anthropic web_search -- --nocapture` covers `anthropic_messages_hosted_tool` rendering from `ProviderHostedToolDefinition::WebSearch` | `cargo test -p freehand-provider-anthropic web_search -- --nocapture` verifies the rendered Messages body includes `web_search_20250305` as a server tool and not a local `input_schema` function tool | `freehand-cliS adp-provider-web-search-test --url ws://127.0.0.1:4042/adp --provider minimax --query "Use web_search to find the current UTC date and one current news headline from openai.com today. Do not answer from memory."` live-tests S-profile Anthropic-compatible Messages provider acceptance or explicit provider rejection |
+| `provider_request.render_anthropic_image_input_wire` | bound | `cargo test -p freehand-provider-anthropic renders_messages_image_input_as_base64_source -- --nocapture` covers Anthropic base64 image source rendering | `cargo test -p freehand-provider-anthropic renders_messages_image_input_as_base64_source -- --nocapture` verifies media type/base64 are present while attachment id/name do not leak | `node scripts/verify-webui-image-attachment-online.mjs` proves the online WebUI current-submit contract reaches provider-neutral image input without persisting raw image history |
 | `provider_response.observe_anthropic_hosted_search_call` | bound | `cargo test -p freehand-provider-anthropic web_search -- --nocapture` covers `server_tool_use` and `web_search_tool_result` parsing into hosted-search observations | `cargo test -p freehand-provider-anthropic web_search -- --nocapture` verifies hosted-search blocks become provider-neutral reasoning events and never `ProviderSemanticOutput::ToolCall` | `freehand-cliS adp-provider-web-search-test --url ws://127.0.0.1:4042/adp --provider minimax --query "Use web_search to find the current UTC date and one current news headline from openai.com today. Do not answer from memory."` proves online observation when the provider emits hosted-search blocks, or returns the exact provider failure as the visible test result |
 
 - lifecycle path under test:

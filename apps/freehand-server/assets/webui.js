@@ -1,4 +1,4 @@
-import { initializeThemeToggle } from "/assets/theme.js?v=20260722-worker-transcript-file-access-detail";
+import { initializeThemeToggle } from "/assets/theme.js?v=20260724-attachments-notifications";
 
 initializeThemeToggle(document);
 
@@ -170,6 +170,7 @@ const samplePrompts = {
 const selectedSessionStorageKey = "freehand-webui-selected-session";
 const selectedCwdStorageKey = "freehand-webui-selected-cwd";
 const attachmentDraftStorageKey = "freehand-webui-attachment-drafts-v1";
+const androidNotificationStorageKey = "freehand-android-notified-turns-v1";
 const layoutWidthsStorageKey = "freehand-webui-layout-widths-v1";
 const adpRequestTimeoutMs = 45000;
 const foregroundRefreshMinIntervalMs = 1500;
@@ -274,6 +275,8 @@ const state = {
   requestSequence: 0,
   attachmentDrafts: loadAttachmentDrafts(),
   attachmentsPreviewOpen: true,
+  androidNotifiedTurns: loadAndroidNotifiedTurns(),
+  androidObservedNonTerminalTurns: new Set(),
   debugDetailsVisible: false,
   forceScrollToBottom: false,
   userScrollLocked: false,
@@ -827,7 +830,12 @@ function adpQuery(query) {
   return requestAdp("query", "query", query, "query");
 }
 
+let adpCommandForTest = null;
+
 function adpCommand(command) {
+  if (adpCommandForTest) {
+    return adpCommandForTest(command);
+  }
   return requestAdp("command", "command", command, "cmd");
 }
 
@@ -993,10 +1001,32 @@ function loadAttachmentDrafts() {
   }
 }
 
+function loadAndroidNotifiedTurns() {
+  try {
+    const raw = window.localStorage.getItem(androidNotificationStorageKey);
+    const parsed = raw ? JSON.parse(raw) : [];
+    return new Set(Array.isArray(parsed) ? parsed.filter((value) => typeof value === "string") : []);
+  } catch (error) {
+    console.warn("Freehand Android notification de-duplication state could not be loaded", error);
+    return new Set();
+  }
+}
+
+function persistAndroidNotifiedTurns() {
+  try {
+    window.localStorage.setItem(
+      androidNotificationStorageKey,
+      JSON.stringify(Array.from(state.androidNotifiedTurns).slice(-500)),
+    );
+  } catch (error) {
+    console.warn("Freehand Android notification de-duplication state could not be saved", error);
+  }
+}
+
 function persistAttachmentDrafts() {
   const entries = Array.from(state.attachmentDrafts.entries()).map(([sessionId, attachments]) => ({
     session_id: sessionId,
-    attachments: attachments.map(({ file, ...metadata }) => ({
+    attachments: attachments.map(({ file, previewUrl, dataBase64, ...metadata }) => ({
       ...metadata,
       available: false,
       status: metadata.status === "ready" ? "metadata-only" : metadata.status,
@@ -1080,9 +1110,11 @@ function addAttachmentFiles(files, forcedKind = null) {
       added_at: new Date().toISOString(),
       status: "ready",
       available: true,
+      previewUrl: file.type.startsWith("image/") ? URL.createObjectURL(file) : null,
       file,
     });
   });
+  state.attachmentsPreviewOpen = true;
   setCurrentAttachments(next);
   setCommandStatus(`${next.length} attachment draft(s) in selected session`, { stickyMs: 4000 });
 }
@@ -1100,9 +1132,14 @@ function addAndroidAttachmentDrafts(kind, files) {
       status: "ready",
       available: true,
       uri: file.uri || "",
+      dataBase64: file.data_base64 || file.dataBase64 || null,
+      previewUrl: file.data_base64 || file.dataBase64
+        ? `data:${file.type || "application/octet-stream"};base64,${file.data_base64 || file.dataBase64}`
+        : null,
       file: null,
     });
   });
+  state.attachmentsPreviewOpen = true;
   setCurrentAttachments(next);
   setCommandStatus(`${next.length} attachment draft(s) in selected session`, { stickyMs: 4000 });
 }
@@ -1121,26 +1158,39 @@ function clearCurrentAttachments() {
   setCurrentAttachments([]);
 }
 
-function attachmentPlaceholderLines(attachments = currentAttachments()) {
+function attachmentDisplayLines(attachments = currentAttachments(), options = {}) {
   if (attachments.length === 0) {
     return [];
   }
-  const lines = ["[attachments: current-send placeholders]"];
+  const lines = [options.heading || "Attachments"];
   attachments.forEach((attachment) => {
-    const availability = attachment.available ? "ready" : "metadata-only";
+    const mediaType = attachment.type || attachment.media_type || "unknown";
+    const sizeBytes = Number.isFinite(attachment.size) ? attachment.size : attachment.size_bytes;
+    const availability = attachment.available ? "ready" : options.defaultAvailability || "metadata-only";
     lines.push(
-      `- ${attachment.kind}: ${attachment.name} (${formatBytes(attachment.size)}, ${attachment.type || "unknown"}, ${availability})`,
+      `- ${attachment.kind}: ${attachment.name} (${formatBytes(sizeBytes)}, ${mediaType}, ${availability})`,
     );
   });
   return lines;
 }
 
-function textWithAttachmentPlaceholders(text, attachments = currentAttachments()) {
-  const placeholders = attachmentPlaceholderLines(attachments);
-  if (placeholders.length === 0) {
+function textWithAttachmentDisplay(text, attachments = currentAttachments()) {
+  const lines = attachmentDisplayLines(attachments);
+  if (lines.length === 0) {
     return text;
   }
-  return `${text}\n\n${placeholders.join("\n")}`;
+  return `${text}\n\n${lines.join("\n")}`;
+}
+
+function textWithSubmittedAttachmentDisplay(text, attachments = []) {
+  const lines = attachmentDisplayLines(attachments, {
+    heading: "Submitted attachments",
+    defaultAvailability: "metadata-only",
+  });
+  if (lines.length === 0) {
+    return text;
+  }
+  return `${text}\n\n${lines.join("\n")}`;
 }
 
 function attachmentSummary(attachments = currentAttachments()) {
@@ -1156,6 +1206,11 @@ function renderAttachmentTray() {
     return;
   }
   const attachments = currentAttachments();
+  if (attachments.length > 0) {
+    document.body.dataset.hasAttachments = "true";
+  } else {
+    delete document.body.dataset.hasAttachments;
+  }
   attachmentTray.replaceChildren();
   const summary = document.createElement("div");
   summary.className = "attachment-summary";
@@ -1170,7 +1225,21 @@ function renderAttachmentTray() {
   list.className = "attachment-list";
   attachments.forEach((attachment) => {
     const chip = document.createElement("div");
-    chip.className = `attachment-chip ${attachment.available ? "ready" : "metadata-only"}`;
+    chip.className = `attachment-chip ${attachment.available ? "ready" : "metadata-only"} ${attachment.kind === "image" ? "image-attachment" : ""}`;
+
+    if (attachment.kind === "image" && attachment.previewUrl) {
+      const imageButton = document.createElement("button");
+      imageButton.className = "attachment-thumb-button";
+      imageButton.type = "button";
+      imageButton.title = "Preview selected image";
+      const img = document.createElement("img");
+      img.className = "attachment-thumb";
+      img.alt = attachment.name || "selected image";
+      img.src = attachment.previewUrl;
+      imageButton.appendChild(img);
+      imageButton.addEventListener("click", () => showAttachmentPreview(attachment));
+      chip.appendChild(imageButton);
+    }
 
     const text = document.createElement("span");
     text.className = "attachment-chip-text";
@@ -1182,13 +1251,84 @@ function renderAttachmentTray() {
     const remove = document.createElement("button");
     remove.className = "attachment-remove";
     remove.type = "button";
-    remove.textContent = "Remove";
-    remove.addEventListener("click", () => removeAttachment(attachment.id));
+    remove.textContent = "×";
+    remove.setAttribute("aria-label", `Remove ${attachment.name}`);
+    remove.addEventListener("click", (event) => {
+      event.stopPropagation();
+      removeAttachment(attachment.id);
+    });
 
     chip.append(text, remove);
     list.appendChild(chip);
   });
   attachmentTray.appendChild(list);
+}
+
+function showAttachmentPreview(attachment) {
+  if (attachment.kind !== "image" || !attachment.previewUrl) {
+    setCommandStatus("image preview is not available; reselect the image if it was restored from metadata", { stickyMs: 5000 });
+    return;
+  }
+  const overlay = document.createElement("div");
+  overlay.className = "attachment-preview-overlay";
+  const panel = document.createElement("div");
+  panel.className = "attachment-preview-panel";
+  const close = document.createElement("button");
+  close.className = "attachment-preview-close";
+  close.type = "button";
+  close.textContent = "×";
+  close.setAttribute("aria-label", "Close image preview");
+  const img = document.createElement("img");
+  img.className = "attachment-preview-image";
+  img.src = attachment.previewUrl;
+  img.alt = attachment.name || "selected image";
+  const caption = document.createElement("div");
+  caption.className = "attachment-preview-caption";
+  caption.textContent = `${attachment.name || "image"} · ${attachment.type || "unknown"} · ${formatBytes(attachment.size)}`;
+  panel.append(close, img, caption);
+  overlay.appendChild(panel);
+  const dismiss = () => overlay.remove();
+  close.addEventListener("click", dismiss);
+  overlay.addEventListener("click", (event) => {
+    if (event.target === overlay) dismiss();
+  });
+  document.body.appendChild(overlay);
+}
+
+function fileToBase64(file) {
+  return new Promise((resolve, reject) => {
+    const reader = new FileReader();
+    reader.onerror = () => reject(reader.error || new Error("failed to read image"));
+    reader.onload = () => {
+      const value = String(reader.result || "");
+      const comma = value.indexOf(",");
+      resolve(comma >= 0 ? value.slice(comma + 1) : value);
+    };
+    reader.readAsDataURL(file);
+  });
+}
+
+async function attachmentsForSubmit(attachments) {
+  const imageAttachments = attachments.filter((attachment) => attachment.kind === "image");
+  const payloads = [];
+  for (const attachment of imageAttachments) {
+    let dataBase64 = attachment.dataBase64 || attachment.data_base64 || null;
+    if (!dataBase64 && attachment.file) {
+      dataBase64 = await fileToBase64(attachment.file);
+    }
+    if (!dataBase64) {
+      throw new Error(`image ${attachment.name || attachment.id} is metadata-only; reselect it before sending`);
+    }
+    payloads.push({
+      attachment_id: attachment.id,
+      kind: "image",
+      media_type: attachment.type || "application/octet-stream",
+      name: attachment.name || "image",
+      size_bytes: Number.isFinite(attachment.size) && attachment.size >= 0 ? attachment.size : null,
+      data_base64: dataBase64,
+    });
+  }
+  return payloads;
 }
 
 function card(role, status, title, body, variant = "assistant", identity = null) {
@@ -1344,7 +1484,7 @@ function pendingExecutionCard(renderPending) {
   body.appendChild(executionRow({
     kind: "user",
     title: "User",
-    body: [textWithAttachmentPlaceholders(renderPending.text, renderPending.attachments)],
+    body: [textWithAttachmentDisplay(renderPending.text, renderPending.attachments)],
     status: "submitted",
   }));
   body.appendChild(executionRow({
@@ -1361,7 +1501,7 @@ function pendingChatCards(renderPending) {
   const userRow = {
     kind: "user",
     title: "User",
-    body: [textWithAttachmentPlaceholders(renderPending.text, renderPending.attachments)],
+    body: [textWithAttachmentDisplay(renderPending.text, renderPending.attachments)],
     status: "submitted",
   };
   const assistantRows = [{
@@ -2480,6 +2620,43 @@ function terminalTurnStatusLabel(status) {
   return "completed";
 }
 
+function maybeNotifyAndroidTurnFinished(previousTurn, nextTurn) {
+  if (!nextTurn || document.body.dataset.layoutClient !== "android-webview") {
+    return;
+  }
+  const turnKey = `${nextTurn.session_id || ""}:${nextTurn.turn_id || ""}`;
+  if (!turnHasTerminalOutcome(nextTurn)) {
+    state.androidObservedNonTerminalTurns.add(turnKey);
+    return;
+  }
+  const sameTurnWasNonTerminal = previousTurn &&
+    previousTurn.session_id === nextTurn.session_id &&
+    previousTurn.turn_id === nextTurn.turn_id &&
+    !turnHasTerminalOutcome(previousTurn);
+  const observedLiveTurn = sameTurnWasNonTerminal || state.androidObservedNonTerminalTurns.has(turnKey);
+  if (!observedLiveTurn) return;
+  const bridge = window.FreehandAndroidNotifications;
+  if (!bridge || typeof bridge.turnFinished !== "function") {
+    return;
+  }
+  const key = `${nextTurn.session_id || ""}:${nextTurn.turn_id || ""}:${nextTurn.terminal_status || ""}`;
+  if (state.androidNotifiedTurns.has(key)) {
+    return;
+  }
+  state.androidNotifiedTurns.add(key);
+  state.androidObservedNonTerminalTurns.delete(turnKey);
+  persistAndroidNotifiedTurns();
+  const label = terminalTurnStatusLabel(nextTurn.terminal_status);
+  const summary = nextTurn.terminal_text || nextTurn.text?.slice(-1)?.[0] || label;
+  bridge.turnFinished(JSON.stringify({
+    sessionId: nextTurn.session_id || "",
+    turnId: nextTurn.turn_id || "",
+    status: `${nextTurn.terminal_status || ""}`,
+    title: "任务已经完成",
+    text: `${label}: ${String(summary).slice(0, 180)}`,
+  }));
+}
+
 function formatDuration(ms) {
   if (!Number.isFinite(ms) || ms < 0) {
     return "";
@@ -2806,7 +2983,7 @@ function derivePublicConversation(turn) {
     items.push({
       kind: "UserText",
       title: "User",
-      body: turn.user_text,
+      body: textWithSubmittedAttachmentDisplay(turn.user_text, turn.attachments || []),
       status: "submitted",
     });
   }
@@ -3719,6 +3896,7 @@ function turnOrderKey(turnId) {
 }
 
 function setTurnProjection(turn, options = {}) {
+  const previousTurn = state.turn;
   if (shouldIgnoreCancelGuardedTurn(turn, options)) {
     return;
   }
@@ -3752,6 +3930,7 @@ function setTurnProjection(turn, options = {}) {
   syncToolTimings(conversationTurnsForRender());
   syncRenderLifecycleClocks();
   clearPendingUserInputIfMaterialized();
+  maybeNotifyAndroidTurnFinished(previousTurn, state.turn);
 }
 
 function turnHasTerminalOutcome(turn) {
@@ -7083,7 +7262,7 @@ function ensureDebugSubscription() {
   });
 }
 
-async function submitUserInput(text) {
+async function submitUserInput(text, submitMetadata = null) {
   const command = { SubmitUserInput: { text } };
   if (state.selectedSessionId) {
     command.SubmitUserInput.session_id = state.selectedSessionId;
@@ -7091,6 +7270,9 @@ async function submitUserInput(text) {
   const cwd = normalizeCwd(state.selectedCwd);
   if (cwd) {
     command.SubmitUserInput.cwd = cwd;
+  }
+  if (submitMetadata && Array.isArray(submitMetadata.attachments) && submitMetadata.attachments.length > 0) {
+    command.SubmitUserInput.metadata = submitMetadata;
   }
   const payload = await adpCommand(command);
   setCommandStatus(commandReceiptStatus(payload));
@@ -7324,28 +7506,41 @@ function recallInputHistory(direction) {
 composerForm.addEventListener("submit", async (event) => {
   event.preventDefault();
   const text = composerInput.value.trim();
-  if (!text) {
+  const attachments = currentAttachments();
+  if (!text && attachments.length === 0) {
     setCommandStatus("empty input rejected", { stickyMs: 3000 });
     return;
   }
+  if (attachments.some((attachment) => attachment.kind !== "image")) {
+    setCommandStatus("only image attachments can be submitted in this version", { stickyMs: 6000 });
+    return;
+  }
   try {
-    if (await runSlashCommand(text)) {
+    if (text && attachments.length === 0 && await runSlashCommand(text)) {
       return;
     }
   } catch (error) {
     setCommandStatus(`slash command failed: ${error.message}`, { stickyMs: 8000 });
     return;
   }
+  let submitMetadata = { attachments: [] };
+  try {
+    submitMetadata = {
+      attachments: await attachmentsForSubmit(attachments),
+    };
+  } catch (error) {
+    setCommandStatus(`image submit failed before dispatch: ${error.message}`, { stickyMs: 8000 });
+    return;
+  }
+  const commandText = text || "Analyze the attached image.";
   setCommandStatus("dispatching...");
   if (!state.selectedSessionId) {
     const sessionId = newDraftSessionId();
     state.draftSessionId = sessionId;
     setSelectedSessionId(sessionId);
   }
-  const attachments = currentAttachments();
-  const commandText = textWithAttachmentPlaceholders(text, attachments);
   rememberInputHistory(text);
-  state.pendingUserInput = text;
+  state.pendingUserInput = commandText;
   state.pendingSubmitId = null;
   state.pendingSubmitSessionId = state.selectedSessionId;
   state.pendingSubmitError = null;
@@ -7359,7 +7554,7 @@ composerForm.addEventListener("submit", async (event) => {
   state.forceScrollToBottom = true;
   renderMessages();
   try {
-    const receipt = await submitUserInput(commandText);
+    const receipt = await submitUserInput(commandText, submitMetadata);
     state.pendingSubmitId = receipt && receipt.ingress ? receipt.ingress.submit_id : null;
     clearCurrentAttachments();
     state.submitInFlight = false;
@@ -7864,6 +8059,85 @@ function installWebUiTestHooks() {
     },
     setAdpQueryForTest(handler) {
       adpQuery = handler;
+    },
+    setAdpCommandForTest(handler) {
+      adpCommandForTest = handler;
+    },
+    prepareAttachmentProofSession(sessionId) {
+      const id = sessionId || "webui-image-attachment-proof-fixed";
+      state.sessions = [{
+        session_id: id,
+        title: "Image attachment proof",
+        active_turn_id: null,
+        archived: false,
+      }];
+      state.sessionListLoaded = true;
+      state.sessionTurns = [];
+      state.turn = null;
+      state.publicConversation = [];
+      state.draftSessionId = null;
+      state.pendingUserInput = null;
+      state.pendingSubmitId = null;
+      state.pendingSubmitSessionId = null;
+      state.pendingSubmitError = null;
+      state.pendingAttachments = [];
+      state.acceptedSubmitReceipt = null;
+      state.submitInFlight = false;
+      state.submitStartedAt = null;
+      setSelectedSessionId(id);
+      clearCurrentAttachments();
+      renderAll();
+      return this.captureAttachmentState();
+    },
+    addImageAttachmentForTest({ name, type, size, dataBase64 }) {
+      addAndroidAttachmentDrafts("image", [{
+        name: name || "test-image.png",
+        type: type || "image/png",
+        size: Number.isFinite(size) ? size : 0,
+        data_base64: dataBase64 || "",
+      }]);
+      renderAttachmentTray();
+      return this.captureAttachmentState();
+    },
+    captureAttachmentState() {
+      const messageText = document.getElementById("message-list")?.innerText || "";
+      return {
+        attachmentCount: currentAttachments().length,
+        trayText: document.getElementById("attachment-tray")?.innerText || "",
+        thumbCount: document.querySelectorAll(".attachment-thumb").length,
+        removeCount: document.querySelectorAll(".attachment-remove").length,
+        overlayCount: document.querySelectorAll(".attachment-preview-overlay").length,
+        messageText,
+        pendingAttachments: state.pendingAttachments.length,
+      };
+    },
+    clickFirstAttachmentPreviewForTest() {
+      document.querySelector(".attachment-thumb-button")?.click();
+      return this.captureAttachmentState();
+    },
+    closeAttachmentPreviewForTest() {
+      document.querySelector(".attachment-preview-close")?.click();
+      return this.captureAttachmentState();
+    },
+    removeFirstAttachmentForTest() {
+      document.querySelector(".attachment-remove")?.click();
+      return this.captureAttachmentState();
+    },
+    async submitComposerForTest(text) {
+      composerInput.value = text || "";
+      composerForm.requestSubmit();
+      await new Promise((resolve) => setTimeout(resolve, 0));
+      return this.captureAttachmentState();
+    },
+    applyTurnProjectionForTest(turn) {
+      setTurnProjection(turn || null);
+      renderAll();
+      return this.captureAttachmentState();
+    },
+    clearAndroidNotificationMemoryForTest() {
+      state.androidNotifiedTurns.clear();
+      state.androidObservedNonTerminalTurns.clear();
+      persistAndroidNotifiedTurns();
     },
     refreshAfterAmbiguousSubmitFailure(message) {
       return refreshAfterAmbiguousSubmitFailure(new Error(message || "simulated submit failure"));

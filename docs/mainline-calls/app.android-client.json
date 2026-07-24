@@ -10,6 +10,9 @@
     "android_file_access.request_startup_permissions",
     "android_file_access.open_all_files_settings",
     "android_file_access.project_status",
+    "android_notification.request_startup_permission",
+    "android_notification.post_turn_finished",
+    "android_notification.project_status",
     "android_apk_update.check_manifest",
     "android_apk_update.download_apk",
     "android_apk_update.request_install"
@@ -22,10 +25,12 @@
     "MainActivity.AndroidApkUpdateBridge::check lets daemon WebUI Settings manually trigger the same AndroidApkUpdater path without moving version comparison, download, or install policy into JavaScript",
     "MainActivity records the latest APK update status and replays it after WebUI page load so startup auto-check and manual Settings checks are observable",
     "MainActivity::requestInstallFileAccessIfNeeded runs once per package install/update marker during startup, requests supported runtime file/media permissions, opens Android 11+ package all-files-access settings when needed, and records FreehandFileAccess logcat truth",
+    "MainActivity::requestInstallNotificationPermissionIfNeeded requests Android 13+ POST_NOTIFICATIONS once per package install/update marker before WebView notification bridge use",
     "MainActivity::onCreate renders a native neutral startup overlay before WebView navigation and immediately loads the canonical daemon WebUI URL with client=android-webview; daemon HTML and no-store assets own WebUI versioning",
     "WebUI owns ADP query/subscribe/command, settings, lifecycle dashboard, transcript, composer, and error rendering",
     "Android physical Back asks the canonical WebUI hook to close focused fields, dialogs, sheets, or drawers before Activity exit or WebView history navigation",
-    "Android only exposes the system file-picker bridge for WebUI attachment controls"
+    "Android only exposes the system file-picker bridge for WebUI attachment controls",
+    "Android exposes FreehandAndroidNotifications.turnFinished only as a native bridge for daemon WebUI turn-finished notification requests"
   ],
   "response_mainline": [
     "daemon root returns the canonical WebUI shell and mobile layout attributes",
@@ -33,6 +38,8 @@
     "a positive higher-version daemon APK manifest with a relative or http(s) APK URL downloads the APK into app cache and opens Android's system package installer with a FileProvider URI",
     "APK update status phases are pushed to window.__freehandAndroidApkUpdateStatus for the daemon WebUI Settings card",
     "File-access startup permission status is logged as FreehandFileAccess rows for requested, settings handoff, granted, restricted, or settings-unavailable states",
+    "Notification startup permission status, missing-permission outcomes, duplicate suppression, and posted turn-finished notifications are logged as FreehandNotification rows",
+    "Turn-finished notifications route taps back to MainActivity through the existing Android package launch intent",
     "WebViewClient::onPageFinished logs canonical WebUI selector/layout/asset readiness evidence and removes the startup overlay only after WebUiStartupGate accepts the Android WebUI shell, applied stylesheet, and module-JavaScript probe",
     "MainActivity::handleAndroidBackPressed treats a true result from window.__freehandHandleAndroidBack as handled UI navigation and otherwise falls through to WebView history or Activity finish",
     "Android file-picker result returns URI metadata to window.__freehandAndroidAttachmentSelected"
@@ -43,6 +50,7 @@
     "APK update manifest parse errors, non-positive versions, non-http absolute APK URLs, HTTP download failures, empty files, or installer handoff failures are logged as FreehandApkUpdate errors and do not become false upgrade success",
     "concurrent Settings clicks return an already_checking status instead of starting duplicate update checks",
     "runtime permission denial or Android all-files settings denial remains visible as FreehandFileAccess restricted status and does not cause repeated prompts during later file actions in the same package install marker",
+    "notification permission denial remains visible as FreehandNotification missing-permission status; Android does not repeatedly prompt in the same package install marker and does not pretend the notification was posted",
     "unsupported bootstrap kind/schema, malformed base64/JSON, expired bootstrap, missing credential, unknown daemon endpoint, relay endpoint without account relayUrl, or unsupported endpoint kind is an explicit startup/import error",
     "WebView network failure remains a WebView/network failure; Android does not render local fallback UI",
     "missing FreehandWebUiLayout evidence is a device-validation failure",
@@ -298,6 +306,48 @@
       "source_resource": "android_file_access",
       "target_resource": "android_file_access",
       "binding_status": "bound"
+    },
+    {
+      "step": "16",
+      "symbol_path": "com.freehand.android.ui.MainActivity::requestInstallNotificationPermissionIfNeeded / NotificationPermissionPolicy::shouldPromptForInstall",
+      "file_path": "apps/freehand-android/app/src/main/java/com/freehand/android/ui/MainActivity.kt / apps/freehand-android/app/src/main/java/com/freehand/android/ui/NotificationPermissionPolicy.kt",
+      "responsibility": "request POST_NOTIFICATIONS once per package install/update marker on Android 13+ before turn-finished notifications are needed",
+      "input_semantic": "package install marker plus current notification permission state",
+      "output_semantic": "runtime notification permission dialog, already-granted state, not-applicable state, or startup request log",
+      "caller": "MainActivity::onCreate",
+      "callee": "NotificationPermissionPolicy and Android permission launcher",
+      "resource_operation": "android_notification.request_startup_permission",
+      "source_resource": "android_notification",
+      "target_resource": "android_notification",
+      "binding_status": "bound"
+    },
+    {
+      "step": "17",
+      "symbol_path": "com.freehand.android.ui.MainActivity::showTurnFinishedNotification",
+      "file_path": "apps/freehand-android/app/src/main/java/com/freehand/android/ui/MainActivity.kt",
+      "responsibility": "post one native notification for a terminal WebUI turn and route taps back to MainActivity",
+      "input_semantic": "FreehandAndroidNotifications.turnFinished payload with session_id, turn_id, terminal status, title, and text",
+      "output_semantic": "Android notification or explicit missing-permission/duplicate/invalid status",
+      "caller": "MainActivity.AndroidNotificationsBridge::turnFinished",
+      "callee": "NotificationManagerCompat and package launch intent",
+      "resource_operation": "android_notification.post_turn_finished",
+      "source_resource": "android_notification",
+      "target_resource": "android_notification",
+      "binding_status": "bound"
+    },
+    {
+      "step": "18",
+      "symbol_path": "com.freehand.android.ui.MainActivity::logNotificationStatus",
+      "file_path": "apps/freehand-android/app/src/main/java/com/freehand/android/ui/MainActivity.kt",
+      "responsibility": "project notification permission and post outcomes to logcat for true-device verification",
+      "input_semantic": "notification permission/post phase plus optional turn id evidence",
+      "output_semantic": "FreehandNotification logcat row",
+      "caller": "startup permission request and turn-finished notification bridge",
+      "callee": "Android Logcat",
+      "resource_operation": "android_notification.project_status",
+      "source_resource": "android_notification",
+      "target_resource": "android_notification",
+      "binding_status": "bound"
     }
   ],
   "shared_functions": [
@@ -316,6 +366,7 @@
     "Android app-owned config contains legacy active Tailscale host/port or config-owned remote_registry bootstrap truth; removed transport and top-level relay fields fail explicitly.",
     "Android imports remote_registry bootstrap links and loads declared Tailscale/IPv4/IPv6/relay WebUI endpoints, but does not own account directory truth, route scoring, live health probing, Tailscale OS connection, or relay tunnel semantics.",
     "Android APK update routes remain daemon-owned release distribution endpoints; Android owns only manifest check, cache download, status bridge, and system package-installer handoff, not a native update panel or silent package replacement.",
-    "Android file access startup prompting is package permission truth plus FreehandFileAccess logcat projection; it does not add a native product UI, silently grant permissions, or move daemon/Worker filesystem semantics into Android."
+    "Android file access startup prompting is package permission truth plus FreehandFileAccess logcat projection; it does not add a native product UI, silently grant permissions, or move daemon/Worker filesystem semantics into Android.",
+    "Android notification prompting and turn-finished notification posting are package notification truth plus FreehandNotification logcat projection; daemon WebUI owns when a live turn is finished."
   ]
 }

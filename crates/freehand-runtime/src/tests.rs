@@ -5,6 +5,7 @@ use freehand_contracts::{
 };
 use freehand_contracts::{ToolCallContract, ToolCallId};
 use freehand_metadata::MetadataEnvelope;
+use freehand_provider_core::{ProviderInputAttachment, ProviderInputAttachmentKind};
 use freehand_reason::ProviderRawLedgerRow;
 use freehand_ui_protocol::{
     UiConversationItemKind, UiModelRequestKind, UiModelRequestWaiting, UiModelTransportActivity,
@@ -658,6 +659,8 @@ fn live_bridge_restores_same_session_history_into_follow_up_provider_request() {
         turn_id: TurnId::new("runtime-turn-1"),
         trace_id: TraceId::new("runtime-trace-1"),
         prompt: "first history prompt".to_owned(),
+        attachments: Vec::new(),
+        attachment_metadata: Vec::new(),
         cwd: None,
         execution_profile: LiveReasonExecutionProfile::Workspace,
         stream: false,
@@ -686,6 +689,8 @@ fn live_bridge_restores_same_session_history_into_follow_up_provider_request() {
         turn_id: TurnId::new("runtime-turn-2"),
         trace_id: TraceId::new("runtime-trace-2"),
         prompt: "second history prompt".to_owned(),
+        attachments: Vec::new(),
+        attachment_metadata: Vec::new(),
         cwd: None,
         execution_profile: LiveReasonExecutionProfile::Workspace,
         stream: false,
@@ -2608,6 +2613,8 @@ fn live_dispatch_failure_preserves_other_session_transcripts() {
             turn_id: TurnId::new("runtime-turn-1"),
             trace_id: TraceId::new("runtime-trace-1"),
             prompt: "preserved prompt".to_owned(),
+            attachments: Vec::new(),
+            attachment_metadata: Vec::new(),
             cwd: None,
             execution_profile: LiveReasonExecutionProfile::Workspace,
             stream: false,
@@ -2645,6 +2652,7 @@ fn live_dispatch_failure_preserves_other_session_transcripts() {
                 text: "failed prompt".to_owned(),
                 session_id: Some(failed_session.clone()),
                 cwd: None,
+                metadata: None,
             })
             .expect("failed envelope"),
         )
@@ -2729,6 +2737,7 @@ fn live_dispatch_materializes_failed_turn_when_provider_fails_before_persistence
                 text: "prompt must remain visible after early provider failure".to_owned(),
                 session_id: Some(failed_session.clone()),
                 cwd: None,
+                metadata: None,
             })
             .expect("submit envelope"),
         )
@@ -2851,6 +2860,7 @@ fn live_dispatch_recovers_dead_owner_master_active_work_before_new_turn() {
                 text: "fresh prompt after stale active work".to_owned(),
                 session_id: Some(fresh_session.clone()),
                 cwd: None,
+                metadata: None,
             })
             .expect("submit envelope"),
         )
@@ -3650,6 +3660,7 @@ fn live_dispatch_projects_schema_polishing_feedback_to_client_before_mismatch_co
                 text: "trigger schema polishing".to_owned(),
                 session_id: None,
                 cwd: None,
+                metadata: None,
             })
             .expect("envelope"),
         )
@@ -3733,6 +3744,7 @@ fn live_dispatch_projects_missing_schema_polishing_feedback_to_client() {
                 text: "trigger missing schema polishing".to_owned(),
                 session_id: None,
                 cwd: None,
+                metadata: None,
             })
             .expect("envelope"),
         )
@@ -3966,6 +3978,7 @@ fn live_submit_uses_requested_session_id_for_new_webui_session() {
                 text: "hello from new session".to_owned(),
                 session_id: Some(requested_session.clone()),
                 cwd: None,
+                metadata: None,
             })
             .expect("envelope"),
         )
@@ -4557,6 +4570,7 @@ fn submit_cwd_is_projected_and_inherited_by_session() {
                 text: "first cwd turn".to_owned(),
                 session_id: Some(session_id.clone()),
                 cwd: Some(cwd.clone()),
+                metadata: None,
             })
             .expect("first envelope"),
         )
@@ -4567,6 +4581,7 @@ fn submit_cwd_is_projected_and_inherited_by_session() {
                 text: "second cwd turn".to_owned(),
                 session_id: Some(session_id.clone()),
                 cwd: None,
+                metadata: None,
             })
             .expect("second envelope"),
         )
@@ -4636,6 +4651,7 @@ fn live_master_tool_execution_allows_external_session_cwd_read() {
                 text: "read the session cwd file".to_owned(),
                 session_id: Some(session_id.clone()),
                 cwd: Some(cwd.clone()),
+                metadata: None,
             })
             .expect("envelope"),
         )
@@ -4864,6 +4880,8 @@ fn live_request(stream: bool) -> LiveReasonTurnRequest {
         turn_id: TurnId::new("turn-live"),
         trace_id: TraceId::new("trace-live"),
         prompt: "reply exactly pong".to_owned(),
+        attachments: Vec::new(),
+        attachment_metadata: Vec::new(),
         cwd: None,
         execution_profile: LiveReasonExecutionProfile::Workspace,
         stream,
@@ -4878,6 +4896,8 @@ fn live_request_for(runtime_home: &Path, session_id: &str, ordinal: u64) -> Live
         turn_id: TurnId::new(format!("runtime-turn-{ordinal}")),
         trace_id: TraceId::new(format!("runtime-trace-{ordinal}")),
         prompt: format!("prompt for {session_id}"),
+        attachments: Vec::new(),
+        attachment_metadata: Vec::new(),
         cwd: None,
         execution_profile: LiveReasonExecutionProfile::Workspace,
         stream: false,
@@ -4930,6 +4950,8 @@ fn lifecycle_live_request(runtime_home: &Path, event_id: &str) -> LiveReasonTurn
         turn_id: TurnId::new(format!("master-lifecycle-{event_id}-decision")),
         trace_id: TraceId::new(format!("master-lifecycle-trace-{event_id}")),
         prompt: format!("make one Task Center decision for {event_id}"),
+        attachments: Vec::new(),
+        attachment_metadata: Vec::new(),
         cwd: Some(runtime_home.to_path_buf()),
         execution_profile: LiveReasonExecutionProfile::Workspace,
         stream: false,
@@ -8676,6 +8698,119 @@ fn live_bridge_executes_real_registry_tool_reenters_result_and_persists_terminal
 }
 
 #[test]
+fn live_bridge_sends_image_payload_once_and_persists_metadata_only() {
+    let _cwd_lock = cwd_lock()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    let (base_url, rx, handle) = spawn_sequence_server(
+        "application/json",
+        vec![
+            tool_use_single_response(),
+            complete_single_response("image inspected after one tool round"),
+        ],
+    );
+    let mut request = live_request(false);
+    request.cwd = Some(std::env::current_dir().expect("current repo cwd"));
+    request.prompt = "Describe the attached image without copying metadata into text".to_owned();
+    request.attachments = vec![ProviderInputAttachment {
+        attachment_id: "att-image-1".to_owned(),
+        kind: ProviderInputAttachmentKind::Image,
+        media_type: "image/png".to_owned(),
+        name: "screen.png".to_owned(),
+        size_bytes: Some(5),
+        data_base64: "aW1hZ2U=".to_owned(),
+    }];
+    request.attachment_metadata = vec![InputAttachmentMetadata {
+        attachment_id: "att-image-1".to_owned(),
+        kind: InputAttachmentKind::Image,
+        media_type: "image/png".to_owned(),
+        name: "screen.png".to_owned(),
+        size_bytes: Some(5),
+    }];
+    let runtime_home = request.runtime_home.clone();
+    let session_id = request.session_id.clone();
+    let mut selected = live_selected_agent(base_url, freehand_config::ProviderType::Anthropic);
+    selected.mode = AgentMode::Slave;
+    set_single_master_peer(&mut selected, "master-live");
+
+    let outcome = run_live_reason_turn_with_policy(
+        &selected,
+        request,
+        LiveReasonExecutionRole::Worker,
+        None,
+        |_| {},
+        |_| {},
+        |_| {},
+    )
+    .expect("live bridge");
+    let first_request = rx.recv().expect("first provider request");
+    let second_request = rx.recv().expect("second provider request");
+    handle.join().expect("join provider");
+
+    let first_body = http_request_body_json(&first_request);
+    let first_content = first_body["messages"][0]["content"]
+        .as_array()
+        .expect("first user content");
+    assert_eq!(first_content[1]["type"], json!("image"));
+    assert_eq!(first_content[1]["source"]["type"], json!("base64"));
+    assert_eq!(first_content[1]["source"]["media_type"], json!("image/png"));
+    assert_eq!(first_content[1]["source"]["data"], json!("aW1hZ2U="));
+    assert!(!first_request.contains("att-image-1"));
+    assert!(!first_request.contains("screen.png"));
+
+    let second_body = http_request_body_json(&second_request);
+    let second_user_content = second_body["messages"]
+        .as_array()
+        .expect("second messages")
+        .iter()
+        .filter(|message| message["role"] == json!("user"))
+        .last()
+        .expect("tool-result user message")["content"]
+        .as_array()
+        .expect("tool result content");
+    assert!(
+        second_user_content
+            .iter()
+            .all(|block| block["type"] != json!("image"))
+    );
+    assert!(!second_request.contains("aW1hZ2U="));
+    assert!(!second_request.contains("data:image/png;base64"));
+
+    assert_eq!(outcome.rounds, 2);
+    assert_eq!(outcome.turns[0].attachments.len(), 1);
+    assert!(outcome.turns[1].attachments.is_empty());
+    assert_eq!(
+        outcome.turns[0].request.user_text,
+        "Describe the attached image without copying metadata into text"
+    );
+    assert!(!outcome.turns[0].request.user_text.contains("att-image-1"));
+    assert!(!outcome.turns[0].request.user_text.contains("aW1hZ2U="));
+
+    let persistence = ReasonPersistence::new(&runtime_home, AgentId::new("agent-live"));
+    let restored_turns = persistence
+        .restore_turn_snapshots_for_ui(&session_id)
+        .expect("restore persisted live turn snapshots");
+    assert_eq!(restored_turns.len(), 2);
+    assert_eq!(restored_turns[0].attachments.len(), 1);
+    assert!(restored_turns[1].attachments.is_empty());
+    let projection = project_runtime_turn_history(
+        &AgentId::new("agent-live"),
+        "agent-live-node",
+        std::slice::from_ref(&restored_turns[0]),
+        None,
+    );
+    assert_eq!(projection.attachments.len(), 1);
+    assert_eq!(projection.attachments[0].attachment_id, "att-image-1");
+    assert_eq!(projection.attachments[0].name, "screen.png");
+    let projection_json = serde_json::to_string(&projection).expect("projection json");
+    assert!(projection_json.contains("att-image-1"));
+    assert!(!projection_json.contains("aW1hZ2U="));
+    assert!(!projection_json.contains("data_base64"));
+
+    fs::remove_dir_all(runtime_home).expect("cleanup runtime home");
+}
+
+#[test]
 fn live_bridge_returns_incomplete_tool_use_as_failed_tool_result_without_schema_retry() {
     let _cwd_lock = cwd_lock()
         .lock()
@@ -9150,6 +9285,7 @@ fn live_dispatch_projects_failed_tool_result_without_command_failure() {
                 text: "trigger tool failure".to_owned(),
                 session_id: None,
                 cwd: None,
+                metadata: None,
             })
             .expect("envelope"),
         )
@@ -9169,6 +9305,7 @@ fn live_dispatch_projects_failed_tool_result_without_command_failure() {
                 text: "trigger tool failure again".to_owned(),
                 session_id: None,
                 cwd: None,
+                metadata: None,
             })
             .expect("envelope"),
         )
@@ -9704,6 +9841,8 @@ fn clean_search_worker_request_uses_hosted_search_without_local_instruction_scan
             turn_id: TurnId::new("clean-search-worker-turn"),
             trace_id: TraceId::new("clean-search-worker-trace"),
             prompt: "Find current source evidence for a broad web question.".to_owned(),
+            attachments: Vec::new(),
+            attachment_metadata: Vec::new(),
             cwd: None,
             execution_profile: LiveReasonExecutionProfile::CleanSearch,
             stream: false,
@@ -10173,6 +10312,8 @@ fn bootstrap_with_live_restore_recovers_ui_projection_and_next_turn_ordinal() {
             turn_id: TurnId::new("runtime-turn-1"),
             trace_id: TraceId::new("runtime-trace-1"),
             prompt: "first request".to_owned(),
+            attachments: Vec::new(),
+            attachment_metadata: Vec::new(),
             cwd: None,
             execution_profile: LiveReasonExecutionProfile::Workspace,
             stream: false,
@@ -10228,6 +10369,7 @@ fn bootstrap_with_live_restore_recovers_ui_projection_and_next_turn_ordinal() {
                 text: "second request".to_owned(),
                 session_id: None,
                 cwd: None,
+                metadata: None,
             })
             .expect("envelope"),
         )
@@ -10282,6 +10424,8 @@ fn live_restore_resumes_turn_ordinal_from_selected_non_default_session() {
             turn_id: TurnId::new("runtime-turn-1"),
             trace_id: TraceId::new("runtime-trace-1"),
             prompt: "selected first request".to_owned(),
+            attachments: Vec::new(),
+            attachment_metadata: Vec::new(),
             cwd: None,
             execution_profile: LiveReasonExecutionProfile::Workspace,
             stream: false,
@@ -10319,6 +10463,7 @@ fn live_restore_resumes_turn_ordinal_from_selected_non_default_session() {
                 text: "selected second request".to_owned(),
                 session_id: Some(selected_session_id.clone()),
                 cwd: None,
+                metadata: None,
             })
             .expect("envelope"),
         )
@@ -10371,6 +10516,7 @@ fn submit_input_dispatches_to_reason_and_updates_ui_state() {
                 text: "hello runtime".to_owned(),
                 session_id: None,
                 cwd: None,
+                metadata: None,
             })
             .expect("envelope"),
         )
@@ -10405,6 +10551,7 @@ fn cancel_turn_dispatches_to_reason_owner() {
                 text: "cancel me".to_owned(),
                 session_id: None,
                 cwd: None,
+                metadata: None,
             })
             .expect("envelope"),
         )
@@ -10446,6 +10593,7 @@ fn cancel_latest_active_turn_dispatches_to_latest_reason_turn() {
                 text: "cancel latest".to_owned(),
                 session_id: None,
                 cwd: None,
+                metadata: None,
             })
             .expect("submit envelope"),
         )
@@ -10534,6 +10682,7 @@ fn active_live_cancel_returns_before_provider_finishes_and_blocks_success_projec
                 text: "start long stream".to_owned(),
                 session_id: None,
                 cwd: None,
+                metadata: None,
             })
             .expect("submit envelope"),
         )
@@ -10647,6 +10796,7 @@ fn runtime_live_submit_registers_and_clears_master_active_work() {
                 text: "hold active work".to_owned(),
                 session_id: None,
                 cwd: None,
+                metadata: None,
             })
             .expect("submit envelope"),
         )
@@ -10723,6 +10873,7 @@ fn runtime_live_submit_rejects_concurrent_master_active_work_without_ordinal_gap
                 text: "first active work".to_owned(),
                 session_id: None,
                 cwd: None,
+                metadata: None,
             })
             .expect("first submit envelope"),
         )
@@ -10743,6 +10894,7 @@ fn runtime_live_submit_rejects_concurrent_master_active_work_without_ordinal_gap
             text: "second active work".to_owned(),
             session_id: None,
             cwd: None,
+            metadata: None,
         })
         .expect("second submit envelope"),
     );
@@ -10799,6 +10951,7 @@ fn runtime_live_submit_persists_pre_provider_active_turn_for_refresh() {
                 "accepted turn must survive refresh before provider".to_owned(),
                 Some(session_id.clone()),
                 Some(runtime_home.to_string_lossy().into_owned()),
+                None,
             )
             .expect("prepare")
             .expect("prepared live submit")
@@ -10897,6 +11050,7 @@ fn runtime_live_submit_materializes_cancelled_turn_before_provider_request() {
                 "cancel before provider request".to_owned(),
                 Some(SessionId::new("pre-provider-cancel")),
                 Some(runtime_home.to_string_lossy().into_owned()),
+                None,
             )
             .expect("prepare")
             .expect("prepared live submit")
@@ -10962,6 +11116,7 @@ fn runtime_live_submit_materializes_cancelled_turn_before_provider_request() {
                 &mut state,
                 "fail before provider request in existing session".to_owned(),
                 Some(SessionId::new("pre-provider-cancel")),
+                None,
                 None,
             )
             .expect("prepare failed turn")
@@ -11042,6 +11197,7 @@ fn runtime_live_submit_materializes_cancelled_turn_before_provider_request() {
                 "next turn after cancelled pre-provider submit".to_owned(),
                 Some(SessionId::new("pre-provider-cancel")),
                 None,
+                None,
             )
             .expect("prepare next")
             .expect("prepared next")
@@ -11074,6 +11230,7 @@ fn cancel_latest_active_live_turn_materializes_pre_provider_terminal_truth() {
                 "cancel while request context is still preparing".to_owned(),
                 Some(session_id.clone()),
                 Some(runtime_home.to_string_lossy().into_owned()),
+                None,
             )
             .expect("prepare")
             .expect("prepared live submit");
@@ -11173,6 +11330,7 @@ fn runtime_live_submit_success_does_not_duplicate_prepared_turn_started() {
                 text: "prepared active should not become historical context".to_owned(),
                 session_id: Some(session_id.clone()),
                 cwd: Some(runtime_home.to_string_lossy().into_owned()),
+                metadata: None,
             })
             .expect("submit envelope"),
         )
@@ -13103,6 +13261,8 @@ fn runtime_task_tool_mutation_publishes_task_list_projection() {
         turn_id: TurnId::new("runtime-turn-task-push-1"),
         trace_id: TraceId::new("runtime-trace-task-push-1"),
         prompt: "create a task".to_owned(),
+        attachments: Vec::new(),
+        attachment_metadata: Vec::new(),
         cwd: None,
         execution_profile: LiveReasonExecutionProfile::Workspace,
         stream: false,

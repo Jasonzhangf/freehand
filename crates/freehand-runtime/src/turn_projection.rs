@@ -89,26 +89,37 @@ pub(crate) fn project_runtime_turn_history(
     let turn = turns
         .last()
         .expect("runtime turn history projection requires at least one turn");
-    turn_projection_for_client(
-        turn_projection_from_events(TurnProjectionInput {
-            source_agent_id: reason_agent_id.clone(),
-            source_node_id: master_node_id.to_owned(),
-            session_id: turn.request.session_id.clone(),
-            turn_id: turn.request.turn_id.clone(),
-            created_at: (turn.created_at != 0).then_some(turn.created_at),
-            timing: ui_turn_timing_from_turn(turn),
-            cwd: cwd.or_else(|| turn.cwd.clone()),
-            user_text: ui_user_text_projection_for_turn(turn),
-            semantic_events: turn.semantic_events.clone(),
-            tool_calls: turn.tool_calls.clone(),
-            tool_results: turn.tool_results.clone(),
-            usage_events: turn.usage_events.clone(),
-            terminal_event: turn.terminal_event.clone(),
-            error_events: turn.error_events.clone(),
-            slave_substream_card: false,
-        }),
-        UiClientKind::WebUi,
-    )
+    let mut projection = turn_projection_from_events(TurnProjectionInput {
+        source_agent_id: reason_agent_id.clone(),
+        source_node_id: master_node_id.to_owned(),
+        session_id: turn.request.session_id.clone(),
+        turn_id: turn.request.turn_id.clone(),
+        created_at: (turn.created_at != 0).then_some(turn.created_at),
+        timing: ui_turn_timing_from_turn(turn),
+        cwd: cwd.or_else(|| turn.cwd.clone()),
+        user_text: ui_user_text_projection_for_turn(turn),
+        semantic_events: turn.semantic_events.clone(),
+        tool_calls: turn.tool_calls.clone(),
+        tool_results: turn.tool_results.clone(),
+        usage_events: turn.usage_events.clone(),
+        terminal_event: turn.terminal_event.clone(),
+        error_events: turn.error_events.clone(),
+        slave_substream_card: false,
+    });
+    projection.attachments = turn
+        .attachments
+        .iter()
+        .map(|attachment| UiAttachmentMetadataProjection {
+            attachment_id: attachment.attachment_id.clone(),
+            kind: match attachment.kind {
+                InputAttachmentKind::Image => UiInputAttachmentKind::Image,
+            },
+            media_type: attachment.media_type.clone(),
+            name: attachment.name.clone(),
+            size_bytes: attachment.size_bytes,
+        })
+        .collect();
+    turn_projection_for_client(projection, UiClientKind::WebUi)
 }
 
 fn ui_turn_timing_from_turn(turn: &TurnRecord) -> Option<UiTurnTimingProjection> {
@@ -279,6 +290,7 @@ pub(crate) fn persist_prepared_live_submit_active_turn(
         )
         .map_err(|err| UiCommandDispatchPortError::DispatchFailed(err.to_string()))?;
     turn.cwd = Some(prepared.cwd.to_string_lossy().into_owned());
+    turn.attachments = prepared.attachment_metadata.clone();
     persistence
         .record_rewrite_state_updated(
             &history,

@@ -8,6 +8,7 @@
 - resource map: `docs/resource-maps/core.json`
 - resource operations:
   - `provider_request.render_hosted_search_wire`
+  - `provider_request.render_openai_image_input_wire`
   - `provider_response.observe_hosted_search_call`
 - owner entry symbols:
   - `OpenAiAdapter::new`
@@ -28,8 +29,10 @@
   - `provider_request`
   - `provider_response`
   - `provider_hosted_search`
+  - `input_attachment`
 - resource operations:
   - `provider_request.render_hosted_search_wire` (`provider_request` -> `provider_hosted_search`)
+  - `provider_request.render_openai_image_input_wire` (`provider_request` -> `input_attachment`)
   - `provider_response.observe_hosted_search_call` (`provider_response` -> `provider_hosted_search`)
 - forbidden shortcuts:
   - OpenAI hosted `web_search` wire must be rendered only from `ProviderHostedToolDefinition`, never from a local Freehand function tool named `web_search`.
@@ -41,6 +44,7 @@
 - adapter renders either `responses` or `chat completions` request body based on selected protocol
 - adapter consumes typed `input_segments` and renders them to OpenAI wire text without owning segment admission truth
 - adapter renders provider-neutral tool definitions and tool-result re-entry into the selected OpenAI wire shape so runtime never hardcodes protocol-specific tool wire
+- adapter renders provider-neutral image attachments as Responses `input_image` data URLs or Chat Completions `image_url` data URLs; attachment id/name metadata never leaks into provider wire
 - adapter renders provider-neutral `ProviderHostedToolDefinition::WebSearch` into OpenAI Responses hosted `{"type":"web_search","external_web_access":true}` wire when the live bridge declares it
 
 ## Response Mainline
@@ -73,6 +77,7 @@
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | 01 | `OpenAiAdapter::render_request` | `crates/freehand-provider-openai/src/lib.rs` | render semantic request, tool definitions, and tool-result re-entry to OpenAI wire request | provider semantic request | OpenAI path + JSON body | runtime/provider caller | adapter renderer | bound |
 | 01a | `openai_responses_hosted_tool` | `crates/freehand-provider-openai/src/lib.rs` | render provider-neutral hosted search declarations into OpenAI Responses hosted tool wire | provider semantic request hosted tool metadata | OpenAI Responses hosted tool JSON | `OpenAiAdapter::render_request` | adapter renderer | bound |
+| 01b | `openai_responses_attachment_content` / `openai_chat_attachment_content` | `crates/freehand-provider-openai/src/lib.rs` | render provider-neutral image attachment bytes into the selected OpenAI protocol image content block | provider image attachment | Responses `input_image` or Chat Completions `image_url` data URL | `OpenAiAdapter::render_request` | adapter renderer | bound |
 | 02 | `OpenAiAdapter::parse_response` | `crates/freehand-provider-openai/src/lib.rs` | parse single-shot OpenAI response | raw response body | provider semantic outputs | runtime/provider caller | adapter parser | bound |
 | 02a | `provider_hosted_web_search_observation` | `crates/freehand-provider-openai/src/lib.rs` | map OpenAI Responses `web_search_call` items into provider-neutral reasoning observations | raw OpenAI response item | provider semantic reasoning event | `OpenAiAdapter::parse_response` / `OpenAiAdapter::parse_stream_event` | adapter parser | bound |
 | 03 | `OpenAiAdapter::parse_stream_event` | `crates/freehand-provider-openai/src/lib.rs` | parse one OpenAI stream event and update partial state | raw stream event | provider semantic outputs | runtime/provider caller | adapter stream parser | bound |

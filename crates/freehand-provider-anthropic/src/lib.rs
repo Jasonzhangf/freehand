@@ -12,8 +12,8 @@ use freehand_contracts::{
 };
 use freehand_provider_core::{
     ProviderAdapterEvent, ProviderErrorHint, ProviderEventContext, ProviderHostedToolDefinition,
-    ProviderProtocol, ProviderSemanticOutput, ProviderSemanticRequest, ProviderToolChoice,
-    ProviderToolExchange, map_adapter_events,
+    ProviderInputAttachment, ProviderInputAttachmentKind, ProviderProtocol, ProviderSemanticOutput,
+    ProviderSemanticRequest, ProviderToolChoice, ProviderToolExchange, map_adapter_events,
 };
 use serde_json::{Value, json};
 use thiserror::Error;
@@ -289,7 +289,7 @@ impl AnthropicAdapter {
             "model": request.descriptor.model,
             "max_tokens": self.config.max_tokens,
             "stream": stream,
-            "messages": render_messages(&rendered_input, &request.tool_exchanges)?,
+            "messages": render_messages(&rendered_input, &request.input_attachments, &request.tool_exchanges)?,
         });
         let tools = anthropic_messages_tools(request);
         if !tools.is_empty() {
@@ -643,16 +643,17 @@ fn join_base_url_path(base_url: &str, path: &str) -> String {
 
 fn render_messages(
     rendered_input: &str,
+    attachments: &[ProviderInputAttachment],
     tool_exchanges: &[ProviderToolExchange],
 ) -> Result<Value, AnthropicAdapterError> {
+    let mut user_content = vec![json!({
+        "type": "text",
+        "text": rendered_input,
+    })];
+    user_content.extend(attachments.iter().map(anthropic_attachment_content));
     let mut messages = vec![json!({
         "role": "user",
-        "content": [
-            {
-                "type": "text",
-                "text": rendered_input,
-            }
-        ]
+        "content": user_content
     })];
     if !tool_exchanges.is_empty() {
         messages.push(json!({
@@ -693,6 +694,19 @@ fn render_messages(
         }));
     }
     Ok(Value::Array(messages))
+}
+
+fn anthropic_attachment_content(attachment: &ProviderInputAttachment) -> Value {
+    match attachment.kind {
+        ProviderInputAttachmentKind::Image => json!({
+            "type": "image",
+            "source": {
+                "type": "base64",
+                "media_type": attachment.media_type,
+                "data": attachment.data_base64,
+            },
+        }),
+    }
 }
 
 fn anthropic_messages_tools(request: &ProviderSemanticRequest) -> Vec<Value> {
@@ -886,9 +900,9 @@ mod tests {
         ReasonReq05ToolResultReentry, SessionId, ToolArgument, ToolResultContract, TraceId, TurnId,
     };
     use freehand_provider_core::{
-        ProviderCapabilities, ProviderDescriptor, ProviderFamily, ProviderToolChoice,
-        ProviderToolDefinition, ProviderToolExchange, ProviderWebSearchCapability,
-        build_semantic_request,
+        ProviderCapabilities, ProviderDescriptor, ProviderFamily, ProviderInputAttachment,
+        ProviderInputAttachmentKind, ProviderToolChoice, ProviderToolDefinition,
+        ProviderToolExchange, ProviderWebSearchCapability, build_semantic_request,
     };
     use std::io::{Read, Write};
     use std::net::TcpListener;
@@ -1088,6 +1102,31 @@ mod tests {
             Some(DEFAULT_ANTHROPIC_MAX_TOKENS)
         );
         assert_eq!(body.get("stream").and_then(Value::as_bool), Some(true));
+    }
+
+    #[test]
+    fn renders_messages_image_input_as_base64_source() {
+        let mut request = request();
+        request.input_attachments.push(ProviderInputAttachment {
+            attachment_id: "att-image-1".to_owned(),
+            kind: ProviderInputAttachmentKind::Image,
+            media_type: "image/png".to_owned(),
+            name: "screen.png".to_owned(),
+            size_bytes: Some(5),
+            data_base64: "aW1hZ2U=".to_owned(),
+        });
+
+        let rendered = adapter().render_request(&request, false).expect("rendered");
+        let body: Value = serde_json::from_str(&rendered.body).expect("json");
+        let content = body["messages"][0]["content"].as_array().expect("content");
+
+        assert_eq!(content[0]["type"], json!("text"));
+        assert_eq!(content[1]["type"], json!("image"));
+        assert_eq!(content[1]["source"]["type"], json!("base64"));
+        assert_eq!(content[1]["source"]["media_type"], json!("image/png"));
+        assert_eq!(content[1]["source"]["data"], json!("aW1hZ2U="));
+        assert!(!rendered.body.contains("att-image-1"));
+        assert!(!rendered.body.contains("screen.png"));
     }
 
     #[test]

@@ -15,9 +15,10 @@ use freehand_blocks::{
 };
 use freehand_contracts::{
     AgentId, ContextProvenance, ContextSegment, ContextSegmentId, ErrorErr01RuntimeClassified,
-    FeatureId, ReasonReq02ContextComposedInput, ReasonReq03ProviderPayload, ReasonReq04ToolCall,
-    ReasonReq05ToolResultReentry, ReasonResp01SemanticEvent, ReasonResp02UsageEvent,
-    ReasonResp03TerminalEvent, SessionId, TerminalStatus, TraceId, TurnId, validate_reason_req02,
+    FeatureId, InputAttachmentMetadata, ReasonReq02ContextComposedInput,
+    ReasonReq03ProviderPayload, ReasonReq04ToolCall, ReasonReq05ToolResultReentry,
+    ReasonResp01SemanticEvent, ReasonResp02UsageEvent, ReasonResp03TerminalEvent, SessionId,
+    TerminalStatus, TraceId, TurnId, validate_reason_req02,
 };
 use freehand_debug::{
     DebugEvent, DebugHub, DebugScenePosition, DebugSemanticPosition, DebugStateSnapshot,
@@ -112,6 +113,8 @@ pub struct TurnRecord {
     pub planned_context: PlannedContext,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cwd: Option<String>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub attachments: Vec<InputAttachmentMetadata>,
     pub semantic_events: Vec<ReasonResp01SemanticEvent>,
     pub tool_calls: Vec<ReasonReq04ToolCall>,
     pub tool_results: Vec<ReasonReq05ToolResultReentry>,
@@ -299,6 +302,7 @@ impl ReasonTurnEngine {
             provider_payload,
             planned_context,
             cwd: None,
+            attachments: Vec::new(),
             semantic_events: Vec::new(),
             tool_calls: Vec::new(),
             tool_results: Vec::new(),

@@ -2407,7 +2407,12 @@ mod tests {
         assert!(js_body.contains("persistAttachmentDrafts"));
         assert!(js_body.contains("addAttachmentFiles"));
         assert!(js_body.contains("renderAttachmentTray"));
-        assert!(js_body.contains("textWithAttachmentPlaceholders"));
+        assert!(js_body.contains("textWithAttachmentDisplay"));
+        assert!(js_body.contains("attachmentsForSubmit"));
+        assert!(js_body.contains("FreehandAndroidNotifications"));
+        assert!(js_body.contains("androidObservedNonTerminalTurns"));
+        assert!(js_body.contains("data_base64"));
+        assert!(js_body.contains("attachment-preview-overlay"));
         assert!(js_body.contains("clearCurrentAttachments"));
         assert!(js_body.contains(
             "submit receipt not verified after service refresh; checking service truth before duplicate send"
@@ -2982,6 +2987,7 @@ mod tests {
                 text: "run task".to_owned(),
                 session_id: None,
                 cwd: None,
+                metadata: None,
             })
             .send()
             .await
@@ -3022,6 +3028,7 @@ mod tests {
                 text: "run task".to_owned(),
                 session_id: None,
                 cwd: None,
+                metadata: None,
             })
             .send()
             .await
@@ -3050,6 +3057,7 @@ mod tests {
                 text: "run task".to_owned(),
                 session_id: None,
                 cwd: None,
+                metadata: None,
             })
             .send()
             .await

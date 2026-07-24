@@ -81,8 +81,9 @@ use freehand_config::{
 use freehand_contracts::{
     AgentId, ContextCachePolicy, ContextProvenance, ContextRole, ContextSegment, ContextSegmentId,
     ContextSegmentKind, ContextStability, ErrorClass, ErrorContract, ErrorErr01RuntimeClassified,
-    FeatureId, ReasonReq03ProviderPayload, ReasonReq04ToolCall, ReasonReq05ToolResultReentry,
-    RecoveryPolicy, SessionId, ToolArgument, ToolResultContract, ToolResultStatus, TraceId, TurnId,
+    FeatureId, InputAttachmentKind, InputAttachmentMetadata, ReasonReq03ProviderPayload,
+    ReasonReq04ToolCall, ReasonReq05ToolResultReentry, RecoveryPolicy, SessionId, ToolArgument,
+    ToolResultContract, ToolResultStatus, TraceId, TurnId,
 };
 use freehand_control::{
     ControlRhythmDecision, ControlStatusRejection, ControlStatusSubmission, ErrorCenterDecision,
@@ -107,10 +108,10 @@ use freehand_provider_anthropic::{
 };
 use freehand_provider_core::{
     ProviderCapabilities, ProviderDescriptor, ProviderEventContext, ProviderFamily,
-    ProviderHostedToolDefinition, ProviderProtocol, ProviderSemanticOutput,
-    ProviderSemanticRequest, ProviderToolChoice, ProviderToolDefinition, ProviderToolExchange,
-    ProviderWebSearchCapability, ProviderWebSearchMode as SemanticWebSearchMode,
-    build_semantic_request,
+    ProviderHostedToolDefinition, ProviderInputAttachment, ProviderInputAttachmentKind,
+    ProviderProtocol, ProviderSemanticOutput, ProviderSemanticRequest, ProviderToolChoice,
+    ProviderToolDefinition, ProviderToolExchange, ProviderWebSearchCapability,
+    ProviderWebSearchMode as SemanticWebSearchMode, build_semantic_request,
 };
 use freehand_provider_openai::{
     OpenAiExecutor, OpenAiExecutorConfig, OpenAiExecutorError, OpenAiRawCapture,
@@ -139,22 +140,23 @@ use freehand_tools::{
 use freehand_ui_protocol::{
     TurnProjectionInput, UiAgentBoardProjection, UiAgentLifecycleActivityProjection,
     UiAgentLifecycleProjection, UiAgentProcessProjection, UiAgentProviderSelectionUpdate,
-    UiAgentResourceConfigUpdate, UiAgentSnapshotProjection, UiClientKind, UiCommand,
-    UiCommandDispatchEnvelope, UiCommandDispatchPort, UiCommandDispatchPortError,
-    UiCommandDispatchReceipt, UiCompletionSchemaRetryWaiting, UiConfigPeerProjection,
-    UiConfigStatusProjection, UiErrorCenterEventListProjection, UiErrorCenterEventProjection,
-    UiExecutionFactCommand, UiExecutionFactKind, UiMasterPollClassificationProjection,
-    UiMasterPollProjection, UiModelRequestKind, UiModelRequestWaiting, UiModelTransportActivity,
-    UiModelTransportKind, UiProtocolState, UiProviderConfigSummaryProjection,
-    UiProviderConfigUpdate, UiQueryResult, UiRuntimeQueryPort, UiSchedulerTickCommand,
-    UiSessionMetadataProjection, UiTaskAgentCreateCommand, UiTaskAssignCommand,
-    UiTaskBoardProjection, UiTaskClaimCommand, UiTaskCreateCommand, UiTaskDispatchCommand,
-    UiTaskEventInboxEntryProjection, UiTaskEventInboxProjection, UiTaskHistoryProjection,
-    UiTaskLedgerEventProjection, UiTaskListProjection, UiTaskReviewCommand,
-    UiTaskReviewRejectionCommand, UiTaskSnapshotProjection, UiTurnProjection,
-    UiTurnTimingProjection, UiWorkerControlCommand, UiWorkerControlEventProjection,
-    UiWorkerControlProjection, checkpoint_projection_from_runtime_summary,
-    turn_projection_for_client, turn_projection_from_events,
+    UiAgentResourceConfigUpdate, UiAgentSnapshotProjection, UiAttachmentMetadataProjection,
+    UiClientKind, UiCommand, UiCommandDispatchEnvelope, UiCommandDispatchPort,
+    UiCommandDispatchPortError, UiCommandDispatchReceipt, UiCompletionSchemaRetryWaiting,
+    UiConfigPeerProjection, UiConfigStatusProjection, UiErrorCenterEventListProjection,
+    UiErrorCenterEventProjection, UiExecutionFactCommand, UiExecutionFactKind,
+    UiInputAttachmentKind, UiMasterPollClassificationProjection, UiMasterPollProjection,
+    UiModelRequestKind, UiModelRequestWaiting, UiModelTransportActivity, UiModelTransportKind,
+    UiProtocolState, UiProviderConfigSummaryProjection, UiProviderConfigUpdate, UiQueryResult,
+    UiRuntimeQueryPort, UiSchedulerTickCommand, UiSessionMetadataProjection, UiSubmitMetadata,
+    UiTaskAgentCreateCommand, UiTaskAssignCommand, UiTaskBoardProjection, UiTaskClaimCommand,
+    UiTaskCreateCommand, UiTaskDispatchCommand, UiTaskEventInboxEntryProjection,
+    UiTaskEventInboxProjection, UiTaskHistoryProjection, UiTaskLedgerEventProjection,
+    UiTaskListProjection, UiTaskReviewCommand, UiTaskReviewRejectionCommand,
+    UiTaskSnapshotProjection, UiTurnProjection, UiTurnTimingProjection, UiWorkerControlCommand,
+    UiWorkerControlEventProjection, UiWorkerControlProjection,
+    checkpoint_projection_from_runtime_summary, turn_projection_for_client,
+    turn_projection_from_events,
 };
 use serde_json::{Map, Value, json};
 use thiserror::Error;
@@ -171,6 +173,8 @@ pub struct LiveReasonTurnRequest {
     pub turn_id: TurnId,
     pub trace_id: TraceId,
     pub prompt: String,
+    pub attachments: Vec<ProviderInputAttachment>,
+    pub attachment_metadata: Vec<InputAttachmentMetadata>,
     pub cwd: Option<PathBuf>,
     pub execution_profile: LiveReasonExecutionProfile,
     pub stream: bool,
@@ -1097,6 +1101,9 @@ where
             .cwd
             .as_ref()
             .map(|path| path.to_string_lossy().into_owned());
+        if round == 1 {
+            turn.attachments = request.attachment_metadata.clone();
+        }
         persistence
             .record_turn_started(&history, &turn, schema_rejections.len() as u32)
             .map_err(|err| RuntimeLiveBridgeError::ReasonPersistenceFailed(err.to_string()))?;
@@ -1108,6 +1115,11 @@ where
             debug_hub.is_enabled(),
         )
         .map_err(|err| RuntimeLiveBridgeError::ProviderRequestBuildFailed(err.to_string()))?;
+        semantic_request.input_attachments = if round == 1 {
+            request.attachments.clone()
+        } else {
+            Vec::new()
+        };
         semantic_request.tools = role.tool_definitions(&tool_registry, request.execution_profile);
         semantic_request.hosted_tools =
             role.hosted_tool_definitions(&active_provider_descriptor, request.execution_profile);
@@ -1404,8 +1416,11 @@ where
                             turn.provider_payload.model =
                                 active_route.provider.default_model.clone();
                             let prior_tools = semantic_request.tools.clone();
+                            let prior_hosted_tools = semantic_request.hosted_tools.clone();
                             let prior_tool_choice = semantic_request.tool_choice.clone();
                             let prior_tool_exchanges = semantic_request.tool_exchanges.clone();
+                            let prior_input_attachments =
+                                semantic_request.input_attachments.clone();
                             semantic_request = build_semantic_request(
                                 active_provider_descriptor.clone(),
                                 turn.provider_payload.clone(),
@@ -1415,8 +1430,10 @@ where
                                 RuntimeLiveBridgeError::ProviderRequestBuildFailed(err.to_string())
                             })?;
                             semantic_request.tools = prior_tools;
+                            semantic_request.hosted_tools = prior_hosted_tools;
                             semantic_request.tool_choice = prior_tool_choice;
                             semantic_request.tool_exchanges = prior_tool_exchanges;
+                            semantic_request.input_attachments = prior_input_attachments;
                             write_live_bridge_metadata(
                                 &metadata_center,
                                 &agent_id,
@@ -2925,6 +2942,8 @@ struct PreparedLiveSubmit {
     turn_id: TurnId,
     trace_id: TraceId,
     prompt: String,
+    attachments: Vec<ProviderInputAttachment>,
+    attachment_metadata: Vec<InputAttachmentMetadata>,
     cancel_token: LiveReasonCancelToken,
 }
 
@@ -3415,6 +3434,7 @@ impl RuntimeCommandDispatcher {
         text: String,
         requested_session_id: Option<SessionId>,
         requested_cwd: Option<String>,
+        metadata: Option<UiSubmitMetadata>,
     ) -> Result<UiCommandDispatchReceipt, UiCommandDispatchPortError> {
         let session_id = requested_session_id.unwrap_or_else(|| state.config.session_id.clone());
         let cwd = resolve_session_cwd(state, &session_id, requested_cwd, None)?;
@@ -3428,6 +3448,7 @@ impl RuntimeCommandDispatcher {
                 .map_err(|err| UiCommandDispatchPortError::DispatchFailed(err.to_string()))?
         };
 
+        let (_provider_attachments, attachment_metadata) = submit_attachment_inputs(metadata);
         let mut turn = state
             .reason_engine
             .start_turn(
@@ -3446,6 +3467,7 @@ impl RuntimeCommandDispatcher {
             )
             .map_err(|err| UiCommandDispatchPortError::DispatchFailed(err.to_string()))?;
         turn.cwd = Some(cwd.to_string_lossy().into_owned());
+        turn.attachments = attachment_metadata;
         if session_id == state.config.session_id {
             state.session_history = session_history;
         }
@@ -3476,6 +3498,7 @@ impl RuntimeCommandDispatcher {
         text: String,
         requested_session_id: Option<SessionId>,
         requested_cwd: Option<String>,
+        metadata: Option<UiSubmitMetadata>,
     ) -> Result<Option<PreparedLiveSubmit>, UiCommandDispatchPortError> {
         let Some(live) = state.config.live.clone() else {
             return Ok(None);
@@ -3487,6 +3510,7 @@ impl RuntimeCommandDispatcher {
         let turn_id = TurnId::new(format!("runtime-turn-{next_turn_ordinal}"));
         let trace_id = TraceId::new(format!("runtime-trace-{next_turn_ordinal}"));
         let cancel_token = Arc::new(AtomicBool::new(false));
+        let (attachments, attachment_metadata) = submit_attachment_inputs(metadata);
         master_runner::register_master_active_work(
             &live.runtime_home,
             &state.config.reason_agent_id,
@@ -3513,6 +3537,8 @@ impl RuntimeCommandDispatcher {
             turn_id,
             trace_id,
             prompt: text,
+            attachments,
+            attachment_metadata,
             cancel_token,
         };
         let current_turn = match persist_prepared_live_submit_active_turn(state, &prepared) {
@@ -3570,6 +3596,8 @@ impl RuntimeCommandDispatcher {
                 turn_id: prepared.turn_id.clone(),
                 trace_id: prepared.trace_id.clone(),
                 prompt: prepared.prompt.clone(),
+                attachments: prepared.attachments.clone(),
+                attachment_metadata: prepared.attachment_metadata.clone(),
                 cwd: Some(prepared.cwd.clone()),
                 execution_profile: LiveReasonExecutionProfile::Workspace,
                 stream: prepared.live.stream,
@@ -3870,6 +3898,8 @@ impl RuntimeCommandDispatcher {
                     turn_id: active.turn_id.clone(),
                     trace_id: active.trace_id.clone(),
                     prompt: active.user_text.clone(),
+                    attachments: Vec::new(),
+                    attachment_metadata: Vec::new(),
                     cancel_token: Arc::clone(&active.cancel_token),
                 };
                 let current_turn = restore_or_materialize_cancelled_live_submit(
@@ -4158,6 +4188,43 @@ impl RuntimeCommandDispatcher {
             .set_checkpoint_snapshot(snapshot);
         Ok(())
     }
+}
+
+fn submit_attachment_inputs(
+    metadata: Option<UiSubmitMetadata>,
+) -> (Vec<ProviderInputAttachment>, Vec<InputAttachmentMetadata>) {
+    let Some(metadata) = metadata else {
+        return (Vec::new(), Vec::new());
+    };
+    let mut provider_inputs = Vec::new();
+    let mut session_metadata = Vec::new();
+    for attachment in metadata.attachments {
+        let kind = match attachment.kind {
+            UiInputAttachmentKind::Image => (
+                ProviderInputAttachmentKind::Image,
+                InputAttachmentKind::Image,
+            ),
+        };
+        let size_bytes = attachment.size_bytes;
+        session_metadata.push(InputAttachmentMetadata {
+            attachment_id: attachment.attachment_id.clone(),
+            kind: kind.1,
+            media_type: attachment.media_type.clone(),
+            name: attachment.name.clone(),
+            size_bytes,
+        });
+        if let Some(data_base64) = attachment.data_base64 {
+            provider_inputs.push(ProviderInputAttachment {
+                attachment_id: attachment.attachment_id,
+                kind: kind.0,
+                media_type: attachment.media_type,
+                name: attachment.name,
+                size_bytes,
+                data_base64,
+            });
+        }
+    }
+    (provider_inputs, session_metadata)
 }
 
 fn resolve_session_cwd(
@@ -4847,6 +4914,7 @@ impl UiCommandDispatchPort for RuntimeCommandDispatcher {
             text,
             session_id,
             cwd,
+            metadata,
         } = envelope.command.clone()
         {
             let prepared = {
@@ -4856,13 +4924,15 @@ impl UiCommandDispatchPort for RuntimeCommandDispatcher {
                     text.clone(),
                     session_id.clone(),
                     cwd.clone(),
+                    metadata.clone(),
                 )
             }?;
             if let Some(prepared) = prepared {
                 return self.dispatch_prepared_live_submit(envelope, prepared);
             }
             let mut state = self.state.lock().expect("lock runtime dispatcher state");
-            return self.dispatch_submit_user_input(&mut state, envelope, text, session_id, cwd);
+            return self
+                .dispatch_submit_user_input(&mut state, envelope, text, session_id, cwd, metadata);
         }
 
         if let UiCommand::TestProviderWebSearch { .. } = envelope.command.clone() {

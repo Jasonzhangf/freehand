@@ -11,8 +11,8 @@ use freehand_contracts::{
 };
 use freehand_provider_core::{
     ProviderAdapterEvent, ProviderErrorHint, ProviderEventContext, ProviderHostedToolDefinition,
-    ProviderProtocol, ProviderSemanticOutput, ProviderSemanticRequest, ProviderToolChoice,
-    ProviderToolExchange, map_adapter_events,
+    ProviderInputAttachment, ProviderInputAttachmentKind, ProviderProtocol, ProviderSemanticOutput,
+    ProviderSemanticRequest, ProviderToolChoice, ProviderToolExchange, map_adapter_events,
 };
 use serde_json::{Value, json};
 use thiserror::Error;
@@ -263,7 +263,7 @@ impl OpenAiAdapter {
                 body: {
                     let mut body = json!({
                     "model": request.descriptor.model,
-                    "input": render_responses_input(&rendered_input, &request.tool_exchanges)?,
+                    "input": render_responses_input(&rendered_input, &request.input_attachments, &request.tool_exchanges)?,
                     "stream": stream,
                     });
                     let tools = openai_responses_tools(request);
@@ -281,7 +281,7 @@ impl OpenAiAdapter {
                 body: {
                     let mut body = json!({
                     "model": request.descriptor.model,
-                    "messages": render_chat_messages(&rendered_input, &request.tool_exchanges)?,
+                    "messages": render_chat_messages(&rendered_input, &request.input_attachments, &request.tool_exchanges)?,
                     "stream": stream,
                     });
                     if !request.tools.is_empty() {
@@ -656,17 +656,18 @@ fn terminal_reason_from_responses(value: &Value) -> Option<String> {
 
 fn render_responses_input(
     rendered_input: &str,
+    attachments: &[ProviderInputAttachment],
     tool_exchanges: &[ProviderToolExchange],
 ) -> Result<Value, OpenAiAdapterError> {
+    let mut content = vec![json!({
+        "type": "input_text",
+        "text": rendered_input,
+    })];
+    content.extend(attachments.iter().map(openai_responses_attachment_content));
     let mut items = vec![json!({
         "type": "message",
         "role": "user",
-        "content": [
-            {
-                "type": "input_text",
-                "text": rendered_input,
-            }
-        ],
+        "content": content,
     })];
     for exchange in tool_exchanges {
         let arguments = render_tool_arguments_json(&exchange.tool_call.tool_call.arguments)
@@ -688,11 +689,22 @@ fn render_responses_input(
 
 fn render_chat_messages(
     rendered_input: &str,
+    attachments: &[ProviderInputAttachment],
     tool_exchanges: &[ProviderToolExchange],
 ) -> Result<Value, OpenAiAdapterError> {
+    let user_content = if attachments.is_empty() {
+        json!(rendered_input)
+    } else {
+        let mut content = vec![json!({
+            "type": "text",
+            "text": rendered_input,
+        })];
+        content.extend(attachments.iter().map(openai_chat_attachment_content));
+        Value::Array(content)
+    };
     let mut messages = vec![json!({
         "role": "user",
-        "content": rendered_input,
+        "content": user_content,
     })];
     if !tool_exchanges.is_empty() {
         messages.push(json!({
@@ -731,6 +743,33 @@ fn render_chat_messages(
         }
     }
     Ok(Value::Array(messages))
+}
+
+fn openai_responses_attachment_content(attachment: &ProviderInputAttachment) -> Value {
+    match attachment.kind {
+        ProviderInputAttachmentKind::Image => json!({
+            "type": "input_image",
+            "image_url": data_url(attachment),
+        }),
+    }
+}
+
+fn openai_chat_attachment_content(attachment: &ProviderInputAttachment) -> Value {
+    match attachment.kind {
+        ProviderInputAttachmentKind::Image => json!({
+            "type": "image_url",
+            "image_url": {
+                "url": data_url(attachment),
+            },
+        }),
+    }
+}
+
+fn data_url(attachment: &ProviderInputAttachment) -> String {
+    format!(
+        "data:{};base64,{}",
+        attachment.media_type, attachment.data_base64
+    )
 }
 
 fn openai_responses_tools(request: &ProviderSemanticRequest) -> Vec<Value> {
@@ -971,8 +1010,8 @@ mod tests {
     };
     use freehand_provider_core::{
         ProviderCapabilities, ProviderDescriptor, ProviderFamily, ProviderHostedToolDefinition,
-        ProviderWebSearchCapability, ProviderWebSearchMode, RawRetentionPolicy,
-        build_semantic_request,
+        ProviderInputAttachment, ProviderInputAttachmentKind, ProviderWebSearchCapability,
+        ProviderWebSearchMode, RawRetentionPolicy, build_semantic_request,
     };
 
     fn ctx() -> ProviderEventContext {
@@ -1085,6 +1124,19 @@ mod tests {
         request
     }
 
+    fn image_request(protocol: ProviderProtocol) -> ProviderSemanticRequest {
+        let mut request = semantic_request(protocol);
+        request.input_attachments.push(ProviderInputAttachment {
+            attachment_id: "att-image-1".to_owned(),
+            kind: ProviderInputAttachmentKind::Image,
+            media_type: "image/png".to_owned(),
+            name: "screen.png".to_owned(),
+            size_bytes: Some(5),
+            data_base64: "aW1hZ2U=".to_owned(),
+        });
+        request
+    }
+
     #[test]
     fn renders_responses_request() {
         let adapter = OpenAiAdapter::new();
@@ -1098,6 +1150,24 @@ mod tests {
         assert!(text.contains("kind=\"user_turn_input\""));
         assert!(text.contains("\nhello\n"));
         assert_eq!(body.get("stream").and_then(Value::as_bool), Some(true));
+    }
+
+    #[test]
+    fn renders_responses_image_input_as_data_url() {
+        let rendered = OpenAiAdapter::new()
+            .render_request(&image_request(ProviderProtocol::OpenAiResponses), false)
+            .expect("render");
+        let body: Value = serde_json::from_str(&rendered.body).expect("json");
+        let content = body["input"][0]["content"].as_array().expect("content");
+
+        assert_eq!(content[0]["type"], json!("input_text"));
+        assert_eq!(content[1]["type"], json!("input_image"));
+        assert_eq!(
+            content[1]["image_url"],
+            json!("data:image/png;base64,aW1hZ2U=")
+        );
+        assert!(!rendered.body.contains("att-image-1"));
+        assert!(!rendered.body.contains("screen.png"));
     }
 
     #[test]
@@ -1190,6 +1260,27 @@ mod tests {
                 .and_then(Value::as_str)
                 .is_some_and(|content| content.contains("kind=\"user_turn_input\""))
         );
+    }
+
+    #[test]
+    fn renders_chat_completions_image_input_as_data_url() {
+        let rendered = OpenAiAdapter::new()
+            .render_request(
+                &image_request(ProviderProtocol::OpenAiChatCompletions),
+                false,
+            )
+            .expect("render");
+        let body: Value = serde_json::from_str(&rendered.body).expect("json");
+        let content = body["messages"][0]["content"].as_array().expect("content");
+
+        assert_eq!(content[0]["type"], json!("text"));
+        assert_eq!(content[1]["type"], json!("image_url"));
+        assert_eq!(
+            content[1]["image_url"]["url"],
+            json!("data:image/png;base64,aW1hZ2U=")
+        );
+        assert!(!rendered.body.contains("att-image-1"));
+        assert!(!rendered.body.contains("screen.png"));
     }
 
     #[test]

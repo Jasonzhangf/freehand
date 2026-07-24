@@ -1,7 +1,11 @@
 package com.freehand.android.ui
 
+import android.Manifest
 import android.animation.AnimatorSet
 import android.animation.ObjectAnimator
+import android.app.NotificationChannel
+import android.app.NotificationManager
+import android.app.PendingIntent
 import android.content.ActivityNotFoundException
 import android.content.Context
 import android.content.Intent
@@ -14,6 +18,7 @@ import android.os.Bundle
 import android.os.Environment
 import android.provider.OpenableColumns
 import android.provider.Settings
+import android.util.Base64
 import android.util.Log
 import android.view.Gravity
 import android.view.View
@@ -34,6 +39,8 @@ import androidx.activity.OnBackPressedCallback
 import androidx.activity.result.ActivityResultLauncher
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
+import androidx.core.app.NotificationCompat
+import androidx.core.app.NotificationManagerCompat
 import androidx.core.content.ContextCompat
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
@@ -60,6 +67,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var fileChooserLauncher: ActivityResultLauncher<Intent>
     private lateinit var fileAccessPermissionLauncher: ActivityResultLauncher<Array<String>>
     private lateinit var allFilesAccessSettingsLauncher: ActivityResultLauncher<Intent>
+    private lateinit var notificationPermissionLauncher: ActivityResultLauncher<String>
     private lateinit var apkUpdater: AndroidApkUpdater
     private var lastApkUpdateStatus: ApkUpdateStatus? = null
 
@@ -68,6 +76,14 @@ class MainActivity : AppCompatActivity() {
         val host = loadHostConfigFromStartupIntent()
         apkUpdater = AndroidApkUpdater(applicationContext, host)
 
+        notificationPermissionLauncher = registerForActivityResult(
+            ActivityResultContracts.RequestPermission(),
+        ) { granted ->
+            logNotificationStatus(
+                phase = if (granted) "runtime_permission_granted" else "runtime_permission_restricted",
+            )
+            requestInstallFileAccessIfNeeded()
+        }
         fileAccessPermissionLauncher = registerForActivityResult(
             ActivityResultContracts.RequestMultiplePermissions(),
         ) { grants ->
@@ -118,6 +134,7 @@ class MainActivity : AppCompatActivity() {
             settings.textZoom = 100
             addJavascriptInterface(AndroidFilePickerBridge(), "FreehandAndroidFilePicker")
             addJavascriptInterface(AndroidApkUpdateBridge(), "FreehandAndroidApkUpdate")
+            addJavascriptInterface(AndroidNotificationsBridge(), "FreehandAndroidNotifications")
             webChromeClient = AndroidWebChromeClient()
             webViewClient = object : WebViewClient() {
                 override fun onPageFinished(view: WebView?, url: String?) {
@@ -160,7 +177,9 @@ class MainActivity : AppCompatActivity() {
                 handleAndroidBackPressed()
             }
         })
-        requestInstallFileAccessIfNeeded()
+        if (!requestInstallNotificationPermissionIfNeeded()) {
+            requestInstallFileAccessIfNeeded()
+        }
         startAndroidApkUpdateCheck()
         webView.loadUrl(host.webUiUrl)
     }
@@ -247,6 +266,49 @@ class MainActivity : AppCompatActivity() {
         fun check() {
             runOnUiThread { startAndroidApkUpdateCheck() }
         }
+    }
+
+    private inner class AndroidNotificationsBridge {
+        @JavascriptInterface
+        fun turnFinished(payloadJson: String) {
+            runOnUiThread { showTurnFinishedNotification(payloadJson) }
+        }
+    }
+
+    private fun requestInstallNotificationPermissionIfNeeded(): Boolean {
+        createNotificationChannel()
+        val permission = NotificationPermissionPolicy.runtimePermissionForSdk(Build.VERSION.SDK_INT)
+            ?: run {
+                logNotificationStatus(phase = "not_applicable")
+                return false
+            }
+        val missing = ContextCompat.checkSelfPermission(this, permission) != PackageManager.PERMISSION_GRANTED
+        val preferences = getSharedPreferences(
+            NotificationPermissionPolicy.PREFS_NAME,
+            Context.MODE_PRIVATE,
+        )
+        val currentInstallMarker = currentInstallMarker()
+        val promptedInstallMarker = preferences.getLong(
+            NotificationPermissionPolicy.PROMPTED_INSTALL_MARKER_KEY,
+            -1L,
+        )
+        if (!NotificationPermissionPolicy.shouldPromptForInstall(
+                promptedInstallMarker = promptedInstallMarker,
+                currentInstallMarker = currentInstallMarker,
+                permissionMissing = missing,
+            )
+        ) {
+            logNotificationStatus(
+                phase = if (missing) "previously_requested_restricted" else "already_granted",
+            )
+            return false
+        }
+        preferences.edit()
+            .putLong(NotificationPermissionPolicy.PROMPTED_INSTALL_MARKER_KEY, currentInstallMarker)
+            .apply()
+        logNotificationStatus(phase = "startup_request")
+        notificationPermissionLauncher.launch(permission)
+        return true
     }
 
     private fun requestInstallFileAccessIfNeeded() {
@@ -360,6 +422,121 @@ class MainActivity : AppCompatActivity() {
         Log.i(FILE_ACCESS_TAG, parts.joinToString(" "))
     }
 
+    private fun createNotificationChannel() {
+        if (Build.VERSION.SDK_INT < 26) return
+        val manager = getSystemService(NotificationManager::class.java)
+        val channel = NotificationChannel(
+            TURN_FINISHED_CHANNEL_ID,
+            "Freehand task completion",
+            NotificationManager.IMPORTANCE_DEFAULT,
+        ).apply {
+            description = "Notifications when a Freehand turn finishes"
+        }
+        manager.createNotificationChannel(channel)
+    }
+
+    private fun showTurnFinishedNotification(payloadJson: String) {
+        createNotificationChannel()
+        val payload = try {
+            JSONObject(payloadJson)
+        } catch (error: Exception) {
+            Log.e(NOTIFICATION_TAG, "invalid turn-finished payload", error)
+            return
+        }
+        val sessionId = payload.optString("sessionId", "")
+        val turnId = payload.optString("turnId", "")
+        val status = payload.optString("status", "")
+        if (sessionId.isBlank() || turnId.isBlank() || status.isBlank()) {
+            logNotificationStatus(phase = "turn_finished_invalid", extra = "turn=$turnId")
+            return
+        }
+        val dedupeKey = "$sessionId:$turnId:$status"
+        if (notificationAlreadyShown(dedupeKey)) {
+            logNotificationStatus(phase = "turn_finished_duplicate", extra = "turn=$turnId")
+            return
+        }
+        if (Build.VERSION.SDK_INT >= 33 &&
+            ContextCompat.checkSelfPermission(this, Manifest.permission.POST_NOTIFICATIONS) !=
+            PackageManager.PERMISSION_GRANTED
+        ) {
+            logNotificationStatus(phase = "turn_finished_permission_missing", extra = "turn=$turnId")
+            return
+        }
+        val openIntent = Intent(this, MainActivity::class.java).apply {
+            action = Intent.ACTION_MAIN
+            addCategory(Intent.CATEGORY_LAUNCHER)
+            flags = Intent.FLAG_ACTIVITY_CLEAR_TOP or Intent.FLAG_ACTIVITY_SINGLE_TOP
+            putExtra("freehand_session_id", sessionId)
+            putExtra("freehand_turn_id", turnId)
+        }
+        val pendingIntent = PendingIntent.getActivity(
+            this,
+            dedupeKey.hashCode(),
+            openIntent,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE,
+        )
+        val notification = NotificationCompat.Builder(this, TURN_FINISHED_CHANNEL_ID)
+            .setSmallIcon(com.freehand.android.R.mipmap.ic_launcher)
+            .setContentTitle(payload.optString("title", "任务已经完成"))
+            .setContentText(payload.optString("text", "Freehand turn finished"))
+            .setStyle(NotificationCompat.BigTextStyle().bigText(payload.optString("text", "")))
+            .setContentIntent(pendingIntent)
+            .setAutoCancel(true)
+            .setPriority(NotificationCompat.PRIORITY_DEFAULT)
+            .build()
+        try {
+            NotificationManagerCompat.from(this).notify(NOTIFICATION_TAG, dedupeKey.hashCode(), notification)
+            markNotificationShown(dedupeKey)
+            logNotificationStatus(phase = "turn_finished_posted", extra = "turn=$turnId")
+        } catch (error: SecurityException) {
+            Log.e(NOTIFICATION_TAG, "turn-finished notification permission failed", error)
+            logNotificationStatus(phase = "turn_finished_permission_failed", extra = "turn=$turnId")
+        }
+    }
+
+    private fun notificationAlreadyShown(key: String): Boolean {
+        val preferences = getSharedPreferences(
+            NotificationPermissionPolicy.PREFS_NAME,
+            Context.MODE_PRIVATE,
+        )
+        return preferences.getStringSet(NotificationPermissionPolicy.NOTIFIED_TURNS_KEY, emptySet())
+            ?.contains(key) == true
+    }
+
+    private fun markNotificationShown(key: String) {
+        val preferences = getSharedPreferences(
+            NotificationPermissionPolicy.PREFS_NAME,
+            Context.MODE_PRIVATE,
+        )
+        val next = preferences
+            .getStringSet(NotificationPermissionPolicy.NOTIFIED_TURNS_KEY, emptySet())
+            ?.toMutableSet()
+            ?: mutableSetOf()
+        next.add(key)
+        preferences.edit()
+            .putStringSet(NotificationPermissionPolicy.NOTIFIED_TURNS_KEY, next.toList().takeLast(500).toSet())
+            .apply()
+    }
+
+    private fun logNotificationStatus(phase: String, extra: String = "") {
+        val permission = NotificationPermissionPolicy.runtimePermissionForSdk(Build.VERSION.SDK_INT)
+        val state = when {
+            permission == null -> "not_applicable"
+            ContextCompat.checkSelfPermission(this, permission) == PackageManager.PERMISSION_GRANTED -> "granted"
+            else -> "missing"
+        }
+        val parts = mutableListOf(
+            "phase=$phase",
+            "versionCode=${BuildConfig.VERSION_CODE}",
+            "installMarker=${currentInstallMarker()}",
+            "permission=$state",
+        )
+        if (extra.isNotBlank()) {
+            parts.add(extra)
+        }
+        Log.i(NOTIFICATION_TAG, parts.joinToString(" "))
+    }
+
     private fun startAndroidApkUpdateCheck() {
         if (!::apkUpdater.isInitialized) {
             recordAndroidApkUpdateStatus(
@@ -425,12 +602,17 @@ class MainActivity : AppCompatActivity() {
     private fun injectAndroidAttachmentSelection(kind: String, data: Intent?) {
         val files = JSONArray()
         selectedUris(data).forEach { uri ->
+            val mediaType = contentResolver.getType(uri) ?: "application/octet-stream"
+            val file = JSONObject()
+                .put("name", displayName(uri))
+                .put("size", displaySize(uri))
+                .put("type", mediaType)
+                .put("uri", uri.toString())
+            if (kind == "image" || mediaType.startsWith("image/")) {
+                base64ForUri(uri)?.let { file.put("data_base64", it) }
+            }
             files.put(
-                JSONObject()
-                    .put("name", displayName(uri))
-                    .put("size", displaySize(uri))
-                    .put("type", contentResolver.getType(uri) ?: "application/octet-stream")
-                    .put("uri", uri.toString()),
+                file,
             )
         }
         if (files.length() == 0) return
@@ -471,6 +653,16 @@ class MainActivity : AppCompatActivity() {
         }
         return -1L
     }
+
+    private fun base64ForUri(uri: Uri): String? =
+        try {
+            contentResolver.openInputStream(uri)?.use { stream ->
+                Base64.encodeToString(stream.readBytes(), Base64.NO_WRAP)
+            }
+        } catch (error: Exception) {
+            Log.e(LOG_TAG, "image attachment read failed for $uri", error)
+            null
+        }
 
     private fun reportCanonicalWebUiLayout(view: WebView?) {
         view?.evaluateJavascript(
@@ -615,5 +807,7 @@ class MainActivity : AppCompatActivity() {
         private const val LOG_TAG = "FreehandAndroid"
         private const val WEBUI_LAYOUT_TAG = "FreehandWebUiLayout"
         private const val FILE_ACCESS_TAG = "FreehandFileAccess"
+        private const val NOTIFICATION_TAG = "FreehandNotification"
+        private const val TURN_FINISHED_CHANNEL_ID = "freehand_turn_finished"
     }
 }

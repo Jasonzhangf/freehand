@@ -1,5 +1,34 @@
 # note.md
 
+# 2026-07-24 image attachments and Android turn-finish notifications
+
+- owner resources: `input_attachment`, `ui_projection`, `android_notification`, provider adapter image wire rendering.
+- implementation:
+  - `SubmitUserInput.metadata.attachments` carries current-send image bytes; session/turn history persists only attachment id/kind/name/media type/size metadata.
+  - Runtime maps UI image metadata into provider-neutral `ProviderInputAttachment` only for the active submit and keeps continuation rounds/history free of raw base64.
+  - OpenAI Responses/Chat Completions and Anthropic Messages adapters render provider-owned image wire without leaking attachment id/name metadata.
+  - WebUI supports multi-image selected pool, thumbnail preview, delete, metadata-only restored display, fixed-session test hooks, and Android `turnFinished` bridge on live nonterminal-to-terminal transitions only.
+  - Android requests `POST_NOTIFICATIONS` at startup where required, creates a turn-finished channel, posts a tappable notification through `FreehandAndroidNotifications`, and logs `FreehandNotification` permission/post/dedupe truth. `verify-device-ui.sh` now captures notification logcat and `dumpsys notification` artifacts.
+  - Resource map, function maps, test designs, mainline manifests, and generated wiki were synced.
+- online proof:
+  - `scripts/install-launchd.sh restartS` rebuilt and service-scoped restarted S daemon/relay.
+  - `curl -fsS http://127.0.0.1:4042/health` -> `ok`.
+  - `freehand-cliS adp-config-query --url ws://127.0.0.1:4042/adp` -> `provider=minimax`, `provider_protocol=messages`, `base_url_host=api.minimaxi.com`, `default_model=MiniMax-M3`, `web_search_effective=hosted_declared`, `auth_source=inline`.
+  - `node scripts/verify-webui-image-attachment-online.mjs` passed repeatedly; latest artifact `artifacts/webui-online/image-attachment-notification-2026-07-24T053116863Z/summary.json`, fixed session `webui-image-attachment-proof-fixed`, selected pool/preview/remove/submit metadata/history metadata-only/one notification/no historical terminal notify all true.
+  - fixture env grep for provider retry/autonomy keys returned no matches.
+- local proof:
+  - `cargo test -p freehand-ui-protocol image -- --nocapture` passed 2/2.
+  - `cargo test -p freehand-provider-openai image_input -- --nocapture` passed 2/2.
+  - `cargo test -p freehand-provider-anthropic renders_messages_image_input_as_base64_source -- --nocapture` passed 1/1.
+  - `cargo test -p freehand-runtime live_bridge_sends_image_payload_once_and_persists_metadata_only -- --nocapture` passed 1/1.
+  - `cargo test -p freehand-server --lib android -- --nocapture` passed 6/6.
+  - `cargo test -p freehand-cli --no-run`, `cargo test -p freehand-daemon --no-run`, and `cargo test -p freehand-server --lib --no-run` passed.
+  - `cd apps/freehand-android && JAVA_HOME="/Applications/Android Studio.app/Contents/jbr/Contents/Home" ./gradlew testDebugUnitTest assembleDebug --no-daemon` passed; debug APK path `apps/freehand-android/app/build/outputs/apk/debug/app-debug.apk`.
+  - `node --check apps/freehand-server/assets/webui.js`, `node --check scripts/verify-webui-image-attachment-online.mjs`, `bash -n apps/freehand-android/scripts/verify-device-ui.sh`, `jq empty ...`, `cargo fmt --check`, `cargo run -p xtask -- mainlines check`, `cargo run -p xtask -- gates check`, and `git diff --check` passed.
+- true-device gap:
+  - `adb pair 100.107.194.67:33039 579786` failed with `protocol fault`; `adb connect 100.107.194.67:45099` returned `Connection refused`; `adb devices -l` was empty.
+  - Android install, runtime permission dialog, real system notification popup, tap-return, and `dumpsys notification` posted proof remain unclosed until a reachable/unlocked ADB device is available.
+
 # 2026-07-11 master/worker path and symlink contract closeout
 
 - user report: Master and Worker both mishandled external paths and symlinked paths; Master searched outside its responsibility before delegating, and Worker did not show enough requested/canonical path evidence.

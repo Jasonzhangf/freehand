@@ -12,6 +12,22 @@
   - `RuntimeCommandDispatcher::ui_state`
   - `run_live_reason_turn_with_hooks`
 
+## Resource Map Binding
+
+- resource map: `docs/resource-maps/core.json`
+- owned resources:
+  - runtime command dispatch and turn projection operations over `input_attachment`
+- touched resources:
+  - `input_attachment`
+  - `provider_request`
+  - `ui_projection`
+- resource operations:
+  - `input_attachment.prepare_provider_input` (`input_attachment` -> `provider_request`)
+  - `input_attachment.project_to_ui` (`input_attachment` -> `ui_projection`)
+- forbidden shortcuts:
+  - Runtime must not persist image base64 in reason/session history or project it to UI history.
+  - Provider adapters must consume only provider-neutral attachment semantics; runtime must not construct protocol-specific image wire payloads.
+
 ## Request Mainline
 
 - accepted UI command ingress arrives as a `UiCommandDispatchEnvelope`
@@ -21,6 +37,7 @@
   `config.core`
 - config-selected live bootstrap may also seed one shared metadata ledger path for node-owned bootstrap and pairing provenance
 - submit commands may carry an optional selected session id and selected cwd so a draft or explicitly chosen cwd-bound session can receive the new turn instead of always using the default session
+- submit commands may carry protocol-validated image attachment metadata plus base64 payload; runtime maps that payload into provider-neutral current-request attachments and persists only id/name/media type/size metadata on the turn
 - live bootstrap may restore persisted session truth and prior turn projections before the next command runs, then recover or clear dead-owner Master active-work checkpoints before accepting user work
 - runtime dispatch owner reads the declared owner target from the envelope
 - session management commands route through runtime into `reason.persistence` session metadata and rollback APIs; runtime refreshes `UiProtocolState` from persistence-owned metadata/effective transcript projections after mutation
@@ -56,6 +73,7 @@
 ## Response Mainline
 
 - reason-backed submit/cancel commands return dispatch receipts and update derived UI turn projections, including the original user prompt and explicit cancelled terminal status for public conversation projection
+- reason-backed submit projects persisted attachment metadata with the turn while excluding image base64 from session history and UI projection
 - live provider-backed submit incrementally writes reason/debug projection updates into `UiProtocolState` while the turn is still running
 - live provider-backed submit maps `ReasonBroadcastEvent::ToolResult` into `UiProtocolState::apply_tool_result` so tool lifecycle completion is visible over turn SSE
 - live provider-backed submit publishes the user prompt into `UiProtocolState` before provider events so blank UI subscriptions can render a complete public conversation stream; framework-owned `worker-task-*` live pending projections use the same user-text hiding contract as persisted query projections

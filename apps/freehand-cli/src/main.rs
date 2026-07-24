@@ -1946,6 +1946,7 @@ async fn run_adp_turn_sample_async(url: String, sample: AdpTurnSample) -> Result
                 text: sample.prompt().to_owned(),
                 session_id: Some(session_id.clone()),
                 cwd: None,
+                metadata: None,
             },
         },
     )
@@ -4661,6 +4662,7 @@ async fn submit_adp_sample_prompt_with_timeout(
                 text,
                 session_id: Some(session_id.clone()),
                 cwd: None,
+                metadata: None,
             },
         },
     )
@@ -5154,6 +5156,8 @@ fn run_reason_live(args: Vec<String>) -> Result<String, String> {
             turn_id: TurnId::new(format!("cli-live-turn-{stamp}")),
             trace_id: TraceId::new(format!("cli-live-trace-{stamp}")),
             prompt: args[3].clone(),
+            attachments: Vec::new(),
+            attachment_metadata: Vec::new(),
             cwd: None,
             execution_profile: LiveReasonExecutionProfile::Workspace,
             stream,

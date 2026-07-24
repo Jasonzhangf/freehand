@@ -102,10 +102,27 @@ pub struct ProviderSemanticRequest {
     pub descriptor: ProviderDescriptor,
     pub payload: ReasonReq03ProviderPayload,
     pub raw_retention: RawRetentionPolicy,
+    pub input_attachments: Vec<ProviderInputAttachment>,
     pub tools: Vec<ProviderToolDefinition>,
     pub hosted_tools: Vec<ProviderHostedToolDefinition>,
     pub tool_choice: Option<ProviderToolChoice>,
     pub tool_exchanges: Vec<ProviderToolExchange>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ProviderInputAttachment {
+    pub attachment_id: String,
+    pub kind: ProviderInputAttachmentKind,
+    pub media_type: String,
+    pub name: String,
+    pub size_bytes: Option<u64>,
+    pub data_base64: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum ProviderInputAttachmentKind {
+    Image,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -208,6 +225,7 @@ pub fn build_semantic_request(
             } else {
                 RawRetentionPolicy::DoNotRetain
             },
+            input_attachments: Vec::new(),
             tools: Vec::new(),
             hosted_tools: Vec::new(),
             tool_choice: None,

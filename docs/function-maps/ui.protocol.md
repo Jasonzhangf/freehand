@@ -8,6 +8,7 @@
 - resource map: `docs/resource-maps/core.json`
 - resource operations:
   - `task.project_to_ui`
+  - `input_attachment.validate_submit_metadata`
 - owner entry symbols:
   - `UiTurnProjection`
   - `TurnProjectionInput`
@@ -27,12 +28,14 @@
 - resource map: `docs/resource-maps/core.json`
 - owned resources:
   - `ui_projection`
+  - `input_attachment`
 - touched resources:
   - `task`
   - `session`
   - `node_pairing`
 - resource operations:
   - `task.project_to_ui`
+  - `input_attachment.validate_submit_metadata`
 - forbidden shortcuts:
   - UI projection must not mutate task truth directly.
   - UI projection must not synthesize persisted sessions from temporary subagent turns.
@@ -67,6 +70,7 @@
 - runtime-owned mutation commands such as checkpoint rewind stay explicit at the protocol envelope layer and do not become UI-owned semantics
 - `CancelLatestActiveTurn` is a mutation-intent command for stopping the current active turn when a UI has not yet received a concrete `turn_id`
 - `SubmitUserInput` may carry an optional selected `session_id` and selected `cwd` so the protocol can route a new turn into an explicitly chosen cwd-bound session or draft session
+- `SubmitUserInput.metadata.attachments` is the neutral attachment ingress for image payloads; protocol validates non-empty id/name/media-type/base64 and rejects unsupported kinds before runtime dispatch, while images do not enter `text`
 - session management commands (`CreateSession`, `RenameSession`, `ArchiveSession`, `RestoreSession`, `DeleteSession`, `RollbackLatestSessionTurn`) are mutation intents only; the protocol validates and routes them while `reason.persistence` owns durable session metadata and rollback truth
 - query and subscribe stay separate
 - ADP WebSocket clients use protocol-owned typed frames for command, query, and subscribe requests instead of app-local JSON envelopes
@@ -116,6 +120,7 @@
   `UiTurnProjection.created_at` when runtime/reason supplies it, allowing UI
   clients to render per-message local-time labels without becoming timestamp
   owners
+- turn projections expose metadata-only `UiTurnProjection.attachments` so clients can render submitted image metadata after refresh without raw/base64 payloads
 - public conversation projection strips raw completion schema blocks and excludes reasoning, usage, provider payload, debug details, and verbose tool term text from the main user-visible stream
 - public conversation tool summaries preserve owner-projected `UiToolActivity.detail` even when `UiToolActivity.display` is present, so failed tool cards show the actual execution error instead of only display parameters
 - public conversation projection preserves the user prompt while still stripping raw completion schema blocks and excluding reasoning, usage, provider payload, debug details, and verbose tool term text from the main user-visible stream
@@ -168,6 +173,7 @@
 
 - invalid command, invalid stream selection, or unavailable source projection return explicit protocol errors
 - empty `SubmitUserInput.cwd` is rejected at the protocol boundary instead of being treated as runtime default
+- malformed or unsupported input attachment metadata is rejected at the protocol boundary instead of being passed to runtime/provider adapters or appended to user text
 - empty session ids and empty session titles are rejected at the protocol boundary for session management commands, including rollback
 - query/subscribe commands sent to command-ingress route are explicit protocol misuse errors
 - query commands sent as ADP command frames are explicit protocol misuse errors, not mutation attempts
@@ -256,6 +262,7 @@
 | step | symbol path | file path | responsibility | input semantic | output semantic | caller | callee | binding status |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | 01 | `validate_command` | `crates/freehand-ui-protocol/src/lib.rs` | accept and validate UI command payload | UI command | validated command | CLI/WebUI | protocol boundary | bound |
+| 01a | `validate_command` | `crates/freehand-ui-protocol/src/lib.rs` | validate SubmitUserInput image metadata attachments and reject missing id/name/media type/base64 or unsupported kinds | `SubmitUserInput.metadata.attachments` | validated neutral attachment metadata or explicit protocol rejection | CLI/WebUI/Android transports | protocol boundary | bound |
 | 01 note | `validate_command` | `crates/freehand-ui-protocol/src/lib.rs` | validate ingress intent only; does not mutate reason/debug truth | UI command | validated command | CLI/WebUI | protocol boundary | bound |
 | 02 | `accept_command_ingress` | `crates/freehand-ui-protocol/src/lib.rs` | accept only mutation-intent ingress commands and return explicit ack | UI command | ingress ack | CLI/WebUI transport adapters | protocol boundary | bound |
 | 03 | `protocol_rejection` | `crates/freehand-ui-protocol/src/lib.rs` | convert protocol error into transport-safe rejection payload | protocol error | rejection payload | CLI/WebUI transport adapters | protocol boundary | bound |

@@ -23,6 +23,7 @@
 14. `verify-device-ui.sh <adb-serial>` installs/starts APK and accepts only canonical WebUI layout evidence; local `apkanalyzer` failures are blocker evidence (`apkanalyzer_failed`), not proof that the APK is missing the launcher activity.
 15. `AndroidApkUpdater::checkForUpdateAsync` checks the selected daemon endpoint's APK update manifest, accepts only positive higher `versionCode` values and relative/http(s) APK URLs, emits stable status phases, downloads the APK into app cache, and hands the cached APK to Android's system installer through FileProvider.
 16. `MainActivity.AndroidApkUpdateBridge::check` lets daemon WebUI Settings trigger the same updater path, while `MainActivity::recordAndroidApkUpdateStatus` replays startup or manual status to `window.__freehandAndroidApkUpdateStatus`.
+17. `MainActivity::requestInstallNotificationPermissionIfNeeded` requests Android 13+ notification permission at startup, and `FreehandAndroidNotifications.turnFinished` posts one tappable notification for each distinct terminal turn.
 
 ## Resource Operation Test Coverage
 
@@ -34,6 +35,9 @@
 | `android_file_access.request_startup_permissions` | bound | `./gradlew testDebugUnitTest` covers SDK-specific runtime file/media permission lists and once-per-install-marker prompt admission, including same-version reinstall markers | `./gradlew assembleDebug` compiles `READ_EXTERNAL_STORAGE`, `READ_MEDIA_*`, and `MANAGE_EXTERNAL_STORAGE` manifest wiring plus the ActivityResult permission launcher | `bash apps/freehand-android/scripts/verify-device-ui.sh <adb-serial>` must include `FreehandFileAccess` logcat rows showing granted, requested, or restricted startup status |
 | `android_file_access.open_all_files_settings` | bound | `./gradlew testDebugUnitTest` covers Android 11+ all-files settings eligibility and pre-Android 11 exclusion | `./gradlew assembleDebug` compiles the package-scoped `ACTION_MANAGE_APP_ALL_FILES_ACCESS_PERMISSION` handoff | `bash apps/freehand-android/scripts/verify-device-ui.sh <adb-serial>` must observe Android settings handoff when all-files access is not already granted; a normal app cannot silently grant it |
 | `android_file_access.project_status` | bound | `./gradlew testDebugUnitTest` covers stable policy decisions used by `FreehandFileAccess` status logging | `./gradlew assembleDebug` compiles startup status logging | `bash apps/freehand-android/scripts/verify-device-ui.sh <adb-serial>` reads `FreehandFileAccess` logcat rows; denial remains restricted evidence, not success |
+| `android_notification.request_startup_permission` | bound | `./gradlew testDebugUnitTest` covers SDK/permission prompt policy | `./gradlew assembleDebug` compiles `POST_NOTIFICATIONS` manifest and ActivityResult launcher wiring | `bash apps/freehand-android/scripts/verify-device-ui.sh <adb-serial>` captures startup permission requested, granted, denied, or not-required truth in `notification-logcat.txt` |
+| `android_notification.post_turn_finished` | bound | `./gradlew testDebugUnitTest` covers notification prompt policy and duplicate turn identity behavior | `./gradlew assembleDebug` compiles the WebUI JavaScript bridge, notification channel, tap-return intent, and notification post path | `bash apps/freehand-android/scripts/verify-device-ui.sh <adb-serial>` captures `FreehandNotification` post truth and Android notification-manager truth after a distinct terminal WebUI turn |
+| `android_notification.project_status` | bound | `./gradlew testDebugUnitTest` locks policy inputs used by notification status projection | `./gradlew assembleDebug` compiles stable `FreehandNotification` status logging | `bash apps/freehand-android/scripts/verify-device-ui.sh <adb-serial>` writes notification permission/post/dedupe/failure status to `notification-logcat.txt` instead of allowing a silent bridge failure |
 
 ## Negative Contract
 
@@ -54,6 +58,7 @@
 - `ApkUpdateManifestTest` covers APK update manifest strict parsing, positive version validation, non-http absolute APK URL rejection, version comparison, direct endpoint URL resolution, and relay namespace URL resolution.
 - `ApkUpdateStatusTest` covers the stable status phase vocabulary consumed by the WebUI Settings bridge.
 - `FileAccessPermissionPolicyTest` covers runtime permission selection, all-files settings eligibility, and once-per-install-marker prompt admission.
+- `NotificationPermissionPolicyTest` covers Android 13+ prompt eligibility and pre-Android 13 no-prompt behavior.
 - `WebUiStartupGateTest` positively accepts only `webuiShell=true` plus `layoutClient=android-webview` plus `webuiCssApplied=true` plus `webuiJsReady=true`, and negatively rejects false, malformed, null, wrong-client, missing-stylesheet, and missing-JavaScript probes.
 - `DaemonConnectionConfigTest` covers bundled config bootstrap, strict schema validation, app-owned persistence, rejection of removed transport/top-level relay fields, remote registry Tailscale/relay endpoint selection, bootstrap deep-link import, expiry rejection, and relay endpoint account binding.
 - Server asset smoke locks that WebUI exposes `window.__freehandHandleAndroidBack`; Android compile verifies `MainActivity::handleAndroidBackPressed` calls that hook instead of owning native drawer/session/settings state.
@@ -64,12 +69,13 @@
 
 - `cd apps/freehand-android && JAVA_HOME="/Applications/Android Studio.app/Contents/jbr/Contents/Home" ./gradlew testDebugUnitTest assembleDebug`
 - APK inspection must show `com.freehand.android.ui.MainActivity` is packaged and `assets/bridge.html` is absent.
-- APK inspection must show `REQUEST_INSTALL_PACKAGES`, file/media storage permissions, `MANAGE_EXTERNAL_STORAGE`, and `${applicationId}.apkupdate.fileprovider` are packaged for the system installer handoff and startup permission prompt.
+- APK inspection must show `REQUEST_INSTALL_PACKAGES`, `POST_NOTIFICATIONS`, file/media storage permissions, `MANAGE_EXTERNAL_STORAGE`, and `${applicationId}.apkupdate.fileprovider` are packaged for the system installer handoff and startup permission prompts.
 - Server test must prove `/mock/android` and `/assets/mocks/android/mobile-mock.css` return 404 while `/?client=android-webview` returns the canonical WebUI shell.
 
 ## Project Black-Box Impact
 
 - True-device closure requires a connected/unlocked explicit ADB serial.
+- Turn-finish notification closure requires notification permission accepted on Android 13+, a real WebUI turn reaching terminal state, `FreehandNotification` posted evidence, `dumpsys notification` package evidence, and tapping the notification back into `MainActivity`.
 - File-access closure requires a fresh install/update marker not yet recorded in app preferences, launch evidence for `FreehandFileAccess` including that marker, runtime permission dialog/settings handoff when permissions are missing, and final granted/restricted status after returning to the app.
 - Full auto-upgrade closure requires installing an older APK, staging a signed higher-version APK plus matching compiled `dist/android/update.json` at the selected daemon endpoint, observing `FreehandApkUpdate` logcat update-plan/download/install-intent evidence, manually confirming Android's system installer if prompted, and reading back the upgraded package `versionCode` plus compatible signer evidence.
 - Manual Settings closure requires opening Config inside the Android WebView, tapping `Check APK update`, observing the status card move through check/download/install phases or current-version/no-update, and preserving the daemon WebUI as the only visible product UI.

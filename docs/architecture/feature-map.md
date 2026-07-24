@@ -92,12 +92,12 @@ This table is the feature-map backlink for `docs/resource-maps/core.json`. The r
 | `error.center` | `error` | `docs/resource-maps/core.json` |
 | `metadata.core` | `metadata` | `docs/resource-maps/core.json` |
 | `debug.core` | `debug_trace` | `docs/resource-maps/core.json` |
-| `ui.protocol` | `ui_projection` | `docs/resource-maps/core.json` |
+| `ui.protocol` | `ui_projection`, `input_attachment` | `docs/resource-maps/core.json` |
 | `runtime.ui-command-dispatch` | `runtime_command` | `docs/resource-maps/core.json` |
 | `runtime.checkpoint-rewind` | `checkpoint` | `docs/resource-maps/core.json` |
 | `node.master-slave` | `node_pairing`, `remote_daemon_directory` | `docs/resource-maps/core.json` |
 | `app.runtime-daemon` | `remote_relay_transport` | `docs/resource-maps/core.json` |
-| `app.android-client` | `android_apk_update`, `android_file_access` | `docs/resource-maps/core.json` |
+| `app.android-client` | `android_apk_update`, `android_file_access`, `android_notification` | `docs/resource-maps/core.json` |
 | `instruction.capability-loader` | `instruction_capability` | `docs/resource-maps/core.json` |
 
 ## Architecture Gap Registry
@@ -613,7 +613,7 @@ Non-violation pending items live in `docs/architecture/architecture-gaps.md`. Ea
 ### `app.webui-smoke`
 
 - owner: `apps/freehand-server`
-- allowed_paths: `apps/freehand-server/**`, `crates/freehand-ui-protocol/**`, `docs/function-maps/**`, `docs/testing/**`, `docs/design/**`, `docs/goals/**`
+- allowed_paths: `apps/freehand-server/**`, `crates/freehand-ui-protocol/**`, `scripts/verify-webui-image-attachment-online.mjs`, `docs/function-maps/**`, `docs/testing/**`, `docs/design/**`, `docs/goals/**`, `docs/mainline-calls/**`, `docs/wiki/**`, `docs/resource-maps/core.json`
 - forbidden_paths: `crates/freehand-runtime/**`, `crates/freehand-reason/**`, `crates/freehand-node/**`, `crates/freehand-config/**`, `crates/freehand-provider-*/**` except consuming already-owned UI protocol projections
 - required_checks:
   - `cargo test -p freehand-server`

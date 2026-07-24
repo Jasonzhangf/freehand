@@ -11,6 +11,7 @@ Generated from `docs/mainline-calls/ui.protocol.json`. Do not edit by hand.
 ## Resource Operation Backlinks
 
 - task.project_to_ui
+- input_attachment.validate_submit_metadata
 
 ## Request Mainline
 
@@ -39,6 +40,7 @@ Generated from `docs/mainline-calls/ui.protocol.json`. Do not edit by hand.
 - subscriptions may target latest active turn, specific turn, specific turn debug state, or node/progress streams
 - CancelLatestActiveTurn is a mutation-intent command for stopping the current active turn when a UI has not yet received a concrete turn_id
 - SubmitUserInput may carry selected session_id and cwd; empty cwd is rejected by protocol validation
+- SubmitUserInput may carry neutral metadata.attachments image payloads; protocol validates kind, id, filename, media type, and current-submit base64 payload before dispatch without embedding images in user text
 - session management commands (`CreateSession`, `RenameSession`, `ArchiveSession`, `RestoreSession`, `DeleteSession`, `RollbackLatestSessionTurn`) are mutation intents only; protocol validates and routes them while `reason.persistence` owns durable metadata and rollback truth
 - task list subscribe commands are protocol-owned ADP/subscribe shapes while task truth remains runtime/task-owner supplied
 - error-center subscribe commands are protocol-owned ADP/subscribe shapes while error truth remains runtime/error-center supplied
@@ -63,6 +65,7 @@ Generated from `docs/mainline-calls/ui.protocol.json`. Do not edit by hand.
 - UI must be able to consume reason-turn state and debug-state projections without owning either truth source
 - transport adapters may drain debug receivers and query protocol snapshots, but projection ownership stays in `freehand-ui-protocol`
 - turn projections preserve terminal status separately from terminal text so UI clients can distinguish success, failed, blocked, interrupted, running, and cancelled terminal states
+- turn projections carry metadata-only `attachments` rows for uploaded images so UI clients can show what was submitted after refresh without raw/base64 image payload
 - public conversation terminal items derive status strings from terminal status instead of treating every terminal text as completed
 - public conversation tool summaries carry tool_call_id so UI clients can update one tool card instead of rendering duplicate waiting/completed cards, and completed/failed public tool bodies expose protocol-projected tool result detail even when structured display fields are present
 - cancel commands route to reason.turn whether they target an explicit turn_id or the latest active turn
@@ -96,6 +99,7 @@ Generated from `docs/mainline-calls/ui.protocol.json`. Do not edit by hand.
 - cancelled terminal projection must stay explicit and must not be collapsed into failed or completed UI status
 - CancelLatestActiveTurn without any active or persisted turn returns explicit target-not-found from the owner module
 - empty SubmitUserInput.cwd returns empty_session_cwd instead of falling back silently
+- SubmitUserInput metadata attachments with missing id, filename, media type, base64 data, or unsupported kind return explicit attachment protocol rejections before runtime dispatch
 - empty session ids and empty session titles are rejected at the protocol boundary for session management commands, including rollback
 - empty task history ids return empty_task_id and task query commands sent as command ingress are rejected as query-route misuse
 - task mutation commands reject empty task id/title/content/goal/review summary, empty worker agent id/capabilities, empty claim execution id, and empty review rejection fields before runtime dispatch instead of silently creating partial task truth
@@ -200,6 +204,7 @@ Generated from `docs/mainline-calls/ui.protocol.json`. Do not edit by hand.
 | step | symbol path | file path | responsibility | input semantic | output semantic | caller | callee | source resource | target resource | resource operation | binding status |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | 01 | `validate_command` | `crates/freehand-ui-protocol/src/lib.rs` | accept and validate UI command payload | UI command | validated command | CLI/WebUI | protocol boundary |  |  |  | bound |
+| 01a | `validate_command` | `crates/freehand-ui-protocol/src/lib.rs` | validate SubmitUserInput metadata image attachments before runtime dispatch | SubmitUserInput.metadata.attachments | validated image attachment metadata and transient base64 payload or explicit protocol rejection | CLI/WebUI/Android transports | protocol boundary | input_attachment | input_attachment | input_attachment.validate_submit_metadata | bound |
 | 02 | `accept_command_ingress` | `crates/freehand-ui-protocol/src/lib.rs` | accept only mutation-intent ingress commands and return explicit ack | UI command | ingress ack | CLI/WebUI transport adapters | protocol boundary |  |  |  | bound |
 | 03 | `protocol_rejection` | `crates/freehand-ui-protocol/src/lib.rs` | convert protocol error into transport-safe rejection payload | protocol error | rejection payload | CLI/WebUI transport adapters | protocol boundary |  |  |  | bound |
 | 04 | `build_command_dispatch_envelope` | `crates/freehand-ui-protocol/src/lib.rs` | wrap accepted ingress command with declared owner routing | UI command | dispatch envelope | CLI/WebUI transport adapters | protocol boundary |  |  |  | bound |

@@ -5,12 +5,14 @@
 - resource map: `docs/resource-maps/core.json`
 - resource operation coverage:
   - `task.project_to_ui`
+  - `input_attachment.validate_submit_metadata`
 
 ## Resource Operation Test Coverage
 
 | resource operation | status | white-box | module black-box | project black-box |
 | --- | --- | --- | --- | --- |
 | `task.project_to_ui` | bound | `cargo test -p freehand-ui-protocol -- --nocapture` covers DTO validation, task/session projection filtering, command receipt, and worker-child session projection tests | `cargo test -p freehand-cli master_worker_autonomy -- --nocapture` covers ADP query/subscribe/command protocol smokes for task board, agent board, event inbox, task history, and session list | `make verify-webui-online` covers WebUI/CLI S-profile projection proofs that task truth renders through protocol projections without UI owning task state |
+| `input_attachment.validate_submit_metadata` | bound | `cargo test -p freehand-ui-protocol image -- --nocapture` covers image-only submit admission and missing-payload rejection | `cargo test -p freehand-server --lib android -- --nocapture` covers WebUI asset wiring for attachment metadata submit helpers and Android bridge payload fields | `node scripts/verify-webui-image-attachment-online.mjs` proves online WebUI submit sends `SubmitUserInput.metadata.attachments` with image base64 while persisted turn projection keeps metadata only |
 
 - lifecycle path under test:
   - commands enter protocol boundary
@@ -18,6 +20,7 @@
   - command ingress accepts only mutation-intent commands and rejects query-route misuse explicitly
   - accepted command ingress is routed to declared owner feature/module before transport dispatch
   - submit command validation accepts an optional selected session id and optional selected cwd without weakening empty-text rejection
+  - submit command validation accepts image-only metadata submits while rejecting malformed attachment metadata before runtime/provider dispatch
   - session management commands are protocol-owned ingress intents: create, rename, archive, restore, delete-as-archive, and rollback route to the session persistence owner instead of mutating WebUI local state
   - latest-active cancellation is accepted as mutation intent and routes to `reason.turn`
   - query returns snapshot truth
@@ -75,6 +78,7 @@
   - command dispatch routing mapping
   - submit command selected-session validation mapping
   - submit command selected-cwd validation and JSON roundtrip mapping
+  - submit metadata attachment validation covers image-only submit, missing base64, and unsupported/empty fields
   - session management command validation covers empty title, empty session id, empty cwd, rollback empty session id, and explicit owner-routing to `reason.persistence`
   - session transcript replacement coverage proves runtime can refresh one effective session transcript after rollback without UI-local deletion
   - explicit cancel and latest-active cancel owner-routing mapping
@@ -122,6 +126,7 @@
 - module black-box plan:
   - command ingress accept/reject smoke
   - selected-session submit command smoke
+  - image-only SubmitUserInput metadata command smoke
   - selected-session cwd projection smoke
 - session metadata projection smoke covers created empty sessions, renamed sessions, archived sessions being hidden from the active list, and restored sessions becoming visible again
 - session list projection smoke covers top-level active/archived lists being metadata-only: created persisted sessions appear even when empty, turn-only sessions do not become global sessions, internal `master-lifecycle-*`, `master-timer-*`, and `worker-task-*` sessions are absent while explicit `QuerySessionTurns` for those ids remains queryable, and `active_turn_id` is present only for the latest nonterminal live/progress turn

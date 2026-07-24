@@ -88,6 +88,10 @@ capture_file_access_logcat() {
   adb -s "$serial" logcat -d -s FreehandFileAccess:I '*:S' 2>/dev/null || true
 }
 
+capture_notification_logcat() {
+  adb -s "$serial" logcat -d -s FreehandNotification:I '*:S' 2>/dev/null || true
+}
+
 capture_activity_and_window() {
   adb -s "$serial" shell dumpsys activity activities >"$artifact_dir/dumpsys-activity.txt" 2>&1 || true
   adb -s "$serial" shell dumpsys window >"$artifact_dir/dumpsys-window.txt" 2>&1 || true
@@ -172,6 +176,8 @@ verify_device_ui() {
   adb -s "$serial" logcat -d >"$artifact_dir/logcat.txt" 2>&1 || true
   capture_webui_layout_logcat >"$artifact_dir/webui-layout-logcat.txt" || true
   capture_file_access_logcat >"$artifact_dir/file-access-logcat.txt" || true
+  capture_notification_logcat >"$artifact_dir/notification-logcat.txt" || true
+  adb -s "$serial" shell dumpsys notification >"$artifact_dir/dumpsys-notification.txt" 2>&1 || true
   adb -s "$serial" exec-out screencap -p >"$artifact_dir/screenshot.png" 2>"$artifact_dir/screencap.stderr" || true
 
   local fatal_pattern

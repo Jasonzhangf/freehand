@@ -588,6 +588,7 @@ mod tests {
                 text: "daemon turn".to_owned(),
                 session_id: None,
                 cwd: None,
+                metadata: None,
             })
             .send()
             .await
@@ -702,6 +703,7 @@ mod tests {
                         text: "daemon adp turn".to_owned(),
                         session_id: None,
                         cwd: None,
+                        metadata: None,
                     },
                 })
                 .expect("command json")
@@ -881,6 +883,7 @@ mod tests {
                 text: "first prompt for rollback session".to_owned(),
                 session_id: Some(session_id.clone()),
                 cwd: None,
+                metadata: None,
             },
         )
         .await;
@@ -891,6 +894,7 @@ mod tests {
                 text: "second prompt to roll back".to_owned(),
                 session_id: Some(session_id.clone()),
                 cwd: None,
+                metadata: None,
             },
         )
         .await;
@@ -1020,6 +1024,7 @@ mod tests {
                 acceptance: vec!["history projection".to_owned()],
                 priority: 80,
                 target_cwd: Some("/tmp".to_owned()),
+                execution_profile: freehand_task::TaskExecutionProfile::Workspace,
                 dispatch: TaskDispatchRequest::None,
                 parent: TaskParentRef {
                     session_id: None,
@@ -1338,6 +1343,7 @@ mod tests {
                         text: "create task through provider".to_owned(),
                         session_id: None,
                         cwd: None,
+                        metadata: None,
                     },
                 })
                 .expect("task submit json")
@@ -1426,6 +1432,7 @@ mod tests {
                 text: "daemon streamed user prompt".to_owned(),
                 session_id: None,
                 cwd: None,
+                metadata: None,
             })
             .send()
             .await
@@ -1469,6 +1476,7 @@ mod tests {
                 text: "daemon turn".to_owned(),
                 session_id: None,
                 cwd: None,
+                metadata: None,
             })
             .send()
             .await
@@ -1507,6 +1515,7 @@ mod tests {
                 text: "create writable checkpoint".to_owned(),
                 session_id: None,
                 cwd: None,
+                metadata: None,
             })
             .send()
             .await
@@ -1603,6 +1612,7 @@ mod tests {
                 text: "create writable checkpoint".to_owned(),
                 session_id: None,
                 cwd: None,
+                metadata: None,
             })
             .send()
             .await
@@ -1677,6 +1687,7 @@ mod tests {
                 text: "first daemon turn".to_owned(),
                 session_id: None,
                 cwd: None,
+                metadata: None,
             })
             .send()
             .await
@@ -1750,6 +1761,7 @@ mod tests {
                 text: "second daemon turn".to_owned(),
                 session_id: None,
                 cwd: None,
+                metadata: None,
             })
             .send()
             .await
@@ -1810,6 +1822,7 @@ mod tests {
                 text: "first streamed daemon turn".to_owned(),
                 session_id: None,
                 cwd: None,
+                metadata: None,
             })
             .send()
             .await
@@ -1844,6 +1857,7 @@ mod tests {
                 text: "second streamed daemon turn".to_owned(),
                 session_id: None,
                 cwd: None,
+                metadata: None,
             })
             .send()
             .await

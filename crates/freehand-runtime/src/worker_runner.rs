@@ -769,6 +769,8 @@ fn worker_live_request(
         turn_id: TurnId::new(format!("worker-turn-{execution_key}")),
         trace_id: TraceId::new(format!("worker-trace-{execution_key}")),
         prompt,
+        attachments: Vec::new(),
+        attachment_metadata: Vec::new(),
         cwd: workspace,
         execution_profile: LiveReasonExecutionProfile::from(task.execution_profile),
         stream: false,

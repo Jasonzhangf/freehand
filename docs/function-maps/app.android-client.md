@@ -4,7 +4,7 @@
 - owner crate: `apps/freehand-android`
 - owner module: `apps/freehand-android/app/src/main/java/com/freehand/android/`
 - product UI owner: daemon-hosted WebUI from `app.webui-smoke`
-- Android scope: thin WebView host plus platform file-picker bridge, first-start file-access permission prompt, APK update status bridge, and system-installer handoff
+- Android scope: thin WebView host plus platform file-picker bridge, startup file/notification permission prompts, turn-finish notification bridge, APK update status bridge, and system-installer handoff
 - reference design: `docs/design/multi-platform-ui-architecture.md`
 - resource map: `docs/resource-maps/core.json`
 - test design: `docs/testing/app.android-client.md`
@@ -13,9 +13,9 @@
 
 ## Resource Map Binding
 
-- owned resources: Android app bootstrap/config, platform WebView host, `android_file_access`, and `android_apk_update`
+- owned resources: Android app bootstrap/config, platform WebView host, `android_file_access`, `android_notification`, and `android_apk_update`
 - touched resources: daemon WebUI URL, daemon APK update manifest URL, app-owned daemon endpoint bootstrap config, Android launcher assets
-- resource operations: `android_file_access.request_startup_permissions` (`android_file_access` -> `android_file_access`), `android_file_access.open_all_files_settings` (`android_file_access` -> `android_file_access`), `android_file_access.project_status` (`android_file_access` -> `android_file_access`), `android_apk_update.check_manifest` (`android_apk_update` -> `android_apk_update`), `android_apk_update.download_apk` (`android_apk_update` -> `android_apk_update`), `android_apk_update.request_install` (`android_apk_update` -> `android_apk_update`)
+- resource operations: `android_file_access.request_startup_permissions` (`android_file_access` -> `android_file_access`), `android_file_access.open_all_files_settings` (`android_file_access` -> `android_file_access`), `android_file_access.project_status` (`android_file_access` -> `android_file_access`), `android_notification.request_startup_permission` (`android_notification` -> `android_notification`), `android_notification.post_turn_finished` (`android_notification` -> `android_notification`), `android_notification.project_status` (`android_notification` -> `android_notification`), `android_apk_update.check_manifest` (`android_apk_update` -> `android_apk_update`), `android_apk_update.download_apk` (`android_apk_update` -> `android_apk_update`), `android_apk_update.request_install` (`android_apk_update` -> `android_apk_update`)
 - forbidden shortcuts: Android must not own a second conversation UI, settings UI, native task/status projector, ADP command transport, SSE transport, local HTML bridge, Android mock page, native update panel, remote daemon account directory truth, route scoring, or relay protocol/tunnel semantics
 
 ## Request Mainline
@@ -30,6 +30,7 @@
 - `MainActivity` records the latest APK update status and replays it after page load so startup auto-check and manual Settings checks remain observable in the WebUI.
 - `MainActivity` renders a neutral native startup overlay before WebView navigation and removes it only after `WebUiStartupGate` accepts the canonical Android WebUI shell plus stylesheet and module-JavaScript readiness probe.
 - `MainActivity::requestInstallFileAccessIfNeeded` runs once per package install/update marker during startup, requests supported runtime file/media permissions, opens Android 11+ package all-files-access settings when broad storage access is not granted, and records the result as `FreehandFileAccess` logcat truth instead of deferring permission prompts until later file actions.
+- `MainActivity::requestInstallNotificationPermissionIfNeeded` requests Android 13+ notification permission during startup when it is not granted; pre-Android 13 needs no runtime notification prompt.
 - WebUI itself owns ADP query/subscribe/command, settings, lifecycle dashboard, transcript, composer, and error rendering.
 - Android physical Back invokes the daemon WebUI-owned `window.__freehandHandleAndroidBack` hook first, so focused fields and WebUI dialogs/drawers close before the Activity exits or WebView history is navigated; Android must not implement native settings/session fallback behavior.
 - Android exposes only `FreehandAndroidFilePicker` so WebUI attachment controls can invoke Android's system picker.
@@ -42,6 +43,7 @@
 - APK update status phases (`checking`, `current`, `available`, `downloading`, `downloaded`, `installer_started`, `failed`, `already_checking`) are pushed into `window.__freehandAndroidApkUpdateStatus` for the WebUI Settings card.
 - Android logs `FreehandWebUiLayout` from canonical WebUI DOM selectors, applied stylesheet state, and WebUI module-JavaScript readiness for true-device validation.
 - Android logs `FreehandFileAccess` status for startup permission requests, all-files settings handoff, granted state, restricted state, and settings-unavailable failures for true-device validation.
+- Android creates a turn-completion notification channel, posts one system notification from `FreehandAndroidNotifications.turnFinished`, and logs permission/post/dedupe status as `FreehandNotification` truth; tapping the notification returns to `MainActivity`.
 - The startup overlay shows loading/error state until the canonical Android WebUI shell is verified; page-finished alone is not success.
 - Android Back returns a WebUI-handled result when the canonical page closes a focused form, dialog, Header tree, Agent sheet, or mobile drawer; otherwise Android may navigate WebView history or exit.
 - File picker selections are returned to WebUI through `window.__freehandAndroidAttachmentSelected`.
@@ -57,6 +59,7 @@
 - Missing WebUI layout probe is a failed/blocked device validation result, not acceptance evidence.
 - Missing, malformed, wrong-client, stylesheet-not-applied, or WebUI-JavaScript-not-ready startup probe leaves the native startup state visible instead of pretending the app is ready.
 - Runtime permission denial or Android all-files settings denial remains visible as `FreehandFileAccess` restricted status; Android does not repeatedly prompt during later file actions in the same package install marker.
+- Missing Android notification permission is an explicit `FreehandNotification permission_missing` status; the bridge does not claim a posted notification.
 - Missing or false WebUI back-hook handling falls through to normal Android exit/navigation; Android must not fabricate local drawer state.
 
 ## Function Call Table
@@ -84,6 +87,9 @@
 | 15 | `com.freehand.android.ui.MainActivity::requestInstallFileAccessIfNeeded` / `currentInstallMarker` | `apps/freehand-android/app/src/main/java/com/freehand/android/ui/MainActivity.kt` | request supported runtime file/media permissions once per package install/update marker during startup | package permission state + prompted install-marker preference | runtime permission dialog or all-files settings handoff or already-granted status | `MainActivity::onCreate` | `FileAccessPermissionPolicy`, Android permission launcher | bound |
 | 15a | `com.freehand.android.ui.MainActivity::openAllFilesAccessSettingsIfNeeded` | `apps/freehand-android/app/src/main/java/com/freehand/android/ui/MainActivity.kt` | open Android 11+ package all-files-access settings when broad storage access is not granted | package name + all-files permission state | settings activity result or settings-unavailable status | runtime permission result / startup permission request | Android Settings intent | bound |
 | 15b | `com.freehand.android.ui.MainActivity::logFileAccessStatus` | `apps/freehand-android/app/src/main/java/com/freehand/android/ui/MainActivity.kt` | project file-access startup permission state to logcat for device verification | phase + runtime/all-files status | `FreehandFileAccess` logcat row | startup permission request / settings result | Android Logcat | bound |
+| 16 | `com.freehand.android.ui.MainActivity::requestInstallNotificationPermissionIfNeeded` / `com.freehand.android.ui.NotificationPermissionPolicy::shouldPromptForInstall` | `apps/freehand-android/app/src/main/java/com/freehand/android/ui/MainActivity.kt` / `apps/freehand-android/app/src/main/java/com/freehand/android/ui/NotificationPermissionPolicy.kt` | request Android 13+ notification permission at startup only when required | SDK + permission state | permission launcher or already-granted/not-required status | `MainActivity::onCreate` | Android permission launcher | bound |
+| 17 | `com.freehand.android.ui.MainActivity::showTurnFinishedNotification` | `apps/freehand-android/app/src/main/java/com/freehand/android/ui/MainActivity.kt` | validate/dedupe the WebUI terminal-turn bridge payload and post a tappable completion notification | session/turn/status/title/body payload | Android notification or explicit permission/dedupe status | `AndroidNotificationsBridge::turnFinished` | `NotificationManagerCompat` | bound |
+| 18 | `com.freehand.android.ui.MainActivity::logNotificationStatus` | `apps/freehand-android/app/src/main/java/com/freehand/android/ui/MainActivity.kt` | project startup permission and post outcomes to device log truth | phase + session/turn/status detail | `FreehandNotification` logcat row | notification permission/post paths | Android Logcat | bound |
 
 ## Sync Status Against Code
 

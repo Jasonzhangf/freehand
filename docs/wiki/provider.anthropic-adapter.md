@@ -11,6 +11,7 @@ Generated from `docs/mainline-calls/provider.anthropic-adapter.json`. Do not edi
 ## Resource Operation Backlinks
 
 - provider_request.render_anthropic_hosted_search_wire
+- provider_request.render_anthropic_image_input_wire
 - provider_response.observe_anthropic_hosted_search_call
 
 ## Request Mainline
@@ -20,6 +21,7 @@ Generated from `docs/mainline-calls/provider.anthropic-adapter.json`. Do not edi
 - adapter consumes typed `input_segments` and renders them to Anthropic wire text without owning segment admission truth
 - adapter renders provider-neutral tool schema metadata into Anthropic `tools` and `tool_choice`
 - adapter renders provider-neutral hosted web_search metadata into Anthropic Messages server-tool wire without creating a local Freehand function tool
+- adapter renders current-submit provider-neutral image attachments into Anthropic Messages image source blocks without leaking attachment ids or filenames
 - adapter renders provider-neutral tool call/result exchanges into Anthropic assistant `tool_use` and user `tool_result` message content
 - executor posts rendered requests to configured Anthropic-compatible base URL with explicit `x-api-key`, `anthropic-version`, and JSON headers
 
@@ -62,6 +64,7 @@ Generated from `docs/mainline-calls/provider.anthropic-adapter.json`. Do not edi
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | 01 | `AnthropicAdapter::render_request` | `crates/freehand-provider-anthropic/src/lib.rs` | render semantic request to Anthropic messages wire request | provider semantic request | Anthropic path plus JSON body | runtime/provider caller | adapter renderer |  |  |  | bound |
 | 01a | `anthropic_messages_hosted_tool` | `crates/freehand-provider-anthropic/src/lib.rs` | render provider-neutral hosted search declarations into Anthropic Messages server-tool wire | provider semantic request hosted tool metadata | Anthropic Messages hosted web_search tool JSON | AnthropicAdapter::render_request | adapter hosted-tool renderer | provider_request | provider_hosted_search | provider_request.render_anthropic_hosted_search_wire | bound |
+| 01b | `anthropic_attachment_content` | `crates/freehand-provider-anthropic/src/lib.rs` | render provider-neutral current-submit image attachments into Anthropic Messages image content blocks | ProviderInputAttachment image metadata plus base64 payload | Anthropic Messages image block with base64 source and media type without attachment id/name leakage | AnthropicAdapter::render_request | adapter image renderer | provider_request | input_attachment | provider_request.render_anthropic_image_input_wire | bound |
 | 02 | `AnthropicAdapter::parse_response` | `crates/freehand-provider-anthropic/src/lib.rs` | parse single-shot Anthropic response | raw response body | provider semantic outputs | runtime/provider caller | adapter parser |  |  |  | bound |
 | 02a | `anthropic_hosted_web_search_observation / anthropic_hosted_web_search_result_observation` | `crates/freehand-provider-anthropic/src/lib.rs` | map Anthropic Messages hosted web_search blocks into provider-neutral reasoning observations | raw Anthropic server_tool_use or web_search_tool_result block | provider semantic reasoning event | AnthropicAdapter::parse_response / AnthropicAdapter::parse_stream_event | adapter hosted-search parser | provider_response | provider_hosted_search | provider_response.observe_anthropic_hosted_search_call | bound |
 | 03 | `AnthropicAdapter::parse_stream_event` | `crates/freehand-provider-anthropic/src/lib.rs` | parse one Anthropic SSE event and update partial state | raw stream event | provider semantic outputs | runtime/provider caller | adapter stream parser |  |  |  | bound |

@@ -8,6 +8,7 @@
   "generated_wiki_doc": "docs/wiki/provider.anthropic-adapter.md",
   "resource_operations": [
     "provider_request.render_anthropic_hosted_search_wire",
+    "provider_request.render_anthropic_image_input_wire",
     "provider_response.observe_anthropic_hosted_search_call"
   ],
   "request_mainline": [
@@ -16,6 +17,7 @@
     "adapter consumes typed `input_segments` and renders them to Anthropic wire text without owning segment admission truth",
     "adapter renders provider-neutral tool schema metadata into Anthropic `tools` and `tool_choice`",
     "adapter renders provider-neutral hosted web_search metadata into Anthropic Messages server-tool wire without creating a local Freehand function tool",
+    "adapter renders current-submit provider-neutral image attachments into Anthropic Messages image source blocks without leaking attachment ids or filenames",
     "adapter renders provider-neutral tool call/result exchanges into Anthropic assistant `tool_use` and user `tool_result` message content",
     "executor posts rendered requests to configured Anthropic-compatible base URL with explicit `x-api-key`, `anthropic-version`, and JSON headers"
   ],
@@ -88,6 +90,20 @@
       "source_resource": "provider_request",
       "target_resource": "provider_hosted_search",
       "resource_operation": "provider_request.render_anthropic_hosted_search_wire",
+      "binding_status": "bound"
+    },
+    {
+      "step": "01b",
+      "symbol_path": "anthropic_attachment_content",
+      "file_path": "crates/freehand-provider-anthropic/src/lib.rs",
+      "responsibility": "render provider-neutral current-submit image attachments into Anthropic Messages image content blocks",
+      "input_semantic": "ProviderInputAttachment image metadata plus base64 payload",
+      "output_semantic": "Anthropic Messages image block with base64 source and media type without attachment id/name leakage",
+      "caller": "AnthropicAdapter::render_request",
+      "callee": "adapter image renderer",
+      "source_resource": "provider_request",
+      "target_resource": "input_attachment",
+      "resource_operation": "provider_request.render_anthropic_image_input_wire",
       "binding_status": "bound"
     },
     {
