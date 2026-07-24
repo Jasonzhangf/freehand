@@ -68,13 +68,16 @@ use freehand_blocks::{
 #[cfg(test)]
 use freehand_config::SelectedPeerAgentConfig;
 use freehand_config::{
-    AgentMode, AgentProviderSelectionConfigUpdate, AgentResourceConfigUpdate, LoadedConfig,
-    MAX_AGENT_RESOURCE_COUNT, ProviderConfigUpdate, ProviderProtocol as ConfigProviderProtocol,
-    ProviderType, ProviderWebSearchMode, SelectedAgentConfig, SelectedProviderConfig,
-    default_config_path, load_config_from_path, load_default_config,
-    provider_base_url_host_for_projection, safe_provider_base_url_for_projection,
+    AgentMode, AgentModelGroupSelectionConfigUpdate, AgentProviderSelectionConfigUpdate,
+    AgentResourceConfigUpdate, LoadedConfig, MAX_AGENT_RESOURCE_COUNT, ModelGroupConfigUpdate,
+    ModelRouteConfig, ModelWeightedRouteConfig, ProviderConfigUpdate,
+    ProviderProtocol as ConfigProviderProtocol, ProviderType, ProviderWebSearchMode,
+    SelectedAgentConfig, SelectedProviderConfig, default_config_path, load_config_from_path,
+    load_default_config, provider_base_url_host_for_projection,
+    safe_provider_base_url_for_projection, switch_agent_model_group_in_path,
     switch_agent_provider_in_path, update_agent_resource_config_in_path,
-    update_provider_config_in_path, upsert_provider_config_in_path,
+    update_provider_config_in_path, upsert_model_group_config_in_path,
+    upsert_provider_config_in_path,
 };
 use freehand_contracts::{
     AgentId, ContextCachePolicy, ContextProvenance, ContextRole, ContextSegment, ContextSegmentId,
@@ -137,23 +140,26 @@ use freehand_tools::{
 };
 use freehand_ui_protocol::{
     TurnProjectionInput, UiAgentBoardProjection, UiAgentLifecycleActivityProjection,
-    UiAgentLifecycleProjection, UiAgentProcessProjection, UiAgentProviderSelectionUpdate,
-    UiAgentResourceConfigUpdate, UiAgentSnapshotProjection, UiAttachmentMetadataProjection,
-    UiClientKind, UiCommand, UiCommandDispatchEnvelope, UiCommandDispatchPort,
-    UiCommandDispatchPortError, UiCommandDispatchReceipt, UiCompletionSchemaRetryWaiting,
-    UiConfigPeerProjection, UiConfigStatusProjection, UiErrorCenterEventListProjection,
-    UiErrorCenterEventProjection, UiExecutionFactCommand, UiExecutionFactKind,
-    UiInputAttachmentKind, UiMasterPollClassificationProjection, UiMasterPollProjection,
-    UiModelRequestKind, UiModelRequestWaiting, UiModelTransportActivity, UiModelTransportKind,
-    UiProtocolState, UiProviderConfigSummaryProjection, UiProviderConfigUpdate, UiQueryResult,
-    UiRuntimeQueryPort, UiSchedulerTickCommand, UiSessionMetadataProjection, UiSubmitMetadata,
-    UiTaskAgentCreateCommand, UiTaskAssignCommand, UiTaskBoardProjection, UiTaskClaimCommand,
-    UiTaskCreateCommand, UiTaskDispatchCommand, UiTaskEventInboxEntryProjection,
-    UiTaskEventInboxProjection, UiTaskHistoryProjection, UiTaskLedgerEventProjection,
-    UiTaskListProjection, UiTaskReviewCommand, UiTaskReviewRejectionCommand,
-    UiTaskSnapshotProjection, UiTimerEventProjection, UiTimerListProjection, UiTimerProjection,
-    UiTimerRepeatCommand, UiTimerScheduleCommand, UiTurnProjection, UiTurnTimingProjection,
-    UiWorkerControlCommand, UiWorkerControlEventProjection, UiWorkerControlProjection,
+    UiAgentLifecycleProjection, UiAgentModelGroupSelectionUpdate, UiAgentProcessProjection,
+    UiAgentProviderSelectionUpdate, UiAgentResourceConfigUpdate, UiAgentSnapshotProjection,
+    UiAttachmentMetadataProjection, UiClientKind, UiCommand, UiCommandDispatchEnvelope,
+    UiCommandDispatchPort, UiCommandDispatchPortError, UiCommandDispatchReceipt,
+    UiCompletionSchemaRetryWaiting, UiConfigPeerProjection, UiConfigStatusProjection,
+    UiErrorCenterEventListProjection, UiErrorCenterEventProjection, UiExecutionFactCommand,
+    UiExecutionFactKind, UiInputAttachmentKind, UiMasterPollClassificationProjection,
+    UiMasterPollProjection, UiModelGroupConfigProjection, UiModelGroupConfigUpdate,
+    UiModelRequestKind, UiModelRequestWaiting, UiModelRouteProjection, UiModelRouteUpdate,
+    UiModelTransportActivity, UiModelTransportKind, UiModelWeightedRouteProjection,
+    UiModelWeightedRouteUpdate, UiProtocolState, UiProviderConfigSummaryProjection,
+    UiProviderConfigUpdate, UiQueryResult, UiRuntimeQueryPort, UiSchedulerTickCommand,
+    UiSessionMetadataProjection, UiSubmitMetadata, UiTaskAgentCreateCommand, UiTaskAssignCommand,
+    UiTaskBoardProjection, UiTaskClaimCommand, UiTaskCreateCommand, UiTaskDispatchCommand,
+    UiTaskEventInboxEntryProjection, UiTaskEventInboxProjection, UiTaskHistoryProjection,
+    UiTaskLedgerEventProjection, UiTaskListProjection, UiTaskReviewCommand,
+    UiTaskReviewRejectionCommand, UiTaskSnapshotProjection, UiTimerEventProjection,
+    UiTimerListProjection, UiTimerProjection, UiTimerRepeatCommand, UiTimerScheduleCommand,
+    UiTurnProjection, UiTurnTimingProjection, UiWorkerControlCommand,
+    UiWorkerControlEventProjection, UiWorkerControlProjection,
     checkpoint_projection_from_runtime_summary, turn_projection_for_client,
     turn_projection_from_events,
 };
@@ -4392,6 +4398,29 @@ fn project_config_status_for_ui(
                 .collect()
         })
         .unwrap_or_default();
+    let model_group_registry = loaded_config
+        .map(|loaded| {
+            loaded
+                .safe_model_group_registry()
+                .into_iter()
+                .map(|group| UiModelGroupConfigProjection {
+                    group_id: group.id,
+                    enabled: group.enabled,
+                    label: group.label,
+                    primary: ui_model_route_from_config(group.primary),
+                    sub: group.sub.map(ui_model_route_from_config),
+                    search: group.search.map(ui_model_route_from_config),
+                    title: group.title.map(ui_model_route_from_config),
+                    fallback: group.fallback.map(ui_model_route_from_config),
+                    load_balance: group
+                        .load_balance
+                        .into_iter()
+                        .map(ui_model_weighted_route_from_config)
+                        .collect(),
+                })
+                .collect()
+        })
+        .unwrap_or_default();
     let (selected_web_search_effective, selected_web_search_reason) =
         provider_web_search_effective_status(
             &selected.provider.id,
@@ -4412,9 +4441,11 @@ fn project_config_status_for_ui(
                 node_id: peer.node_id.clone(),
                 provider_id: peer.provider_id.clone(),
                 fallback_provider_id: peer.fallback_provider_id.clone(),
+                model_group_id: peer.model_group_id.clone(),
             })
             .collect(),
         provider_registry,
+        model_group_registry,
         agent_resource_count: worker_peers.len(),
         agent_resource_limit: MAX_AGENT_RESOURCE_COUNT,
         agent_resource_provider_mode: if worker_peers.is_empty() {
@@ -4431,6 +4462,7 @@ fn project_config_status_for_ui(
             .fallback_provider
             .as_ref()
             .map(|provider| provider.id.clone()),
+        model_group_id: selected.model_group_id.clone(),
         provider_type: selected.provider.provider_type.as_str().to_owned(),
         provider_protocol: selected.provider.protocol.as_str().to_owned(),
         provider_base_url: safe_provider_base_url_for_projection(&selected.provider.base_url),
@@ -4443,6 +4475,40 @@ fn project_config_status_for_ui(
         provider_auth_type: selected.provider.auth_type.as_str().to_owned(),
         provider_auth_source: selected.provider.auth_source.as_str().to_owned(),
         restart_required_on_change: selected.restart_required_on_change,
+    }
+}
+
+fn ui_model_route_from_config(route: ModelRouteConfig) -> UiModelRouteProjection {
+    UiModelRouteProjection {
+        provider_id: route.provider_id,
+        model: route.model,
+    }
+}
+
+fn ui_model_weighted_route_from_config(
+    route: ModelWeightedRouteConfig,
+) -> UiModelWeightedRouteProjection {
+    UiModelWeightedRouteProjection {
+        provider_id: route.provider_id,
+        model: route.model,
+        weight: route.weight,
+    }
+}
+
+fn model_route_config_from_ui(route: UiModelRouteUpdate) -> ModelRouteConfig {
+    ModelRouteConfig {
+        provider_id: route.provider_id,
+        model: route.model,
+    }
+}
+
+fn model_weighted_route_config_from_ui(
+    route: UiModelWeightedRouteUpdate,
+) -> ModelWeightedRouteConfig {
+    ModelWeightedRouteConfig {
+        provider_id: route.provider_id,
+        model: route.model,
+        weight: route.weight,
     }
 }
 
@@ -4986,6 +5052,12 @@ impl UiCommandDispatchPort for RuntimeCommandDispatcher {
             }
             UiCommand::UpsertProviderConfig { update } => {
                 self.dispatch_upsert_provider_config(&mut state, envelope, update)
+            }
+            UiCommand::UpsertModelGroupConfig { group } => {
+                self.dispatch_upsert_model_group_config(&mut state, envelope, group)
+            }
+            UiCommand::UpdateAgentModelGroupSelection { selection } => {
+                self.dispatch_update_agent_model_group_selection(&mut state, envelope, selection)
             }
             UiCommand::UpdateAgentProviderSelection { selection } => {
                 self.dispatch_update_agent_provider_selection(&mut state, envelope, selection)
@@ -5565,6 +5637,83 @@ impl RuntimeCommandDispatcher {
             target_feature_id: envelope.target_feature_id,
             target_owner_module: envelope.target_owner_module,
             dispatch_status: "provider_config_upserted_restart_required".to_owned(),
+        })
+    }
+
+    fn dispatch_upsert_model_group_config(
+        &self,
+        state: &mut RuntimeCommandDispatcherState,
+        envelope: UiCommandDispatchEnvelope,
+        group: UiModelGroupConfigUpdate,
+    ) -> Result<UiCommandDispatchReceipt, UiCommandDispatchPortError> {
+        let live = state.config.live.as_ref().ok_or_else(|| {
+            UiCommandDispatchPortError::Unsupported(
+                "model group upsert requires a live runtime home".to_owned(),
+            )
+        })?;
+        let agent_name = group.agent_name.clone();
+        let config_path = live.runtime_home.join("config.toml");
+        upsert_model_group_config_in_path(
+            &config_path,
+            ModelGroupConfigUpdate {
+                agent_name: agent_name.clone(),
+                group_id: group.group_id,
+                enabled: group.enabled,
+                label: group.label,
+                primary: model_route_config_from_ui(group.primary),
+                sub: group.sub.map(model_route_config_from_ui),
+                search: group.search.map(model_route_config_from_ui),
+                title: group.title.map(model_route_config_from_ui),
+                fallback: group.fallback.map(model_route_config_from_ui),
+                load_balance: group
+                    .load_balance
+                    .into_iter()
+                    .map(model_weighted_route_config_from_ui)
+                    .collect(),
+            },
+        )
+        .map_err(|err| UiCommandDispatchPortError::DispatchFailed(err.to_string()))?;
+        state.pending_config_status = Some(project_config_status_from_path_for_ui(
+            &config_path,
+            &agent_name,
+        )?);
+        Ok(UiCommandDispatchReceipt {
+            ingress: envelope.ingress,
+            target_feature_id: envelope.target_feature_id,
+            target_owner_module: envelope.target_owner_module,
+            dispatch_status: "model_group_config_upserted_restart_required".to_owned(),
+        })
+    }
+
+    fn dispatch_update_agent_model_group_selection(
+        &self,
+        state: &mut RuntimeCommandDispatcherState,
+        envelope: UiCommandDispatchEnvelope,
+        selection: UiAgentModelGroupSelectionUpdate,
+    ) -> Result<UiCommandDispatchReceipt, UiCommandDispatchPortError> {
+        let live = state.config.live.as_ref().ok_or_else(|| {
+            UiCommandDispatchPortError::Unsupported(
+                "model group selection update requires a live runtime home".to_owned(),
+            )
+        })?;
+        let config_path = live.runtime_home.join("config.toml");
+        switch_agent_model_group_in_path(
+            &config_path,
+            AgentModelGroupSelectionConfigUpdate {
+                agent_name: selection.agent_name.clone(),
+                model_group_id: selection.model_group_id,
+            },
+        )
+        .map_err(|err| UiCommandDispatchPortError::DispatchFailed(err.to_string()))?;
+        state.pending_config_status = Some(project_config_status_from_path_for_ui(
+            &config_path,
+            &selection.agent_name,
+        )?);
+        Ok(UiCommandDispatchReceipt {
+            ingress: envelope.ingress,
+            target_feature_id: envelope.target_feature_id,
+            target_owner_module: envelope.target_owner_module,
+            dispatch_status: "model_group_selection_saved_restart_required".to_owned(),
         })
     }
 

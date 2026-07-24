@@ -3866,6 +3866,7 @@ fn selected_master_with_workers(worker_ids: &[&str]) -> SelectedAgentConfig {
                 ),
                 provider_id: "worker-provider".to_owned(),
                 fallback_provider_id: None,
+                model_group_id: None,
             })
             .collect(),
         allowed_pair_ip: None,
@@ -3883,6 +3884,7 @@ fn selected_master_with_workers(worker_ids: &[&str]) -> SelectedAgentConfig {
             api_key: "test-key".to_owned(),
         },
         fallback_provider: None,
+        model_group_id: None,
         restart_required_on_change: true,
     }
 }

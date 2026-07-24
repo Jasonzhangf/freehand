@@ -17,9 +17,12 @@
   - resolve provider auth source without leaking secret projection
   - preserve safe auth source kind on selected provider config for downstream UI-safe status projection
   - project the complete configured provider registry without resolved secrets so users can select any enabled provider by id
+  - project the complete configured model group registry without resolved secrets so users can select primary/sub/search/title/fallback/load-balance routes by group id
   - resolve any enabled configured provider by id for live capability tests without changing active agent selection
   - validate and persist owner-backed provider definition upserts without changing the selected agent provider
   - validate and persist owner-backed primary/fallback provider selection changes without rewriting provider definitions
+  - validate and persist owner-backed model group definition upserts without rewriting provider definitions
+  - validate and persist owner-backed active model-group selection changes without rewriting provider definitions or model group definitions
   - retain the legacy combined provider/model update path for existing CLI callers while new UI flows use separate upsert and selection operations
   - validate and persist owner-backed Master Worker resource-count updates through the canonical config path
   - keep active Worker resources in `1..=5`, preserve declared peer order, clone the first Worker as the shared-provider template when growing, and remove trailing reciprocal Worker tables when shrinking
@@ -31,6 +34,7 @@
 | resource operation | status | white-box coverage | module black-box coverage | project black-box coverage |
 | --- | --- | --- | --- | --- |
 | `config.mutate_provider_config` | bound | `cargo test -p freehand-config provider -- --nocapture --test-threads=1` covers safe provider registry projection, definition-only upsert, selection-only switch, same-primary fallback rejection, disabled-provider rejection, and no-overwrite failures | `cargo test -p freehand-config -- --nocapture` exercises the public config mutation boundary through owner APIs and reparsed saved TOML | `cargo test -p freehand-runtime runtime_dispatch_upserts_provider_registry_without_switching_active_selection -- --nocapture --test-threads=1` and `cargo test -p freehand-runtime runtime_dispatch_switches_agent_provider_selection_without_hot_reload -- --nocapture --test-threads=1` prove runtime/UI mutations route through `config.core` and remain restart-required |
+| `config.mutate_model_group_config` | bound | `cargo test -p freehand-config model_group -- --nocapture --test-threads=1` covers model group registry projection, primary/fallback route override, definition upsert, active group switch, provider switch clearing hidden group selection, disabled/unknown provider rejection, and no-overwrite failures | `cargo test -p freehand-config -- --nocapture` exercises the public config mutation boundary through owner APIs and reparsed saved TOML | `cargo test -p freehand-runtime model_group -- --nocapture --test-threads=1` and `node scripts/verify-model-group-ui-online.mjs` prove runtime/WebUI mutations route through `config.core`, project restart-required state, and restore S-profile config |
 | `config.compile_remote_daemon_registry` | bound | `cargo test -p freehand-config remote_daemon -- --nocapture` covers registry validation, direct-first route selection, relay selection after direct health failure, no-selectable route error, route-selected bootstrap bundles, app/web bootstrap link parsing, expiry rejection, and secret-redacted summaries | `cargo test -p freehand-config -- --nocapture` exercises the public config loader/accessor boundary for remote daemon registry and bootstrap helpers | `cargo run -p xtask -- gates check` enforces resource-map/mainline/function/test binding; full relay tunnel and live Tailscale probing remain outside this config-owned source edge |
 - white-box plan:
   - parse and validate agent/provider schema, ordered reciprocal multi-peer topology invariants, explicit protocol declaration, unknown-field rejection, auth-source invariants, and env resolution rules
@@ -40,6 +44,10 @@
   - assert safe provider registry projection preserves every configured provider id, enabled flag, type, protocol, sanitized base URL/host, model, auth type, and auth source without API-key values
   - assert provider definition upsert can add a third provider while preserving the current primary/fallback binding and every existing provider table
   - assert provider selection can switch among existing enabled providers without rewriting provider definitions and can explicitly clear or replace fallback selection
+  - assert model group definition upsert can add primary/sub/search/title/fallback/load-balance routes while preserving current provider registry and active provider binding
+  - assert model group selection can switch an agent to an enabled group and selected-agent resolution uses the group's primary/fallback model routes without changing provider registry defaults
+  - assert explicit provider selection clears active model-group selection so the user-selected provider route is not hidden behind stale group truth
+  - reject empty/unknown/disabled model group routes and zero load-balance weights before overwrite so the original config bytes remain unchanged
   - reject missing/disabled primary selection and same-primary fallback selection before overwrite so the original config bytes remain unchanged
   - assert provider/model update accepts valid env-var auth, writes only `api_key_env`, returns a restart-required selected-agent projection, and does not write resolved API-key values
   - assert invalid provider update input fails before overwrite so the original config bytes remain unchanged
@@ -64,7 +72,9 @@
   - CLI startup path consumes one named agent configuration and projects selected provider metadata without exposing API key
   - CLI `remote-daemon-bootstrap-link` consumes config-owned remote daemon registry truth and emits a scan/import deep link using a one-time credential env var
   - runtime/UI config status queries can list every configured provider and current primary/fallback selection without reading raw provider auth fields or resolved API keys
+  - runtime/UI config status queries can list every configured model group and current active model group without reading raw provider auth fields or resolved API keys
   - runtime/UI provider definition and provider selection commands persist only through `config.core` and must surface restart-required semantics instead of hot-reload success
+  - runtime/UI model group definition and selection commands persist only through `config.core` and must surface restart-required semantics instead of hot-reload success
   - runtime/UI Agent resource controls can persist only config-owned reciprocal topology; frontend state cannot invent capacity
   - machine-readable mainline truth remains the only source for generated wiki artifacts
 - fixtures / replay inputs / runtime evidence paths:
@@ -80,6 +90,7 @@
   - `cargo test -p freehand-config remote_daemon -- --nocapture` covers the focused remote daemon route/bootstrap slice
   - selected-provider auth source is regression-locked for inline and env configurations
   - provider registry safe projection, definition-only upsert, and selection-only mutation positive/negative paths are regression-locked
+  - model group registry safe projection, definition-only upsert, route override, selection-only mutation, and provider-switch clearing paths are regression-locked
   - provider/model update positive and invalid-input no-overwrite paths are regression-locked
   - Agent resource-count grow/shrink plus out-of-range/no-overwrite paths are regression-locked
   - migrated mainline-call source and generated wiki are kept in sync with this test design

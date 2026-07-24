@@ -167,6 +167,12 @@ pub enum UiCommand {
     UpsertProviderConfig {
         update: UiProviderConfigUpdate,
     },
+    UpsertModelGroupConfig {
+        group: UiModelGroupConfigUpdate,
+    },
+    UpdateAgentModelGroupSelection {
+        selection: UiAgentModelGroupSelectionUpdate,
+    },
     TestProviderWebSearch {
         provider_id: String,
         #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -272,6 +278,47 @@ pub struct UiAgentProviderSelectionUpdate {
     pub provider_id: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub fallback_provider_id: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct UiModelRouteUpdate {
+    pub provider_id: String,
+    pub model: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct UiModelWeightedRouteUpdate {
+    pub provider_id: String,
+    pub model: String,
+    pub weight: u32,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct UiModelGroupConfigUpdate {
+    pub agent_name: String,
+    pub group_id: String,
+    #[serde(default)]
+    pub enabled: bool,
+    #[serde(default)]
+    pub label: String,
+    pub primary: UiModelRouteUpdate,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sub: Option<UiModelRouteUpdate>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub search: Option<UiModelRouteUpdate>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub title: Option<UiModelRouteUpdate>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fallback: Option<UiModelRouteUpdate>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub load_balance: Vec<UiModelWeightedRouteUpdate>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct UiAgentModelGroupSelectionUpdate {
+    pub agent_name: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model_group_id: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -812,6 +859,8 @@ pub struct UiConfigStatusProjection {
     pub paired_agents: Vec<UiConfigPeerProjection>,
     #[serde(default)]
     pub provider_registry: Vec<UiProviderConfigSummaryProjection>,
+    #[serde(default)]
+    pub model_group_registry: Vec<UiModelGroupConfigProjection>,
     pub agent_resource_count: usize,
     pub agent_resource_limit: usize,
     pub agent_resource_provider_mode: String,
@@ -820,6 +869,8 @@ pub struct UiConfigStatusProjection {
     pub provider_id: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub fallback_provider_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model_group_id: Option<String>,
     pub provider_type: String,
     pub provider_protocol: String,
     #[serde(default, skip_serializing_if = "String::is_empty")]
@@ -859,6 +910,37 @@ pub struct UiProviderConfigSummaryProjection {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct UiModelRouteProjection {
+    pub provider_id: String,
+    pub model: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct UiModelWeightedRouteProjection {
+    pub provider_id: String,
+    pub model: String,
+    pub weight: u32,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct UiModelGroupConfigProjection {
+    pub group_id: String,
+    pub enabled: bool,
+    pub label: String,
+    pub primary: UiModelRouteProjection,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub sub: Option<UiModelRouteProjection>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub search: Option<UiModelRouteProjection>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub title: Option<UiModelRouteProjection>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub fallback: Option<UiModelRouteProjection>,
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub load_balance: Vec<UiModelWeightedRouteProjection>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct UiConfigPeerProjection {
     pub agent_name: String,
     pub agent_mode: String,
@@ -866,6 +948,8 @@ pub struct UiConfigPeerProjection {
     pub provider_id: String,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub fallback_provider_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model_group_id: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -1429,6 +1513,14 @@ pub enum UiProtocolError {
     EmptyProviderDefaultModel,
     #[error("config update requires non-empty API key environment variable name")]
     EmptyProviderApiKeyEnv,
+    #[error("model group update requires non-empty group id")]
+    EmptyModelGroupId,
+    #[error("model group route requires non-empty provider id")]
+    EmptyModelRouteProvider,
+    #[error("model group route requires non-empty model")]
+    EmptyModelRouteModel,
+    #[error("model group load-balance route requires a positive weight")]
+    EmptyModelRouteWeight,
     #[error("agent resource count must be between 1 and 5, received {resource_count}")]
     AgentResourceCountOutOfRange { resource_count: usize },
     #[error("command ingress route only accepts mutation-intent commands")]
@@ -2207,6 +2299,20 @@ pub fn validate_command(command: &UiCommand) -> Result<(), UiProtocolError> {
         {
             Err(UiProtocolError::EmptyProviderApiKeyEnv)
         }
+        UiCommand::UpsertModelGroupConfig { group } => validate_model_group_config_update(group),
+        UiCommand::UpdateAgentModelGroupSelection { selection }
+            if selection.agent_name.trim().is_empty() =>
+        {
+            Err(UiProtocolError::EmptyConfigAgentName)
+        }
+        UiCommand::UpdateAgentModelGroupSelection { selection }
+            if selection
+                .model_group_id
+                .as_deref()
+                .is_some_and(|value| value.trim().is_empty()) =>
+        {
+            Err(UiProtocolError::EmptyModelGroupId)
+        }
         UiCommand::TestProviderWebSearch { provider_id, .. } if provider_id.trim().is_empty() => {
             Err(UiProtocolError::EmptyProviderId)
         }
@@ -2266,6 +2372,50 @@ fn invalid_input_attachment(attachment: &UiInputAttachment) -> bool {
             .data_base64
             .as_deref()
             .is_none_or(|data| data.trim().is_empty())
+}
+
+fn validate_model_group_config_update(
+    group: &UiModelGroupConfigUpdate,
+) -> Result<(), UiProtocolError> {
+    if group.agent_name.trim().is_empty() {
+        return Err(UiProtocolError::EmptyConfigAgentName);
+    }
+    if group.group_id.trim().is_empty() {
+        return Err(UiProtocolError::EmptyModelGroupId);
+    }
+    validate_model_route_update(&group.primary)?;
+    for route in [
+        group.sub.as_ref(),
+        group.search.as_ref(),
+        group.title.as_ref(),
+        group.fallback.as_ref(),
+    ]
+    .into_iter()
+    .flatten()
+    {
+        validate_model_route_update(route)?;
+    }
+    for route in &group.load_balance {
+        validate_model_route_fields(&route.provider_id, &route.model)?;
+        if route.weight == 0 {
+            return Err(UiProtocolError::EmptyModelRouteWeight);
+        }
+    }
+    Ok(())
+}
+
+fn validate_model_route_update(route: &UiModelRouteUpdate) -> Result<(), UiProtocolError> {
+    validate_model_route_fields(&route.provider_id, &route.model)
+}
+
+fn validate_model_route_fields(provider_id: &str, model: &str) -> Result<(), UiProtocolError> {
+    if provider_id.trim().is_empty() {
+        return Err(UiProtocolError::EmptyModelRouteProvider);
+    }
+    if model.trim().is_empty() {
+        return Err(UiProtocolError::EmptyModelRouteModel);
+    }
+    Ok(())
 }
 
 fn validate_timer_schedule_command(timer: &UiTimerScheduleCommand) -> Result<(), UiProtocolError> {
@@ -2510,6 +2660,10 @@ pub fn protocol_rejection(err: UiProtocolError) -> UiProtocolRejection {
         UiProtocolError::EmptyProviderBaseUrl => "empty_provider_base_url",
         UiProtocolError::EmptyProviderDefaultModel => "empty_provider_default_model",
         UiProtocolError::EmptyProviderApiKeyEnv => "empty_provider_api_key_env",
+        UiProtocolError::EmptyModelGroupId => "empty_model_group_id",
+        UiProtocolError::EmptyModelRouteProvider => "empty_model_route_provider",
+        UiProtocolError::EmptyModelRouteModel => "empty_model_route_model",
+        UiProtocolError::EmptyModelRouteWeight => "empty_model_route_weight",
         UiProtocolError::AgentResourceCountOutOfRange { .. } => "agent_resource_count_out_of_range",
         UiProtocolError::IngressCommandKindMismatch => "ingress_command_kind_mismatch",
         UiProtocolError::StreamKindMismatch => "stream_kind_mismatch",
@@ -3174,6 +3328,8 @@ fn command_kind(command: &UiCommand) -> &'static str {
         UiCommand::QueryErrorCenterEvents { .. } => "query_error_center_events",
         UiCommand::UpdateProviderConfig { .. } => "update_provider_config",
         UiCommand::UpsertProviderConfig { .. } => "upsert_provider_config",
+        UiCommand::UpsertModelGroupConfig { .. } => "upsert_model_group_config",
+        UiCommand::UpdateAgentModelGroupSelection { .. } => "update_agent_model_group_selection",
         UiCommand::TestProviderWebSearch { .. } => "test_provider_web_search",
         UiCommand::ScheduleTimer { .. } => "schedule_timer",
         UiCommand::CancelTimer { .. } => "cancel_timer",
@@ -3215,6 +3371,8 @@ fn is_command_ingress_kind(command: &UiCommand) -> bool {
             | UiCommand::SubmitUserInput { .. }
             | UiCommand::UpdateProviderConfig { .. }
             | UiCommand::UpsertProviderConfig { .. }
+            | UiCommand::UpsertModelGroupConfig { .. }
+            | UiCommand::UpdateAgentModelGroupSelection { .. }
             | UiCommand::TestProviderWebSearch { .. }
             | UiCommand::ScheduleTimer { .. }
             | UiCommand::CancelTimer { .. }
@@ -3259,6 +3417,8 @@ fn command_dispatch_target(command: &UiCommand) -> (&'static str, &'static str) 
         }
         UiCommand::UpdateProviderConfig { .. }
         | UiCommand::UpsertProviderConfig { .. }
+        | UiCommand::UpsertModelGroupConfig { .. }
+        | UiCommand::UpdateAgentModelGroupSelection { .. }
         | UiCommand::UpdateAgentProviderSelection { .. }
         | UiCommand::UpdateAgentResourceConfig { .. } => ("config.core", "crates/freehand-config"),
         UiCommand::TestProviderWebSearch { .. } => {
@@ -6063,6 +6223,7 @@ mod tests {
                 node_id: "worker-node".to_owned(),
                 provider_id: "minimonth".to_owned(),
                 fallback_provider_id: None,
+                model_group_id: None,
             }],
             provider_registry: vec![UiProviderConfigSummaryProjection {
                 provider_id: "minimonth".to_owned(),
@@ -6078,12 +6239,40 @@ mod tests {
                 provider_auth_type: "apikey".to_owned(),
                 provider_auth_source: "env".to_owned(),
             }],
+            model_group_registry: vec![UiModelGroupConfigProjection {
+                group_id: "default".to_owned(),
+                enabled: true,
+                label: "Default".to_owned(),
+                primary: UiModelRouteProjection {
+                    provider_id: "minimonth".to_owned(),
+                    model: "MiniMax-M2".to_owned(),
+                },
+                sub: Some(UiModelRouteProjection {
+                    provider_id: "minimonth".to_owned(),
+                    model: "MiniMax-sub".to_owned(),
+                }),
+                search: Some(UiModelRouteProjection {
+                    provider_id: "minimonth".to_owned(),
+                    model: "MiniMax-search".to_owned(),
+                }),
+                title: Some(UiModelRouteProjection {
+                    provider_id: "minimonth".to_owned(),
+                    model: "MiniMax-title".to_owned(),
+                }),
+                fallback: None,
+                load_balance: vec![UiModelWeightedRouteProjection {
+                    provider_id: "minimonth".to_owned(),
+                    model: "MiniMax-M2".to_owned(),
+                    weight: 1,
+                }],
+            }],
             agent_resource_count: 1,
             agent_resource_limit: 5,
             agent_resource_provider_mode: "shared".to_owned(),
             agent_resource_provider_id: Some("minimonth".to_owned()),
             provider_id: "minimonth".to_owned(),
             fallback_provider_id: None,
+            model_group_id: Some("default".to_owned()),
             provider_type: "anthropic".to_owned(),
             provider_protocol: "messages".to_owned(),
             provider_base_url: "https://api.example.test/anthropic".to_owned(),
@@ -6101,6 +6290,8 @@ mod tests {
         assert!(encoded.contains("ConfigStatus"));
         assert!(encoded.contains("provider_auth_source"));
         assert!(encoded.contains("provider_registry"));
+        assert!(encoded.contains("model_group_registry"));
+        assert!(encoded.contains("model_group_id"));
         assert!(encoded.contains("provider_base_url"));
         assert!(encoded.contains("provider_web_search_effective"));
         assert!(encoded.contains("provider_web_search_reason"));
@@ -6220,6 +6411,104 @@ mod tests {
             protocol_rejection(empty_selection).code,
             "empty_provider_id"
         );
+    }
+
+    #[test]
+    fn model_group_upsert_and_selection_route_to_config_owner() {
+        let upsert = UiCommand::UpsertModelGroupConfig {
+            group: UiModelGroupConfigUpdate {
+                agent_name: "master".to_owned(),
+                group_id: "research".to_owned(),
+                enabled: true,
+                label: "Research".to_owned(),
+                primary: UiModelRouteUpdate {
+                    provider_id: "cc".to_owned(),
+                    model: "gpt-5.5-main".to_owned(),
+                },
+                sub: Some(UiModelRouteUpdate {
+                    provider_id: "cc".to_owned(),
+                    model: "gpt-5.5-sub".to_owned(),
+                }),
+                search: Some(UiModelRouteUpdate {
+                    provider_id: "cc".to_owned(),
+                    model: "gpt-5.5-search".to_owned(),
+                }),
+                title: Some(UiModelRouteUpdate {
+                    provider_id: "minimax".to_owned(),
+                    model: "MiniMax-title".to_owned(),
+                }),
+                fallback: Some(UiModelRouteUpdate {
+                    provider_id: "minimax".to_owned(),
+                    model: "MiniMax-fallback".to_owned(),
+                }),
+                load_balance: vec![UiModelWeightedRouteUpdate {
+                    provider_id: "cc".to_owned(),
+                    model: "gpt-5.5-main".to_owned(),
+                    weight: 2,
+                }],
+            },
+        };
+        validate_command(&upsert).expect("valid model group upsert");
+        let envelope = build_command_dispatch_envelope(&upsert).expect("upsert envelope");
+        assert_eq!(envelope.target_feature_id, "config.core");
+        assert_eq!(envelope.target_owner_module, "crates/freehand-config");
+        assert_eq!(envelope.ingress.command_kind, "upsert_model_group_config");
+
+        let selection = UiCommand::UpdateAgentModelGroupSelection {
+            selection: UiAgentModelGroupSelectionUpdate {
+                agent_name: "master".to_owned(),
+                model_group_id: Some("research".to_owned()),
+            },
+        };
+        validate_command(&selection).expect("valid model group selection");
+        let envelope = build_command_dispatch_envelope(&selection).expect("selection envelope");
+        assert_eq!(envelope.target_feature_id, "config.core");
+        assert_eq!(envelope.target_owner_module, "crates/freehand-config");
+        assert_eq!(
+            envelope.ingress.command_kind,
+            "update_agent_model_group_selection"
+        );
+
+        let empty_group = validate_command(&UiCommand::UpsertModelGroupConfig {
+            group: UiModelGroupConfigUpdate {
+                agent_name: "master".to_owned(),
+                group_id: String::new(),
+                enabled: true,
+                label: String::new(),
+                primary: UiModelRouteUpdate {
+                    provider_id: "cc".to_owned(),
+                    model: "gpt-5.5-main".to_owned(),
+                },
+                sub: None,
+                search: None,
+                title: None,
+                fallback: None,
+                load_balance: Vec::new(),
+            },
+        })
+        .expect_err("empty group rejected");
+        assert_eq!(empty_group, UiProtocolError::EmptyModelGroupId);
+        assert_eq!(protocol_rejection(empty_group).code, "empty_model_group_id");
+
+        let bad_route = validate_command(&UiCommand::UpsertModelGroupConfig {
+            group: UiModelGroupConfigUpdate {
+                agent_name: "master".to_owned(),
+                group_id: "research".to_owned(),
+                enabled: true,
+                label: String::new(),
+                primary: UiModelRouteUpdate {
+                    provider_id: "cc".to_owned(),
+                    model: String::new(),
+                },
+                sub: None,
+                search: None,
+                title: None,
+                fallback: None,
+                load_balance: Vec::new(),
+            },
+        })
+        .expect_err("empty route model rejected");
+        assert_eq!(bad_route, UiProtocolError::EmptyModelRouteModel);
     }
 
     #[test]

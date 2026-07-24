@@ -43,7 +43,7 @@
   - WebUI default command/query/status path uses ADP WebSocket `/adp`; latest-turn SSE is consumed as a display-refresh mirror
   - WebUI exposes hidden success/failure diagnostic prompts through slash commands and keyboard shortcuts while preserving the normal ADP submit path; persistent Success/Failure composer buttons must not render
 - WebUI control strip and session rail expose session switching, `/new` New dialog, `/task` task mode in that dialog, refresh, cwd selection, model selection, attachment upload, file/image/video preview, slash commands, and keyboard shortcuts as input-layer affordances
-- WebUI settings shell exposes the owner-backed provider registry, current primary/fallback selectors, provider definition add/update form, provider web_search live-test trigger/status, Worker-limit settings, and Android-only APK update bridge card without parsing or directly mutating daemon config files; Phase 1 settings review rows for provider family/model group/token usage/appearance/skills/memory/MCP/env/runtime dirs/daemon/Worker/Android/logs/about are UI-only until owner-backed Phase 2 wiring lands
+- WebUI settings shell exposes the owner-backed provider registry, current primary/fallback selectors, provider definition add/update form, provider web_search live-test trigger/status, model group registry/definition/active selection, Worker-limit settings, and Android-only APK update bridge card without parsing or directly mutating daemon config files; Phase 1 settings review rows for provider family/token usage/appearance/skills/memory/MCP/env/runtime dirs/daemon/Worker/Android/logs/about are UI-only until owner-backed Phase 2 wiring lands
 - WebUI aspect-ratio layout classifier applies presentation-only shape attributes for phone portrait, tall phone, phone landscape, tablet portrait, tablet landscape, foldable unfolded, and desktop large without mutating protocol/session state
 - WebUI root route renders `?client=android-webview` with server-side `tablet_portrait` initial layout attributes before JS loads, while the normal browser root remains unpinned
 - WebUI phone/tall-phone/tablet-portrait layout defaults to the conversation workspace; sessions and debug/config detail panels are hidden in explicit overlay drawers and never consume the normal conversation flow
@@ -72,6 +72,13 @@
     `refreshTimerDashboard`, `renderTimerDashboard`,
     `renderTimerDashboardList`, `renderTimerDashboardHistory`,
     `renderMobileHomeTimerList`, `scheduleTimerFromForm`, and `cancelTimer`
+  - WebUI model group settings asset smoke for `model_group_registry`,
+    `settings-model-group-registry-list`, `settings-model-group-current-select`,
+    `syncModelGroupSelectionControls`, `syncSettingsModelGroupForm`,
+    `renderSettingsModelGroupRegistry`, `fillSettingsModelGroupForm`,
+    `parseLoadBalanceRoutes`, `submitModelGroupConfigUpdate`,
+    `submitModelGroupSelectionUpdate`, `UpsertModelGroupConfig`, and
+    `UpdateAgentModelGroupSelection`
   - Android update route smoke for env/sidecar manifest JSON, explicit missing-sidecar failure, and explicit missing-APK 404
   - WebUI JS asset smoke locks ADP WebSocket command/query usage, rejects `fetch` as a live path, and requires `EventSource` only for latest-turn SSE display refresh
   - WebUI ADP subscription accepted/waiting status rendering smoke
@@ -86,7 +93,7 @@
   - WebUI attachment control smoke for multi-image add/remove/preview and session-scoped draft retention
   - WebUI attachment success-clear smoke
   - WebUI attachment failure-retain smoke
-- WebUI settings shell smoke for desktop/mobile entry points, complete registry rendering without a fixed provider count, owner-backed current/fallback selectors that keep fallback truth on initial load and provider upsert until the operator explicitly edits selector draft state, owner-backed definition add/update and selection command wiring, Android-only APK update card/bridge/status callback wiring, visible invalid-save errors, visible restart-required success, absence of unsupported read-only status cards, no API-key/password inputs, no credential text, and no direct config write helpers
+- WebUI settings shell smoke for desktop/mobile entry points, complete provider/model-group registry rendering without a fixed provider count, owner-backed current/fallback/model-group selectors that keep fallback truth on initial load and provider/model-group upsert until the operator explicitly edits selector draft state, owner-backed provider definition add/update, model group definition add/update, provider selection, model group selection command wiring, Android-only APK update card/bridge/status callback wiring, visible invalid-save errors, visible restart-required success, absence of unsupported read-only status cards, no API-key/password inputs, no credential text, and no direct config write helpers
 - Server APK update route smoke must prove `/android/update.json` serves explicit runtime env override or compiled sidecar truth with no-store cache headers, `/android/freehand-android.apk` serves the signed staged APK, and that a missing sidecar does not return a hardcoded old `versionCode` as a false current-version success.
   - WebUI mobile settings drawer back/close smoke locks sticky drawer header CSS plus `window.__freehandHandleAndroidBack`: focused settings input is blurred on first back, a following back closes the settings drawer, and the conversation remains visible without native fallback UI
   - mobile Agent header renders owner-backed Worker limit and system max five; increment/decrement stays within `1..=5` and save routes only through `UpdateAgentResourceConfig`
@@ -172,6 +179,13 @@
   through the browser, observes the TimerStore-backed `QueryTimerList` row,
   cancels it through the DOM, verifies `TimerCancelled` ledger truth, and
   proves top-level persisted session ids are unchanged by timer schedule/cancel
+- WebUI online model group Settings coverage uses
+  `node scripts/verify-model-group-ui-online.mjs`: it opens the production
+  S-profile WebUI, saves a verifier-owned model group through the browser,
+  observes the owner-projected `QueryConfigStatus.model_group_registry` row,
+  switches the active model group through the DOM, proves selected
+  provider/model/fallback projection now comes from the model group route, then
+  restores the original S-profile config/env and verifies no fixture env remains
 - WebUI mobile Agent Dashboard positive coverage must prove the Header and child-task list come from current-session TaskBoard/AgentBoard truth and that task selection refreshes `QuerySessionTurns` for the projected Worker session; `scripts/verify-worker-subtasks-online.py --parent-session <id>` is the read-only ADP checker for enumerating every current child task and verifying each projected Worker transcript one by one
 - `node scripts/verify-webui-path-diagnostic-online.mjs` is the fixed-session
   WebUI online closure for path-tool diagnostics: it creates/reuses the fixed
@@ -243,7 +257,7 @@
   - WebUI mobile v3 is not a desktop layout shrink: app bar is compact, conversation stream is continuous, internal runtime/session strips are absent, status floats as a small pill near the composer, and focused composer is the only state that reveals attachment/model/cwd controls
 - WebUI mobile session drawer right-swipe gesture and persisted-session -> indented worker-child hierarchy are landed and covered by asset smoke plus `scripts/webui_verify_online.mjs`
   - WebUI session rail now supports `/new` as the New dialog for global conversation or cwd-bound task creation, compact session summaries, and selected-session draft creation without inventing a separate navigation path
-  - WebUI settings shell is landed as a provider registry, provider definition add/update, provider web_search live-test trigger/status, active primary/fallback selector, and Worker-limit drawer, not a generic config/status drawer; it consumes owner-backed `QueryConfigStatus`, provider definition edits route through `UpsertProviderConfig`, active selection changes route through `UpdateAgentProviderSelection`, provider search tests route through `TestProviderWebSearch`, and unsupported agent/session/workspace/skills/files/tasks/diagnostics controls remain absent until owner-backed write contracts exist
+  - WebUI settings shell is landed as a provider registry, provider definition add/update, provider web_search live-test trigger/status, model group registry/definition/active selection, active primary/fallback selector, and Worker-limit drawer, not a generic config/status drawer; it consumes owner-backed `QueryConfigStatus`, provider definition edits route through `UpsertProviderConfig`, model group edits route through `UpsertModelGroupConfig`, active provider selection changes route through `UpdateAgentProviderSelection`, active model group selection changes route through `UpdateAgentModelGroupSelection`, provider search tests route through `TestProviderWebSearch`, and unsupported agent/session/workspace/skills/files/tasks/diagnostics controls remain absent until owner-backed write contracts exist
   - mobile Agent capacity control is config truth: no localStorage capacity, no synthetic AgentBoard rows, and no claim that added Workers are live before restart/process startup
 - WebUI online verifier owns its Settings valid-save fixture: it backs up S-profile config/env, injects a verifier-only credential env before the browser run, edits the currently selected primary provider instead of switching the agent to a configured fallback provider, and restores config/env afterward so Settings proof does not depend on stale local launchd environment or violate the primary/fallback-distinct config contract
   - WebUI online verifier now captures Phase 2D drawer proof by querying service truth through the same endpoint and comparing TaskBoard, AgentBoard, EventInbox, TaskHistory, and WorkerControl status text plus visible card counts

@@ -8026,3 +8026,31 @@ Current real root cause split:
   - Phase 2 as a whole is not complete; only Timer dashboard owner wiring is closed.
   - Android true-device proof was not run in this slice.
   - In the Codex shell, direct shebang execution of `scripts/verify-timer-tool-online.sh` returned `137` before creating a new timer temp dir; explicit `bash scripts/verify-timer-tool-online.sh` is the verified entrance in this environment.
+
+# 2026-07-24 mobile UI tree Phase 2 model group Settings slice
+
+- scope:
+  - Current work closes only the Phase 2 model group Settings function slice.
+  - Full Phase 2 remains open for Provider registry editing/testing, Tools registry/instruction capability page, Search, New/session/task/attachment wiring, Android update/permission/notification true-device closure, and lifecycle dashboard proof.
+- implementation:
+  - `config.core` owns persisted model group registry, safe projections, upsert, and active agent model-group selection in `~/.freehand/config.toml`.
+  - `ui.protocol` owns `UpsertModelGroupConfig`, `UpdateAgentModelGroupSelection`, route/group update DTO validation, and `UiConfigStatusProjection.model_group_registry`.
+  - `runtime.ui-command-dispatch` only bridges config commands to `config.core` and projects config status; WebUI does not read or write config truth directly.
+  - WebUI Settings renders provider-backed model group registry and active group selector with primary/sub/search/title/fallback/load-balance route fields. Saved changes require restart and refresh through `QueryConfigStatus`.
+  - Asset version is `20260724-model-groups-ui`.
+- online proof:
+  - `node scripts/verify-model-group-ui-online.mjs` passed on S-profile `ws://127.0.0.1:4042/adp`.
+  - Artifact: `artifacts/webui-online/model-group-ui-1784907693362`.
+  - Verifier created group `ui.verify.1784907693362` through WebUI DOM, observed ADP `model_group_registry`, switched active group through WebUI, and proved projected active route `provider_id=cc`, `default_model=gpt-5.5-model-group-ui`, `fallback_provider_id=minimax`.
+  - Restore proof: final summary has `restored=true`, `restoreErrors=[]`, final provider `minimax`, protocol `messages`, base host `api.minimaxi.com`, model `MiniMax-M3`, `model_group_id=null`, groups `[]`, and fixture env match count `0`.
+- local proof:
+  - `node --check scripts/verify-model-group-ui-online.mjs` passed.
+  - `node --check apps/freehand-server/assets/webui.js` passed.
+  - `jq empty docs/resource-maps/core.json docs/mainline-calls/config.core.json docs/mainline-calls/ui.protocol.json docs/mainline-calls/runtime.ui-command-dispatch.json docs/mainline-calls/app.webui-smoke.json` passed.
+  - `CARGO_TARGET_DIR=/tmp/freehand-target-model-group cargo test -p freehand-config model_group -- --nocapture --test-threads=1` passed 2/2.
+  - `CARGO_TARGET_DIR=/tmp/freehand-target-model-group cargo test -p freehand-ui-protocol model_group -- --nocapture --test-threads=1` passed 1/1.
+  - `CARGO_TARGET_DIR=/tmp/freehand-target-model-group cargo test -p freehand-runtime model_group -- --nocapture --test-threads=1` passed 1/1.
+  - `CARGO_TARGET_DIR=/tmp/freehand-target-model-group cargo test -p freehand-server --lib -- --nocapture --test-threads=1` passed 19/19; the printed dispatch-worker panic is the intentional join-failure negative test.
+  - `CARGO_TARGET_DIR=/tmp/freehand-target-model-group cargo check -p freehand-config -p freehand-ui-protocol -p freehand-runtime -p freehand-server` passed.
+  - `cargo fmt --check`, `CARGO_TARGET_DIR=/tmp/freehand-target-model-group cargo run -p xtask -- mainlines check`, `CARGO_TARGET_DIR=/tmp/freehand-target-model-group cargo run -p xtask -- gates check`, and `git diff --check` passed.
+  - Final config query returned `provider=minimax`, `fallback_provider=cc`, `provider_protocol=messages`, `base_url_host=api.minimaxi.com`, `default_model=MiniMax-M3`, `web_search=auto`, `web_search_effective=hosted_declared`, `auth_source=inline`; fixture env grep returned 0 matches.

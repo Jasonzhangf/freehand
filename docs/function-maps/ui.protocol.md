@@ -49,6 +49,8 @@
   - `UiProtocolState::query`
   - `UiRuntimeQueryPort::query_runtime`
   - `UiProviderConfigUpdate`
+  - `UiModelGroupConfigUpdate`
+  - `UiAgentModelGroupSelectionUpdate`
   - `session_list_projection`
   - `turn_is_nonterminal`
 - `UiProtocolState::apply_semantic_event`
@@ -103,6 +105,8 @@
 - config status query is a protocol-owned ADP/query command shape carrying the complete safe provider registry plus current primary/fallback selection, but selected config truth remains owned by `config.core` and supplied through `runtime.ui-command-dispatch`
 - provider definition upsert is a protocol-owned mutation command shape (`UpsertProviderConfig`) that carries only editable provider id/type/protocol/base URL/default model/env-var auth fields and routes to `config.core` without switching active selection
 - provider selection is a protocol-owned mutation command shape (`UpdateAgentProviderSelection`) that carries only agent name plus primary/fallback provider ids and routes to `config.core` without rewriting provider definitions
+- model group definition upsert is a protocol-owned mutation command shape (`UpsertModelGroupConfig`) that carries only group id, enabled flag, label, primary/sub/search/title/fallback/load-balance route ids/models and routes to `config.core` without writing provider secrets or switching active provider selection
+- model group selection is a protocol-owned mutation command shape (`UpdateAgentModelGroupSelection`) that carries only agent name plus optional model group id and routes to `config.core` without rewriting provider definitions or group definitions
 - provider web_search live test is a protocol-owned command shape (`TestProviderWebSearch`) carrying provider id plus optional query; it routes to `provider.reason-live-bridge` and must not be handled as a UI-local query or local Freehand tool call
 - legacy provider/model update remains a protocol-owned mutation command shape (`UpdateProviderConfig`) for existing CLI callers; WebUI and CLI must not write config files directly or send raw API-key values
 - Agent resource-count update is a protocol-owned mutation command shape (`UpdateAgentResourceConfig`) that carries only agent name plus `resource_count`; protocol rejects values outside `1..=5` before runtime dispatch and routes valid intent to `config.core`
@@ -152,10 +156,12 @@
   an ordered peer list of agent name/mode/node id, and auth source type only;
   API keys, pair-token env/value fields, provider raw payloads, and full
   credential-bearing URLs are not part of the DTO
+- config status query results expose UI-safe model group registry rows and current active model group id, but not provider credential values or raw config TOML
 - config status query results expose provider web_search configured/effective
   route status and reason strings as UI-safe capability diagnostics, not as
   secrets or provider wire payloads
 - provider/model update command receipts report owner dispatch status only; the restart-required and saved provider/model state is observed by a follow-up config status query/projection, not by protocol-local config truth
+- model group definition/selection command receipts report owner dispatch status only; the restart-required and saved group state is observed by a follow-up config status query/projection, not by protocol-local config truth
 - provider web_search test command receipts report owner dispatch status only;
   provider success and exact provider rejection remain visible receipt text
   supplied by runtime/provider owners
@@ -191,6 +197,7 @@
 - task list/history commands sent to command ingress are rejected as query-route misuse instead of mutating task truth
 - config status command sent to command ingress is rejected as query-route misuse instead of becoming a UI-local config read or mutation
 - provider/model update commands reject empty agent/provider/type/protocol/base URL/model/env-var fields and unsupported protocol values before dispatch; credential/API-key value fields do not exist in the DTO
+- model group commands reject empty agent/group ids, empty route providers/models, and zero load-balance weights before dispatch; credential/API-key value fields do not exist in the DTO
 - Agent resource-count update commands reject empty agent names and counts outside `1..=5` before dispatch; provider credentials and process-start state do not exist in the DTO
 - `RunMasterPoll` rejects empty cursors and rejects `replay_from_start=true`
   combined with `after_cursor` before dispatch
@@ -305,6 +312,7 @@
 | 20b | `UiProviderConfigUpdate` / `UiCommand::UpdateProviderConfig` / `UiCommand::UpsertProviderConfig` | `crates/freehand-ui-protocol/src/lib.rs` | define provider definition mutation DTOs without credential values and route them to the config owner | provider/model/base-url/env-var update | validated mutation intent routed to `config.core` | WebUI/CLI ADP command transport | runtime.ui-command-dispatch | bound |
 | 20b1 | `UiAgentProviderSelectionUpdate` / `UiCommand::UpdateAgentProviderSelection` | `crates/freehand-ui-protocol/src/lib.rs` | define active provider selection mutation DTO without credential values and route it to the config owner | agent name plus primary/fallback provider ids | validated mutation intent routed to `config.core` | WebUI/CLI ADP command transport | runtime.ui-command-dispatch | bound |
 | 20b2 | `UiCommand::TestProviderWebSearch` | `crates/freehand-ui-protocol/src/lib.rs` | define provider-hosted web_search live-test command DTO and route it to the runtime/provider bridge owner | provider id plus optional query | validated mutation intent routed to `provider.reason-live-bridge` | WebUI/CLI ADP command transport | runtime.ui-command-dispatch | bound |
+| 20b3 | `UiModelGroupConfigUpdate` / `UiAgentModelGroupSelectionUpdate` / `UiCommand::UpsertModelGroupConfig` / `UiCommand::UpdateAgentModelGroupSelection` / `UiModelGroupConfigProjection` | `crates/freehand-ui-protocol/src/lib.rs` | define model group registry/selection DTOs without credential values and route them to the config owner | group id, route provider/model fields, load-balance weights, and optional active group id | validated mutation intent routed to `config.core` plus UI-safe config projection DTOs | WebUI/CLI ADP command/query transport | runtime.ui-command-dispatch | bound |
 | 20c | `UiAgentResourceConfigUpdate` / `UiCommand::UpdateAgentResourceConfig` | `crates/freehand-ui-protocol/src/lib.rs` | define Agent resource-count update command DTO without provider credentials and route it to the config owner | agent name + `1..=5` resource count | validated mutation intent routed to `config.core` | WebUI/CLI ADP command transport | runtime.ui-command-dispatch | bound |
 | 21 | `UiCommand::QueryErrorCenterEvents` / `UiQueryResult::ErrorCenterEvents` | `crates/freehand-ui-protocol/src/lib.rs` | define read-only error-center query/result DTOs | session/trace/turn/domain filters | UI-safe error-center projection | ADP query transport | runtime query port | bound |
 | 22 | `UiCommand::SubscribeErrorCenterEvents` / `UiProjection::ErrorCenterEvents` | `crates/freehand-ui-protocol/src/lib.rs` | define error-center subscription command and projection event shape | error-center subscription filters | UI-safe error-center subscription event | ADP subscribe transport | protocol selector matcher | bound |
@@ -348,6 +356,7 @@
 - provider web_search effective status fields and `TestProviderWebSearch` command routing are protocol-bound without adding a local `web_search` function tool
 - provider definition upsert and legacy provider/model update command DTOs are protocol-bound, owner-routed to `config.core`, reject invalid/empty fields, and serialize without credential/API-key values
 - active provider selection command DTO is protocol-bound, owner-routed to `config.core`, rejects empty provider ids, and serializes without credential/API-key values
+- model group config and active selection command DTOs are protocol-bound, owner-routed to `config.core`, reject empty route fields/zero weights, and serialize without credential/API-key values
 - Agent resource-count update command DTO is protocol-bound, owner-routed to `config.core`, rejects out-of-range counts, and serializes without provider credentials or live-process state
 - task mutation command DTOs are protocol-bound, owner-routed to `task.orchestration`, and rejected at the protocol boundary when required task, worker, execution, or review fields are empty
 - Phase 2A worker agent, assignment, claim, review rejection, and dispatch-mode DTOs are landed and locked by protocol owner tests

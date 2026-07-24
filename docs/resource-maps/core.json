@@ -8,7 +8,7 @@
       "owner_crate": "crates/freehand-config",
       "identity": "agent profile plus config source path",
       "truth_store": "~/.freehand/config.toml",
-      "operations": ["load", "validate", "compile_agent_topology", "compile_remote_daemon_registry", "project_safe_config", "mutate_provider_config", "mutate_agent_resource_topology", "bootstrap_node_pairing", "compile_instruction_capability"],
+      "operations": ["load", "validate", "compile_agent_topology", "compile_remote_daemon_registry", "project_safe_config", "mutate_provider_config", "mutate_model_group_config", "mutate_agent_resource_topology", "bootstrap_node_pairing", "compile_instruction_capability"],
       "projections": ["runtime bootstrap config", "ordered configured peer topology", "safe CLI/ADP config query"]
     },
     {
@@ -568,6 +568,15 @@
       "source_resource": "config",
       "target_resource": "config",
       "effect": "mutate provider definitions and agent primary/fallback provider selection through config-owner validation and atomic persistence",
+      "mainline_call_doc": "docs/mainline-calls/config.core.json",
+      "binding_status": "bound"
+    },
+    {
+      "operation_id": "config.mutate_model_group_config",
+      "owner_feature_id": "config.core",
+      "source_resource": "config",
+      "target_resource": "config",
+      "effect": "mutate model group definitions and active agent model-group selection through config-owner validation and atomic persistence without making UI or runtime a config truth owner",
       "mainline_call_doc": "docs/mainline-calls/config.core.json",
       "binding_status": "bound"
     },
@@ -1141,6 +1150,28 @@
       "binding_status": "bound"
     },
     {
+      "edge_id": "config.core#10c",
+      "operation_id": "config.mutate_model_group_config",
+      "source_resource": "config",
+      "target_resource": "config",
+      "mainline_call_doc": "docs/mainline-calls/config.core.json",
+      "call_table_step": "10c",
+      "file_path": "crates/freehand-config/src/lib.rs",
+      "symbol_path": "upsert_model_group_config_in_path",
+      "binding_status": "bound"
+    },
+    {
+      "edge_id": "config.core#10d",
+      "operation_id": "config.mutate_model_group_config",
+      "source_resource": "config",
+      "target_resource": "config",
+      "mainline_call_doc": "docs/mainline-calls/config.core.json",
+      "call_table_step": "10d",
+      "file_path": "crates/freehand-config/src/lib.rs",
+      "symbol_path": "switch_agent_model_group_in_path",
+      "binding_status": "bound"
+    },
+    {
       "edge_id": "config.core#15",
       "operation_id": "config.compile_remote_daemon_registry",
       "source_resource": "config",
@@ -1581,7 +1612,7 @@
       "target_resource": "config",
       "allowed_direct": true,
       "via_resources": [],
-      "reason": "Config owner may validate and atomically replace its own provider registry and agent provider selection truth without routing through another resource."
+      "reason": "Config owner may validate and atomically replace its own provider registry, model group registry, and agent selection truth without routing through another resource."
     },
     {
       "rule_id": "config-compiles-remote-daemon-registry-direct",

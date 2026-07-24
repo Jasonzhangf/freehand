@@ -1,4 +1,4 @@
-import { initializeThemeToggle } from "/assets/theme.js?v=20260724-timer-ui-phase2";
+import { initializeThemeToggle } from "/assets/theme.js?v=20260724-model-groups-ui";
 
 initializeThemeToggle(document);
 
@@ -132,6 +132,26 @@ const settingsProviderWebSearchInput = document.getElementById("settings-provide
 const settingsProviderEnvInput = document.getElementById("settings-provider-env-input");
 const settingsProviderSaveButton = document.getElementById("settings-provider-save-button");
 const settingsProviderWebSearchTestButton = document.getElementById("settings-provider-web-search-test-button");
+const settingsModelGroupSummary = document.getElementById("settings-model-group-summary");
+const settingsModelGroupCurrentSelect = document.getElementById("settings-model-group-current-select");
+const settingsModelGroupSwitchButton = document.getElementById("settings-model-group-switch-button");
+const settingsModelGroupRegistryList = document.getElementById("settings-model-group-registry-list");
+const settingsModelGroupForm = document.getElementById("settings-model-group-form");
+const settingsModelGroupIdInput = document.getElementById("settings-model-group-id-input");
+const settingsModelGroupLabelInput = document.getElementById("settings-model-group-label-input");
+const settingsModelGroupEnabledInput = document.getElementById("settings-model-group-enabled-input");
+const settingsModelGroupPrimaryProviderInput = document.getElementById("settings-model-group-primary-provider-input");
+const settingsModelGroupPrimaryModelInput = document.getElementById("settings-model-group-primary-model-input");
+const settingsModelGroupSubProviderInput = document.getElementById("settings-model-group-sub-provider-input");
+const settingsModelGroupSubModelInput = document.getElementById("settings-model-group-sub-model-input");
+const settingsModelGroupSearchProviderInput = document.getElementById("settings-model-group-search-provider-input");
+const settingsModelGroupSearchModelInput = document.getElementById("settings-model-group-search-model-input");
+const settingsModelGroupTitleProviderInput = document.getElementById("settings-model-group-title-provider-input");
+const settingsModelGroupTitleModelInput = document.getElementById("settings-model-group-title-model-input");
+const settingsModelGroupFallbackProviderInput = document.getElementById("settings-model-group-fallback-provider-input");
+const settingsModelGroupFallbackModelInput = document.getElementById("settings-model-group-fallback-model-input");
+const settingsModelGroupLoadBalanceInput = document.getElementById("settings-model-group-load-balance-input");
+const settingsModelGroupSaveButton = document.getElementById("settings-model-group-save-button");
 const settingsApkUpdateSummary = document.getElementById("settings-apk-update-summary");
 const settingsApkUpdateSource = document.getElementById("settings-apk-update-source");
 const settingsApkUpdateStatus = document.getElementById("settings-apk-update-status");
@@ -202,7 +222,7 @@ const phaseOneSettingsTree = [
       ["Provider registry", "已配置 provider 列表和加载到表单", "ok"],
       ["Add provider family", "OpenAI / Anthropic / Gemini / xAI / OpenRouter family review UI", "attention"],
       ["Provider detail", "API key / OAuth / Base URL / protocol / capability test", "ok"],
-      ["Model group", "primary / sub / search / fallback / load balance review UI", "attention"],
+      ["Model group", "primary / sub / search / title / fallback / load balance owner-backed config", "ok"],
       ["Token 用量", "provider / session 用量投影，Phase 2 接 owner truth", "attention"],
     ],
   },
@@ -305,6 +325,9 @@ const state = {
   providerSelectionInFlight: false,
   providerWebSearchTestInFlight: "",
   providerSelectionDraft: null,
+  modelGroupSelectionDraft: null,
+  modelGroupSaveInFlight: false,
+  modelGroupSelectionInFlight: false,
   agentResourceDraftCount: null,
   agentResourceSaveInFlight: false,
   agentResourceSaveMessage: null,
@@ -949,6 +972,20 @@ function providerSelectionReceiptStatus(receipt) {
     return "Provider selection saved. Restart required.";
   }
   throw new Error("Provider selection save returned an unexpected service status.");
+}
+
+function modelGroupUpsertReceiptStatus(receipt) {
+  if (receipt && receipt.dispatch_status === "model_group_config_upserted_restart_required") {
+    return "Model group saved. Restart required.";
+  }
+  throw new Error("Model group save returned an unexpected service status.");
+}
+
+function modelGroupSelectionReceiptStatus(receipt) {
+  if (receipt && receipt.dispatch_status === "model_group_selection_saved_restart_required") {
+    return "Model group selection saved. Restart required.";
+  }
+  throw new Error("Model group selection save returned an unexpected service status.");
 }
 
 function agentResourceConfigReceiptStatus(receipt, expectedCount) {
@@ -2302,6 +2339,8 @@ function commandReceiptStatus(receipt) {
     case "provider_config_saved_restart_required":
     case "provider_config_upserted_restart_required":
     case "agent_provider_selection_saved_restart_required":
+    case "model_group_config_upserted_restart_required":
+    case "model_group_selection_saved_restart_required":
     case "agent_resource_config_saved_restart_required":
       return "settings saved";
     case "node_direct_message_dispatched":
@@ -6970,6 +7009,9 @@ function renderSettingsShell() {
   syncProviderSelectionControls();
   syncSettingsProviderForm();
   renderSettingsProviderRegistry();
+  syncModelGroupSelectionControls();
+  syncSettingsModelGroupForm();
+  renderSettingsModelGroupRegistry();
   renderSystemAgentResourceConfig();
   renderAndroidApkUpdateSettings();
   renderSettingsReviewTree();
@@ -7441,6 +7483,350 @@ async function submitProviderSelectionUpdate() {
     renderSettingsShell();
   } finally {
     state.providerSelectionInFlight = false;
+    renderSettingsShell();
+  }
+}
+
+function configModelGroupRegistry() {
+  return Array.isArray(state.configStatus?.model_group_registry)
+    ? state.configStatus.model_group_registry
+    : [];
+}
+
+function configModelGroupById(groupId) {
+  return configModelGroupRegistry().find((group) => group.group_id === groupId) || null;
+}
+
+function activeModelGroup() {
+  return configModelGroupById(state.configStatus?.model_group_id || "");
+}
+
+function modelRouteLabel(route) {
+  return route ? `${route.provider_id}:${route.model}` : "none";
+}
+
+function modelGroupOptionLabel(group) {
+  const stateLabel = group.enabled === false ? "disabled" : "enabled";
+  return `${group.group_id} · ${group.label || group.group_id} · ${modelRouteLabel(group.primary)} · ${stateLabel}`;
+}
+
+function replaceModelGroupOptions(select, groups, value) {
+  if (!select) {
+    return;
+  }
+  select.replaceChildren();
+  const none = document.createElement("option");
+  none.value = "";
+  none.textContent = "No active model group";
+  select.append(none);
+  groups.forEach((group) => {
+    const option = document.createElement("option");
+    option.value = group.group_id;
+    option.disabled = group.enabled === false;
+    option.textContent = modelGroupOptionLabel(group);
+    select.append(option);
+  });
+  select.value = value || "";
+  select.dataset.optionsInitialized = "true";
+}
+
+function syncModelGroupSelectionControls() {
+  const status = state.configStatus;
+  const groups = configModelGroupRegistry();
+  const activeGroupId = state.modelGroupSelectionDraft?.modelGroupId || status?.model_group_id || "";
+  replaceModelGroupOptions(settingsModelGroupCurrentSelect, groups, activeGroupId);
+  const selectedGroupId = settingsModelGroupCurrentSelect?.value || "";
+  if (state.modelGroupSelectionDraft) {
+    state.modelGroupSelectionDraft = { modelGroupId: selectedGroupId };
+  }
+  const changed = Boolean(status) && selectedGroupId !== (status.model_group_id || "");
+  setText(
+    "settings-model-group-summary",
+    status
+      ? `${status.model_group_id || "none"} · ${groups.length} configured`
+      : state.configStatusError || "loading",
+  );
+  if (settingsModelGroupSwitchButton) {
+    settingsModelGroupSwitchButton.disabled =
+      state.modelGroupSelectionInFlight || !status || !changed;
+    settingsModelGroupSwitchButton.textContent = state.modelGroupSelectionInFlight
+      ? "Saving..."
+      : "Switch group";
+  }
+}
+
+function updateModelGroupSelectionDraftFromControl() {
+  state.modelGroupSelectionDraft = {
+    modelGroupId: settingsModelGroupCurrentSelect?.value || "",
+  };
+}
+
+function replaceProviderRouteOptions(select, value, includeNone = true) {
+  if (!select) {
+    return;
+  }
+  const providers = configProviderRegistry();
+  select.replaceChildren();
+  if (includeNone) {
+    const none = document.createElement("option");
+    none.value = "";
+    none.textContent = "No route";
+    select.append(none);
+  }
+  providers.forEach((provider) => {
+    const option = document.createElement("option");
+    option.value = provider.provider_id;
+    option.disabled = provider.enabled === false;
+    option.textContent = providerOptionLabel(provider);
+    select.append(option);
+  });
+  select.value = value || "";
+}
+
+function syncSettingsModelGroupForm() {
+  const status = state.configStatus;
+  const group = activeModelGroup() || configModelGroupRegistry()[0] || null;
+  const primaryProvider = group?.primary?.provider_id || status?.provider_id || "";
+  const primaryModel = group?.primary?.model || status?.default_model || "";
+  setInputValueIfNotFocused(settingsModelGroupIdInput, group?.group_id || "default");
+  setInputValueIfNotFocused(settingsModelGroupLabelInput, group?.label || "Default model group");
+  if (settingsModelGroupEnabledInput && document.activeElement !== settingsModelGroupEnabledInput) {
+    settingsModelGroupEnabledInput.checked = group ? group.enabled !== false : true;
+  }
+  replaceProviderRouteOptions(settingsModelGroupPrimaryProviderInput, primaryProvider, false);
+  replaceProviderRouteOptions(settingsModelGroupSubProviderInput, group?.sub?.provider_id || "");
+  replaceProviderRouteOptions(settingsModelGroupSearchProviderInput, group?.search?.provider_id || "");
+  replaceProviderRouteOptions(settingsModelGroupTitleProviderInput, group?.title?.provider_id || "");
+  replaceProviderRouteOptions(settingsModelGroupFallbackProviderInput, group?.fallback?.provider_id || status?.fallback_provider_id || "");
+  setInputValueIfNotFocused(settingsModelGroupPrimaryModelInput, primaryModel);
+  setInputValueIfNotFocused(settingsModelGroupSubModelInput, group?.sub?.model || "");
+  setInputValueIfNotFocused(settingsModelGroupSearchModelInput, group?.search?.model || "");
+  setInputValueIfNotFocused(settingsModelGroupTitleModelInput, group?.title?.model || "");
+  setInputValueIfNotFocused(settingsModelGroupFallbackModelInput, group?.fallback?.model || "");
+  setInputValueIfNotFocused(
+    settingsModelGroupLoadBalanceInput,
+    Array.isArray(group?.load_balance)
+      ? group.load_balance
+          .map((route) => `${route.provider_id}:${route.model}:${route.weight}`)
+          .join(", ")
+      : "",
+  );
+  if (settingsModelGroupSaveButton) {
+    settingsModelGroupSaveButton.disabled = state.modelGroupSaveInFlight || !status;
+    settingsModelGroupSaveButton.textContent = state.modelGroupSaveInFlight
+      ? "Saving..."
+      : "Add/update model group";
+  }
+}
+
+function renderSettingsModelGroupRegistry() {
+  if (!settingsModelGroupRegistryList) {
+    return;
+  }
+  if (!state.configStatus) {
+    settingsModelGroupRegistryList.textContent = state.configStatusError || "loading model groups";
+    return;
+  }
+  const groups = configModelGroupRegistry();
+  if (groups.length === 0) {
+    settingsModelGroupRegistryList.textContent = "No model groups configured. Add one below to bind primary/sub/search/title/fallback routes.";
+    return;
+  }
+  const cards = groups.map((group) => {
+    const card = document.createElement("article");
+    card.className = "settings-model-group-card";
+    card.classList.toggle("is-active", group.group_id === state.configStatus.model_group_id);
+    card.classList.toggle("is-disabled", group.enabled === false);
+    card.dataset.modelGroupId = group.group_id || "";
+    const title = document.createElement("div");
+    title.className = "settings-model-group-card-title";
+    const name = document.createElement("span");
+    name.textContent = group.label || group.group_id || "unknown";
+    const badge = document.createElement("span");
+    badge.textContent = group.group_id === state.configStatus.model_group_id
+      ? "active"
+      : group.enabled === false
+        ? "disabled"
+        : "available";
+    title.append(name, badge);
+    const meta = document.createElement("div");
+    meta.className = "settings-model-group-card-meta";
+    meta.textContent = [
+      `id=${group.group_id}`,
+      `primary=${modelRouteLabel(group.primary)}`,
+      `sub=${modelRouteLabel(group.sub)}`,
+      `search=${modelRouteLabel(group.search)}`,
+      `title=${modelRouteLabel(group.title)}`,
+      `fallback=${modelRouteLabel(group.fallback)}`,
+      `load_balance=${Array.isArray(group.load_balance) ? group.load_balance.length : 0}`,
+    ].join(" · ");
+    const action = document.createElement("button");
+    action.className = "settings-secondary-action";
+    action.type = "button";
+    action.textContent = "Load into form";
+    action.addEventListener("click", () => fillSettingsModelGroupForm(group));
+    card.append(title, meta, action);
+    return card;
+  });
+  settingsModelGroupRegistryList.replaceChildren(...cards);
+}
+
+function fillSettingsModelGroupForm(group) {
+  if (!group) {
+    return;
+  }
+  setInputDirect(settingsModelGroupIdInput, group.group_id || "");
+  setInputDirect(settingsModelGroupLabelInput, group.label || group.group_id || "");
+  if (settingsModelGroupEnabledInput) {
+    settingsModelGroupEnabledInput.checked = group.enabled !== false;
+  }
+  fillModelRouteInputs("primary", group.primary);
+  fillModelRouteInputs("sub", group.sub);
+  fillModelRouteInputs("search", group.search);
+  fillModelRouteInputs("title", group.title);
+  fillModelRouteInputs("fallback", group.fallback);
+  setInputDirect(
+    settingsModelGroupLoadBalanceInput,
+    Array.isArray(group.load_balance)
+      ? group.load_balance
+          .map((route) => `${route.provider_id}:${route.model}:${route.weight}`)
+          .join(", ")
+      : "",
+  );
+}
+
+function setInputDirect(input, value) {
+  if (input) {
+    input.value = value || "";
+  }
+}
+
+function fillModelRouteInputs(routeName, route) {
+  const controls = modelRouteControls(routeName);
+  if (controls.provider) {
+    controls.provider.value = route?.provider_id || "";
+  }
+  if (controls.model) {
+    controls.model.value = route?.model || "";
+  }
+}
+
+function modelRouteControls(routeName) {
+  const map = {
+    primary: [settingsModelGroupPrimaryProviderInput, settingsModelGroupPrimaryModelInput],
+    sub: [settingsModelGroupSubProviderInput, settingsModelGroupSubModelInput],
+    search: [settingsModelGroupSearchProviderInput, settingsModelGroupSearchModelInput],
+    title: [settingsModelGroupTitleProviderInput, settingsModelGroupTitleModelInput],
+    fallback: [settingsModelGroupFallbackProviderInput, settingsModelGroupFallbackModelInput],
+  };
+  const [provider, model] = map[routeName] || [];
+  return { provider, model };
+}
+
+function routeUpdateFromControls(routeName, required = false) {
+  const controls = modelRouteControls(routeName);
+  const providerId = controls.provider?.value.trim() || "";
+  const model = controls.model?.value.trim() || "";
+  if (!providerId && !model && !required) {
+    return null;
+  }
+  if (!providerId || !model) {
+    throw new Error(`${routeName} route requires both provider and model`);
+  }
+  return {
+    provider_id: providerId,
+    model,
+  };
+}
+
+function parseLoadBalanceRoutes(text) {
+  const trimmed = (text || "").trim();
+  if (!trimmed) {
+    return [];
+  }
+  return trimmed.split(",").map((entry) => {
+    const parts = entry.trim().split(":").map((part) => part.trim());
+    if (parts.length !== 3 || !parts[0] || !parts[1] || !parts[2]) {
+      throw new Error("Load balance routes must use provider:model:weight");
+    }
+    const weight = Number.parseInt(parts[2], 10);
+    if (!Number.isInteger(weight) || weight <= 0) {
+      throw new Error("Load balance weight must be a positive integer");
+    }
+    return {
+      provider_id: parts[0],
+      model: parts[1],
+      weight,
+    };
+  });
+}
+
+async function submitModelGroupConfigUpdate(event) {
+  event.preventDefault();
+  if (!state.configStatus) {
+    setText("settings-model-group-save-status", "Config status is not loaded yet.");
+    return;
+  }
+  let group;
+  try {
+    group = {
+      agent_name: state.configStatus.agent_name,
+      group_id: settingsModelGroupIdInput?.value.trim() || "",
+      enabled: settingsModelGroupEnabledInput ? settingsModelGroupEnabledInput.checked : true,
+      label: settingsModelGroupLabelInput?.value.trim() || "",
+      primary: routeUpdateFromControls("primary", true),
+      sub: routeUpdateFromControls("sub"),
+      search: routeUpdateFromControls("search"),
+      title: routeUpdateFromControls("title"),
+      fallback: routeUpdateFromControls("fallback"),
+      load_balance: parseLoadBalanceRoutes(settingsModelGroupLoadBalanceInput?.value || ""),
+    };
+  } catch (error) {
+    setText("settings-model-group-save-status", `Model group invalid: ${error.message}`);
+    return;
+  }
+  state.modelGroupSaveInFlight = true;
+  setText("settings-model-group-save-status", "Saving model group...");
+  renderSettingsShell();
+  try {
+    const receipt = await adpCommand({ UpsertModelGroupConfig: { group } });
+    setCommandStatus(modelGroupUpsertReceiptStatus(receipt), { stickyMs: 5000 });
+    await refreshConfigStatus();
+    setText("settings-model-group-save-status", "Model group saved. Restart required before active runtime changes.");
+  } catch (error) {
+    state.configStatusError = error.message;
+    setText("settings-model-group-save-status", `Save failed: ${error.message}`);
+    renderSettingsShell();
+  } finally {
+    state.modelGroupSaveInFlight = false;
+    renderSettingsShell();
+  }
+}
+
+async function submitModelGroupSelectionUpdate() {
+  if (!state.configStatus) {
+    setText("settings-model-group-switch-status", "Config status is not loaded yet.");
+    return;
+  }
+  const selection = {
+    agent_name: state.configStatus.agent_name,
+    model_group_id: settingsModelGroupCurrentSelect?.value.trim() || null,
+  };
+  state.modelGroupSelectionInFlight = true;
+  setText("settings-model-group-switch-status", "Saving model group selection...");
+  renderSettingsShell();
+  try {
+    const receipt = await adpCommand({ UpdateAgentModelGroupSelection: { selection } });
+    setCommandStatus(modelGroupSelectionReceiptStatus(receipt), { stickyMs: 5000 });
+    await refreshConfigStatus();
+    state.modelGroupSelectionDraft = null;
+    setText("settings-model-group-switch-status", "Model group selection saved. Restart required before active runtime changes.");
+  } catch (error) {
+    state.configStatusError = error.message;
+    setText("settings-model-group-switch-status", `Switch failed: ${error.message}`);
+    renderSettingsShell();
+  } finally {
+    state.modelGroupSelectionInFlight = false;
     renderSettingsShell();
   }
 }
@@ -8323,6 +8709,30 @@ if (settingsProviderWebSearchTestButton) {
     testProviderWebSearch().catch((error) => {
       state.providerWebSearchTestInFlight = "";
       setText("settings-provider-web-search-test-status", `Provider web_search test failed: ${error.message}`);
+      renderSettingsShell();
+    });
+  });
+}
+if (settingsModelGroupForm) {
+  settingsModelGroupForm.addEventListener("submit", (event) => {
+    submitModelGroupConfigUpdate(event).catch((error) => {
+      state.modelGroupSaveInFlight = false;
+      setText("settings-model-group-save-status", `Save failed: ${error.message}`);
+      renderSettingsShell();
+    });
+  });
+}
+if (settingsModelGroupCurrentSelect) {
+  settingsModelGroupCurrentSelect.addEventListener("change", () => {
+    updateModelGroupSelectionDraftFromControl();
+    syncModelGroupSelectionControls();
+  });
+}
+if (settingsModelGroupSwitchButton) {
+  settingsModelGroupSwitchButton.addEventListener("click", () => {
+    submitModelGroupSelectionUpdate().catch((error) => {
+      state.modelGroupSelectionInFlight = false;
+      setText("settings-model-group-switch-status", `Switch failed: ${error.message}`);
       renderSettingsShell();
     });
   });

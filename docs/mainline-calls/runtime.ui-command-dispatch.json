@@ -26,10 +26,12 @@
     "Phase 1 board and lifecycle queries route `QueryTaskBoard`, `QueryAgentBoard`, and `QueryAgentLifecycle` through runtime into `TaskRuntime::query_task_board`, `TaskRuntime::query_agent_board`, and `TaskRuntime::query_agent_lifecycle`",
     "Phase 1 execution fact and scheduler tick commands route through runtime into `TaskRuntime::apply_execution_fact` and `TaskRuntime::run_scheduler_tick`; runtime stays a thin bridge and does not make scheduler business decisions",
     "runtime read-only error-center queries enter through `UiRuntimeQueryPort` and read watermarked metadata rows through the runtime metadata projection owner",
-    "runtime read-only config status queries reload config-owner truth from the runtime home and project the selected live agent/provider config plus complete safe provider registry and web_search configured/effective route diagnostics without exposing API keys, pair tokens, or credential-bearing URLs",
+    "runtime read-only config status queries reload config-owner truth from the runtime home and project the selected live agent/provider config plus complete safe provider registry, complete safe model group registry, active model group id, and web_search configured/effective route diagnostics without exposing API keys, pair tokens, or credential-bearing URLs",
     "provider web_search live-test commands reload config-owner provider truth from runtime home, resolve the requested enabled provider through LoadedConfig::select_provider_for_test, and execute one provider-hosted-search test through provider.reason-live-bridge outside the runtime mutex",
     "provider definition upsert commands enter through a protocol dispatch envelope, route to config.core::upsert_provider_config_in_path, and must not duplicate config validation or persistence logic in runtime",
     "provider selection commands enter through a protocol dispatch envelope, route to config.core::switch_agent_provider_in_path, and must not duplicate config validation or persistence logic in runtime",
+    "model group definition upsert commands enter through a protocol dispatch envelope, route to config.core::upsert_model_group_config_in_path, and must not duplicate route/provider validation or persistence logic in runtime",
+    "model group selection commands enter through a protocol dispatch envelope, route to config.core::switch_agent_model_group_in_path, and must not duplicate enabled-group validation or persistence logic in runtime",
     "legacy provider/model update commands enter through a protocol dispatch envelope, route to config.core::update_provider_config_in_path, and remain supported for existing CLI callers",
     "Agent resource-count update commands enter through a protocol dispatch envelope, route to config.core::update_agent_resource_config_in_path, and must not duplicate topology validation or persistence logic in runtime",
     "live submit registers an active turn cancel token, persists a prepared active turn snapshot before context/provider execution, and releases the runtime mutex before running provider IO",
@@ -70,11 +72,12 @@
     "runtime-backed task mutation commands return receipts only after task.orchestration accepts the mutation and task list projection publication succeeds",
     "runtime-backed worker claim receipts include the claimed task id and execution id; no-task is explicit and not a success mutation",
     "runtime error-center queries return UI-safe projections built from watermarked metadata rows and omit raw error/request/provider text",
-    "runtime config status queries return UI-safe projections sourced from config.core selected-agent truth with the ordered peer name/mode/node-id/provider list, complete provider registry, current primary/fallback provider ids, resource count, resource limit, shared provider id, auth source type, and provider web_search effective route diagnostics only",
+    "runtime config status queries return UI-safe projections sourced from config.core selected-agent truth with the ordered peer name/mode/node-id/provider list, complete provider registry, complete model group registry, current primary/fallback provider ids, active model group id, resource count, resource limit, shared provider id, auth source type, and provider web_search effective route diagnostics only",
     "runtime-backed provider web_search tests return explicit owner receipts: success requires a provider-hosted search observation; provider rejection or missing hosted observation is returned as a visible dispatch failure",
     "runtime task list subscription updates reuse the same UI-safe projection helper as task list queries",
     "successful provider definition upserts persist through the canonical config owner, store a pending restart-required UI-safe projection, preserve active primary/fallback selection, and leave active runtime/live provider config unchanged until daemon restart",
     "successful provider selection updates persist only the agent primary/fallback binding through the canonical config owner, store a pending restart-required UI-safe projection, preserve provider definitions, and leave active runtime/live provider config unchanged until daemon restart",
+    "successful model group definition and selection updates persist through the canonical config owner, store a pending restart-required UI-safe projection, preserve provider definitions, and leave active runtime/live provider config unchanged until daemon restart",
     "successful legacy provider/model updates persist through the canonical config owner, store a pending restart-required UI-safe projection, and leave active runtime/live provider config unchanged until daemon restart",
     "successful Agent resource-count updates persist through the canonical config owner, store a pending restart-required UI-safe projection, and do not fabricate live AgentBoard workers before daemon/Worker restart",
     "runtime-backed EventInbox query and MasterPoll command return UI-safe projections sourced from TaskRuntime::query_event_inbox and TaskRuntime::run_master_poll, including classifications and persisted cursor evidence without task status mutations",
@@ -103,6 +106,7 @@
     "task mutation dispatch requires a live runtime home, maps missing tasks to target-not-found, and must not create task truth outside task.orchestration",
     "invalid task board filters, missing agent lifecycle ids, invalid execution facts, and invalid scheduler thresholds map to explicit dispatch failures from the owner APIs",
     "provider/model update without a live runtime home or with invalid config owner input returns an explicit dispatch failure; failed updates must not overwrite config or fake hot reload",
+    "model group update/selection without a live runtime home or with invalid config owner input returns an explicit dispatch failure; failed updates must not overwrite config or fake hot reload",
     "Agent resource-count update without a live runtime home, with a non-Master target, or with invalid config owner input returns an explicit dispatch failure; failed updates must not overwrite config or fake live resources",
     "invalid EventInbox cursor, conflicting MasterPoll cursor mode, or MasterPoll cursor persistence failures map to explicit dispatch failures from task.orchestration",
     "invalid worker-control targets, unknown operations, missing op-specific payloads, terminal tasks, and Task Center consequence failures map to explicit dispatch failures without runtime-local success projection"
@@ -228,12 +232,14 @@
     {
       "symbol": "project_config_status_for_ui",
       "owner": "crates/freehand-runtime/src/lib.rs",
-      "purpose": "build UI-safe active or pending config projection plus complete provider registry from config.core selected agent truth",
+      "purpose": "build UI-safe active or pending config projection plus complete provider and model group registries from config.core selected agent truth",
       "allowed_callers": [
         "RuntimeCommandDispatcher::query_runtime",
         "RuntimeCommandDispatcher::dispatch_update_provider_config",
         "RuntimeCommandDispatcher::dispatch_upsert_provider_config",
-        "RuntimeCommandDispatcher::dispatch_update_agent_provider_selection"
+        "RuntimeCommandDispatcher::dispatch_update_agent_provider_selection",
+        "RuntimeCommandDispatcher::dispatch_upsert_model_group_config",
+        "RuntimeCommandDispatcher::dispatch_update_agent_model_group_selection"
       ],
       "related_tests": [
         "runtime_query_projects_config_status_without_secrets",
@@ -241,7 +247,8 @@
         "provider_web_search_test_fails_when_provider_does_not_observe_hosted_search",
         "runtime_dispatch_updates_provider_config_without_hot_reloading_active_model",
         "runtime_dispatch_upserts_provider_registry_without_switching_active_selection",
-        "runtime_dispatch_switches_agent_provider_selection_without_hot_reload"
+        "runtime_dispatch_switches_agent_provider_selection_without_hot_reload",
+        "runtime_dispatch_upserts_and_selects_model_group_without_hot_reload"
       ],
       "why_shared": "keeps config-to-UI projection in runtime owner while app transports stay protocol-only"
     },
@@ -336,11 +343,11 @@
       "step": "04",
       "symbol_path": "RuntimeCommandDispatcher::dispatch",
       "file_path": "crates/freehand-runtime/src/lib.rs",
-      "responsibility": "execute protocol-owned dispatch envelope through the correct owner adapter",
+      "responsibility": "execute protocol-owned dispatch envelope through the correct owner adapter, including config-owner provider/model-group mutations",
       "input_semantic": "dispatch envelope",
       "output_semantic": "dispatch receipt or failure",
       "caller": "app/daemon runtime boundary",
-      "callee": "reason/node owner adapter",
+      "callee": "reason/node/config owner adapter",
       "binding_status": "bound"
     },
     {
@@ -647,6 +654,17 @@
       "binding_status": "bound"
     },
     {
+      "step": "16d",
+      "symbol_path": "RuntimeCommandDispatcher::dispatch_upsert_model_group_config / RuntimeCommandDispatcher::dispatch_update_agent_model_group_selection",
+      "file_path": "crates/freehand-runtime/src/lib.rs",
+      "responsibility": "route model group definition and active group selection dispatch into the config owner and store pending restart-required UI projection without hot-reloading active runtime",
+      "input_semantic": "UiModelGroupConfigUpdate or UiAgentModelGroupSelectionUpdate dispatch envelope",
+      "output_semantic": "dispatch receipt or explicit dispatch failure",
+      "caller": "RuntimeCommandDispatcher::dispatch",
+      "callee": "upsert_model_group_config_in_path / switch_agent_model_group_in_path",
+      "binding_status": "bound"
+    },
+    {
       "step": "17",
       "symbol_path": "update_provider_config_in_path / upsert_provider_config_in_path / switch_agent_provider_in_path",
       "file_path": "crates/freehand-config/src/lib.rs",
@@ -654,6 +672,17 @@
       "input_semantic": "runtime config path plus provider definition or selection update",
       "output_semantic": "selected agent config projection from saved TOML",
       "caller": "config mutation dispatchers",
+      "callee": "config.core persistence",
+      "binding_status": "bound"
+    },
+    {
+      "step": "17m",
+      "symbol_path": "upsert_model_group_config_in_path / switch_agent_model_group_in_path",
+      "file_path": "crates/freehand-config/src/lib.rs",
+      "responsibility": "validate and atomically persist model group definitions and active model-group selection through canonical config owner",
+      "input_semantic": "runtime config path plus model group definition or selection update",
+      "output_semantic": "selected agent config projection from saved TOML",
+      "caller": "model group mutation dispatchers",
       "callee": "config.core persistence",
       "binding_status": "bound"
     },
@@ -810,6 +839,7 @@
     "runtime Phase 2A master-worker command bridge is covered by runtime_dispatches_phase2a_master_worker_loop_into_task_truth and master-worker-foundation-sample",
     "runtime error-center query bridge routes metadata rows through a UI-safe projection and is covered by runtime and daemon ADP tests",
     "runtime provider definition upsert and active provider selection dispatch are bound as thin mutation routes into config.core; successful saves project restart-required pending status and active runtime config remains unchanged until restart",
+    "runtime model group definition and active group selection dispatch are bound as thin mutation routes into config.core; successful saves project restart-required pending status and active runtime config remains unchanged until restart",
     "runtime legacy provider/model update dispatch remains bound as a thin mutation route into config.core for existing callers",
     "runtime Agent resource-count update dispatch is bound as a thin mutation route into config.core; successful saves project restart-required pending status and active AgentBoard truth remains unchanged until restart/process startup",
     "runtime Phase 2B EventInbox and MasterPoll bridge is covered by runtime_dispatches_phase2b_master_poll_and_event_inbox, including replay_from_start and a backlog larger than the old default page size",

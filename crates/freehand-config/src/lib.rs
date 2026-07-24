@@ -110,6 +110,7 @@ pub struct AgentConfig {
     pub pair_token_env: String,
     pub provider_id: String,
     pub fallback_provider_id: Option<String>,
+    pub model_group_id: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -144,6 +145,45 @@ pub struct ProviderConfig {
     pub web_search: ProviderWebSearchMode,
     pub auth_type: ProviderAuthType,
     pub auth: ProviderAuthConfig,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ModelRouteConfig {
+    pub provider_id: String,
+    pub model: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ModelWeightedRouteConfig {
+    pub provider_id: String,
+    pub model: String,
+    pub weight: u32,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ModelGroupConfig {
+    pub id: String,
+    pub enabled: bool,
+    pub label: String,
+    pub primary: ModelRouteConfig,
+    pub sub: Option<ModelRouteConfig>,
+    pub search: Option<ModelRouteConfig>,
+    pub title: Option<ModelRouteConfig>,
+    pub fallback: Option<ModelRouteConfig>,
+    pub load_balance: Vec<ModelWeightedRouteConfig>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SafeModelGroupConfigProjection {
+    pub id: String,
+    pub enabled: bool,
+    pub label: String,
+    pub primary: ModelRouteConfig,
+    pub sub: Option<ModelRouteConfig>,
+    pub search: Option<ModelRouteConfig>,
+    pub title: Option<ModelRouteConfig>,
+    pub fallback: Option<ModelRouteConfig>,
+    pub load_balance: Vec<ModelWeightedRouteConfig>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -190,6 +230,26 @@ pub struct AgentProviderSelectionConfigUpdate {
     pub agent_name: String,
     pub provider_id: String,
     pub fallback_provider_id: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ModelGroupConfigUpdate {
+    pub agent_name: String,
+    pub group_id: String,
+    pub enabled: bool,
+    pub label: String,
+    pub primary: ModelRouteConfig,
+    pub sub: Option<ModelRouteConfig>,
+    pub search: Option<ModelRouteConfig>,
+    pub title: Option<ModelRouteConfig>,
+    pub fallback: Option<ModelRouteConfig>,
+    pub load_balance: Vec<ModelWeightedRouteConfig>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct AgentModelGroupSelectionConfigUpdate {
+    pub agent_name: String,
+    pub model_group_id: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -715,6 +775,7 @@ impl RemoteDaemonBootstrapBundle {
 pub struct LoadedConfig {
     agents: BTreeMap<String, AgentConfig>,
     providers: BTreeMap<String, ProviderConfig>,
+    model_groups: BTreeMap<String, ModelGroupConfig>,
     remote_daemon_registry: RemoteDaemonRegistryConfig,
 }
 
@@ -727,10 +788,21 @@ impl LoadedConfig {
         &self.providers
     }
 
+    pub fn model_groups(&self) -> &BTreeMap<String, ModelGroupConfig> {
+        &self.model_groups
+    }
+
     pub fn safe_provider_registry(&self) -> Vec<SafeProviderConfigProjection> {
         self.providers
             .values()
             .map(ProviderConfig::safe_projection)
+            .collect()
+    }
+
+    pub fn safe_model_group_registry(&self) -> Vec<SafeModelGroupConfigProjection> {
+        self.model_groups
+            .values()
+            .map(ModelGroupConfig::safe_projection)
             .collect()
     }
 
@@ -773,28 +845,66 @@ impl LoadedConfig {
             });
         }
 
-        let provider = select_provider_for_agent(
-            &self.providers,
-            &agent.name,
-            &agent.provider_id,
-            ProviderRouteRole::Primary,
-        )?;
-        let fallback_provider = match agent.fallback_provider_id.as_deref() {
-            Some(fallback_provider_id) => {
-                if fallback_provider_id == agent.provider_id {
-                    return Err(ConfigError::FallbackProviderMatchesPrimary {
+        let active_model_group = match agent.model_group_id.as_deref() {
+            Some(model_group_id) => {
+                let group = self.model_groups.get(model_group_id).ok_or_else(|| {
+                    ConfigError::AgentModelGroupNotFound {
                         agent_name: agent.name.clone(),
-                        provider_id: agent.provider_id.clone(),
+                        model_group_id: model_group_id.to_owned(),
+                    }
+                })?;
+                if !group.enabled {
+                    return Err(ConfigError::AgentModelGroupDisabled {
+                        agent_name: agent.name.clone(),
+                        model_group_id: group.id.clone(),
                     });
                 }
-                Some(select_provider_for_agent(
-                    &self.providers,
-                    &agent.name,
-                    fallback_provider_id,
-                    ProviderRouteRole::Fallback,
-                )?)
+                Some(group)
             }
             None => None,
+        };
+        let (provider, fallback_provider) = if let Some(group) = active_model_group {
+            let provider = select_provider_for_model_route(
+                &self.providers,
+                &agent.name,
+                &group.primary,
+                ProviderRouteRole::Primary,
+            )?;
+            let fallback_provider = match &group.fallback {
+                Some(route) => Some(select_provider_for_model_route(
+                    &self.providers,
+                    &agent.name,
+                    route,
+                    ProviderRouteRole::Fallback,
+                )?),
+                None => None,
+            };
+            (provider, fallback_provider)
+        } else {
+            let provider = select_provider_for_agent(
+                &self.providers,
+                &agent.name,
+                &agent.provider_id,
+                ProviderRouteRole::Primary,
+            )?;
+            let fallback_provider = match agent.fallback_provider_id.as_deref() {
+                Some(fallback_provider_id) => {
+                    if fallback_provider_id == agent.provider_id {
+                        return Err(ConfigError::FallbackProviderMatchesPrimary {
+                            agent_name: agent.name.clone(),
+                            provider_id: agent.provider_id.clone(),
+                        });
+                    }
+                    Some(select_provider_for_agent(
+                        &self.providers,
+                        &agent.name,
+                        fallback_provider_id,
+                        ProviderRouteRole::Fallback,
+                    )?)
+                }
+                None => None,
+            };
+            (provider, fallback_provider)
         };
         let mut paired_agents = Vec::new();
         for paired_agent_name in &agent.paired_agent_names {
@@ -812,6 +922,7 @@ impl LoadedConfig {
                 pair_token_env: paired.pair_token_env.clone(),
                 provider_id: paired.provider_id.clone(),
                 fallback_provider_id: paired.fallback_provider_id.clone(),
+                model_group_id: paired.model_group_id.clone(),
             });
         }
 
@@ -825,6 +936,7 @@ impl LoadedConfig {
             pair_token,
             provider,
             fallback_provider,
+            model_group_id: agent.model_group_id.clone(),
             restart_required_on_change: true,
         })
     }
@@ -856,6 +968,22 @@ impl ProviderConfig {
     }
 }
 
+impl ModelGroupConfig {
+    pub fn safe_projection(&self) -> SafeModelGroupConfigProjection {
+        SafeModelGroupConfigProjection {
+            id: self.id.clone(),
+            enabled: self.enabled,
+            label: self.label.clone(),
+            primary: self.primary.clone(),
+            sub: self.sub.clone(),
+            search: self.search.clone(),
+            title: self.title.clone(),
+            fallback: self.fallback.clone(),
+            load_balance: self.load_balance.clone(),
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct SelectedAgentConfig {
     pub name: String,
@@ -867,6 +995,7 @@ pub struct SelectedAgentConfig {
     pub pair_token: String,
     pub provider: SelectedProviderConfig,
     pub fallback_provider: Option<SelectedProviderConfig>,
+    pub model_group_id: Option<String>,
     pub restart_required_on_change: bool,
 }
 
@@ -879,6 +1008,7 @@ pub struct SelectedPeerAgentConfig {
     pub pair_token_env: String,
     pub provider_id: String,
     pub fallback_provider_id: Option<String>,
+    pub model_group_id: Option<String>,
 }
 
 impl SelectedAgentConfig {
@@ -941,6 +1071,11 @@ pub enum ConfigError {
         table_name: String,
         field_name: String,
     },
+    #[error("model group table `{table_name}` has mismatched id field `{field_name}`")]
+    ModelGroupIdMismatch {
+        table_name: String,
+        field_name: String,
+    },
     #[error("agent `{agent_name}` pair_token must be a non-empty environment variable name")]
     EmptyPairTokenEnv { agent_name: String },
     #[error("agent `{agent_name}` node_id must be non-empty")]
@@ -989,6 +1124,43 @@ pub enum ConfigError {
     EmptyProviderBaseUrl { provider_id: String },
     #[error("provider `{provider_id}` id must use only letters, numbers, `_`, `-`, or `.`")]
     InvalidProviderId { provider_id: String },
+    #[error("model group `{model_group_id}` id must use only letters, numbers, `_`, `-`, or `.`")]
+    InvalidModelGroupId { model_group_id: String },
+    #[error("model group `{model_group_id}` primary route is required")]
+    MissingModelGroupPrimaryRoute { model_group_id: String },
+    #[error("model group `{model_group_id}` route `{route}` provider must be non-empty")]
+    EmptyModelRouteProvider {
+        model_group_id: String,
+        route: String,
+    },
+    #[error("model group `{model_group_id}` route `{route}` model must be non-empty")]
+    EmptyModelRouteModel {
+        model_group_id: String,
+        route: String,
+    },
+    #[error(
+        "model group `{model_group_id}` route `{route}` references missing provider `{provider_id}`"
+    )]
+    ModelRouteProviderNotFound {
+        model_group_id: String,
+        route: String,
+        provider_id: String,
+    },
+    #[error(
+        "model group `{model_group_id}` route `{route}` references disabled provider `{provider_id}`"
+    )]
+    ModelRouteProviderDisabled {
+        model_group_id: String,
+        route: String,
+        provider_id: String,
+    },
+    #[error(
+        "model group `{model_group_id}` load_balance route `{route}` weight must be greater than zero"
+    )]
+    EmptyModelRouteWeight {
+        model_group_id: String,
+        route: String,
+    },
     #[error("provider `{provider_id}` base_url must be an http(s) URL with a host")]
     InvalidProviderBaseUrl { provider_id: String },
     #[error("provider `{provider_id}` type `{provider_type}` is not supported")]
@@ -1130,6 +1302,16 @@ pub enum ConfigError {
         agent_name: String,
         provider_id: String,
     },
+    #[error("agent `{agent_name}` references missing model group `{model_group_id}`")]
+    AgentModelGroupNotFound {
+        agent_name: String,
+        model_group_id: String,
+    },
+    #[error("agent `{agent_name}` selected disabled model group `{model_group_id}`")]
+    AgentModelGroupDisabled {
+        agent_name: String,
+        model_group_id: String,
+    },
     #[error("agent `{agent_name}` references missing fallback provider `{provider_id}`")]
     AgentFallbackProviderNotFound {
         agent_name: String,
@@ -1202,6 +1384,8 @@ struct RawConfig {
     #[serde(default)]
     providers: BTreeMap<String, RawProviderConfig>,
     #[serde(default)]
+    model_groups: BTreeMap<String, RawModelGroupConfig>,
+    #[serde(default)]
     remote_daemon_accounts: BTreeMap<String, RawRemoteDaemonAccountConfig>,
     #[serde(default)]
     remote_daemons: BTreeMap<String, RawRemoteDaemonConfig>,
@@ -1219,6 +1403,8 @@ struct RawAgentConfig {
     provider: String,
     #[serde(default)]
     fallback_provider: Option<String>,
+    #[serde(default)]
+    model_group: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -1248,6 +1434,41 @@ struct RawProviderAuthConfig {
     api_key: Option<String>,
     #[serde(default, alias = "apiKeyEnv")]
     api_key_env: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RawModelGroupConfig {
+    id: String,
+    enabled: bool,
+    #[serde(default)]
+    label: Option<String>,
+    primary: RawModelRouteConfig,
+    #[serde(default)]
+    sub: Option<RawModelRouteConfig>,
+    #[serde(default)]
+    search: Option<RawModelRouteConfig>,
+    #[serde(default)]
+    title: Option<RawModelRouteConfig>,
+    #[serde(default)]
+    fallback: Option<RawModelRouteConfig>,
+    #[serde(default)]
+    load_balance: Vec<RawModelWeightedRouteConfig>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RawModelRouteConfig {
+    provider: String,
+    model: String,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RawModelWeightedRouteConfig {
+    provider: String,
+    model: String,
+    weight: u32,
 }
 
 #[derive(Debug, Deserialize)]
@@ -1595,6 +1816,110 @@ pub fn switch_agent_provider_in_path(
     Ok(selected)
 }
 
+pub fn upsert_model_group_config_in_path(
+    path: impl AsRef<Path>,
+    update: ModelGroupConfigUpdate,
+) -> Result<SelectedAgentConfig, ConfigError> {
+    let path = path.as_ref();
+    let raw = fs::read_to_string(path).map_err(|source| ConfigError::ReadConfig {
+        path: path.to_path_buf(),
+        source,
+    })?;
+    let loaded = parse_config(path, &raw)?;
+    if !loaded.agents().contains_key(&update.agent_name) {
+        return Err(ConfigError::AgentNotFound {
+            agent_name: update.agent_name.clone(),
+        });
+    }
+    let group_id = update.group_id.trim().to_owned();
+    validate_model_group_id(&group_id)?;
+    validate_model_group_config(
+        model_group_update_to_raw(&update, &group_id),
+        &group_id,
+        loaded.providers(),
+    )?;
+    let mut document: toml::Value =
+        toml::from_str(&raw).map_err(|source| ConfigError::ParseConfig {
+            path: path.to_path_buf(),
+            source,
+        })?;
+    apply_model_group_config_update(path, &mut document, &update, &group_id)?;
+    let updated =
+        toml::to_string_pretty(&document).map_err(|source| ConfigError::SerializeConfig {
+            path: path.to_path_buf(),
+            source,
+        })?;
+    let updated_loaded = parse_config(path, &updated)?;
+    let selected = updated_loaded.select_agent(&update.agent_name)?;
+    persist_config_atomically(path, &updated)?;
+    Ok(selected)
+}
+
+pub fn switch_agent_model_group_in_path(
+    path: impl AsRef<Path>,
+    update: AgentModelGroupSelectionConfigUpdate,
+) -> Result<SelectedAgentConfig, ConfigError> {
+    let agent_name = update.agent_name.trim().to_owned();
+    let model_group_id = update
+        .model_group_id
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_owned);
+    if let Some(model_group_id) = &model_group_id {
+        validate_model_group_id(model_group_id)?;
+    }
+
+    let path = path.as_ref();
+    let raw = fs::read_to_string(path).map_err(|source| ConfigError::ReadConfig {
+        path: path.to_path_buf(),
+        source,
+    })?;
+    let loaded = parse_config(path, &raw)?;
+    if !loaded.agents().contains_key(&agent_name) {
+        return Err(ConfigError::AgentNotFound {
+            agent_name: agent_name.clone(),
+        });
+    }
+    if let Some(model_group_id) = &model_group_id {
+        match loaded.model_groups().get(model_group_id) {
+            Some(group) if group.enabled => {}
+            Some(_) => {
+                return Err(ConfigError::AgentModelGroupDisabled {
+                    agent_name: agent_name.clone(),
+                    model_group_id: model_group_id.clone(),
+                });
+            }
+            None => {
+                return Err(ConfigError::AgentModelGroupNotFound {
+                    agent_name: agent_name.clone(),
+                    model_group_id: model_group_id.clone(),
+                });
+            }
+        }
+    }
+    let mut document: toml::Value =
+        toml::from_str(&raw).map_err(|source| ConfigError::ParseConfig {
+            path: path.to_path_buf(),
+            source,
+        })?;
+    apply_agent_model_group_selection_update(
+        path,
+        &mut document,
+        &agent_name,
+        model_group_id.as_deref(),
+    )?;
+    let updated =
+        toml::to_string_pretty(&document).map_err(|source| ConfigError::SerializeConfig {
+            path: path.to_path_buf(),
+            source,
+        })?;
+    let updated_loaded = parse_config(path, &updated)?;
+    let selected = updated_loaded.select_agent(&agent_name)?;
+    persist_config_atomically(path, &updated)?;
+    Ok(selected)
+}
+
 pub fn update_agent_resource_config_in_path(
     path: impl AsRef<Path>,
     update: AgentResourceConfigUpdate,
@@ -1655,6 +1980,7 @@ fn validate_config(parsed: RawConfig) -> Result<LoadedConfig, ConfigError> {
     let RawConfig {
         agents: raw_agents,
         providers: raw_providers,
+        model_groups: raw_model_groups,
         remote_daemon_accounts: raw_remote_daemon_accounts,
         remote_daemons: raw_remote_daemons,
     } = parsed;
@@ -1702,6 +2028,20 @@ fn validate_config(parsed: RawConfig) -> Result<LoadedConfig, ConfigError> {
             auth,
         };
         providers.insert(raw_provider.id, provider);
+    }
+
+    let mut model_groups = BTreeMap::new();
+    for (table_name, raw_group) in raw_model_groups {
+        let group_id = raw_group.id.trim().to_owned();
+        validate_model_group_id(&group_id)?;
+        if group_id != table_name {
+            return Err(ConfigError::ModelGroupIdMismatch {
+                table_name,
+                field_name: group_id,
+            });
+        }
+        let group = validate_model_group_config(raw_group, &group_id, &providers)?;
+        model_groups.insert(group_id, group);
     }
 
     let mut agents = BTreeMap::new();
@@ -1765,11 +2105,35 @@ fn validate_config(parsed: RawConfig) -> Result<LoadedConfig, ConfigError> {
             pair_token_env: raw_agent.pair_token,
             provider_id: raw_agent.provider,
             fallback_provider_id: raw_agent.fallback_provider,
+            model_group_id: raw_agent
+                .model_group
+                .as_deref()
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .map(str::to_owned),
         };
         agents.insert(raw_agent.name, agent);
     }
 
     for agent in agents.values() {
+        if let Some(model_group_id) = &agent.model_group_id {
+            validate_model_group_id(model_group_id)?;
+            match model_groups.get(model_group_id) {
+                Some(group) if group.enabled => {}
+                Some(_) => {
+                    return Err(ConfigError::AgentModelGroupDisabled {
+                        agent_name: agent.name.clone(),
+                        model_group_id: model_group_id.clone(),
+                    });
+                }
+                None => {
+                    return Err(ConfigError::AgentModelGroupNotFound {
+                        agent_name: agent.name.clone(),
+                        model_group_id: model_group_id.clone(),
+                    });
+                }
+            }
+        }
         if agent.mode == AgentMode::Master && agent.paired_agent_names.is_empty() {
             return Err(ConfigError::MasterRequiresWorkerPeer {
                 agent_name: agent.name.clone(),
@@ -1822,6 +2186,7 @@ fn validate_config(parsed: RawConfig) -> Result<LoadedConfig, ConfigError> {
     Ok(LoadedConfig {
         agents,
         providers,
+        model_groups,
         remote_daemon_registry,
     })
 }
@@ -2132,7 +2497,136 @@ fn apply_agent_primary_provider_update(
         "provider".to_owned(),
         toml::Value::String(provider_id.to_owned()),
     );
+    agent.remove("model_group");
     Ok(())
+}
+
+fn apply_model_group_config_update(
+    path: &Path,
+    document: &mut toml::Value,
+    update: &ModelGroupConfigUpdate,
+    group_id: &str,
+) -> Result<(), ConfigError> {
+    let root = document
+        .as_table_mut()
+        .ok_or_else(|| ConfigError::InvalidConfigRoot {
+            path: path.to_path_buf(),
+        })?;
+    let model_groups = root
+        .entry("model_groups".to_owned())
+        .or_insert_with(|| toml::Value::Table(toml::map::Map::new()))
+        .as_table_mut()
+        .ok_or_else(|| ConfigError::MissingConfigTable {
+            path: path.to_path_buf(),
+            table: "model_groups".to_owned(),
+        })?;
+    let mut group = toml::map::Map::new();
+    group.insert("id".to_owned(), toml::Value::String(group_id.to_owned()));
+    group.insert("enabled".to_owned(), toml::Value::Boolean(update.enabled));
+    group.insert(
+        "label".to_owned(),
+        toml::Value::String(
+            update
+                .label
+                .trim()
+                .is_empty()
+                .then(|| group_id.to_owned())
+                .unwrap_or_else(|| update.label.trim().to_owned()),
+        ),
+    );
+    group.insert("primary".to_owned(), model_route_to_toml(&update.primary));
+    if let Some(route) = &update.sub {
+        group.insert("sub".to_owned(), model_route_to_toml(route));
+    }
+    if let Some(route) = &update.search {
+        group.insert("search".to_owned(), model_route_to_toml(route));
+    }
+    if let Some(route) = &update.title {
+        group.insert("title".to_owned(), model_route_to_toml(route));
+    }
+    if let Some(route) = &update.fallback {
+        group.insert("fallback".to_owned(), model_route_to_toml(route));
+    }
+    if !update.load_balance.is_empty() {
+        group.insert(
+            "load_balance".to_owned(),
+            toml::Value::Array(
+                update
+                    .load_balance
+                    .iter()
+                    .map(model_weighted_route_to_toml)
+                    .collect(),
+            ),
+        );
+    }
+    model_groups.insert(group_id.to_owned(), toml::Value::Table(group));
+    Ok(())
+}
+
+fn model_route_to_toml(route: &ModelRouteConfig) -> toml::Value {
+    let mut table = toml::map::Map::new();
+    table.insert(
+        "provider".to_owned(),
+        toml::Value::String(route.provider_id.trim().to_owned()),
+    );
+    table.insert(
+        "model".to_owned(),
+        toml::Value::String(route.model.trim().to_owned()),
+    );
+    toml::Value::Table(table)
+}
+
+fn model_weighted_route_to_toml(route: &ModelWeightedRouteConfig) -> toml::Value {
+    let mut table = toml::map::Map::new();
+    table.insert(
+        "provider".to_owned(),
+        toml::Value::String(route.provider_id.trim().to_owned()),
+    );
+    table.insert(
+        "model".to_owned(),
+        toml::Value::String(route.model.trim().to_owned()),
+    );
+    table.insert(
+        "weight".to_owned(),
+        toml::Value::Integer(i64::from(route.weight)),
+    );
+    toml::Value::Table(table)
+}
+
+fn model_group_update_to_raw(
+    update: &ModelGroupConfigUpdate,
+    group_id: &str,
+) -> RawModelGroupConfig {
+    RawModelGroupConfig {
+        id: group_id.to_owned(),
+        enabled: update.enabled,
+        label: Some(update.label.clone()),
+        primary: model_route_to_raw(&update.primary),
+        sub: update.sub.as_ref().map(model_route_to_raw),
+        search: update.search.as_ref().map(model_route_to_raw),
+        title: update.title.as_ref().map(model_route_to_raw),
+        fallback: update.fallback.as_ref().map(model_route_to_raw),
+        load_balance: update
+            .load_balance
+            .iter()
+            .map(model_weighted_route_to_raw)
+            .collect(),
+    }
+}
+
+fn model_route_to_raw(route: &ModelRouteConfig) -> RawModelRouteConfig {
+    RawModelRouteConfig {
+        provider: route.provider_id.clone(),
+        model: route.model.clone(),
+    }
+}
+
+fn model_weighted_route_to_raw(route: &ModelWeightedRouteConfig) -> RawModelWeightedRouteConfig {
+    RawModelWeightedRouteConfig {
+        provider: route.provider_id.clone(),
+        model: route.model.clone(),
+        weight: route.weight,
+    }
 }
 
 fn apply_agent_provider_selection_update(
@@ -2171,6 +2665,42 @@ fn apply_agent_provider_selection_update(
         );
     } else {
         agent.remove("fallback_provider");
+    }
+    agent.remove("model_group");
+    Ok(())
+}
+
+fn apply_agent_model_group_selection_update(
+    path: &Path,
+    document: &mut toml::Value,
+    agent_name: &str,
+    model_group_id: Option<&str>,
+) -> Result<(), ConfigError> {
+    let root = document
+        .as_table_mut()
+        .ok_or_else(|| ConfigError::InvalidConfigRoot {
+            path: path.to_path_buf(),
+        })?;
+    let agents = root
+        .get_mut("agents")
+        .and_then(toml::Value::as_table_mut)
+        .ok_or_else(|| ConfigError::MissingConfigTable {
+            path: path.to_path_buf(),
+            table: "agents".to_owned(),
+        })?;
+    let agent = agents
+        .get_mut(agent_name)
+        .and_then(toml::Value::as_table_mut)
+        .ok_or_else(|| ConfigError::AgentNotFound {
+            agent_name: agent_name.to_owned(),
+        })?;
+    if let Some(model_group_id) = model_group_id {
+        agent.insert(
+            "model_group".to_owned(),
+            toml::Value::String(model_group_id.to_owned()),
+        );
+    } else {
+        agent.remove("model_group");
     }
     Ok(())
 }
@@ -2324,6 +2854,142 @@ fn validate_provider_id(provider_id: &str) -> Result<(), ConfigError> {
             provider_id: provider_id.to_owned(),
         })
     }
+}
+
+fn validate_model_group_id(model_group_id: &str) -> Result<(), ConfigError> {
+    let valid = !model_group_id.trim().is_empty()
+        && model_group_id
+            .chars()
+            .all(|ch| ch.is_ascii_alphanumeric() || matches!(ch, '_' | '-' | '.'));
+    if valid {
+        Ok(())
+    } else {
+        Err(ConfigError::InvalidModelGroupId {
+            model_group_id: model_group_id.to_owned(),
+        })
+    }
+}
+
+fn validate_model_group_config(
+    raw: RawModelGroupConfig,
+    group_id: &str,
+    providers: &BTreeMap<String, ProviderConfig>,
+) -> Result<ModelGroupConfig, ConfigError> {
+    let enabled = raw.enabled;
+    let primary = validate_model_route(raw.primary, group_id, "primary", enabled, providers)?;
+    let sub = raw
+        .sub
+        .map(|route| validate_model_route(route, group_id, "sub", enabled, providers))
+        .transpose()?;
+    let search = raw
+        .search
+        .map(|route| validate_model_route(route, group_id, "search", enabled, providers))
+        .transpose()?;
+    let title = raw
+        .title
+        .map(|route| validate_model_route(route, group_id, "title", enabled, providers))
+        .transpose()?;
+    let fallback = raw
+        .fallback
+        .map(|route| validate_model_route(route, group_id, "fallback", enabled, providers))
+        .transpose()?;
+    let mut load_balance = Vec::new();
+    for (index, route) in raw.load_balance.into_iter().enumerate() {
+        load_balance.push(validate_model_weighted_route(
+            route,
+            group_id,
+            &format!("load_balance[{index}]"),
+            enabled,
+            providers,
+        )?);
+    }
+    Ok(ModelGroupConfig {
+        id: group_id.to_owned(),
+        enabled,
+        label: raw
+            .label
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .unwrap_or(group_id)
+            .to_owned(),
+        primary,
+        sub,
+        search,
+        title,
+        fallback,
+        load_balance,
+    })
+}
+
+fn validate_model_route(
+    raw: RawModelRouteConfig,
+    group_id: &str,
+    route_name: &str,
+    group_enabled: bool,
+    providers: &BTreeMap<String, ProviderConfig>,
+) -> Result<ModelRouteConfig, ConfigError> {
+    let provider_id = raw.provider.trim().to_owned();
+    if provider_id.is_empty() {
+        return Err(ConfigError::EmptyModelRouteProvider {
+            model_group_id: group_id.to_owned(),
+            route: route_name.to_owned(),
+        });
+    }
+    validate_provider_id(&provider_id)?;
+    let provider =
+        providers
+            .get(&provider_id)
+            .ok_or_else(|| ConfigError::ModelRouteProviderNotFound {
+                model_group_id: group_id.to_owned(),
+                route: route_name.to_owned(),
+                provider_id: provider_id.clone(),
+            })?;
+    if group_enabled && !provider.enabled {
+        return Err(ConfigError::ModelRouteProviderDisabled {
+            model_group_id: group_id.to_owned(),
+            route: route_name.to_owned(),
+            provider_id,
+        });
+    }
+    let model = raw.model.trim().to_owned();
+    if model.is_empty() {
+        return Err(ConfigError::EmptyModelRouteModel {
+            model_group_id: group_id.to_owned(),
+            route: route_name.to_owned(),
+        });
+    }
+    Ok(ModelRouteConfig { provider_id, model })
+}
+
+fn validate_model_weighted_route(
+    raw: RawModelWeightedRouteConfig,
+    group_id: &str,
+    route_name: &str,
+    group_enabled: bool,
+    providers: &BTreeMap<String, ProviderConfig>,
+) -> Result<ModelWeightedRouteConfig, ConfigError> {
+    if raw.weight == 0 {
+        return Err(ConfigError::EmptyModelRouteWeight {
+            model_group_id: group_id.to_owned(),
+            route: route_name.to_owned(),
+        });
+    }
+    let route = validate_model_route(
+        RawModelRouteConfig {
+            provider: raw.provider,
+            model: raw.model,
+        },
+        group_id,
+        route_name,
+        group_enabled,
+        providers,
+    )?;
+    Ok(ModelWeightedRouteConfig {
+        provider_id: route.provider_id,
+        model: route.model,
+        weight: raw.weight,
+    })
 }
 
 pub fn safe_provider_base_url_for_projection(raw: &str) -> String {
@@ -2599,6 +3265,17 @@ fn select_provider_for_agent(
         auth_source: provider.auth.source_kind(),
         api_key: resolve_provider_api_key(provider)?,
     })
+}
+
+fn select_provider_for_model_route(
+    providers: &BTreeMap<String, ProviderConfig>,
+    agent_name: &str,
+    route: &ModelRouteConfig,
+    role: ProviderRouteRole,
+) -> Result<SelectedProviderConfig, ConfigError> {
+    let mut provider = select_provider_for_agent(providers, agent_name, &route.provider_id, role)?;
+    provider.default_model = route.model.clone();
+    Ok(provider)
 }
 
 #[cfg(test)]
@@ -4497,6 +5174,233 @@ fallback_provider = "minimax"
         assert!(raw.contains("provider = \"cc\""));
         assert!(raw.contains("fallback_provider = \"minimax\""));
         assert!(raw.contains("api_key_env = \"FREEHAND_NEW_OPENAI_KEY\""));
+
+        // SAFETY: undo the test environment mutation before exit.
+        unsafe { env::remove_var(&pair_token_env) };
+        fs::remove_file(path).expect("cleanup");
+    }
+
+    #[test]
+    fn model_group_registry_projects_and_overrides_selected_model_routes() {
+        let pair_token_env = unique_env_name("FREEHAND_MODEL_GROUP_PAIR_TOKEN");
+        let path = write_temp_config(&format!(
+            r#"
+[providers.cc]
+id = "cc"
+enabled = true
+type = "openai"
+protocol = "responses"
+base_url = "https://api.anyint.ai/openai/v1"
+default_model = "gpt-5.5"
+
+[providers.cc.auth]
+type = "apikey"
+api_key = "sk-cc-inline"
+
+[providers.minimax]
+id = "minimax"
+enabled = true
+type = "anthropic"
+protocol = "messages"
+base_url = "https://api.minimaxi.com/anthropic"
+default_model = "MiniMax-M3"
+
+[providers.minimax.auth]
+type = "apikey"
+api_key = "sk-minimax-inline"
+
+[model_groups.research]
+id = "research"
+enabled = true
+label = "Research"
+primary = {{ provider = "cc", model = "gpt-5.5-main" }}
+sub = {{ provider = "cc", model = "gpt-5.5-sub" }}
+search = {{ provider = "cc", model = "gpt-5.5-search" }}
+title = {{ provider = "minimax", model = "MiniMax-title" }}
+fallback = {{ provider = "minimax", model = "MiniMax-M3-fallback" }}
+load_balance = [
+  {{ provider = "cc", model = "gpt-5.5-main", weight = 2 }},
+  {{ provider = "minimax", model = "MiniMax-M3", weight = 1 }},
+]
+
+[agents.master]
+name = "master"
+mode = "master"
+node_id = "master-node"
+paired_agents = ["worker"]
+pair_token = "{pair_token_env}"
+provider = "minimax"
+fallback_provider = "cc"
+model_group = "research"
+
+[agents.worker]
+name = "worker"
+mode = "slave"
+node_id = "worker-node"
+paired_agents = ["master"]
+pair_token = "WORKER_TOKEN"
+provider = "minimax"
+"#
+        ));
+        // SAFETY: test process controls this unique environment variable.
+        unsafe { env::set_var(&pair_token_env, "pair-token") };
+
+        let config = load_config_from_path(&path).expect("load config");
+        let groups = config.safe_model_group_registry();
+        assert_eq!(groups.len(), 1);
+        let group = &groups[0];
+        assert_eq!(group.id, "research");
+        assert_eq!(group.primary.provider_id, "cc");
+        assert_eq!(group.sub.as_ref().expect("sub").model, "gpt-5.5-sub");
+        assert_eq!(
+            group.search.as_ref().expect("search").model,
+            "gpt-5.5-search"
+        );
+        assert_eq!(group.title.as_ref().expect("title").provider_id, "minimax");
+        assert_eq!(group.load_balance.len(), 2);
+
+        let selected = config.select_agent("master").expect("select master");
+        assert_eq!(selected.model_group_id.as_deref(), Some("research"));
+        assert_eq!(selected.provider.id, "cc");
+        assert_eq!(selected.provider.default_model, "gpt-5.5-main");
+        assert_eq!(
+            selected
+                .fallback_provider
+                .as_ref()
+                .map(|provider| (provider.id.as_str(), provider.default_model.as_str())),
+            Some(("minimax", "MiniMax-M3-fallback"))
+        );
+        assert_eq!(
+            config
+                .select_provider_for_test("cc")
+                .expect("test provider")
+                .default_model,
+            "gpt-5.5"
+        );
+
+        // SAFETY: undo the test environment mutation before exit.
+        unsafe { env::remove_var(&pair_token_env) };
+        fs::remove_file(path).expect("cleanup");
+    }
+
+    #[test]
+    fn upsert_and_switch_model_group_persists_without_rewriting_provider_registry() {
+        let pair_token_env = unique_env_name("FREEHAND_MODEL_GROUP_SWITCH_PAIR_TOKEN");
+        let path = write_temp_config(&format!(
+            r#"
+[providers.cc]
+id = "cc"
+enabled = true
+type = "openai"
+protocol = "responses"
+base_url = "https://api.anyint.ai/openai/v1"
+default_model = "gpt-5.5"
+
+[providers.cc.auth]
+type = "apikey"
+api_key = "sk-cc-inline"
+
+[providers.minimax]
+id = "minimax"
+enabled = true
+type = "anthropic"
+protocol = "messages"
+base_url = "https://api.minimaxi.com/anthropic"
+default_model = "MiniMax-M3"
+
+[providers.minimax.auth]
+type = "apikey"
+api_key = "sk-minimax-inline"
+
+[agents.master]
+name = "master"
+mode = "master"
+node_id = "master-node"
+paired_agents = ["worker"]
+pair_token = "{pair_token_env}"
+provider = "minimax"
+fallback_provider = "cc"
+
+[agents.worker]
+name = "worker"
+mode = "slave"
+node_id = "worker-node"
+paired_agents = ["master"]
+pair_token = "WORKER_TOKEN"
+provider = "minimax"
+"#
+        ));
+        // SAFETY: test process controls this unique environment variable.
+        unsafe { env::set_var(&pair_token_env, "pair-token") };
+
+        let selected = upsert_model_group_config_in_path(
+            &path,
+            ModelGroupConfigUpdate {
+                agent_name: "master".to_owned(),
+                group_id: "ui.group".to_owned(),
+                enabled: true,
+                label: "UI Group".to_owned(),
+                primary: ModelRouteConfig {
+                    provider_id: "cc".to_owned(),
+                    model: "gpt-ui-primary".to_owned(),
+                },
+                sub: Some(ModelRouteConfig {
+                    provider_id: "cc".to_owned(),
+                    model: "gpt-ui-sub".to_owned(),
+                }),
+                search: Some(ModelRouteConfig {
+                    provider_id: "cc".to_owned(),
+                    model: "gpt-ui-search".to_owned(),
+                }),
+                title: Some(ModelRouteConfig {
+                    provider_id: "minimax".to_owned(),
+                    model: "MiniMax-title".to_owned(),
+                }),
+                fallback: Some(ModelRouteConfig {
+                    provider_id: "minimax".to_owned(),
+                    model: "MiniMax-fallback".to_owned(),
+                }),
+                load_balance: vec![ModelWeightedRouteConfig {
+                    provider_id: "cc".to_owned(),
+                    model: "gpt-ui-primary".to_owned(),
+                    weight: 3,
+                }],
+            },
+        )
+        .expect("upsert model group");
+        assert_eq!(selected.provider.id, "minimax");
+        assert_eq!(selected.model_group_id, None);
+
+        let raw = fs::read_to_string(&path).expect("read model group config");
+        assert!(raw.contains("[model_groups.\"ui.group\"]"));
+        assert!(raw.contains("provider = \"minimax\""));
+        assert!(raw.contains("model = \"gpt-ui-search\""));
+
+        let selected = switch_agent_model_group_in_path(
+            &path,
+            AgentModelGroupSelectionConfigUpdate {
+                agent_name: "master".to_owned(),
+                model_group_id: Some("ui.group".to_owned()),
+            },
+        )
+        .expect("switch model group");
+        assert_eq!(selected.model_group_id.as_deref(), Some("ui.group"));
+        assert_eq!(selected.provider.id, "cc");
+        assert_eq!(selected.provider.default_model, "gpt-ui-primary");
+
+        let selected = switch_agent_provider_in_path(
+            &path,
+            AgentProviderSelectionConfigUpdate {
+                agent_name: "master".to_owned(),
+                provider_id: "minimax".to_owned(),
+                fallback_provider_id: Some("cc".to_owned()),
+            },
+        )
+        .expect("switch provider");
+        assert_eq!(selected.model_group_id, None);
+        assert_eq!(selected.provider.id, "minimax");
+        let raw = fs::read_to_string(&path).expect("read after provider switch");
+        assert!(!raw.contains("model_group ="));
 
         // SAFETY: undo the test environment mutation before exit.
         unsafe { env::remove_var(&pair_token_env) };

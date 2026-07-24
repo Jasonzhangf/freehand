@@ -1464,6 +1464,7 @@ fn selected_worker() -> SelectedAgentConfig {
             pair_token_env: "FREEHAND_PAIR_TOKEN_MASTER".to_owned(),
             provider_id: "master-provider".to_owned(),
             fallback_provider_id: None,
+            model_group_id: None,
         }],
         allowed_pair_ip: None,
         pair_token_env: "FREEHAND_PAIR_TOKEN_WORKER".to_owned(),
@@ -1480,6 +1481,7 @@ fn selected_worker() -> SelectedAgentConfig {
             api_key: "test-key".to_owned(),
         },
         fallback_provider: None,
+        model_group_id: None,
         restart_required_on_change: true,
     }
 }

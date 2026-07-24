@@ -2384,6 +2384,202 @@ fallback_provider = "minimax"
 }
 
 #[test]
+fn runtime_dispatch_upserts_and_selects_model_group_without_hot_reload() {
+    let runtime_home = temp_runtime_home();
+    fs::create_dir_all(&runtime_home).expect("create runtime home");
+    let config_path = runtime_home.join("config.toml");
+    fs::write(
+        &config_path,
+        r#"
+[providers.cc]
+id = "cc"
+enabled = true
+type = "openai"
+protocol = "responses"
+base_url = "https://api.anyint.ai/openai/v1"
+default_model = "gpt-5.5"
+
+[providers.cc.auth]
+type = "apikey"
+api_key_env = "FREEHAND_RUNTIME_MODEL_GROUP_CC"
+
+[providers.minimax]
+id = "minimax"
+enabled = true
+type = "anthropic"
+protocol = "messages"
+base_url = "https://api.minimaxi.com/anthropic"
+default_model = "MiniMax-M3"
+
+[providers.minimax.auth]
+type = "apikey"
+api_key = "sk-minimax-inline"
+
+[agents.agent-live]
+name = "agent-live"
+mode = "master"
+node_id = "agent-live-node"
+paired_agents = ["agent-live-worker"]
+pair_token = "FREEHAND_RUNTIME_MODEL_GROUP_MASTER"
+provider = "minimax"
+fallback_provider = "cc"
+
+[agents.agent-live-worker]
+name = "agent-live-worker"
+mode = "slave"
+node_id = "agent-live-worker-node"
+paired_agents = ["agent-live"]
+pair_token = "FREEHAND_RUNTIME_MODEL_GROUP_WORKER"
+provider = "minimax"
+"#,
+    )
+    .expect("write config");
+    // SAFETY: this test owns these unique variable names and removes them before exit.
+    unsafe {
+        std::env::set_var("FREEHAND_RUNTIME_MODEL_GROUP_CC", "cc-secret");
+        std::env::set_var("FREEHAND_RUNTIME_MODEL_GROUP_MASTER", "pair-token");
+        std::env::set_var("FREEHAND_RUNTIME_MODEL_GROUP_WORKER", "pair-token");
+    }
+    let selected = freehand_config::load_config_from_path(&config_path)
+        .expect("load config")
+        .select_agent("agent-live")
+        .expect("select agent");
+    let runtime = RuntimeCommandDispatcher::from_selected_agent_with_live(
+        &selected,
+        runtime_home.clone(),
+        false,
+    )
+    .expect("runtime bootstrap");
+
+    let receipt = runtime
+        .dispatch(
+            build_command_dispatch_envelope(&UiCommand::UpsertModelGroupConfig {
+                group: UiModelGroupConfigUpdate {
+                    agent_name: "agent-live".to_owned(),
+                    group_id: "research".to_owned(),
+                    enabled: true,
+                    label: "Research".to_owned(),
+                    primary: UiModelRouteUpdate {
+                        provider_id: "cc".to_owned(),
+                        model: "gpt-research-primary".to_owned(),
+                    },
+                    sub: Some(UiModelRouteUpdate {
+                        provider_id: "cc".to_owned(),
+                        model: "gpt-research-sub".to_owned(),
+                    }),
+                    search: Some(UiModelRouteUpdate {
+                        provider_id: "cc".to_owned(),
+                        model: "gpt-research-search".to_owned(),
+                    }),
+                    title: Some(UiModelRouteUpdate {
+                        provider_id: "minimax".to_owned(),
+                        model: "MiniMax-title".to_owned(),
+                    }),
+                    fallback: Some(UiModelRouteUpdate {
+                        provider_id: "minimax".to_owned(),
+                        model: "MiniMax-fallback".to_owned(),
+                    }),
+                    load_balance: vec![UiModelWeightedRouteUpdate {
+                        provider_id: "cc".to_owned(),
+                        model: "gpt-research-primary".to_owned(),
+                        weight: 2,
+                    }],
+                },
+            })
+            .expect("model group upsert envelope"),
+        )
+        .expect("model group upsert receipt");
+    assert_eq!(
+        receipt.dispatch_status,
+        "model_group_config_upserted_restart_required"
+    );
+
+    match runtime
+        .query_runtime(&UiCommand::QueryConfigStatus)
+        .expect("config query")
+        .expect("runtime-owned config result")
+    {
+        UiQueryResult::ConfigStatus(status) => {
+            assert_eq!(status.provider_id, "minimax");
+            assert_eq!(status.model_group_id, None);
+            assert_eq!(status.model_group_registry.len(), 1);
+            assert_eq!(status.model_group_registry[0].group_id, "research");
+            assert_eq!(
+                status.model_group_registry[0]
+                    .search
+                    .as_ref()
+                    .expect("search route")
+                    .model,
+                "gpt-research-search"
+            );
+        }
+        other => panic!("unexpected query result: {other:?}"),
+    }
+
+    let receipt = runtime
+        .dispatch(
+            build_command_dispatch_envelope(&UiCommand::UpdateAgentModelGroupSelection {
+                selection: UiAgentModelGroupSelectionUpdate {
+                    agent_name: "agent-live".to_owned(),
+                    model_group_id: Some("research".to_owned()),
+                },
+            })
+            .expect("model group selection envelope"),
+        )
+        .expect("model group selection receipt");
+    assert_eq!(
+        receipt.dispatch_status,
+        "model_group_selection_saved_restart_required"
+    );
+
+    match runtime
+        .query_runtime(&UiCommand::QueryConfigStatus)
+        .expect("config query")
+        .expect("runtime-owned config result")
+    {
+        UiQueryResult::ConfigStatus(status) => {
+            assert_eq!(status.model_group_id.as_deref(), Some("research"));
+            assert_eq!(status.provider_id, "cc");
+            assert_eq!(status.default_model, "gpt-research-primary");
+            assert_eq!(status.fallback_provider_id.as_deref(), Some("minimax"));
+            let encoded = serde_json::to_string(&status).expect("status json");
+            assert!(!encoded.contains("cc-secret"));
+            assert!(!encoded.contains("sk-minimax-inline"));
+            assert!(!encoded.contains("api_key"));
+        }
+        other => panic!("unexpected query result: {other:?}"),
+    }
+
+    {
+        let state = runtime.state.lock().expect("lock runtime state");
+        assert_eq!(
+            state
+                .config
+                .live
+                .as_ref()
+                .unwrap()
+                .selected_agent
+                .provider
+                .id,
+            "minimax"
+        );
+    }
+
+    let raw = fs::read_to_string(&config_path).expect("read saved config");
+    assert!(raw.contains("[model_groups.research]"));
+    assert!(raw.contains("model_group = \"research\""));
+    assert!(raw.contains("model = \"gpt-research-search\""));
+
+    // SAFETY: undo the test environment mutation before exit.
+    unsafe {
+        std::env::remove_var("FREEHAND_RUNTIME_MODEL_GROUP_CC");
+        std::env::remove_var("FREEHAND_RUNTIME_MODEL_GROUP_MASTER");
+        std::env::remove_var("FREEHAND_RUNTIME_MODEL_GROUP_WORKER");
+    }
+    fs::remove_dir_all(runtime_home).expect("cleanup runtime home");
+}
+
+#[test]
 fn runtime_dispatch_switches_agent_provider_selection_without_hot_reload() {
     let runtime_home = temp_runtime_home();
     fs::create_dir_all(&runtime_home).expect("create runtime home");
@@ -4851,6 +5047,7 @@ fn selected_master_agent() -> SelectedAgentConfig {
             pair_token_env: "FREEHAND_PAIR_TOKEN_WORKER".to_owned(),
             provider_id: "provider-worker".to_owned(),
             fallback_provider_id: None,
+            model_group_id: None,
         }],
         allowed_pair_ip: None,
         pair_token_env: "FREEHAND_PAIR_TOKEN_MASTER".to_owned(),
@@ -4867,6 +5064,7 @@ fn selected_master_agent() -> SelectedAgentConfig {
             api_key: "secret".to_owned(),
         },
         fallback_provider: None,
+        model_group_id: None,
         restart_required_on_change: true,
     }
 }
@@ -4891,6 +5089,7 @@ fn live_selected_agent(
             pair_token_env: "FREEHAND_WORKER_TOKEN".to_owned(),
             provider_id: "provider-live".to_owned(),
             fallback_provider_id: None,
+            model_group_id: None,
         }],
         allowed_pair_ip: None,
         pair_token_env: "FREEHAND_MASTER_TOKEN".to_owned(),
@@ -4907,6 +5106,7 @@ fn live_selected_agent(
             api_key: "test-api-key".to_owned(),
         },
         fallback_provider: None,
+        model_group_id: None,
         restart_required_on_change: true,
     }
 }
@@ -4925,6 +5125,7 @@ fn selected_peer(
         pair_token_env: pair_token_env.into(),
         provider_id: "worker-provider".to_owned(),
         fallback_provider_id: None,
+        model_group_id: None,
     }
 }
 

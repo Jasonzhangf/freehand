@@ -40,6 +40,7 @@
   - runtime-backed read-only config status queries reload config-owner truth and project the complete safe provider registry plus current primary/fallback selection without becoming config truth writers
   - runtime-backed provider definition upsert commands route to `config.core` persistence without changing the active provider binding, then expose pending restart-required projection without hot-reloading active runtime config
   - runtime-backed provider selection commands route to `config.core` persistence without rewriting provider definitions, then expose pending restart-required projection without hot-reloading active runtime config
+  - runtime-backed model group definition and selection commands route to `config.core` persistence without rewriting provider definitions, then expose pending restart-required projection without hot-reloading active runtime config
   - runtime-backed Agent resource-count commands route to `config.core`, expose pending `1..=5` shared-provider topology projection, and do not fabricate live AgentBoard processes before restart
   - successful task tool mutations publish a runtime-owned task list projection into shared UI protocol state so ADP task subscribers receive owner-backed lifecycle changes
   - session-management dispatch routes create/rename/archive/restore/delete-as-archive commands to reason persistence metadata APIs and refreshes the shared UI projection
@@ -123,6 +124,7 @@
   - provider web_search live-test dispatch coverage, including hosted-only request shape, explicit no-observation failure, and no local `web_search` function tool
   - provider definition upsert dispatch coverage, including adding a provider without changing selection, invalid no-overwrite, no secret projection, and active runtime model/provider unchanged until restart
   - provider selection dispatch coverage, including switching to an existing enabled provider, preserving provider definitions, rejecting invalid/same-fallback selection without overwrite, and active runtime model/provider unchanged until restart
+  - model group dispatch coverage, including adding a group, switching to an existing enabled group, preserving provider definitions, rejecting invalid group/route selection without overwrite, projecting pending restart-required state, and active runtime model/provider unchanged until restart
   - Agent resource-count update dispatch coverage, including valid grow/shrink, invalid no-overwrite, pending safe projection refresh, and active runtime peers unchanged until restart
   - task list publication coverage after successful task tool mutation
   - task mutation command dispatch coverage for create/review/approve/close, including task list projection publication and missing task failures
@@ -166,6 +168,7 @@
   - daemon ADP error-center query smoke over the shared runtime query port
   - daemon ADP config status query smoke over the shared runtime query port
   - daemon/WebUI provider registry, definition upsert, and active-provider selection smoke over the shared ADP command/query path, including visible invalid error, restart-required success state, and post-restart activation proof
+  - daemon/WebUI model group definition and active-group selection smoke over the shared ADP command/query path, including visible registry row, restart-required success state, and post-restore config proof
   - daemon ADP task list subscription smoke over the shared runtime projection channel
   - daemon ADP EventInbox/MasterPoll smoke over the shared runtime query/command
     path, with same-cursor proof using replay plus omitted limit rather than a
@@ -236,6 +239,7 @@
   - runtime config status query bridge is covered by `runtime_query_projects_config_status_without_secrets`
   - runtime provider web_search test dispatch is covered by `provider_web_search_test_declares_hosted_tool_and_requires_observation` and `provider_web_search_test_fails_when_provider_does_not_observe_hosted_search`
   - runtime provider/model update dispatch is covered by `runtime_dispatch_updates_provider_config_without_hot_reloading_active_model` and `runtime_dispatch_rejects_invalid_provider_config_without_overwrite`
+  - runtime model group dispatch is covered by `runtime_dispatch_upserts_and_selects_model_group_without_hot_reload`
   - daemon ADP error-center query bridge is covered by `daemon_adp_queries_runtime_error_center_truth`
   - runtime task list push bridge is planned for `runtime_task_tool_mutation_publishes_task_list_projection`
   - daemon ADP task list subscribe bridge is planned for `daemon_adp_subscribes_runtime_task_truth`
