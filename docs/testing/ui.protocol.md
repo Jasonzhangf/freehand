@@ -41,6 +41,9 @@
   - Timer dashboard QueryTimerList/ScheduleTimer/CancelTimer ADP frames use
     protocol-owned DTOs while runtime/timer owners supply independent timer
     schedule, cancel, ledger, and UI projection truth
+  - Tools dashboard QueryToolRegistry ADP frames use protocol-owned DTOs while
+    runtime/tool registry owners supply the UI-safe registry rows, schema,
+    examples, guidance, execution scopes, and Master/Worker exposure truth
   - task list ADP subscribe frames use protocol-owned subscription shape and receive runtime-supplied task list projections without making protocol state the task truth owner
   - error-center ADP query/subscribe frames use protocol-owned commands and UI-safe DTOs while runtime owner code supplies metadata-backed truth
   - config status ADP query frames use protocol-owned command/result DTOs for complete safe provider registry plus current primary/fallback selection while runtime owner code supplies config.core-backed truth
@@ -121,6 +124,9 @@
     ScheduleTimer owner-routing, CancelTimer owner-routing, mode-specific
     relative/absolute/recurring fields, repeat validation, and TimerList DTO
     JSON roundtrip without protocol-owned timer persistence
+  - Tools dashboard validation covers QueryToolRegistry route separation,
+    ToolRegistry DTO JSON roundtrip, protocol-state local rejection, no local
+    `web_search` function row, and no protocol-owned tool execution
   - task list subscription selector and matcher cover accepted task list projections and rejection of task query/history misuse on subscribe route
   - error-center query command validation covers empty session id and command-ingress rejection for query-route misuse
   - config status query covers command-ingress rejection, runtime-owned
@@ -167,6 +173,8 @@
   - ADP Timer dashboard smoke proves protocol frames can carry TimerList
     projections plus schedule/cancel mutation intents without protocol-owned
     timer schedule or ledger storage
+  - ADP Tools dashboard smoke proves protocol frames can carry ToolRegistry
+    projections without protocol-owned registry storage or tool execution
   - `command_to_projection_smoke` asserts turn `created_at` survives protocol
     projection
   - ADP task list subscription smoke proves initial task list projection and subsequent runtime-published task changes use the same subscription channel
@@ -190,6 +198,8 @@
   - protocol can route runtime config mutation intents without becoming config persistence truth or adding a credential value DTO
   - protocol can expose timer dashboard DTOs without becoming timer schedule,
     due-fire, recurrence, or ledger truth
+  - protocol can expose Tools dashboard DTOs without becoming tool registry
+    truth or adding provider-hosted broad search as a local function tool
   - ADP gives WebUI, Android, CLI, and headless smoke tests one shared control/status protocol
 - mainline/wiki sync:
   - wiki generated from mainline call must stay in sync with protocol owner code and function map updates
@@ -243,3 +253,5 @@
   - provider web_search test command DTO is landed and regression-locked by `provider_web_search_test_routes_to_runtime_owner`
   - Timer dashboard command/query DTOs are landed and regression-locked by
     `cargo test -p freehand-ui-protocol timer_ -- --nocapture`
+  - Tools dashboard query/result DTOs are landed and regression-locked by
+    `cargo test -p freehand-ui-protocol tool_registry -- --nocapture`

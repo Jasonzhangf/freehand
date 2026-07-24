@@ -1389,7 +1389,7 @@ mod tests {
         assert!(html.contains("/assets/webui.css"));
         assert!(html.contains("/assets/logo.png"));
         assert!(html.contains("/assets/webui.js"));
-        assert!(html.contains("20260724-model-groups-ui"));
+        assert!(html.contains("20260724-tools-registry-ui"));
         assert!(html.contains("data-adp-endpoint=\"/adp\""));
         assert!(html.contains("data-selected-session=\"\""));
         assert!(html.contains("data-selected-turn=\"\""));
@@ -1417,6 +1417,11 @@ mod tests {
         assert!(html.contains("id=\"timer-dashboard-list\""));
         assert!(html.contains("id=\"timer-dashboard-history\""));
         assert!(html.contains("Timers are independent runtime truth"));
+        assert!(html.contains("id=\"tools-dashboard-dialog\""));
+        assert!(html.contains("id=\"tools-dashboard-refresh-button\""));
+        assert!(html.contains("id=\"tools-dashboard-guidance\""));
+        assert!(html.contains("id=\"tools-dashboard-list\""));
+        assert!(html.contains("Tools are owner-backed registry projections"));
         assert!(html.contains("id=\"settings-shell\""));
         assert!(html.contains("id=\"settings-review-tree\""));
         assert!(html.contains("id=\"settings-provider-form\""));
@@ -1613,6 +1618,9 @@ mod tests {
         assert!(root_body.contains("id=\"settings-provider-switch-button\""));
         assert!(root_body.contains("id=\"settings-provider-registry-list\""));
         assert!(root_body.contains("id=\"settings-provider-form\""));
+        assert!(root_body.contains("id=\"tools-dashboard-dialog\""));
+        assert!(root_body.contains("id=\"tools-dashboard-list\""));
+        assert!(root_body.contains("Tools are owner-backed registry projections"));
         assert!(root_body.contains("id=\"task-board-status\""));
         assert!(root_body.contains("id=\"task-board-list\""));
         assert!(root_body.contains("id=\"agent-board-status\""));
@@ -1890,7 +1898,11 @@ mod tests {
         assert!(js_body.contains("CancelTimer"));
         assert!(js_body.contains("function renderTimerDashboard"));
         assert!(js_body.contains("function scheduleTimerFromForm"));
-        assert!(js_body.contains("Built-in Tools entry is UI-only in Phase 1"));
+        assert!(js_body.contains("QueryToolRegistry"));
+        assert!(js_body.contains("function renderToolsDashboard"));
+        assert!(js_body.contains("function refreshToolsDashboard"));
+        assert!(js_body.contains("tool.exposed_to_master"));
+        assert!(js_body.contains("tool.exposed_to_worker"));
         assert!(!js_body.contains("rootfs"));
         assert!(!js_body.contains("shared-folder"));
         assert!(!js_body.contains("mount-directory"));

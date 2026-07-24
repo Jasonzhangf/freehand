@@ -23,10 +23,12 @@
   - `provider_request`
   - `ui_projection`
   - `timer`
+  - `tool_call`
 - resource operations:
   - `input_attachment.prepare_provider_input` (`input_attachment` -> `provider_request`)
   - `input_attachment.project_to_ui` (`input_attachment` -> `ui_projection`)
   - timer bridge references `runtime.master-worker-loop` owner operations `timer.schedule`, `timer.cancel`, and `timer.list`
+  - tool registry bridge references `tool.registry` owner operation `tool_call.project_registry_to_ui`
 - forbidden shortcuts:
   - Runtime must not persist image base64 in reason/session history or project it to UI history.
   - Provider adapters must consume only provider-neutral attachment semantics; runtime must not construct protocol-specific image wire payloads.
@@ -78,6 +80,11 @@
   independent timer owner truth. Runtime converts protocol DTOs into timer
   schedule requests, calls TimerStore schedule/cancel/list APIs, and never
   mutates Task Center truth for timer actions.
+- Phase 2 Tools dashboard `QueryToolRegistry` routes through runtime into
+  `tool.registry` owner truth. Runtime only maps
+  `BuiltinToolRegistry::registry_projection` rows into UI DTOs and does not
+  execute tools, persist registry truth, or synthesize provider-hosted
+  `web_search` as a local tool.
 
 ## Response Mainline
 
@@ -145,6 +152,10 @@
 - runtime-backed Timer dashboard dispatch returns owner receipt evidence only
   after TimerStore persists schedule/cancel truth; QueryTimerList returns
   UI-safe schedule and ledger rows from timer owner truth
+- runtime-backed Tools dashboard query returns UI-safe registry rows from
+  `BuiltinToolRegistry::registry_projection`, including schema, examples,
+  guidance, scope, implemented/read-only state, and Master/Worker exposure
+  flags without tool execution
 
 ## Error Mainline
 
@@ -179,6 +190,8 @@
 - invalid timer schedules, unknown timer ids, missing live runtime home, and
   TimerStore persistence failures map to explicit dispatch failures; runtime
   must not create task truth or fake a browser-local timer projection
+- tool registry projection failure maps to explicit query failure; runtime must
+  not fall back to a hardcoded browser/runtime tool list
 
 ## Shared Multi-Reference Functions
 
@@ -286,6 +299,7 @@
 | 25 | `RuntimeCommandDispatcher::query_runtime` / `project_worker_control_events_for_ui` | `crates/freehand-runtime/src/lib.rs` | route QueryWorkerControl into worker.control persisted event truth for restart verification | task id plus execution id query | `UiWorkerControlProjection` event list | ADP query transport | `TaskRuntime::query_worker_control_events` | bound |
 | 26 | `RuntimeCommandDispatcher::query_runtime` / `project_timer_list_for_ui` | `crates/freehand-runtime/src/lib.rs` | route QueryTimerList into timer owner schedule and ledger truth, then project UI-safe TimerList rows | include_terminal timer query flag | `UiTimerListProjection` or explicit timer-store failure | ADP query transport | `TimerStore::load_schedules` / `TimerStore::load_events` | bound |
 | 27 | `RuntimeCommandDispatcher::dispatch_schedule_timer` / `RuntimeCommandDispatcher::dispatch_cancel_timer` | `crates/freehand-runtime/src/lib.rs` | route ScheduleTimer and CancelTimer command envelopes into TimerStore owner mutation APIs and return user-safe timer receipts | validated timer schedule or cancel command | `timer_scheduled` or `timer_cancelled` receipt, or explicit owner failure | `RuntimeCommandDispatcher::dispatch` | `TimerStore::schedule_from_request` / `TimerStore::upsert_schedule` / `TimerStore::cancel` | bound |
+| 28 | `RuntimeCommandDispatcher::query_runtime` / `project_tool_registry_for_ui` | `crates/freehand-runtime/src/lib.rs` | route QueryToolRegistry into tool.registry owner projection and convert rows into UI-safe protocol DTOs without executing tools | tool registry query | `UiToolRegistryProjection` or explicit query failure | ADP query transport | `BuiltinToolRegistry::registry_projection` | bound |
 
 ## Sync Status Against Code
 
@@ -333,6 +347,9 @@
 - runtime Phase 2C WorkerControl command/query bridge is implemented as a thin
   route to `worker.control`; online S-profile closeout is still required before
   claiming Phase 2C complete
+- runtime Tools dashboard query bridge is implemented as a thin projection route
+  to `tool.registry` and is covered by
+  `runtime_query_projects_tool_registry_owner_truth`
 - final live projection now keeps each runtime round as its own UI turn so earlier-round tool activity cannot be merged into the final latest turn
 - failed live bridge tool execution now refreshes runtime UI state from persisted failed turn truth before returning the dispatch error, so WebUI query/SSE can observe failure instead of waiting forever
 - early live provider/protocol failure now creates a persisted failed turn and session projection instead of falling back to non-live submit or returning transport-only dispatch failure

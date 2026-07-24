@@ -36,6 +36,10 @@
   - runtime-backed Timer dashboard QueryTimerList, ScheduleTimer, and
     CancelTimer route to independent TimerStore truth; runtime converts DTOs
     and projects owner truth without creating Task Center lifecycle state
+  - runtime-backed Tools dashboard QueryToolRegistry routes to
+    `tool.registry` owner projection; runtime converts rows into UI DTOs
+    without executing tools, mutating sessions/tasks/timers, or creating a
+    local broad `web_search` tool
   - runtime-backed read-only error-center queries route to metadata ledger projection and return UI-safe rows without becoming error truth writers
   - runtime-backed read-only config status queries reload config-owner truth and project the complete safe provider registry plus current primary/fallback selection without becoming config truth writers
   - runtime-backed provider definition upsert commands route to `config.core` persistence without changing the active provider binding, then expose pending restart-required projection without hot-reloading active runtime config
@@ -114,6 +118,9 @@
   - Timer dashboard command/query coverage, including schedule persistence,
     cancel persistence, include_terminal list projection, invalid shape failure,
     missing live runtime-home failure, and no Task Center mutation
+  - Tools dashboard query coverage, including owner projection mapping,
+    Master/Worker exposure flags, `bash` hidden from live exposure, no local
+    `web_search`, path guidance text, and no session/task/timer mutation
   - missing task history query target-not-found coverage
   - error-center runtime query coverage, including trace/turn/domain filters and no raw text in projection
   - config status runtime query coverage, including ordered multi-peer
@@ -177,6 +184,8 @@
     with same-id proof using persisted worker-control ledger truth
   - daemon/WebUI Timer dashboard smoke over the shared runtime query/command
     path, with schedule/cancel/list evidence from timer owner ledger truth
+  - daemon/WebUI Tools dashboard smoke over the shared runtime query path,
+    with browser rows matched to `QueryToolRegistry` owner projection truth
 - project black-box impact:
   - runtime command execution stays outside app boundary while remaining compatible with protocol-owned transport contracts
 - fixtures / replay inputs / runtime evidence paths:
@@ -243,4 +252,6 @@
   - daemon ADP error-center query bridge is covered by `daemon_adp_queries_runtime_error_center_truth`
   - runtime task list push bridge is planned for `runtime_task_tool_mutation_publishes_task_list_projection`
   - daemon ADP task list subscribe bridge is planned for `daemon_adp_subscribes_runtime_task_truth`
+  - runtime Tools registry query bridge is covered by
+    `cargo test -p freehand-runtime tool_registry -- --nocapture`
   - migrated mainline-call source and generated wiki are kept in sync with this test design

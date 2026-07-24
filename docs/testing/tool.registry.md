@@ -6,6 +6,7 @@
 - resource operation coverage:
   - `tool_call.execute_workspace_path`
   - `tool_call.execute_external_http`
+  - `tool_call.project_registry_to_ui`
 
 ## Resource Operation Test Coverage
 
@@ -13,6 +14,7 @@
 | --- | --- | --- | --- | --- |
 | `tool_call.execute_workspace_path` | bound | `cargo test -p freehand-tools -- --nocapture` covers built-in schema, locked workspace path, absolute/symlink path, external absolute rejection, read/search/write, preview, and tool display tests | `cargo test -p freehand-tools -- --nocapture` covers registry execution smokes for read_file/glob/grep/ls/write_file/edit_file/multi_edit and failure guidance | `cargo test -p freehand-runtime live_bridge -- --nocapture` covers runtime live tool-loop smokes and Worker online evidence that tool calls execute only through the locked workspace owner |
 | `tool_call.execute_external_http` | bound | `cargo test -p freehand-tools web_fetch_executes_against_local_http_url -- --nocapture` covers bounded HTTP fetch execution and argument validation tests cover invalid URL/limit/timeout handling | `cargo test -p freehand-tools web_fetch_executes_against_local_http_url -- --nocapture` covers registry execution through the owner `BuiltinToolRegistry::execute` path | `cargo test -p freehand-runtime live_bridge_admits_long_operator_task_without_semantic_truncation -- --nocapture --test-threads=1` proves Master/Worker provider request context advertises `web_fetch`; online proof must inspect provider request/tool-call evidence before claiming model behavior |
+| `tool_call.project_registry_to_ui` | bound | `cargo test -p freehand-tools registry_projection -- --nocapture` covers UI-safe registry projection, Master/Worker exposure, scope, examples, path guidance, and no local `web_search` row | `cargo test -p freehand-runtime tool_registry -- --nocapture` covers runtime `QueryToolRegistry` bridge from owner projection into UI DTOs | `node scripts/verify-webui-tools-registry-online.mjs` proves browser Tools dashboard renders ADP owner projection, not local tool truth, and does not create top-level sessions |
 
 - lifecycle path under test:
   - registry is created per run
@@ -23,6 +25,8 @@
     `web_fetch`, plus `task` and `timer`
   - unimplemented registered tools fail explicitly
   - unknown tools fail explicitly
+  - UI-safe registry projection exposes schema/examples/guidance/exposure only
+    and never executes tools from the Tools dashboard
 - white-box plan:
   - registry name/schema export tests
   - implemented schema fingerprint stability tests
@@ -36,6 +40,11 @@
     `readlink`, `pwd`, `cat`, and `find`
   - tool execution scope classification distinguishes framework, workspace, and
     unrestricted process tools in the registry owner
+  - registry projection coverage proves `task` and `timer` are Master-only
+    framework tools, `web_fetch` is Master+Worker network scope, `bash` is
+    implemented but not live-exposed, Worker-only progress tools are hidden
+    from Master, and path guidance includes locked workspace, absolute,
+    leading-`~`, and symlink rules
   - read-only path tools reject existing external absolute paths after
     canonical/symlink resolution instead of treating external reads as valid
     workspace truth
@@ -145,6 +154,9 @@
     claimed after restart and completed from durable timer truth
   - writable file-mutation tools now still enter the live path only through the registry owner instead of runtime orchestration
   - future bash/broad-search/browser/notebook tools still have one owner and cannot be implemented in runtime orchestration
+  - WebUI Tools dashboard online proof must compare DOM cards against
+    `QueryToolRegistry` ADP projection, prove no local `web_search` function
+    row, and prove no top-level persisted session ids change
   - future task-management actions must enter through the small owner-scoped
     tool/op surface, while standard non-task internal actions such as timers
     use their own owner-approved internal tool surface

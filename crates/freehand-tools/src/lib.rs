@@ -43,6 +43,38 @@ pub enum BuiltinToolExecutionScope {
     Network,
 }
 
+impl BuiltinToolExecutionScope {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            BuiltinToolExecutionScope::Framework => "framework",
+            BuiltinToolExecutionScope::Workspace => "workspace",
+            BuiltinToolExecutionScope::Shell => "shell",
+            BuiltinToolExecutionScope::Network => "network",
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct BuiltinToolRegistryProjection {
+    pub registry_version: String,
+    pub guidance: Vec<String>,
+    pub tools: Vec<BuiltinToolRegistryToolProjection>,
+}
+
+#[derive(Debug, Clone, PartialEq)]
+pub struct BuiltinToolRegistryToolProjection {
+    pub name: String,
+    pub description: String,
+    pub input_schema: Value,
+    pub read_only: bool,
+    pub implemented: bool,
+    pub execution_scope: String,
+    pub exposed_to_master: bool,
+    pub exposed_to_worker: bool,
+    pub examples: Vec<String>,
+    pub guidance: Vec<String>,
+}
+
 thread_local! {
     static TOOL_WORKSPACE_ROOT: RefCell<Option<PathBuf>> = const { RefCell::new(None) };
 }
@@ -300,6 +332,53 @@ impl BuiltinToolRegistry {
         self.tools.get(name).map(|spec| spec.read_only)
     }
 
+    pub fn registry_projection(&self) -> BuiltinToolRegistryProjection {
+        let master_names = self
+            .master_implemented_definitions()
+            .into_iter()
+            .map(|definition| definition.name)
+            .collect::<Vec<_>>();
+        let worker_names = self
+            .worker_implemented_definitions()
+            .into_iter()
+            .map(|definition| definition.name)
+            .collect::<Vec<_>>();
+        BuiltinToolRegistryProjection {
+            registry_version: "reasonix-aligned-v1".to_owned(),
+            guidance: vec![
+                "Use the exact JSON schema shown here; do not discover tool shapes by trial calls."
+                    .to_owned(),
+                "Path tools are locked to the current workspace: relative paths are resolved there, leading-~ is expanded, and absolute or symlink paths are accepted only when canonicalized inside the locked workspace.".to_owned(),
+                "Provider-hosted broad search is not a Freehand local function tool named web_search; inspect provider capability status or use task clean_search when configured.".to_owned(),
+                "Master exposes local workspace tools, concrete-url web_fetch, task, and timer; Worker exposes workspace tools, todo_write, complete_step, and web_fetch only.".to_owned(),
+            ],
+            tools: self
+                .tools
+                .values()
+                .map(|spec| {
+                    let name = spec.definition.name.clone();
+                    let scope = self
+                        .execution_scope(&name)
+                        .map(BuiltinToolExecutionScope::as_str)
+                        .unwrap_or("unknown")
+                        .to_owned();
+                    BuiltinToolRegistryToolProjection {
+                        examples: builtin_tool_examples(&name),
+                        guidance: builtin_tool_guidance(&name),
+                        read_only: spec.read_only,
+                        implemented: spec.implemented,
+                        exposed_to_master: master_names.iter().any(|item| item == &name),
+                        exposed_to_worker: worker_names.iter().any(|item| item == &name),
+                        execution_scope: scope,
+                        description: spec.definition.description.clone(),
+                        input_schema: spec.definition.input_schema.clone(),
+                        name,
+                    }
+                })
+                .collect(),
+        }
+    }
+
     pub fn execute(
         &self,
         call: &ReasonReq04ToolCall,
@@ -366,6 +445,88 @@ impl BuiltinToolRegistry {
             tool_call_id: call.tool_call.tool_call_id.clone(),
             changes: vec![change],
         })
+    }
+}
+
+fn builtin_tool_examples(name: &str) -> Vec<String> {
+    match name {
+        "ls" => vec![
+            r#"{"path":"src","recursive":false}"#.to_owned(),
+            r#"{"path":"/absolute/or/symlink/workspace/path","recursive":true}"#.to_owned(),
+        ],
+        "read_file" => vec![r#"{"path":"README.md","offset":0,"limit":2000}"#.to_owned()],
+        "glob" => vec![
+            r#"{"pattern":"src/**/*.rs"}"#.to_owned(),
+            r#"{"pattern":"/absolute/or/symlink/workspace/**/*.rs"}"#.to_owned(),
+        ],
+        "grep" => vec![r#"{"pattern":"QueryToolRegistry","path":"crates"}"#.to_owned()],
+        "write_file" => vec![r##"{"path":"output/report.md","content":"# Report\n"}"##.to_owned()],
+        "edit_file" => vec![
+            r#"{"path":"src/lib.rs","old_string":"old exact text","new_string":"new exact text"}"#
+                .to_owned(),
+        ],
+        "multi_edit" => vec![
+            r#"{"path":"src/lib.rs","edits":[{"old_string":"one","new_string":"two","replace_all":false}]}"#
+                .to_owned(),
+        ],
+        "delete_range" => vec![
+            r#"{"path":"src/lib.rs","start_anchor":"begin","end_anchor":"end","inclusive":true}"#
+                .to_owned(),
+        ],
+        "web_fetch" => vec![
+            r#"{"url":"https://example.com/page","timeout_seconds":20,"limit":12000}"#
+                .to_owned(),
+        ],
+        "task" => vec![
+            r#"{"op":"create","title":"Analyze module","content":"...","goal":"...","deliverables":["..."],"acceptance":["..."],"target_cwd":"/absolute/existing/repo","execution_profile":"workspace","dispatch":{"mode":"none"}}"#.to_owned(),
+            r#"{"op":"assign","task_id":"task-123","agent_id":"worker-1"}"#.to_owned(),
+        ],
+        "timer" => vec![
+            r#"{"op":"schedule","mode":"relative","delay_seconds":300,"reason":"Recheck worker result","prompt":"Read current TaskBoard/EventInbox/TaskHistory/AgentBoard truth and decide approve/reject/retry or schedule the next timer."}"#.to_owned(),
+            r#"{"op":"schedule","mode":"recurring","reason":"Working-day follow-up","prompt":"Use current truth only.","repeat":{"kind":"cron","expression":"*/15 9-17 * * 1-5","max_runs":32}}"#.to_owned(),
+        ],
+        "todo_write" => vec![
+            r#"{"todos":[{"content":"Verify output","status":"in_progress","activeForm":"Verifying output","level":0}]}"#
+                .to_owned(),
+        ],
+        "complete_step" => vec![
+            r#"{"step":"Verify","result":"passed","evidence":[{"kind":"verification","summary":"cargo test passed","command":"cargo test -p pkg"}]}"#
+                .to_owned(),
+        ],
+        "bash" => vec![r#"{"command":"cargo test -p freehand-tools","timeout_seconds":900}"#.to_owned()],
+        _ => Vec::new(),
+    }
+}
+
+fn builtin_tool_guidance(name: &str) -> Vec<String> {
+    match name {
+        "ls" | "read_file" | "glob" | "grep" | "write_file" | "edit_file" | "multi_edit"
+        | "delete_range" => vec![
+            "Relative paths are resolved against the locked workspace.".to_owned(),
+            "Leading-~ and absolute paths are valid only when canonical/symlink resolution stays inside the locked workspace.".to_owned(),
+            "External absolute paths and parent traversal are explicit boundary failures with path_diagnostic evidence.".to_owned(),
+        ],
+        "task" => vec![
+            "Every task call must include top-level op.".to_owned(),
+            "Use create then assign for production Worker dispatch; do not use status=\"all\".".to_owned(),
+            "Prefer expanded absolute existing target_cwd, while symlink aliases are valid when they resolve inside the workspace.".to_owned(),
+        ],
+        "timer" => vec![
+            "Use timer instead of dead-waiting when the useful wait exceeds three minutes.".to_owned(),
+            "Timer is independent runtime truth, not Task Center truth.".to_owned(),
+            "The persisted prompt must say what current truth to inspect and what decision to make after wakeup.".to_owned(),
+        ],
+        "web_fetch" => vec![
+            "Fetches one concrete HTTP/HTTPS URL only.".to_owned(),
+            "This is not broad search and is not provider-hosted web_search.".to_owned(),
+        ],
+        "bash" => vec![
+            "Generic owner-test foreground shell tool; not exposed to Master or Worker live model surfaces.".to_owned(),
+        ],
+        "todo_write" | "complete_step" => vec![
+            "Worker-safe framework progress tool; not exposed to Master live turns.".to_owned(),
+        ],
+        _ => Vec::new(),
     }
 }
 
@@ -2376,6 +2537,106 @@ mod tests {
             registry.execution_scope("web_fetch"),
             Some(BuiltinToolExecutionScope::Network)
         );
+    }
+
+    #[test]
+    fn registry_projection_exposes_safe_tool_guidance_without_local_web_search() {
+        let registry = BuiltinToolRegistry::reasonix_aligned();
+        let projection = registry.registry_projection();
+        let names = projection
+            .tools
+            .iter()
+            .map(|tool| tool.name.as_str())
+            .collect::<Vec<_>>();
+        let find = |name: &str| {
+            projection
+                .tools
+                .iter()
+                .find(|tool| tool.name == name)
+                .unwrap_or_else(|| panic!("missing projected tool {name}: {names:?}"))
+        };
+
+        assert_eq!(projection.registry_version, "reasonix-aligned-v1");
+        assert!(
+            projection
+                .guidance
+                .iter()
+                .any(|line| line.contains("exact JSON schema"))
+        );
+        assert!(
+            projection
+                .guidance
+                .iter()
+                .any(|line| line.contains("absolute or symlink paths"))
+        );
+        assert!(
+            projection
+                .guidance
+                .iter()
+                .any(|line| line.contains("not a Freehand local function tool named web_search"))
+        );
+        assert!(!names.contains(&"web_search"));
+
+        let task = find("task");
+        assert!(task.implemented);
+        assert!(task.exposed_to_master);
+        assert!(!task.exposed_to_worker);
+        assert_eq!(task.execution_scope, "framework");
+        assert!(task.input_schema.to_string().contains("\"op\""));
+
+        let timer = find("timer");
+        assert!(timer.implemented);
+        assert!(timer.exposed_to_master);
+        assert!(!timer.exposed_to_worker);
+        assert_eq!(timer.execution_scope, "framework");
+        assert!(
+            timer
+                .guidance
+                .iter()
+                .any(|line| line.contains("dead-waiting"))
+        );
+
+        let web_fetch = find("web_fetch");
+        assert!(web_fetch.read_only);
+        assert!(web_fetch.exposed_to_master);
+        assert!(web_fetch.exposed_to_worker);
+        assert_eq!(web_fetch.execution_scope, "network");
+        assert!(
+            web_fetch
+                .guidance
+                .iter()
+                .any(|line| line.contains("not broad search"))
+        );
+
+        let bash = find("bash");
+        assert!(bash.implemented);
+        assert!(!bash.exposed_to_master);
+        assert!(!bash.exposed_to_worker);
+        assert_eq!(bash.execution_scope, "shell");
+
+        for worker_only in ["todo_write", "complete_step"] {
+            let tool = find(worker_only);
+            assert!(tool.exposed_to_worker);
+            assert!(!tool.exposed_to_master);
+            assert_eq!(tool.execution_scope, "framework");
+        }
+
+        for path_tool in ["glob", "read_file", "ls"] {
+            let tool = find(path_tool);
+            let text = format!(
+                "{}\n{}\n{}",
+                tool.description,
+                tool.examples.join("\n"),
+                tool.guidance.join("\n")
+            );
+            assert!(text.contains("locked workspace"), "{path_tool}: {text}");
+            assert!(text.contains("absolute"), "{path_tool}: {text}");
+            assert!(text.contains("symlink"), "{path_tool}: {text}");
+            assert!(
+                text.contains("Leading-~") || text.contains("leading `~`"),
+                "{path_tool}: {text}"
+            );
+        }
     }
 
     #[test]

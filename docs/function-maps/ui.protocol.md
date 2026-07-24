@@ -51,6 +51,7 @@
   - `UiProviderConfigUpdate`
   - `UiModelGroupConfigUpdate`
   - `UiAgentModelGroupSelectionUpdate`
+  - `UiToolRegistryProjection`
   - `session_list_projection`
   - `turn_is_nonterminal`
 - `UiProtocolState::apply_semantic_event`
@@ -100,6 +101,11 @@
   validates timer ids, schedule mode, relative/absolute/recurring fields,
   reason, prompt, and source session id before runtime dispatch; protocol does
   not write timer schedules or infer timer state.
+- Tools dashboard `QueryToolRegistry` is a protocol-owned read-only ADP query
+  shape. Protocol defines `UiToolRegistryProjection` and
+  `UiToolRegistryToolProjection`, but the registry rows, examples, guidance,
+  execution scopes, and Master/Worker exposure flags must be supplied by the
+  runtime/tool registry owner path, not protocol-local state.
 - task list subscriptions are protocol-owned ADP/subscribe command shapes; task list projection contents must be supplied by runtime/task owners and remain read-only UI DTOs
 - error-center event queries and subscriptions are protocol-owned ADP/query/subscribe command shapes, but metadata truth remains owned by `metadata.core` and classified by `error.center`
 - config status query is a protocol-owned ADP/query command shape carrying the complete safe provider registry plus current primary/fallback selection, but selected config truth remains owned by `config.core` and supplied through `runtime.ui-command-dispatch`
@@ -150,6 +156,10 @@
   owner code through `UiRuntimeQueryPort`
 - TimerList query results expose UI-safe timer schedules and ledger event rows
   supplied by runtime owner code through `UiRuntimeQueryPort`
+- ToolRegistry query results expose UI-safe built-in tool schema/guidance rows
+  supplied by runtime owner code through `UiRuntimeQueryPort`; protocol does
+  not execute tools, persist tool truth, or expose provider-hosted broad search
+  as a local `web_search` function tool
 - task list subscription events expose the same UI-safe task list projection as query results so task panels can refresh from push without polling or app-local task state
 - error-center event query results expose UI-safe watermarked metadata fields plus raw hash only; raw provider/tool/request/user/assistant text is not part of the protocol DTO
 - config status query results expose UI-safe active agent/provider/model fields,
@@ -196,6 +206,9 @@
 - empty error-center session ids are rejected at the protocol boundary as `empty_session_id`
 - task list/history commands sent to command ingress are rejected as query-route misuse instead of mutating task truth
 - config status command sent to command ingress is rejected as query-route misuse instead of becoming a UI-local config read or mutation
+- `QueryToolRegistry` sent to command ingress or local protocol-state query is
+  rejected as route/source misuse instead of returning a browser/protocol-local
+  hardcoded tool list
 - provider/model update commands reject empty agent/provider/type/protocol/base URL/model/env-var fields and unsupported protocol values before dispatch; credential/API-key value fields do not exist in the DTO
 - model group commands reject empty agent/group ids, empty route providers/models, and zero load-balance weights before dispatch; credential/API-key value fields do not exist in the DTO
 - Agent resource-count update commands reject empty agent names and counts outside `1..=5` before dispatch; provider credentials and process-start state do not exist in the DTO
@@ -323,6 +336,7 @@
 | 27 | `UiCommand::RunMasterPoll` / `UiQueryResult::MasterPoll` | `crates/freehand-ui-protocol/src/lib.rs` | define Phase 2B MasterPoll command/result DTOs routed to task.orchestration, including replay_from_start cursor-mode validation | master poll command cursor mode | validated mutation intent routed to task.orchestration and owner-supplied poll projection | ADP command transport | runtime.ui-command-dispatch | bound |
 | 28 | `UiWorkerControlCommand` / `UiCommand::WorkerControl` / `UiCommand::QueryWorkerControl` / `UiQueryResult::WorkerControl` | `crates/freehand-ui-protocol/src/lib.rs` | define Phase 2C worker-control command/query DTOs, validate op-specific fields, and route mutation intent to worker.control | worker-control command or event query | validated mutation intent or runtime-backed control event projection | ADP command/query transport | runtime.ui-command-dispatch | bound |
 | 29 | `UiTimerScheduleCommand` / `UiTimerRepeatCommand` / `UiCommand::QueryTimerList` / `UiCommand::ScheduleTimer` / `UiCommand::CancelTimer` / `UiQueryResult::TimerList` / `validate_timer_schedule_command` | `crates/freehand-ui-protocol/src/lib.rs` | define independent timer dashboard query/command DTOs, validate mode-specific schedule fields, and route mutation intent to runtime.master-worker-loop through runtime dispatch | timer list query, schedule command, or cancel command | validated timer query/result DTO or mutation intent routed to timer owner | ADP command/query transport | runtime.ui-command-dispatch | bound |
+| 30 | `UiCommand::QueryToolRegistry` / `UiQueryResult::ToolRegistry` / `UiToolRegistryProjection` / `UiToolRegistryToolProjection` | `crates/freehand-ui-protocol/src/lib.rs` | define read-only Tools dashboard query/result DTOs without owning tool registry truth or executing tools | tool registry query | runtime-backed UI-safe built-in tool registry projection or protocol-state route rejection | ADP query transport | runtime.ui-command-dispatch | bound |
 
 ## Sync Status Against Code
 
@@ -362,4 +376,5 @@
 - Phase 2A worker agent, assignment, claim, review rejection, and dispatch-mode DTOs are landed and locked by protocol owner tests
 - Phase 2C worker-control command/query DTOs are landed and locked by protocol owner tests
 - Timer dashboard command/query DTOs are landed and locked by protocol owner tests
+- Tools dashboard query/result DTOs are landed and locked by `cargo test -p freehand-ui-protocol tool_registry -- --nocapture`; protocol-state local query rejection proves the runtime/tool owner supplies the registry projection
 - the generated wiki must be regenerated from `docs/mainline-calls/ui.protocol.json` when this function-map truth changes

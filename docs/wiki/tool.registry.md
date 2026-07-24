@@ -12,6 +12,7 @@ Generated from `docs/mainline-calls/tool.registry.json`. Do not edit by hand.
 
 - tool_call.execute_workspace_path
 - tool_call.execute_external_http
+- tool_call.project_registry_to_ui
 
 ## Request Mainline
 
@@ -28,6 +29,7 @@ Generated from `docs/mainline-calls/tool.registry.json`. Do not edit by hand.
 - file-mutation tools remain locked to the current workspace root
 - writable live exposure additionally depends on `tool.preview` and `runtime.checkpoint-rewind`
 - provider adapters render schemas; they do not own tool registry truth
+- runtime and WebUI may consume `BuiltinToolRegistry::registry_projection` only as a UI-safe read-only registry projection; it exposes schema, scope, exposure, examples, and guidance without executing tools or adding a local `web_search` function
 
 ## Response Mainline
 
@@ -42,6 +44,7 @@ Generated from `docs/mainline-calls/tool.registry.json`. Do not edit by hand.
 - foreground `bash` remains generically executable for owner tests but is absent from both master-safe and worker-safe live provider exports
 - runtime may bind one explicit per-call workspace root through `with_workspace_root` without mutating process-global cwd or environment
 - unsupported or unimplemented tools fail explicitly and do not become successful tool-result truth
+- UI-safe registry projection returns the complete built-in registry surface with `registry_version`, global guidance, per-tool schema, read-only state, implemented state, execution scope, Master/Worker exposure flags, examples, and concise first-call guidance
 
 ## Error Mainline
 
@@ -144,6 +147,12 @@ Generated from `docs/mainline-calls/tool.registry.json`. Do not edit by hand.
   - allowed callers: BuiltinToolRegistry::reasonix_aligned, tests
   - related tests: timer tool schema export test, master and worker tool-surface tests
   - why shared: keeps timer schema truth in the registry owner instead of task or runtime prompt-only definitions
+- `BuiltinToolRegistry::registry_projection`
+  - owner: `crates/freehand-tools/src/lib.rs`
+  - purpose: project UI-safe built-in tool registry rows, examples, guidance, execution scope, and Master/Worker exposure without executing tools or exposing provider-hosted search as a local function tool
+  - allowed callers: runtime UI query bridge, tool registry tests
+  - related tests: cargo test -p freehand-tools registry_projection -- --nocapture
+  - why shared: keeps Tools dashboard and runtime query projection sourced from the same tool registry owner instead of browser/runtime-local tool lists
 
 ## Function Call Table
 
@@ -166,6 +175,7 @@ Generated from `docs/mainline-calls/tool.registry.json`. Do not edit by hand.
 | 13 | `execute_ls` | `crates/freehand-tools/src/lib.rs` | list locked-workspace directory entries/recursive tree or report one file entry after canonical/symlink path resolution | optional path plus optional recursive | newline-separated directory listing or one file entry | registry execute | read-only file tool owner |  |  |  | bound |
 | 13a | `execute_web_fetch` | `crates/freehand-tools/src/lib.rs` | fetch one concrete HTTP/HTTPS URL with timeout and byte limit | url plus optional timeout_seconds plus optional limit | fetched text result or explicit HTTP/network/decode error | registry execute | network fetch tool owner | tool_call | external_http_resource | tool_call.execute_external_http | bound |
 | 14 | `reasonix_aligned_builtin_specs` | `crates/freehand-tools/src/lib.rs` | declare timer as an independent framework tool with schedule, cancel, list, relative, absolute, local-time recurring, local-time cron, weekday, skip-weekend, max-runs, reason, prompt, and example schema fields | static timer registry truth | provider-neutral timer tool definition | registry constructor/tests | tool owner |  |  |  | bound |
+| 15 | `BuiltinToolRegistry::registry_projection` | `crates/freehand-tools/src/lib.rs` | project UI-safe tool registry metadata, examples, guidance, scope, and Master/Worker exposure without executing tools | built-in tool registry | UI-safe built-in tool registry projection | runtime UI query bridge | tool owner | tool_call | ui_projection | tool_call.project_registry_to_ui | bound |
 
 ## Sync Status Against Mainline Call
 
@@ -181,3 +191,4 @@ Generated from `docs/mainline-calls/tool.registry.json`. Do not edit by hand.
 - `timer` is implemented as a framework tool: `freehand-tools` owns schema exposure while `freehand-runtime` owns durable schedule execution and Master wakeup routing
 - timer daily, weekly, and cron fields use local-time semantics; cron is a strict 5-field expression: minute hour day-of-month month weekday
 - `web_fetch` is implemented as a bounded concrete-URL network tool; `bg_jobs`, `kill_shell`, `wait_job`, broad `web_search`, browser, notebook, and symbol-aware mutation tools remain unimplemented until their lifecycle/gates are designed
+- registry projection is bound in `freehand-tools` and is the only Tools dashboard source; it exposes no local `web_search` function, keeps `bash` hidden from Master/Worker live exposure, and includes path guidance for absolute, leading-tilde, and symlink-aware locked-workspace handling

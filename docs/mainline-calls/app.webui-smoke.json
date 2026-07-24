@@ -40,6 +40,7 @@
     "transport-facing ADP query route can call an injected protocol-owned runtime query port for read-only owner projections such as task list/history and error-center metadata before using protocol-state snapshots",
     "front-end Phase 2D status drawer queries TaskBoard, AgentBoard, EventInbox, TaskHistory, and WorkerControl through the existing ADP/runtime query path; the browser only caches transient render data and must not persist task/control truth",
     "front-end Timer dashboard queries QueryTimerList through ADP/runtime owner truth, submits ScheduleTimer and CancelTimer only as protocol commands, and must not store timer schedules, infer timer status, or encode timer state as task/browser truth",
+    "front-end Tools dashboard queries QueryToolRegistry through ADP/runtime owner truth and renders only owner-projected schema, examples, guidance, execution scope, and Master/Worker exposure without executing tools, rendering session-specific tool turns, synthesizing a local web_search tool, or storing browser-local registry truth",
     "front-end Worker labels derive from Worker-only resource ordinals; the Master AgentBoard row must not offset configured Worker labels",
     "transport-facing app routes expose SSE subscribe for latest turn and per-turn debug snapshot",
     "HTTP query and POST command ingress remain compatibility routes; SSE latest-turn subscribe is consumed by WebUI as a display-refresh mirror without owning command dispatch",
@@ -69,6 +70,7 @@
     "Android update manifest route returns env override or compiled sidecar JSON, while missing or invalid manifest truth is explicit and never reports a hardcoded old current version",
     "WebUI Phase 2D status drawer renders compact TaskBoard, AgentBoard, EventInbox, task history, and WorkerControl cards from owner query results; worker-control buttons submit WorkerControl commands and then re-query owner truth before updating the drawer",
     "WebUI Timer dashboard renders owner-projected active/completed/cancelled/failed timer schedules and ledger history, disables duplicate schedule/cancel actions while commands are in flight, and refreshes QueryTimerList after every owner-backed receipt",
+    "WebUI Tools dashboard renders owner-projected tool registry rows, global guidance, schemas, examples, read-only/implemented state, scope, and Master/Worker exposure flags from QueryToolRegistry; repeated refreshes replace only the registry projection and never create sessions, tasks, timers, or tool executions",
     "WebUI forwards selected cwd through SubmitUserInput.cwd and keeps draft-session empty state out of the chat stream",
     "WebUI selected empty sessions render a clean empty prompt and ignore latest-active turns from other sessions until the selected session has its own transcript or live turn",
     "WebUI Escape behavior is stateful: active/submit-in-flight cancels, non-empty composer clears, empty composer first Esc arms rollback, and second Esc calls `RollbackLatestSessionTurn` before refilling composer from the rolled-back user text",
@@ -123,7 +125,8 @@
     "settings provider definition upsert and provider selection failures render explicit user-visible config errors and must not update local Settings state as if save succeeded",
     "settings model group definition upsert and active group selection failures render explicit user-visible config errors and must not update local Settings state as if save succeeded",
     "Android APK update bridge absence, desktop/browser use, malformed payloads, JavaScript bridge call failures, missing update sidecar truth, or missing staged APK artifacts render explicit failures and must not pretend an update check started or that the APK is current",
-    "Timer dashboard QueryTimerList, ScheduleTimer, and CancelTimer failures render explicit user-visible timer status errors and must not backfill timer rows from local browser guesses or task state"
+    "Timer dashboard QueryTimerList, ScheduleTimer, and CancelTimer failures render explicit user-visible timer status errors and must not backfill timer rows from local browser guesses or task state",
+    "Tools dashboard QueryToolRegistry failures render explicit user-visible status errors and must not backfill tool rows from local browser guesses, static arrays, or provider capability text"
   ],
   "shared_functions": [
     {
@@ -332,6 +335,17 @@
       "binding_status": "bound"
     },
     {
+      "step": "11k",
+      "symbol_path": "openToolsDashboard / refreshToolsDashboard / renderToolsDashboard / renderToolRegistryGuidance / renderToolRegistryList / renderToolRegistryCard",
+      "file_path": "apps/freehand-server/assets/webui.js",
+      "responsibility": "render the Tools dashboard from owner-projected ToolRegistry truth, display registry guidance/schema/examples/scope/exposure, and refresh through QueryToolRegistry without executing tools or storing registry truth in the browser",
+      "input_semantic": "Tools dashboard button, refresh click, and UiQueryResult::ToolRegistry",
+      "output_semantic": "owner-backed Tools dashboard rows, guidance, schema previews, exposure badges, or explicit registry error status",
+      "caller": "WebUI mobile home Tools entry",
+      "callee": "runtime tool registry owner projection through ADP",
+      "binding_status": "bound"
+    },
+    {
       "step": "11e",
       "symbol_path": "timelineItemCycleCard / cycleCardFromChatCards / cycleCardKey / reconcileCycleCardFragments / frozenCycleCardNeedsAuthoritativeMetadataRefresh / cycleCardMetaForTimelineItem / cycleCardIsTerminal",
       "file_path": "apps/freehand-server/assets/webui.js",
@@ -487,6 +501,7 @@
     "WebUI mobile Agent Dashboard Worker labels now use Worker-only ordinals so configured worker/worker-2/worker-3 render as Worker 1/2/3 even when AgentBoard includes Master",
     "WebUI WorkerControl buttons now send WorkerControl commands through ADP and re-query the owner projection; the visible receipt hides internal feature ids",
     "WebUI Timer dashboard now queries QueryTimerList, schedules timers through ScheduleTimer, cancels through CancelTimer, updates the mobile home Timer summary from owner projection, and keeps schedule/history truth in the runtime timer owner instead of browser state",
+    "WebUI Tools dashboard now queries QueryToolRegistry, renders owner projection rows and guidance, proves no local web_search function row, and keeps session-specific tool turns in conversation rendering instead of this registry/settings surface",
     "generated wiki must be regenerated from `docs/mainline-calls/app.webui-smoke.json` when this function-map truth changes",
     "WebUI Cancel button and Escape key now send CancelTurn through protocol command ingress instead of only clearing local input",
     "WebUI cancel path now covers the submit-in-flight window with CancelLatestActiveTurn",

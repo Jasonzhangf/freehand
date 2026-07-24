@@ -1,4 +1,4 @@
-import { initializeThemeToggle } from "/assets/theme.js?v=20260724-model-groups-ui";
+import { initializeThemeToggle } from "/assets/theme.js?v=20260724-tools-registry-ui";
 
 initializeThemeToggle(document);
 
@@ -179,6 +179,12 @@ const timerDashboardRefreshButton = document.getElementById("timer-dashboard-ref
 const timerDashboardStatus = document.getElementById("timer-dashboard-status");
 const timerDashboardList = document.getElementById("timer-dashboard-list");
 const timerDashboardHistory = document.getElementById("timer-dashboard-history");
+const toolsDashboardDialog = document.getElementById("tools-dashboard-dialog");
+const toolsDashboardCloseButton = document.getElementById("tools-dashboard-close-button");
+const toolsDashboardRefreshButton = document.getElementById("tools-dashboard-refresh-button");
+const toolsDashboardStatus = document.getElementById("tools-dashboard-status");
+const toolsDashboardGuidance = document.getElementById("tools-dashboard-guidance");
+const toolsDashboardList = document.getElementById("tools-dashboard-list");
 const timerModeInput = document.getElementById("timer-mode-input");
 const timerDelayInput = document.getElementById("timer-delay-input");
 const timerRunAtInput = document.getElementById("timer-run-at-input");
@@ -316,6 +322,9 @@ const state = {
   timerList: null,
   timerStatusError: null,
   timerCommandInFlight: false,
+  toolRegistry: null,
+  toolRegistryError: null,
+  toolRegistryInFlight: false,
   phase2StatusError: null,
   phase2LastRefreshAt: null,
   workerControlInFlight: false,
@@ -5572,6 +5581,13 @@ function applyPhase2QueryResult(result) {
     renderMobileHomeDashboard();
     return true;
   }
+  const toolRegistry = variantPayload(result, "ToolRegistry");
+  if (toolRegistry !== undefined) {
+    state.toolRegistry = toolRegistry;
+    state.toolRegistryError = null;
+    renderToolsDashboard();
+    return true;
+  }
   return false;
 }
 
@@ -6890,6 +6906,203 @@ async function cancelTimer(timerId) {
   }
 }
 
+function renderToolsDashboard() {
+  if (toolsDashboardStatus) {
+    toolsDashboardStatus.textContent = state.toolRegistryError
+      ? `tool registry query failed: ${state.toolRegistryError}`
+      : state.toolRegistry
+        ? toolRegistrySummary()
+        : "waiting for tool registry projection";
+  }
+  if (toolsDashboardRefreshButton) {
+    toolsDashboardRefreshButton.disabled = state.toolRegistryInFlight;
+    toolsDashboardRefreshButton.textContent = state.toolRegistryInFlight ? "Refreshing..." : "Refresh tools";
+  }
+  renderToolRegistryGuidance();
+  renderToolRegistryList();
+}
+
+function toolRegistrySummary() {
+  const tools = toolRegistryTools();
+  const masterCount = tools.filter((tool) => tool.exposed_to_master).length;
+  const workerCount = tools.filter((tool) => tool.exposed_to_worker).length;
+  const unimplementedCount = tools.filter((tool) => !tool.implemented).length;
+  return `registry ${state.toolRegistry.registry_version || "unknown"} · ${tools.length} tools · master ${masterCount} · worker ${workerCount} · unimplemented ${unimplementedCount}`;
+}
+
+function renderToolRegistryGuidance() {
+  if (!toolsDashboardGuidance) {
+    return;
+  }
+  toolsDashboardGuidance.replaceChildren();
+  if (state.toolRegistryError) {
+    toolsDashboardGuidance.textContent = state.toolRegistryError;
+    return;
+  }
+  const guidance = Array.isArray(state.toolRegistry?.guidance) ? state.toolRegistry.guidance : [];
+  if (guidance.length === 0) {
+    toolsDashboardGuidance.textContent = state.toolRegistry ? "No registry guidance." : "waiting for registry guidance";
+    return;
+  }
+  guidance.forEach((line) => {
+    const item = document.createElement("p");
+    item.textContent = line;
+    toolsDashboardGuidance.appendChild(item);
+  });
+}
+
+function renderToolRegistryList() {
+  if (!toolsDashboardList) {
+    return;
+  }
+  toolsDashboardList.replaceChildren();
+  if (state.toolRegistryError) {
+    toolsDashboardList.textContent = state.toolRegistryError;
+    return;
+  }
+  const tools = toolRegistryTools();
+  if (tools.length === 0) {
+    toolsDashboardList.textContent = state.toolRegistry ? "No tool registry rows." : "waiting for tool registry truth";
+    return;
+  }
+  tools.forEach((tool) => {
+    toolsDashboardList.appendChild(renderToolRegistryCard(tool));
+  });
+}
+
+function toolRegistryTools() {
+  return Array.isArray(state.toolRegistry?.tools)
+    ? state.toolRegistry.tools.slice().sort((left, right) => `${left.name || ""}`.localeCompare(`${right.name || ""}`))
+    : [];
+}
+
+function renderToolRegistryCard(tool) {
+  const card = document.createElement("article");
+  card.className = "tool-registry-card";
+  card.dataset.toolName = tool.name || "";
+  card.dataset.scope = tool.execution_scope || "";
+  card.dataset.implemented = String(tool.implemented === true);
+  card.dataset.readOnly = String(tool.read_only === true);
+  card.dataset.exposedToMaster = String(tool.exposed_to_master === true);
+  card.dataset.exposedToWorker = String(tool.exposed_to_worker === true);
+
+  const header = document.createElement("div");
+  header.className = "tool-registry-card-head";
+  const marker = document.createElement("span");
+  marker.className = `settings-status-marker ${toolRegistryTone(tool)}`;
+  marker.setAttribute("aria-hidden", "true");
+  const title = document.createElement("div");
+  title.className = "tool-registry-title";
+  const name = document.createElement("strong");
+  name.textContent = tool.name || "unnamed";
+  const meta = document.createElement("small");
+  meta.textContent = [
+    `scope=${tool.execution_scope || "unknown"}`,
+    `read_only=${tool.read_only === true}`,
+    `implemented=${tool.implemented === true}`,
+    `master=${tool.exposed_to_master === true}`,
+    `worker=${tool.exposed_to_worker === true}`,
+  ].join(" · ");
+  title.append(name, meta);
+  header.append(marker, title);
+  card.appendChild(header);
+
+  const description = document.createElement("p");
+  description.className = "tool-registry-description";
+  description.textContent = tool.description || "No description projected.";
+  card.appendChild(description);
+
+  const badges = document.createElement("div");
+  badges.className = "tool-registry-badges";
+  badges.append(
+    toolRegistryBadge(tool.execution_scope || "unknown", "scope"),
+    toolRegistryBadge(tool.read_only ? "read only" : "mutating", "read_only"),
+    toolRegistryBadge(tool.implemented ? "implemented" : "unimplemented", "implemented"),
+    toolRegistryBadge(tool.exposed_to_master ? "Master visible" : "Master hidden", "master"),
+    toolRegistryBadge(tool.exposed_to_worker ? "Worker visible" : "Worker hidden", "worker"),
+  );
+  card.appendChild(badges);
+
+  appendToolRegistryListSection(card, "Examples", tool.examples, "example");
+  appendToolRegistryListSection(card, "Guidance", tool.guidance, "guidance");
+
+  const details = document.createElement("details");
+  details.className = "tool-registry-schema";
+  const summary = document.createElement("summary");
+  summary.textContent = "Input schema";
+  const pre = document.createElement("pre");
+  pre.textContent = schemaPreview(tool.input_schema);
+  details.append(summary, pre);
+  card.appendChild(details);
+  return card;
+}
+
+function toolRegistryTone(tool) {
+  if (!tool || tool.implemented !== true) {
+    return "attention";
+  }
+  return tool.exposed_to_master || tool.exposed_to_worker ? "ok" : "attention";
+}
+
+function toolRegistryBadge(label, key) {
+  const badge = document.createElement("span");
+  badge.className = "tool-registry-badge";
+  badge.dataset.badge = key || "";
+  badge.textContent = label;
+  return badge;
+}
+
+function appendToolRegistryListSection(card, title, items, kind) {
+  const values = Array.isArray(items) ? items.filter(Boolean) : [];
+  if (values.length === 0) {
+    return;
+  }
+  const section = document.createElement("section");
+  section.className = `tool-registry-section tool-registry-section-${kind}`;
+  const heading = document.createElement("div");
+  heading.className = "tool-registry-section-heading";
+  heading.textContent = title;
+  section.appendChild(heading);
+  values.forEach((value) => {
+    const item = document.createElement(kind === "example" ? "code" : "p");
+    item.textContent = `${value}`;
+    section.appendChild(item);
+  });
+  card.appendChild(section);
+}
+
+function schemaPreview(schema) {
+  try {
+    return JSON.stringify(schema || {}, null, 2);
+  } catch (error) {
+    return String(schema || "");
+  }
+}
+
+async function openToolsDashboard() {
+  if (toolsDashboardDialog && typeof toolsDashboardDialog.showModal === "function" && !toolsDashboardDialog.open) {
+    toolsDashboardDialog.showModal();
+  }
+  renderToolsDashboard();
+  await refreshToolsDashboard();
+}
+
+async function refreshToolsDashboard() {
+  state.toolRegistryInFlight = true;
+  renderToolsDashboard();
+  try {
+    const result = await adpQuery("QueryToolRegistry");
+    applyPhase2QueryResult(result);
+    setCommandStatus("Tool registry projection refreshed.");
+  } catch (error) {
+    state.toolRegistryError = error.message;
+    setCommandStatus(`tool registry refresh failed: ${error.message}`, { stickyMs: 9000 });
+  } finally {
+    state.toolRegistryInFlight = false;
+    renderToolsDashboard();
+  }
+}
+
 async function refreshPhase2Status() {
   try {
     applyPhase2QueryResult(await adpQuery({ QueryTaskBoard: { include_terminal: true } }));
@@ -7928,6 +8141,7 @@ function renderAll() {
   renderPhase2Dashboard();
   renderMobileHomeDashboard();
   renderSettingsShell();
+  renderToolsDashboard();
   renderCommandStatus();
 }
 
@@ -8613,7 +8827,21 @@ if (timerDashboardForm) {
 }
 if (openToolsDashboardButton) {
   openToolsDashboardButton.addEventListener("click", () => {
-    setCommandStatus("Built-in Tools entry is UI-only in Phase 1. Tool schema registry and examples are Phase 2.", { stickyMs: 7000 });
+    openToolsDashboard().catch((error) => {
+      state.toolRegistryError = error.message;
+      setCommandStatus(`tool registry dashboard failed: ${error.message}`, { stickyMs: 9000 });
+      renderToolsDashboard();
+    });
+  });
+}
+if (toolsDashboardCloseButton) {
+  toolsDashboardCloseButton.addEventListener("click", () => {
+    toolsDashboardDialog?.close();
+  });
+}
+if (toolsDashboardRefreshButton) {
+  toolsDashboardRefreshButton.addEventListener("click", () => {
+    refreshToolsDashboard();
   });
 }
 if (closeSessionDrawerButton) {

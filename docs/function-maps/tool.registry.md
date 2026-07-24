@@ -9,6 +9,7 @@
 - resource operations:
   - `tool_call.execute_workspace_path`
   - `tool_call.execute_external_http`
+  - `tool_call.project_registry_to_ui`
 - owner entry symbols:
   - `BuiltinToolRegistry::reasonix_aligned`
   - `BuiltinToolRegistry::definitions`
@@ -19,6 +20,7 @@
   - `BuiltinToolRegistry::worker_implemented_definitions`
   - `BuiltinToolRegistry::worker_implemented_schema_fingerprint`
   - `BuiltinToolRegistry::execution_scope`
+  - `BuiltinToolRegistry::registry_projection`
   - `BuiltinToolRegistry::execute`
   - `with_workspace_root`
   - `reasonix_aligned_builtin_specs`
@@ -32,9 +34,11 @@
   - `external_http_resource`
 - touched resources:
   - `checkpoint`
+  - `ui_projection`
 - resource operations:
   - `tool_call.execute_workspace_path`
   - `tool_call.execute_external_http`
+  - `tool_call.project_registry_to_ui`
 - forbidden shortcuts:
   - Runtime command restore paths must not mutate workspace paths without checkpoint owner admission.
   - Master workspace tool surface must not expose a Worker task cwd as direct Master authority; Master local tools are locked to the current selected session cwd only.
@@ -71,6 +75,10 @@
   glob patterns, broad search paths, and not-yet-created output directories
 - registry exposes `timer` as a standard internal framework tool for durable
   wakeups; timer semantics must not be encoded as task lifecycle operations
+- registry can project one UI-safe built-in tool registry view containing
+  schema, examples, guidance, read-only state, implementation state, execution
+  scope, and Master/Worker exposure without executing tools or exposing
+  provider-hosted broad search as a local `web_search` function
 - timer schema tells the Master to schedule instead of dead-waiting when the
   next useful wait exceeds 3 minutes, then continue other ready Master-side
   work
@@ -97,6 +105,8 @@
 - file-mutation tools remain locked to the current workspace root
 - writable live exposure additionally depends on `tool.preview` and `runtime.checkpoint-rewind`
 - provider adapters render schemas; they do not own tool registry truth
+- runtime and WebUI may consume `BuiltinToolRegistry::registry_projection` only
+  as read-only owner projection; WebUI must not hardcode a parallel tool list
 
 ## Response Mainline
 
@@ -160,6 +170,11 @@
   - `todo_write`
   - `web_fetch`
   - `write_file`
+- UI-safe registry projection includes global guidance that exact JSON schemas
+  should be followed instead of trial calls, path tools are locked to the
+  workspace with relative, leading-`~`, absolute, and symlink rules, provider
+  hosted `web_search` is not a local Freehand function tool, and Master/Worker
+  exposure differs by role
 - implemented tools return user/model-visible tool result text
 - unsupported or unimplemented tools fail explicitly and do not become successful tool-result truth
 
@@ -249,6 +264,12 @@
   - allowed callers: runtime live bridge, tests
   - related tests: master tool-surface exclusion and cross-workspace boundary tests
   - why shared: keeps tool category truth out of runtime string lists
+- `BuiltinToolRegistry::registry_projection`
+  - owner: `crates/freehand-tools/src/lib.rs`
+  - purpose: project UI-safe registry metadata, examples, guidance, scope, and Master/Worker exposure without executing tools or exposing local `web_search`
+  - allowed callers: runtime UI query bridge and tests
+  - related tests: `cargo test -p freehand-tools registry_projection -- --nocapture`
+  - why shared: keeps the Tools dashboard and model-visible schema guidance on the same owner truth instead of duplicating tool lists in WebUI or runtime
 - `execute_web_fetch`
   - owner: `crates/freehand-tools/src/lib.rs`
   - purpose: execute one bounded HTTP/HTTPS text fetch for a concrete URL and return status/content-type/body text or explicit HTTP/network/decode failure
@@ -277,6 +298,7 @@
 | 12 | `execute_grep` | `crates/freehand-tools/src/lib.rs` | search UTF-8 text files by regex inside the locked workspace after canonical/symlink path resolution | `pattern` + optional `path` | `path:line:text` matches | registry execute | read-only search tool owner | bound |
 | 13 | `execute_ls` | `crates/freehand-tools/src/lib.rs` | list locked-workspace directory entries/recursive tree or report one file entry after canonical/symlink path resolution | optional `path` + optional `recursive` | newline-separated directory listing or one file entry | registry execute | read-only file tool owner | bound |
 | 13a | `execute_web_fetch` | `crates/freehand-tools/src/lib.rs` | fetch one concrete HTTP/HTTPS URL with timeout and byte limit | `url` + optional `timeout_seconds` + optional `limit` | fetched text result or explicit HTTP/network/decode error | registry execute | network fetch tool owner | bound |
+| 15 | `BuiltinToolRegistry::registry_projection` | `crates/freehand-tools/src/lib.rs` | project UI-safe tool registry metadata, examples, guidance, scope, and Master/Worker exposure without executing tools | registry | UI-safe tool registry projection | runtime UI query bridge | tool owner | bound |
 
 ## Sync Status Against Code
 
@@ -304,6 +326,9 @@
   local-workspace-plus-framework master-safe fingerprint, and Worker live guidance/provider
   requests consume the worker-safe surface instead of guessing tool names
 - tool execution scopes are bound in the registry owner; master runtime exposure includes locked local workspace file/search/write/edit tools, concrete-URL `web_fetch`, plus `task` and `timer`, while excluding shell, browser, broad `web_search`, `todo_write`, and `complete_step`
+- registry projection is bound in `freehand-tools` and is the only Tools
+  dashboard source for schema/examples/guidance/exposure; no browser-local
+  function tool list or local `web_search` row is allowed
 - read-only path tools use the owner-supplied workspace root as the locked
   boundary for relative, absolute, and leading-`~` paths after
   canonical/symlink resolution

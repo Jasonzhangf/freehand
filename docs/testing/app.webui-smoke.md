@@ -31,6 +31,10 @@
     `ScheduleTimer`, submit `CancelTimer`, and render owner-projected
     schedule/ledger truth without browser-persisted timer state or Task Center
     state
+  - WebUI Tools dashboard can query `QueryToolRegistry` and render
+    owner-projected registry rows, schema previews, examples, guidance,
+    execution scopes, and Master/Worker exposure flags without executing tools,
+    creating tasks/timers/sessions, or storing browser-local registry truth
   - WebUI mobile Agent Dashboard derives one presentation model from owner-backed projections; the Header shows current running Agent count, Worker task lifecycle buckets, and active/review/blocked task title, while the first tap opens only the current session's Worker child-task list
   - WebUI Header session relationship surface is canonical for Master/Worker navigation: collapsed state is a compact dashbar, expanded state is a dropdown session tree capped at half the viewport, and the Worker return path is in the Header
   - WebUI Master/Worker relationship tests lock schema fields, not UI copy: persisted session metadata is the Master source, and `UiTaskSnapshotProjection.parent_session_id`, `attached_session_ids`, `worker_session_id`, and `task_id` are the only Worker relationship source; DOM `data-session-id` / `data-task-id` are checked only as projections of those fields
@@ -79,6 +83,11 @@
     `parseLoadBalanceRoutes`, `submitModelGroupConfigUpdate`,
     `submitModelGroupSelectionUpdate`, `UpsertModelGroupConfig`, and
     `UpdateAgentModelGroupSelection`
+  - WebUI Tools dashboard asset smoke for `tools-dashboard-dialog`,
+    `tools-dashboard-list`, `QueryToolRegistry`, `renderToolsDashboard`,
+    `refreshToolsDashboard`, `renderToolRegistryGuidance`,
+    `renderToolRegistryList`, `renderToolRegistryCard`,
+    `tool.exposed_to_master`, and `tool.exposed_to_worker`
   - Android update route smoke for env/sidecar manifest JSON, explicit missing-sidecar failure, and explicit missing-APK 404
   - WebUI JS asset smoke locks ADP WebSocket command/query usage, rejects `fetch` as a live path, and requires `EventSource` only for latest-turn SSE display refresh
   - WebUI ADP subscription accepted/waiting status rendering smoke
@@ -186,6 +195,14 @@
   switches the active model group through the DOM, proves selected
   provider/model/fallback projection now comes from the model group route, then
   restores the original S-profile config/env and verifies no fixture env remains
+- WebUI online Tools dashboard coverage uses
+  `node scripts/verify-webui-tools-registry-online.mjs`: it opens the
+  production S-profile WebUI, queries `QueryToolRegistry`, opens the Tools
+  dashboard through the browser, proves visible rows match owner projection for
+  `task`, `timer`, `web_fetch`, `read_file`, `glob`, and `ls`, proves no local
+  `web_search` row, verifies path guidance for locked workspace, absolute,
+  symlink, and leading-tilde rules, and proves top-level persisted session ids
+  are unchanged
 - WebUI mobile Agent Dashboard positive coverage must prove the Header and child-task list come from current-session TaskBoard/AgentBoard truth and that task selection refreshes `QuerySessionTurns` for the projected Worker session; `scripts/verify-worker-subtasks-online.py --parent-session <id>` is the read-only ADP checker for enumerating every current child task and verifying each projected Worker transcript one by one
 - `node scripts/verify-webui-path-diagnostic-online.mjs` is the fixed-session
   WebUI online closure for path-tool diagnostics: it creates/reuses the fixed
@@ -263,6 +280,8 @@
   - WebUI online verifier now captures Phase 2D drawer proof by querying service truth through the same endpoint and comparing TaskBoard, AgentBoard, EventInbox, TaskHistory, and WorkerControl status text plus visible card counts
   - WebUI Timer dashboard list/schedule/cancel wiring is landed and covered by
     `node scripts/verify-webui-timer-dashboard-online.mjs`
+  - WebUI Tools dashboard owner projection wiring is landed and covered by
+    `node scripts/verify-webui-tools-registry-online.mjs`
   - WebUI New dialog task path selection and composer cwd input are landed; new conversation creates protocol-owned session metadata through ADP `CreateSession` without cwd, while new task requires an explicit selected or typed cwd and creates a cwd-bound session through ADP `CreateSession`
   - WebUI root shell intentionally does not expose persistent success/failure buttons, while WebUI JS still carries paired diagnostic prompts for slash commands and shortcuts
   - WebUI terminal display defaults to summary-only; evidence, learned notes, and completion reason require debug details to be enabled

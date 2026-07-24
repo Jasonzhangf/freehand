@@ -8,7 +8,8 @@
   "generated_wiki_doc": "docs/wiki/tool.registry.md",
   "resource_operations": [
     "tool_call.execute_workspace_path",
-    "tool_call.execute_external_http"
+    "tool_call.execute_external_http",
+    "tool_call.project_registry_to_ui"
   ],
   "request_mainline": [
     "runtime asks the tool owner for a per-run registry",
@@ -23,7 +24,8 @@
     "read-only path tools remain locked to the current workspace root after canonical/symlink resolution and reject existing external absolute paths",
     "file-mutation tools remain locked to the current workspace root",
     "writable live exposure additionally depends on `tool.preview` and `runtime.checkpoint-rewind`",
-    "provider adapters render schemas; they do not own tool registry truth"
+    "provider adapters render schemas; they do not own tool registry truth",
+    "runtime and WebUI may consume `BuiltinToolRegistry::registry_projection` only as a UI-safe read-only registry projection; it exposes schema, scope, exposure, examples, and guidance without executing tools or adding a local `web_search` function"
   ],
   "response_mainline": [
     "completed provider tool calls enter `BuiltinToolRegistry::execute`",
@@ -36,7 +38,8 @@
     "implemented tools return user/model-visible tool result text",
     "foreground `bash` remains generically executable for owner tests but is absent from both master-safe and worker-safe live provider exports",
     "runtime may bind one explicit per-call workspace root through `with_workspace_root` without mutating process-global cwd or environment",
-    "unsupported or unimplemented tools fail explicitly and do not become successful tool-result truth"
+    "unsupported or unimplemented tools fail explicitly and do not become successful tool-result truth",
+    "UI-safe registry projection returns the complete built-in registry surface with `registry_version`, global guidance, per-tool schema, read-only state, implemented state, execution scope, Master/Worker exposure flags, examples, and concise first-call guidance"
   ],
   "error_mainline": [
     "unknown tool names return `ToolRegistryError::UnknownTool`",
@@ -260,6 +263,19 @@
         "master and worker tool-surface tests"
       ],
       "why_shared": "keeps timer schema truth in the registry owner instead of task or runtime prompt-only definitions"
+    },
+    {
+      "symbol": "BuiltinToolRegistry::registry_projection",
+      "owner": "crates/freehand-tools/src/lib.rs",
+      "purpose": "project UI-safe built-in tool registry rows, examples, guidance, execution scope, and Master/Worker exposure without executing tools or exposing provider-hosted search as a local function tool",
+      "allowed_callers": [
+        "runtime UI query bridge",
+        "tool registry tests"
+      ],
+      "related_tests": [
+        "cargo test -p freehand-tools registry_projection -- --nocapture"
+      ],
+      "why_shared": "keeps Tools dashboard and runtime query projection sourced from the same tool registry owner instead of browser/runtime-local tool lists"
     }
   ],
   "call_table": [
@@ -455,6 +471,20 @@
       "caller": "registry constructor/tests",
       "callee": "tool owner",
       "binding_status": "bound"
+    },
+    {
+      "step": "15",
+      "symbol_path": "BuiltinToolRegistry::registry_projection",
+      "file_path": "crates/freehand-tools/src/lib.rs",
+      "responsibility": "project UI-safe tool registry metadata, examples, guidance, scope, and Master/Worker exposure without executing tools",
+      "input_semantic": "built-in tool registry",
+      "output_semantic": "UI-safe built-in tool registry projection",
+      "caller": "runtime UI query bridge",
+      "callee": "tool owner",
+      "source_resource": "tool_call",
+      "target_resource": "ui_projection",
+      "resource_operation": "tool_call.project_registry_to_ui",
+      "binding_status": "bound"
     }
   ],
   "sync_status": [
@@ -469,6 +499,7 @@
     "checkpointed live writable execution now depends on the code-bound `tool.preview` and `runtime.checkpoint-rewind` owner paths instead of runtime-local mutation shortcuts",
     "`timer` is implemented as a framework tool: `freehand-tools` owns schema exposure while `freehand-runtime` owns durable schedule execution and Master wakeup routing",
     "timer daily, weekly, and cron fields use local-time semantics; cron is a strict 5-field expression: minute hour day-of-month month weekday",
-    "`web_fetch` is implemented as a bounded concrete-URL network tool; `bg_jobs`, `kill_shell`, `wait_job`, broad `web_search`, browser, notebook, and symbol-aware mutation tools remain unimplemented until their lifecycle/gates are designed"
+    "`web_fetch` is implemented as a bounded concrete-URL network tool; `bg_jobs`, `kill_shell`, `wait_job`, broad `web_search`, browser, notebook, and symbol-aware mutation tools remain unimplemented until their lifecycle/gates are designed",
+    "registry projection is bound in `freehand-tools` and is the only Tools dashboard source; it exposes no local `web_search` function, keeps `bash` hidden from Master/Worker live exposure, and includes path guidance for absolute, leading-tilde, and symlink-aware locked-workspace handling"
   ]
 }

@@ -158,10 +158,10 @@ use freehand_ui_protocol::{
     UiTaskLedgerEventProjection, UiTaskListProjection, UiTaskReviewCommand,
     UiTaskReviewRejectionCommand, UiTaskSnapshotProjection, UiTimerEventProjection,
     UiTimerListProjection, UiTimerProjection, UiTimerRepeatCommand, UiTimerScheduleCommand,
-    UiTurnProjection, UiTurnTimingProjection, UiWorkerControlCommand,
-    UiWorkerControlEventProjection, UiWorkerControlProjection,
-    checkpoint_projection_from_runtime_summary, turn_projection_for_client,
-    turn_projection_from_events,
+    UiToolRegistryProjection, UiToolRegistryToolProjection, UiTurnProjection,
+    UiTurnTimingProjection, UiWorkerControlCommand, UiWorkerControlEventProjection,
+    UiWorkerControlProjection, checkpoint_projection_from_runtime_summary,
+    turn_projection_for_client, turn_projection_from_events,
 };
 use serde_json::{Map, Value, json};
 use thiserror::Error;
@@ -3378,6 +3378,9 @@ impl RuntimeCommandDispatcher {
                     events,
                 ))))
             }
+            UiCommand::QueryToolRegistry => Ok(Some(UiQueryResult::ToolRegistry(
+                project_tool_registry_for_ui(state.config.reason_agent_id.clone()),
+            ))),
             UiCommand::QueryEventInbox {
                 after_cursor,
                 limit,
@@ -6438,6 +6441,32 @@ fn project_timer_list_for_ui(
         include_terminal,
         timers,
         events,
+    }
+}
+
+fn project_tool_registry_for_ui(source_agent_id: AgentId) -> UiToolRegistryProjection {
+    let projection = BuiltinToolRegistry::reasonix_aligned().registry_projection();
+    UiToolRegistryProjection {
+        source_agent_id,
+        generated_at: now_unix_seconds(),
+        registry_version: projection.registry_version,
+        guidance: projection.guidance,
+        tools: projection
+            .tools
+            .into_iter()
+            .map(|tool| UiToolRegistryToolProjection {
+                name: tool.name,
+                description: tool.description,
+                input_schema: tool.input_schema,
+                read_only: tool.read_only,
+                implemented: tool.implemented,
+                execution_scope: tool.execution_scope,
+                exposed_to_master: tool.exposed_to_master,
+                exposed_to_worker: tool.exposed_to_worker,
+                examples: tool.examples,
+                guidance: tool.guidance,
+            })
+            .collect(),
     }
 }
 

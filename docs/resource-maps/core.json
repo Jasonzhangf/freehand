@@ -134,8 +134,8 @@
       "owner_crate": "crates/freehand-tools",
       "identity": "turn_id plus provider tool_call_id",
       "truth_store": "reason turn event plus tool owner execution state",
-      "operations": ["declare_schema", "classify_scope", "execute", "execute_workspace_path", "execute_external_http"],
-      "projections": ["tool result text", "tool display semantics"]
+      "operations": ["declare_schema", "classify_scope", "execute", "execute_workspace_path", "execute_external_http", "project_registry_to_ui"],
+      "projections": ["tool result text", "tool display semantics", "UI-safe tool registry projection"]
     },
     {
       "resource_type": "workspace_path",
@@ -388,6 +388,15 @@
       "source_resource": "tool_call",
       "target_resource": "external_http_resource",
       "effect": "execute one bounded HTTP/HTTPS text fetch for a concrete URL through the tool registry owner",
+      "mainline_call_doc": "docs/mainline-calls/tool.registry.json",
+      "binding_status": "bound"
+    },
+    {
+      "operation_id": "tool_call.project_registry_to_ui",
+      "owner_feature_id": "tool.registry",
+      "source_resource": "tool_call",
+      "target_resource": "ui_projection",
+      "effect": "project UI-safe built-in tool schema, examples, guidance, scope, and Master/Worker exposure metadata without executing tools or exposing provider-hosted search as a local function",
       "mainline_call_doc": "docs/mainline-calls/tool.registry.json",
       "binding_status": "bound"
     },
@@ -905,6 +914,17 @@
       "call_table_step": "13a",
       "file_path": "crates/freehand-tools/src/lib.rs",
       "symbol_path": "execute_web_fetch",
+      "binding_status": "bound"
+    },
+    {
+      "edge_id": "tool.registry#15",
+      "operation_id": "tool_call.project_registry_to_ui",
+      "source_resource": "tool_call",
+      "target_resource": "ui_projection",
+      "mainline_call_doc": "docs/mainline-calls/tool.registry.json",
+      "call_table_step": "15",
+      "file_path": "crates/freehand-tools/src/lib.rs",
+      "symbol_path": "BuiltinToolRegistry::registry_projection",
       "binding_status": "bound"
     },
     {
@@ -1485,6 +1505,14 @@
       "allowed_direct": true,
       "via_resources": [],
       "reason": "Tool registry owner may execute a bounded HTTP/HTTPS fetch for a concrete URL and return only tool-result text/error truth."
+    },
+    {
+      "rule_id": "tool-call-projects-registry-ui-direct",
+      "source_resource": "tool_call",
+      "target_resource": "ui_projection",
+      "allowed_direct": true,
+      "via_resources": [],
+      "reason": "Tool registry owner may expose UI-safe built-in schema, examples, guidance, scope, and exposure metadata without executing tools or leaking provider-hosted search as a local function tool."
     },
     {
       "rule_id": "tool-call-to-hosted-search-through-provider-request",

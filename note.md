@@ -8054,3 +8054,40 @@ Current real root cause split:
   - `CARGO_TARGET_DIR=/tmp/freehand-target-model-group cargo check -p freehand-config -p freehand-ui-protocol -p freehand-runtime -p freehand-server` passed.
   - `cargo fmt --check`, `CARGO_TARGET_DIR=/tmp/freehand-target-model-group cargo run -p xtask -- mainlines check`, `CARGO_TARGET_DIR=/tmp/freehand-target-model-group cargo run -p xtask -- gates check`, and `git diff --check` passed.
   - Final config query returned `provider=minimax`, `fallback_provider=cc`, `provider_protocol=messages`, `base_url_host=api.minimaxi.com`, `default_model=MiniMax-M3`, `web_search=auto`, `web_search_effective=hosted_declared`, `auth_source=inline`; fixture env grep returned 0 matches.
+
+# 2026-07-24 mobile UI tree Phase 2 Tools registry UI slice
+
+- scope:
+  - Current work closes only the Phase 2 owner-backed Tools dashboard slice.
+  - Tools dashboard is read-only registry/settings/instruction-capability projection; it does not execute tools and does not render conversation tool turns.
+  - Full Phase 2 remains open for Provider registry editing/testing, Search, New/session/task/attachment wiring, Android update/permission/notification true-device closure, and lifecycle dashboard proof.
+- implementation:
+  - `tool.registry` now projects `BuiltinToolRegistry::registry_projection()` with version, global guidance, per-tool schema, examples, guidance, read-only/implemented flags, execution scope, and Master/Worker exposure.
+  - `ui.protocol` now defines `QueryToolRegistry`, `UiToolRegistryProjection`, `UiToolRegistryToolProjection`, and `UiQueryResult::ToolRegistry`; local protocol state rejects the query so runtime/tool owner must answer.
+  - `runtime.ui-command-dispatch` bridges `QueryToolRegistry` to the tool owner projection and maps it into UI DTOs.
+  - WebUI Tools dashboard opens from the mobile top-right tools entry, queries `QueryToolRegistry`, renders owner-projected tool cards/schema/examples/guidance/exposure, and does not hardcode a browser-local tool list.
+  - `scripts/verify-webui-tools-registry-online.mjs` uses ADP `QueryToolRegistry` plus browser DOM proof; it now prefers Playwright `chromium_headless_shell` because macOS can reuse an already-running normal Chrome and ignore new CDP port flags.
+- online proof:
+  - `node scripts/verify-webui-tools-registry-online.mjs` passed on S-profile `ws://127.0.0.1:4042/adp`.
+  - Artifact: `artifacts/webui-online/webui-tools-registry-20260724T165955-27717`.
+  - Summary: `webui_tools_registry_ok url=http://127.0.0.1:4042/ adp=ws://127.0.0.1:4042/adp tools=19`.
+  - Checks true: production asset version, dialog opened, DOM tool names match ADP, core tools visible, no local `web_search` tool, `task`/`timer` Master-only, `web_fetch` Master+Worker, `bash` implemented but hidden from Master/Worker, Worker-only tools hidden from Master, path guidance visible, no top-level session created, no horizontal overflow.
+  - Related online regressions passed with headless shell:
+    - `mobile_ui_tree_phase1_ok`, artifact `artifacts/webui-online/mobile-ui-tree-phase1-20260724T165539-5547`
+    - `webui_timer_dashboard_ok`, timer `timer-master-source-less-ui-1784912153675880000-1`, artifact `artifacts/webui-online/webui-timer-dashboard-20260724T165550-6177`
+    - `model_group_ui_online_ok`, group `ui.verify.1784912168782`, final provider `minimax`, final model `MiniMax-M3`, final group `none`, artifact `artifacts/webui-online/model-group-ui-1784912168782`
+- local proof:
+  - `jq empty docs/resource-maps/core.json docs/mainline-calls/tool.registry.json docs/mainline-calls/ui.protocol.json docs/mainline-calls/runtime.ui-command-dispatch.json docs/mainline-calls/app.webui-smoke.json` passed.
+  - `node --check apps/freehand-server/assets/webui.js` and `node --check` for the four related online verifiers passed.
+  - `cargo fmt --check` passed.
+  - `CARGO_TARGET_DIR=/tmp/freehand-target-tools-registry cargo test -p freehand-tools registry_projection -- --nocapture --test-threads=1` passed 1/1.
+  - `CARGO_TARGET_DIR=/tmp/freehand-target-tools-registry cargo test -p freehand-ui-protocol tool_registry -- --nocapture --test-threads=1` passed 1/1.
+  - `CARGO_TARGET_DIR=/tmp/freehand-target-tools-registry cargo test -p freehand-runtime tool_registry -- --nocapture --test-threads=1` passed 1/1.
+  - `CARGO_TARGET_DIR=/tmp/freehand-target-tools-registry cargo test -p freehand-server --lib -- --nocapture --test-threads=1` passed 19/19; the printed dispatch-worker panic is the intentional negative test.
+  - `CARGO_TARGET_DIR=/tmp/freehand-target-tools-registry cargo check -p freehand-tools -p freehand-ui-protocol -p freehand-runtime -p freehand-server` passed.
+  - `CARGO_TARGET_DIR=/tmp/freehand-target-tools-registry cargo run -p xtask -- mainlines generate/check` passed.
+  - `CARGO_TARGET_DIR=/tmp/freehand-target-tools-registry cargo run -p xtask -- gates check` passed after fixing `docs/function-maps/tool.registry.md` to list touched `ui_projection`.
+  - Final `git diff --check` passed after memory/skill append.
+- restore proof:
+  - Final S config query returned `provider=minimax`, `fallback_provider=cc`, `provider_protocol=messages`, `base_url_host=api.minimaxi.com`, `default_model=MiniMax-M3`, `web_search=auto`, `web_search_effective=hosted_declared`, `auth_source=inline`.
+  - Fixture env grep for model group/provider retry/master autonomy keys returned 0 matches.

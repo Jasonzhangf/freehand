@@ -152,6 +152,7 @@ pub enum UiCommand {
         #[serde(default)]
         include_terminal: bool,
     },
+    QueryToolRegistry,
     QueryErrorCenterEvents {
         session_id: SessionId,
         #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -1159,6 +1160,33 @@ pub struct UiTimerListProjection {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct UiToolRegistryProjection {
+    pub source_agent_id: AgentId,
+    pub generated_at: u64,
+    pub registry_version: String,
+    #[serde(default)]
+    pub guidance: Vec<String>,
+    #[serde(default)]
+    pub tools: Vec<UiToolRegistryToolProjection>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct UiToolRegistryToolProjection {
+    pub name: String,
+    pub description: String,
+    pub input_schema: serde_json::Value,
+    pub read_only: bool,
+    pub implemented: bool,
+    pub execution_scope: String,
+    pub exposed_to_master: bool,
+    pub exposed_to_worker: bool,
+    #[serde(default)]
+    pub examples: Vec<String>,
+    #[serde(default)]
+    pub guidance: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct UiWorkerControlCommand {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub control_id: Option<String>,
@@ -1261,6 +1289,7 @@ pub enum UiQueryResult {
     ErrorCenterEvents(UiErrorCenterEventListProjection),
     ConfigStatus(UiConfigStatusProjection),
     TimerList(UiTimerListProjection),
+    ToolRegistry(UiToolRegistryProjection),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -2022,6 +2051,7 @@ impl UiProtocolState {
             | UiCommand::QueryTaskHistory { .. }
             | UiCommand::QueryWorkerControl { .. }
             | UiCommand::QueryTimerList { .. }
+            | UiCommand::QueryToolRegistry
             | UiCommand::RunMasterPoll { .. }
             | UiCommand::WorkerControl { .. }
             | UiCommand::TestProviderWebSearch { .. }
@@ -3325,6 +3355,7 @@ fn command_kind(command: &UiCommand) -> &'static str {
         UiCommand::QueryTaskHistory { .. } => "query_task_history",
         UiCommand::QueryWorkerControl { .. } => "query_worker_control",
         UiCommand::QueryTimerList { .. } => "query_timer_list",
+        UiCommand::QueryToolRegistry => "query_tool_registry",
         UiCommand::QueryErrorCenterEvents { .. } => "query_error_center_events",
         UiCommand::UpdateProviderConfig { .. } => "update_provider_config",
         UiCommand::UpsertProviderConfig { .. } => "upsert_provider_config",
@@ -4421,6 +4452,67 @@ mod tests {
         assert!(encoded.contains("TimerList"));
         assert!(encoded.contains("TimerScheduled"));
         let decoded: UiAdpResponse = serde_json::from_str(&encoded).expect("response decode");
+        assert_eq!(decoded, response);
+    }
+
+    #[test]
+    fn tool_registry_query_stays_runtime_owned_and_projects_safe_surface() {
+        let query = UiCommand::QueryToolRegistry;
+        validate_command(&query).expect("valid tool registry query");
+        let err =
+            accept_command_ingress(&query).expect_err("tool registry query is not command ingress");
+        assert_eq!(err, UiProtocolError::IngressCommandKindMismatch);
+        let err = UiProtocolState::default()
+            .query(&query)
+            .expect_err("protocol state cannot answer tool registry query locally");
+        assert_eq!(err, UiProtocolError::StreamKindMismatch);
+        assert_eq!(command_kind(&query), "query_tool_registry");
+
+        let response = UiAdpResponse::QueryResult {
+            request_id: "tool-registry-query".to_owned(),
+            result: UiQueryResult::ToolRegistry(UiToolRegistryProjection {
+                source_agent_id: AgentId::new("master"),
+                generated_at: 100,
+                registry_version: "reasonix-aligned-v1".to_owned(),
+                guidance: vec![
+                    "Provider-hosted broad search is not a Freehand local function tool named web_search.".to_owned(),
+                ],
+                tools: vec![
+                    UiToolRegistryToolProjection {
+                        name: "task".to_owned(),
+                        description: "Task Center call shape is strict.".to_owned(),
+                        input_schema: serde_json::json!({"type": "object", "required": ["op"]}),
+                        read_only: false,
+                        implemented: true,
+                        execution_scope: "framework".to_owned(),
+                        exposed_to_master: true,
+                        exposed_to_worker: false,
+                        examples: vec![r#"{"op":"assign","task_id":"task-123","agent_id":"worker-1"}"#.to_owned()],
+                        guidance: vec!["Every task call must include top-level op.".to_owned()],
+                    },
+                    UiToolRegistryToolProjection {
+                        name: "glob".to_owned(),
+                        description: "Find files inside the current locked workspace.".to_owned(),
+                        input_schema: serde_json::json!({"type": "object", "required": ["pattern"]}),
+                        read_only: true,
+                        implemented: true,
+                        execution_scope: "workspace".to_owned(),
+                        exposed_to_master: true,
+                        exposed_to_worker: true,
+                        examples: vec![r#"{"pattern":"/absolute/or/symlink/workspace/**/*.rs"}"#.to_owned()],
+                        guidance: vec![
+                            "Leading-~ and absolute paths are valid only when canonical/symlink resolution stays inside the locked workspace.".to_owned(),
+                        ],
+                    },
+                ],
+            }),
+        };
+        let encoded = serde_json::to_string(&response).expect("tool registry response json");
+        assert!(encoded.contains("ToolRegistry"));
+        assert!(encoded.contains("locked workspace"));
+        assert!(!encoded.contains("\"web_search\",\"description\""));
+        let decoded: UiAdpResponse =
+            serde_json::from_str(&encoded).expect("tool registry response decode");
         assert_eq!(decoded, response);
     }
 

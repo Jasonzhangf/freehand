@@ -47,6 +47,7 @@ Generated from `docs/mainline-calls/runtime.ui-command-dispatch.json`. Do not ed
 - Phase 2B EventInbox and MasterPoll query/command shapes route as thin ADP dispatch into Task Center owner truth; runtime does not classify or apply business actions locally
 - Phase 2C WorkerControl command and QueryWorkerControl query shapes route as thin ADP dispatch/query into worker.control owner truth; runtime converts DTOs and does not own control semantics
 - Phase 2 timer dashboard QueryTimerList, ScheduleTimer, and CancelTimer route through runtime into timer owner truth; runtime converts protocol DTOs, persists through TimerStore, and does not encode timers as Task Center truth
+- Phase 2 Tools dashboard QueryToolRegistry routes through runtime into tool.registry owner truth; runtime maps BuiltinToolRegistry::registry_projection rows into UI DTOs without executing tools, persisting registry truth, or synthesizing provider-hosted web_search as a local tool
 - runtime passes Phase 2B replay_from_start and maps omitted limit to the owner full-drain sentinel so closeout samples can ignore stale persisted cursors and consume all pending events instead of only the first page
 
 ## Response Mainline
@@ -88,6 +89,7 @@ Generated from `docs/mainline-calls/runtime.ui-command-dispatch.json`. Do not ed
 - runtime-backed EventInbox query and MasterPoll command return UI-safe projections sourced from TaskRuntime::query_event_inbox and TaskRuntime::run_master_poll, including classifications and persisted cursor evidence without task status mutations
 - runtime-backed WorkerControl dispatch returns owner receipt evidence after worker.control persists accepted control truth, and QueryWorkerControl returns UI-safe persisted control events for same-id restart verification
 - runtime-backed Timer dashboard commands return owner receipt evidence only after TimerStore accepts schedule or cancel truth, and QueryTimerList returns UI-safe timer schedule and ledger projections from timer owner truth
+- runtime-backed Tools dashboard query returns UI-safe registry rows from BuiltinToolRegistry::registry_projection, including schema, examples, guidance, scope, implemented/read-only state, and Master/Worker exposure flags without tool execution
 - runtime-backed EventInbox/MasterPoll closeout proof uses replay_from_start=true plus omitted limit; explicit finite limits are pagination and cannot prove no events remain after cursor persistence
 
 ## Error Mainline
@@ -117,6 +119,7 @@ Generated from `docs/mainline-calls/runtime.ui-command-dispatch.json`. Do not ed
 - invalid EventInbox cursor, conflicting MasterPoll cursor mode, or MasterPoll cursor persistence failures map to explicit dispatch failures from task.orchestration
 - invalid worker-control targets, unknown operations, missing op-specific payloads, terminal tasks, and Task Center consequence failures map to explicit dispatch failures without runtime-local success projection
 - timer schedule/cancel/list without a live runtime home, with invalid timer id, or with timer-store persistence failure maps to explicit dispatch failure; runtime must not create task truth or fake a timer projection
+- tool registry projection failure maps to explicit query failure; runtime must not fall back to a hardcoded browser/runtime tool list
 
 ## Shared Multi-Reference Functions
 
@@ -248,6 +251,7 @@ Generated from `docs/mainline-calls/runtime.ui-command-dispatch.json`. Do not ed
 | 24 | `RuntimeCommandDispatcher::query_runtime / project_worker_control_events_for_ui` | `crates/freehand-runtime/src/lib.rs` | route QueryWorkerControl into worker.control persisted event truth for restart verification | task id plus execution id query | UiWorkerControlProjection event list | ADP query transport | TaskRuntime::query_worker_control_events |  |  |  | bound |
 | 25 | `RuntimeCommandDispatcher::query_runtime / project_timer_list_for_ui` | `crates/freehand-runtime/src/lib.rs` | route QueryTimerList into timer owner schedule and ledger truth, then project UI-safe TimerList rows | include_terminal timer query flag | UiTimerListProjection or explicit timer-store failure | ADP query transport | TimerStore::load_schedules / TimerStore::load_events |  |  |  | bound |
 | 26 | `RuntimeCommandDispatcher::dispatch_schedule_timer / RuntimeCommandDispatcher::dispatch_cancel_timer` | `crates/freehand-runtime/src/lib.rs` | route ScheduleTimer and CancelTimer command envelopes into TimerStore owner mutation APIs and return user-safe timer receipts | validated timer schedule or cancel command | timer_scheduled or timer_cancelled receipt, or explicit owner failure | RuntimeCommandDispatcher::dispatch | TimerStore::schedule_from_request / TimerStore::upsert_schedule / TimerStore::cancel |  |  |  | bound |
+| 27 | `RuntimeCommandDispatcher::query_runtime / project_tool_registry_for_ui` | `crates/freehand-runtime/src/lib.rs` | route QueryToolRegistry into tool.registry owner projection and convert rows into UI-safe protocol DTOs without executing tools | tool registry query | UiToolRegistryProjection or explicit query failure | ADP query transport | BuiltinToolRegistry::registry_projection |  |  |  | bound |
 
 ## Sync Status Against Mainline Call
 
@@ -286,3 +290,4 @@ Generated from `docs/mainline-calls/runtime.ui-command-dispatch.json`. Do not ed
 - runtime Agent resource-count update dispatch is bound as a thin mutation route into config.core; successful saves project restart-required pending status and active AgentBoard truth remains unchanged until restart/process startup
 - runtime Phase 2B EventInbox and MasterPoll bridge is covered by runtime_dispatches_phase2b_master_poll_and_event_inbox, including replay_from_start and a backlog larger than the old default page size
 - runtime Phase 2C WorkerControl dispatch/query bridge is covered by runtime_dispatches_worker_control_to_task_owner and runtime_worker_control_invalid_target_returns_explicit_failure
+- runtime Tools dashboard query bridge is covered by runtime_query_projects_tool_registry_owner_truth

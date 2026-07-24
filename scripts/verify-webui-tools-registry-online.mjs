@@ -1,25 +1,23 @@
 import { spawn } from 'node:child_process';
+import fsSync from 'node:fs';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 
 const repo = process.cwd();
-const chromePath = process.env.FREEHAND_WEBUI_CHROME ||
-  '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
-const debugPort = Number.parseInt(process.env.FREEHAND_WEBUI_TIMER_DEBUG_PORT || '9257', 10);
-const baseUrl = normalizedBaseUrl(process.env.FREEHAND_WEBUI_TIMER_BASE_URL || 'http://127.0.0.1:4042/');
-const adpUrl = process.env.FREEHAND_WEBUI_TIMER_ADP_URL || adpUrlFromBaseUrl(baseUrl);
+const chromePath = process.env.FREEHAND_WEBUI_TOOLS_CHROME ||
+  defaultBrowserPath();
+const debugPort = Number.parseInt(process.env.FREEHAND_WEBUI_TOOLS_DEBUG_PORT || '9261', 10);
+const baseUrl = normalizedBaseUrl(process.env.FREEHAND_WEBUI_TOOLS_BASE_URL || 'http://127.0.0.1:4042/');
+const adpUrl = process.env.FREEHAND_WEBUI_TOOLS_ADP_URL || adpUrlFromBaseUrl(baseUrl);
 const runStamp = new Date().toISOString().replace(/[-:.]/g, '').slice(0, 15);
-const runId = `webui-timer-dashboard-${runStamp}-${process.pid}`;
+const runId = `webui-tools-registry-${runStamp}-${process.pid}`;
 const artifactDir = path.join(repo, 'artifacts', 'webui-online', runId);
 const assetVersion = '20260724-tools-registry-ui';
-const marker = `timer-dashboard-online-proof-${runStamp}-${process.pid}`;
-const wakePrompt = `Inspect current framework truth for ${marker}, then decide the next Master action.`;
-const createdTimerIds = new Set();
 
 await fs.mkdir(artifactDir, { recursive: true });
 
-const chromeProfileDir = await fs.mkdtemp(path.join(os.tmpdir(), 'freehand-webui-timer-'));
+const chromeProfileDir = await fs.mkdtemp(path.join(os.tmpdir(), 'freehand-webui-tools-'));
 let chrome = null;
 let cdp = null;
 let summary = null;
@@ -28,9 +26,10 @@ try {
   await waitHealth();
   await assertProductionPageReachable();
   const beforeSessions = sessionListPayload(await adpQuery('QuerySessionList'));
-  const before = timerListPayload(await adpQuery({ QueryTimerList: { include_terminal: true } }));
+  const registry = toolRegistryPayload(await adpQuery('QueryToolRegistry'));
   await fs.writeFile(path.join(artifactDir, 'session-list-before.json'), JSON.stringify(beforeSessions, null, 2));
-  await fs.writeFile(path.join(artifactDir, 'timer-list-before.json'), JSON.stringify(before, null, 2));
+  await fs.writeFile(path.join(artifactDir, 'tool-registry-adp.json'), JSON.stringify(registry, null, 2));
+  assertOwnerProjection(registry);
 
   chrome = spawn(
     chromePath,
@@ -70,121 +69,83 @@ try {
   await waitForFunction(cdp, () => {
     return document.body.dataset.webuiJsReady === 'true' &&
       !!document.querySelector('[data-webui-shell="true"]') &&
-      !!document.getElementById('open-timer-dashboard-button');
-  }, 20_000, 'Timer-capable WebUI shell ready');
+      !!document.getElementById('open-tools-dashboard-button') &&
+      !!document.getElementById('tools-dashboard-dialog');
+  }, 20_000, 'Tools-capable WebUI shell ready');
 
   await evalInPage(cdp, () => {
     window.dispatchEvent(new Event('resize'));
     window.__freehandLayout?.applyLayoutShape?.();
-    document.getElementById('open-timer-dashboard-button')?.click();
+    document.getElementById('open-tools-dashboard-button')?.click();
   });
   await waitForFunction(cdp, () => {
-    const dialog = document.getElementById('timer-dashboard-dialog');
+    const dialog = document.getElementById('tools-dashboard-dialog');
     return !!dialog && dialog.open;
-  }, 10_000, 'timer dashboard dialog open');
+  }, 10_000, 'tools dashboard dialog open');
 
-  await evalInPage(cdp, (reason, prompt) => {
-    function setValue(id, value) {
-      const node = document.getElementById(id);
-      if (!node) {
-        throw new Error(`missing timer form field ${id}`);
-      }
-      node.value = value;
-      node.dispatchEvent(new Event('input', { bubbles: true }));
-      node.dispatchEvent(new Event('change', { bubbles: true }));
+  const expectedNames = registry.tools.map((tool) => tool.name).filter(Boolean);
+  const dom = await waitForFunction(cdp, (names) => {
+    const rows = Array.from(document.querySelectorAll('.tool-registry-card'));
+    const rowNames = rows.map((row) => row.dataset.toolName || '');
+    if (names.every((name) => rowNames.includes(name))) {
+      const dialog = document.getElementById('tools-dashboard-dialog');
+      const bodyWidth = document.body.scrollWidth;
+      const docWidth = document.documentElement.scrollWidth;
+      return {
+        dialogOpen: !!dialog?.open,
+        statusText: document.getElementById('tools-dashboard-status')?.innerText || '',
+        guidanceText: document.getElementById('tools-dashboard-guidance')?.innerText || '',
+        commandStatusText: document.getElementById('command-status')?.innerText || '',
+        rows: rows.map((row) => ({
+          toolName: row.dataset.toolName || '',
+          scope: row.dataset.scope || '',
+          implemented: row.dataset.implemented || '',
+          readOnly: row.dataset.readOnly || '',
+          exposedToMaster: row.dataset.exposedToMaster || '',
+          exposedToWorker: row.dataset.exposedToWorker || '',
+          text: row.innerText || '',
+        })),
+        bodyText: document.body.innerText || '',
+        noHorizontalOverflow: Math.max(bodyWidth, docWidth) <= window.innerWidth + 2,
+      };
     }
-    setValue('timer-mode-input', 'relative');
-    setValue('timer-delay-input', '900');
-    setValue('timer-max-runs-input', '1');
-    setValue('timer-source-session-input', '');
-    setValue('timer-reason-input', reason);
-    setValue('timer-prompt-input', prompt);
-  }, marker, wakePrompt);
-  await evalInPage(cdp, () => {
-    document.getElementById('timer-dashboard-create-button')?.click();
-  });
+    return null;
+  }, 30_000, 'tool registry DOM rows', expectedNames);
+  await fs.writeFile(path.join(artifactDir, 'tool-registry-dom.json'), JSON.stringify(dom, null, 2));
+  await captureScreenshot(cdp, 'tools-registry-dashboard.png');
 
-  await waitForFunction(cdp, (reason) => {
-    const rows = Array.from(document.querySelectorAll('.timer-row'));
-    return rows.some((row) => row.innerText.includes(reason) && row.dataset.timerId);
-  }, 20_000, 'scheduled timer row in DOM', marker);
-  const scheduledDom = await evalInPage(cdp, collectTimerDomState, marker);
-  await fs.writeFile(path.join(artifactDir, 'dom-scheduled.json'), JSON.stringify(scheduledDom, null, 2));
-  await captureScreenshot(cdp, 'timer-dashboard-scheduled.png');
-
-  const afterSchedule = timerListPayload(await adpQuery({ QueryTimerList: { include_terminal: true } }));
-  await fs.writeFile(path.join(artifactDir, 'timer-list-after-schedule.json'), JSON.stringify(afterSchedule, null, 2));
-  const scheduledTimer = findTimerByMarker(afterSchedule, marker);
-  if (!scheduledTimer) {
-    throw new Error(`scheduled timer not visible in owner projection marker=${marker}`);
-  }
-  createdTimerIds.add(scheduledTimer.timer_id);
-  if (scheduledTimer.status !== 'active') {
-    throw new Error(`scheduled timer status is ${scheduledTimer.status}, expected active`);
-  }
-
-  await evalInPage(cdp, (timerId) => {
-    const row = Array.from(document.querySelectorAll('.timer-row'))
-      .find((candidate) => candidate.dataset.timerId === timerId);
-    const button = row?.querySelector('.timer-cancel-button');
-    if (!button) {
-      throw new Error(`missing cancel button for ${timerId}`);
-    }
-    button.click();
-  }, scheduledTimer.timer_id);
-
-  await waitFor(async () => {
-    const projection = timerListPayload(await adpQuery({ QueryTimerList: { include_terminal: true } }));
-    const timer = projection.timers.find((candidate) => candidate.timer_id === scheduledTimer.timer_id);
-    return timer?.status === 'cancelled' ? projection : null;
-  }, 20_000, 'cancelled timer owner projection');
-  await evalInPage(cdp, () => {
-    document.getElementById('timer-dashboard-refresh-button')?.click();
-  });
-  await waitForFunction(cdp, (timerId) => {
-    const text = document.getElementById('timer-dashboard-history')?.innerText || '';
-    return text.includes('TimerCancelled') || text.includes(timerId) && text.includes('cancelled');
-  }, 15_000, 'cancelled timer visible in DOM history', scheduledTimer.timer_id);
-  const cancelledDom = await evalInPage(cdp, collectTimerDomState, marker);
-  await fs.writeFile(path.join(artifactDir, 'dom-cancelled.json'), JSON.stringify(cancelledDom, null, 2));
-  await captureScreenshot(cdp, 'timer-dashboard-cancelled.png');
-
-  const afterCancel = timerListPayload(await adpQuery({ QueryTimerList: { include_terminal: true } }));
   const afterSessions = sessionListPayload(await adpQuery('QuerySessionList'));
-  await fs.writeFile(path.join(artifactDir, 'timer-list-after-cancel.json'), JSON.stringify(afterCancel, null, 2));
   await fs.writeFile(path.join(artifactDir, 'session-list-after.json'), JSON.stringify(afterSessions, null, 2));
-  const cancelledTimer = afterCancel.timers.find((candidate) => candidate.timer_id === scheduledTimer.timer_id);
-  const cancelEvent = afterCancel.events.find((event) =>
-    event.timer_id === scheduledTimer.timer_id && event.event_type === 'TimerCancelled'
-  );
 
+  const byName = Object.fromEntries(dom.rows.map((row) => [row.toolName, row]));
   summary = {
     ok: true,
     baseUrl,
     adpUrl,
     artifactDir,
     assetVersion,
-    marker,
-    scheduledTimerId: scheduledTimer.timer_id,
-    beforeTimerCount: before.timers.length,
-    afterScheduleTimerCount: afterSchedule.timers.length,
-    afterCancelTimerCount: afterCancel.timers.length,
-    screenshots: ['timer-dashboard-scheduled.png', 'timer-dashboard-cancelled.png'],
+    sourceAgentId: registry.source_agent_id,
+    registryVersion: registry.registry_version,
+    toolCount: registry.tools.length,
+    screenshots: ['tools-registry-dashboard.png'],
     checks: {
       productionAssetVersion: true,
-      dialogOpened: scheduledDom.dialogOpen === true,
-      domShowsScheduledTimer: scheduledDom.rows.some((row) =>
-        row.timerId === scheduledTimer.timer_id && row.text.includes(marker)
-      ),
-      adpHasScheduledTimer: scheduledTimer.reason === marker && scheduledTimer.status === 'active',
-      scheduleLedgerVisible: afterSchedule.events.some((event) =>
-        event.timer_id === scheduledTimer.timer_id && event.event_type === 'TimerScheduled'
-      ),
-      cancelUpdatedAdpTruth: cancelledTimer?.status === 'cancelled',
-      cancelLedgerVisible: !!cancelEvent,
-      domShowsCancelHistory: cancelledDom.historyText.includes('TimerCancelled') ||
-        cancelledDom.historyText.includes('cancelled'),
+      dialogOpened: dom.dialogOpen === true,
+      domMatchesAdpToolNames: expectedNames.every((name) => !!byName[name]),
+      coreToolsVisible: ['task', 'timer', 'web_fetch', 'read_file', 'glob', 'ls'].every((name) => !!byName[name]),
+      noLocalWebSearchTool: !expectedNames.includes('web_search') && !byName.web_search && !dom.bodyText.includes('data-tool-name="web_search"'),
+      taskMasterOnly: byName.task?.exposedToMaster === 'true' && byName.task?.exposedToWorker === 'false',
+      timerMasterOnly: byName.timer?.exposedToMaster === 'true' && byName.timer?.exposedToWorker === 'false',
+      webFetchMasterWorker: byName.web_fetch?.exposedToMaster === 'true' && byName.web_fetch?.exposedToWorker === 'true',
+      bashHiddenFromMasterWorker: byName.bash?.implemented === 'true' && byName.bash?.exposedToMaster === 'false' && byName.bash?.exposedToWorker === 'false',
+      workerToolsVisible: byName.todo_write?.exposedToWorker === 'true' && byName.complete_step?.exposedToWorker === 'true',
+      workerOnlyToolsHiddenFromMaster: byName.todo_write?.exposedToMaster === 'false' && byName.complete_step?.exposedToMaster === 'false',
+      pathGuidanceVisible: /locked workspace/i.test(byName.glob?.text || '') &&
+        /absolute/i.test(byName.glob?.text || '') &&
+        /symlink/i.test(byName.glob?.text || '') &&
+        /Leading-~|leading `~`/i.test(byName.glob?.text || ''),
       noTopLevelSessionCreated: sessionIds(beforeSessions).join('\n') === sessionIds(afterSessions).join('\n'),
+      noHorizontalOverflow: dom.noHorizontalOverflow === true,
     },
   };
   summary.ok = Object.values(summary.checks).every(Boolean);
@@ -193,14 +154,13 @@ try {
     const failed = Object.entries(summary.checks)
       .filter(([, value]) => value !== true)
       .map(([key]) => key);
-    throw new Error(`webui_timer_dashboard_failed checks=${failed.join(',')} artifactDir=${artifactDir}`);
+    throw new Error(`webui_tools_registry_failed checks=${failed.join(',')} artifactDir=${artifactDir}`);
   }
-  console.log(`webui_timer_dashboard_ok url=${baseUrl} adp=${adpUrl} timer_id=${scheduledTimer.timer_id} artifactDir=${artifactDir}`);
+  console.log(`webui_tools_registry_ok url=${baseUrl} adp=${adpUrl} tools=${registry.tools.length} artifactDir=${artifactDir}`);
 } catch (error) {
   await writeFailure(error);
   throw error;
 } finally {
-  await cleanupCreatedTimers();
   if (cdp) {
     await cdp.close().catch(() => null);
   }
@@ -210,36 +170,60 @@ try {
   await fs.rm(chromeProfileDir, { recursive: true, force: true }).catch(() => null);
 }
 
-async function cleanupCreatedTimers() {
-  try {
-    const projection = timerListPayload(await adpQuery({ QueryTimerList: { include_terminal: true } }));
-    for (const timer of projection.timers) {
-      if (timer.reason !== marker || timer.status !== 'active') {
-        continue;
-      }
-      createdTimerIds.add(timer.timer_id);
-    }
-    for (const timerId of createdTimerIds) {
-      const timer = projection.timers.find((candidate) => candidate.timer_id === timerId);
-      if (timer?.status === 'active') {
-        await adpCommand({ CancelTimer: { timer_id: timerId } }, 20_000).catch(() => null);
-      }
-    }
-  } catch (_) {
-    // Cleanup is best-effort for verifier-owned timers only; failure is recorded by main proof.
-  }
-}
-
 async function writeFailure(error) {
   const failureDir = path.join(artifactDir, 'failure');
   await fs.mkdir(failureDir, { recursive: true });
   await fs.writeFile(path.join(failureDir, 'error.txt'), error.stack || error.message);
-  await adpQuery({ QueryTimerList: { include_terminal: true } })
-    .then((value) => fs.writeFile(path.join(failureDir, 'timer-list.json'), JSON.stringify(value, null, 2)))
-    .catch((queryError) => fs.writeFile(path.join(failureDir, 'timer-list-error.txt'), queryError.stack || queryError.message));
+  await adpQuery('QueryToolRegistry')
+    .then((value) => fs.writeFile(path.join(failureDir, 'tool-registry.json'), JSON.stringify(value, null, 2)))
+    .catch((queryError) => fs.writeFile(path.join(failureDir, 'tool-registry-error.txt'), queryError.stack || queryError.message));
   if (summary) {
     await fs.writeFile(path.join(failureDir, 'summary.partial.json'), JSON.stringify(summary, null, 2));
   }
+}
+
+function assertOwnerProjection(registry) {
+  const names = registry.tools.map((tool) => tool.name);
+  for (const required of ['task', 'timer', 'web_fetch', 'read_file', 'glob', 'ls', 'bash', 'todo_write', 'complete_step']) {
+    if (!names.includes(required)) {
+      throw new Error(`ADP tool registry missing ${required}`);
+    }
+  }
+  if (names.includes('web_search')) {
+    throw new Error('ADP tool registry exposed local web_search tool');
+  }
+  const task = toolByName(registry, 'task');
+  const timer = toolByName(registry, 'timer');
+  const webFetch = toolByName(registry, 'web_fetch');
+  const bash = toolByName(registry, 'bash');
+  if (!task.exposed_to_master || task.exposed_to_worker || task.execution_scope !== 'framework') {
+    throw new Error('task projection is not Master-only framework scope');
+  }
+  if (!timer.exposed_to_master || timer.exposed_to_worker || timer.execution_scope !== 'framework') {
+    throw new Error('timer projection is not Master-only framework scope');
+  }
+  if (!webFetch.exposed_to_master || !webFetch.exposed_to_worker || webFetch.execution_scope !== 'network') {
+    throw new Error('web_fetch projection is not Master+Worker network scope');
+  }
+  if (!bash.implemented || bash.exposed_to_master || bash.exposed_to_worker || bash.execution_scope !== 'shell') {
+    throw new Error('bash projection should be implemented but hidden from live Master/Worker');
+  }
+  const globText = [
+    toolByName(registry, 'glob').description,
+    ...(toolByName(registry, 'glob').guidance || []),
+    ...(toolByName(registry, 'glob').examples || []),
+  ].join('\n');
+  if (!/locked workspace/i.test(globText) || !/absolute/i.test(globText) || !/symlink/i.test(globText) || !/Leading-~|leading `~`/i.test(globText)) {
+    throw new Error('glob projection missing locked workspace absolute/symlink/leading-~ guidance');
+  }
+}
+
+function toolByName(registry, name) {
+  const tool = registry.tools.find((candidate) => candidate.name === name);
+  if (!tool) {
+    throw new Error(`missing tool ${name}`);
+  }
+  return tool;
 }
 
 async function waitHealth() {
@@ -260,27 +244,6 @@ async function assertProductionPageReachable() {
   }
 }
 
-function collectTimerDomState(markerText) {
-  const dialog = document.getElementById('timer-dashboard-dialog');
-  const rows = Array.from(document.querySelectorAll('.timer-row')).map((row) => ({
-    timerId: row.dataset.timerId || '',
-    text: row.innerText || '',
-    hasCancel: !!row.querySelector('.timer-cancel-button'),
-  }));
-  const historyText = document.getElementById('timer-dashboard-history')?.innerText || '';
-  const bodyWidth = document.body.scrollWidth;
-  const docWidth = document.documentElement.scrollWidth;
-  return {
-    dialogOpen: !!dialog?.open,
-    statusText: document.getElementById('timer-dashboard-status')?.innerText || '',
-    commandStatusText: document.getElementById('command-status')?.innerText || '',
-    markerVisible: document.body.innerText.includes(markerText),
-    historyText,
-    rows,
-    noHorizontalOverflow: Math.max(bodyWidth, docWidth) <= window.innerWidth + 2,
-  };
-}
-
 async function captureScreenshot(cdpClient, fileName) {
   const screenshot = await cdpClient.send('Page.captureScreenshot', {
     format: 'png',
@@ -289,18 +252,14 @@ async function captureScreenshot(cdpClient, fileName) {
   await fs.writeFile(path.join(artifactDir, fileName), Buffer.from(screenshot.data, 'base64'));
 }
 
-function findTimerByMarker(projection, markerText) {
-  return projection.timers.find((timer) => timer.reason === markerText) || null;
-}
-
-function timerListPayload(result) {
-  const payload = result?.TimerList || result?.timer_list || result;
+function toolRegistryPayload(result) {
+  const payload = result?.ToolRegistry || result?.tool_registry || result;
   return {
     source_agent_id: payload?.source_agent_id || '',
     generated_at: payload?.generated_at || 0,
-    include_terminal: !!payload?.include_terminal,
-    timers: Array.isArray(payload?.timers) ? payload.timers : [],
-    events: Array.isArray(payload?.events) ? payload.events : [],
+    registry_version: payload?.registry_version || '',
+    guidance: Array.isArray(payload?.guidance) ? payload.guidance : [],
+    tools: Array.isArray(payload?.tools) ? payload.tools : [],
   };
 }
 
@@ -321,10 +280,6 @@ function sessionIds(list) {
 
 async function adpQuery(query) {
   return await adpRequest('query', 'query', query, 30_000);
-}
-
-async function adpCommand(command, timeoutMs = 30_000) {
-  return await adpRequest('command', 'command', command, timeoutMs);
 }
 
 function adpRequest(kind, payloadKey, payload, timeoutMs) {
@@ -351,10 +306,6 @@ function adpRequest(kind, payloadKey, payload, timeoutMs) {
       }
       if (message.kind === 'query_result') {
         resolve(message.result);
-        return;
-      }
-      if (message.kind === 'command_receipt') {
-        resolve(message.receipt);
         return;
       }
       reject(new Error(`unexpected ADP ${kind} response: ${message.kind}`));
@@ -495,6 +446,23 @@ function normalizedBaseUrl(value) {
     url.pathname = `${url.pathname}/`;
   }
   return url.toString();
+}
+
+function defaultBrowserPath() {
+  const playwrightCache = path.join(os.homedir(), 'Library', 'Caches', 'ms-playwright');
+  try {
+    const shellPath = fsSync.readdirSync(playwrightCache)
+      .filter((entry) => /^chromium_headless_shell-\d+$/.test(entry))
+      .sort((left, right) => Number(right.split('-').at(-1)) - Number(left.split('-').at(-1)))
+      .map((entry) => path.join(playwrightCache, entry, 'chrome-mac', 'headless_shell'))
+      .find((candidate) => fsSync.existsSync(candidate));
+    if (shellPath) {
+      return shellPath;
+    }
+  } catch (_) {
+    // Fall through to the system Chrome path when Playwright is not installed.
+  }
+  return '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
 }
 
 function delay(ms) {

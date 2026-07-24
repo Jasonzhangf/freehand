@@ -1988,6 +1988,99 @@ fn runtime_timer_ui_commands_reject_non_live_dispatcher() {
 }
 
 #[test]
+fn runtime_query_projects_tool_registry_owner_truth() {
+    let runtime_home = temp_runtime_home();
+    let runtime = RuntimeCommandDispatcher::from_selected_agent_with_live(
+        &live_selected_agent(
+            "http://127.0.0.1:1".to_owned(),
+            freehand_config::ProviderType::Anthropic,
+        ),
+        runtime_home.clone(),
+        false,
+    )
+    .expect("runtime bootstrap");
+
+    let result = runtime
+        .query_runtime(&UiCommand::QueryToolRegistry)
+        .expect("tool registry query")
+        .expect("runtime-owned tool registry projection");
+
+    match result {
+        UiQueryResult::ToolRegistry(projection) => {
+            assert_eq!(projection.source_agent_id, AgentId::new("agent-live"));
+            assert_eq!(projection.registry_version, "reasonix-aligned-v1");
+            assert!(
+                projection
+                    .guidance
+                    .iter()
+                    .any(|line| line.contains("exact JSON schema"))
+            );
+            let names = projection
+                .tools
+                .iter()
+                .map(|tool| tool.name.as_str())
+                .collect::<Vec<_>>();
+            assert!(names.contains(&"task"));
+            assert!(names.contains(&"timer"));
+            assert!(names.contains(&"web_fetch"));
+            assert!(names.contains(&"read_file"));
+            assert!(names.contains(&"glob"));
+            assert!(names.contains(&"ls"));
+            assert!(!names.contains(&"web_search"));
+
+            let find = |name: &str| {
+                projection
+                    .tools
+                    .iter()
+                    .find(|tool| tool.name == name)
+                    .unwrap_or_else(|| panic!("missing projected tool {name}: {names:?}"))
+            };
+            let task = find("task");
+            assert!(task.exposed_to_master);
+            assert!(!task.exposed_to_worker);
+            assert_eq!(task.execution_scope, "framework");
+
+            let timer = find("timer");
+            assert!(timer.exposed_to_master);
+            assert!(!timer.exposed_to_worker);
+            assert_eq!(timer.execution_scope, "framework");
+
+            let web_fetch = find("web_fetch");
+            assert!(web_fetch.exposed_to_master);
+            assert!(web_fetch.exposed_to_worker);
+            assert_eq!(web_fetch.execution_scope, "network");
+
+            let bash = find("bash");
+            assert!(bash.implemented);
+            assert!(!bash.exposed_to_master);
+            assert!(!bash.exposed_to_worker);
+            assert_eq!(bash.execution_scope, "shell");
+
+            for worker_only in ["todo_write", "complete_step"] {
+                let tool = find(worker_only);
+                assert!(tool.exposed_to_worker);
+                assert!(!tool.exposed_to_master);
+            }
+
+            let glob = find("glob");
+            let glob_text = format!(
+                "{}\n{}\n{}",
+                glob.description,
+                glob.examples.join("\n"),
+                glob.guidance.join("\n")
+            );
+            assert!(glob_text.contains("locked workspace"));
+            assert!(glob_text.contains("absolute"));
+            assert!(glob_text.contains("symlink"));
+            assert!(glob_text.contains("Leading-~") || glob_text.contains("leading `~`"));
+        }
+        other => panic!("unexpected tool registry query result: {other:?}"),
+    }
+
+    fs::remove_dir_all(runtime_home).expect("cleanup runtime home");
+}
+
+#[test]
 fn runtime_query_projects_config_status_without_secrets() {
     let runtime_home = temp_runtime_home();
     fs::create_dir_all(&runtime_home).expect("create runtime home");
