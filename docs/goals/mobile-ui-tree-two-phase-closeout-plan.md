@@ -135,3 +135,14 @@ Commit Phase 2 separately only after each visible function is backed by owner tr
 - Phase 1 has a separate commit with production UI, docs, tests, and browser evidence.
 - Phase 2 has a separate commit with owner-backed functions, docs, tests, and live evidence.
 - The final report includes changed files, verification commands, browser/Android evidence paths, remaining risks, and explicit confirmation that top-level session history excludes worker temporary sessions.
+
+## Progress Evidence
+
+### Phase 2 Provider Registry UI
+
+- Status: closed for the Provider registry UI entry only; full Phase 2 remains open.
+- Online proof: `FREEHAND_PROVIDER_REGISTRY_UI_CHROME=$HOME/Library/Caches/ms-playwright/chromium_headless_shell-1194/chrome-mac/headless_shell FREEHAND_PROVIDER_REGISTRY_UI_DEBUG_PORT=9273 node scripts/verify-provider-registry-ui-online.mjs`.
+- Result: `provider_registry_ui_online_ok url=ws://127.0.0.1:4042/adp run_id=provider-registry-ui-1784913165666 added_provider=ui-verify-provider-registry switched_provider=cc final_provider=minimax final_fallback=cc final_registry=cc,minimax`.
+- Artifact: `artifacts/webui-online/provider-registry-ui-1784913165666`.
+- Coverage: WebUI loaded owner-backed provider registry projection, added a provider through `UpsertProviderConfig`, proved upsert did not change current primary/fallback, switched active provider through `UpdateAgentProviderSelection`, and restored S-profile config/env.
+- Restore: final config returned `minimax/MiniMax-M3` with fallback `cc`, `web_search=auto`, `web_search_effective=hosted_declared`, inline auth, and no fixture env matches.

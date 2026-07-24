@@ -8091,3 +8091,18 @@ Current real root cause split:
 - restore proof:
   - Final S config query returned `provider=minimax`, `fallback_provider=cc`, `provider_protocol=messages`, `base_url_host=api.minimaxi.com`, `default_model=MiniMax-M3`, `web_search=auto`, `web_search_effective=hosted_declared`, `auth_source=inline`.
   - Fixture env grep for model group/provider retry/master autonomy keys returned 0 matches.
+
+# 2026-07-25 mobile UI tree Phase 2 Provider registry UI proof
+
+- scope:
+  - Current work closes only the Phase 2 Provider registry UI evidence slice.
+  - No runtime code change was required in this slice; existing owner-backed code already exposes provider registry add/update, active provider switch, and provider-hosted web_search test controls through ADP/protocol.
+  - Full Phase 2 remains open for Search, New/session/task/attachments, current-session lifecycle dashboard, Android update/permissions/notifications true-device closure, and diagnostics.
+- evidence:
+  - `FREEHAND_PROVIDER_REGISTRY_UI_CHROME=$HOME/Library/Caches/ms-playwright/chromium_headless_shell-1194/chrome-mac/headless_shell FREEHAND_PROVIDER_REGISTRY_UI_DEBUG_PORT=9273 node scripts/verify-provider-registry-ui-online.mjs` passed on S-profile.
+  - Output: `provider_registry_ui_online_ok url=ws://127.0.0.1:4042/adp run_id=provider-registry-ui-1784913165666 added_provider=ui-verify-provider-registry switched_provider=cc final_provider=minimax final_fallback=cc final_registry=cc,minimax`.
+  - Artifact: `artifacts/webui-online/provider-registry-ui-1784913165666`.
+  - Proof contents include initial DOM config owner projection, WebUI `UpsertProviderConfig` add, proof that upsert did not change primary/fallback, WebUI `UpdateAgentProviderSelection` switch to `cc`, and post-finally restore.
+- restore proof:
+  - Final config query returned `provider=minimax`, `fallback_provider=cc`, `provider_protocol=messages`, `base_url_host=api.minimaxi.com`, `default_model=MiniMax-M3`, `web_search=auto`, `web_search_effective=hosted_declared`, `auth_source=inline`.
+  - Fixture env grep for provider registry/provider retry/master autonomy keys returned 0 matches.
