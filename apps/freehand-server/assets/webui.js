@@ -3719,6 +3719,14 @@ function browserRandomId() {
 }
 
 function newDraftSessionId() {
+  if (
+    globalThis.__freehandEnableTestHooks &&
+    Array.isArray(globalThis.__freehandDraftSessionIdsForTest) &&
+    globalThis.__freehandDraftSessionIdsForTest.length > 0
+  ) {
+    const fixedDraftSessionId = `${globalThis.__freehandDraftSessionIdsForTest.shift() || ""}`.trim();
+    if (fixedDraftSessionId) return fixedDraftSessionId;
+  }
   const stamp = new Date().toISOString().replace(/[-:.TZ]/g, "").slice(0, 14);
   return `webui-session-${stamp}-${browserRandomId().slice(0, 8)}`;
 }

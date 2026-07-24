@@ -256,6 +256,7 @@
   - WebUI JS asset smoke locks chronological per-round rendering so `runtime-turn-N` and `runtime-turn-N-rM` render as separate lifecycle cards instead of one all-in summary card
   - WebUI JS asset smoke locks internal runtime continuation prompt hiding and raw completion-schema stripping while preserving Final card projection at the end of the round sequence
   - WebUI JS asset smoke locks that `/new` opens the New dialog, new conversation routes through `CreateSession` without cwd, new task requires a selected or typed cwd and routes through `CreateSession` with cwd, optional `SubmitUserInput.cwd` forwarding remains available, and the old selected-session/no-turns system chat card stays absent
+  - `node scripts/verify-webui-new-session-online.mjs` clicks the mobile New entry, uses fixed test-hook draft session ids, proves New conversation and New task both route through ADP `CreateSession`, verifies `QuerySessionList` owner truth for no-cwd vs cwd-bound sessions, and checks worker temporary sessions are not top-level results
   - WebUI JS asset smoke locks that remove uses `DeleteSession`, archive/restore/query-archived paths are absent from the WebUI app, rename uses `RenameSession`, and double-Esc rollback uses `RollbackLatestSessionTurn`
   - WebUI terminal status projection keeps cancelled/failed cards visually distinct from success
   - WebUI terminal/final summary rendering extracts the complete `Summary` block from terminal text before debug fields, then uses a dedicated final-summary renderer rather than generic paragraph rendering; it preserves source response formatting, renders plain single-line summaries as one readable block, renders explicit source newlines/line-start labels/numbering as multiple blocks, and keeps debug fields hidden unless debug details are enabled
@@ -298,6 +299,7 @@
   - WebUI Tools dashboard owner projection wiring is landed and covered by
     `node scripts/verify-webui-tools-registry-online.mjs`
   - WebUI New dialog task path selection and composer cwd input are landed; new conversation creates protocol-owned session metadata through ADP `CreateSession` without cwd, while new task requires an explicit selected or typed cwd and creates a cwd-bound session through ADP `CreateSession`
+  - WebUI New dialog online proof is covered by `node scripts/verify-webui-new-session-online.mjs` on fixed sessions `webui-new-conversation-fixed` and `webui-new-task-fixed`
   - WebUI root shell intentionally does not expose persistent success/failure buttons, while WebUI JS still carries paired diagnostic prompts for slash commands and shortcuts
   - WebUI terminal display defaults to summary-only; evidence, learned notes, and completion reason require debug details to be enabled
   - WebUI JS must keep shortcuts and slash commands as input-layer affordances that call existing ADP query/command helpers instead of mutating protocol truth directly

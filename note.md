@@ -8132,3 +8132,25 @@ Current real root cause split:
   - Fixture env grep for provider retry/master autonomy keys returned 0 matches.
 - lesson:
   - Search/list verifiers must include metadata-only sessions created by WebUI; treating persisted index rows as the only persisted-session truth misses valid newly-created empty sessions.
+
+# 2026-07-25 mobile UI tree Phase 2 New conversation/task slice
+
+- scope:
+  - Current work closes only the Phase 2 New conversation / New task online proof slice.
+  - Full Phase 2 remains open for attachment failure-retention proof, current-session lifecycle dashboard closure, Android true-device update/permission/notification closure, and diagnostics.
+- implementation:
+  - Production WebUI asset version is bumped to `20260725-new-session-ui`.
+  - Browser-fixed draft session ids are available only behind `globalThis.__freehandEnableTestHooks` plus `__freehandDraftSessionIdsForTest`; normal production browsing still uses generated `webui-session-*` ids.
+  - `scripts/verify-webui-new-session-online.mjs` clicks the mobile New entry, creates a no-cwd conversation and cwd-bound task through the actual dialog, waits for `QuerySessionList` owner truth after each `CreateSession`, and verifies no `worker-task-*` rows appear as top-level sessions.
+- online proof:
+  - `FREEHAND_NEW_SESSION_CHROME=$HOME/Library/Caches/ms-playwright/chromium_headless_shell-1194/chrome-mac/headless_shell node scripts/verify-webui-new-session-online.mjs` passed.
+  - Output: `webui_new_session_ok url=http://127.0.0.1:4042/ adp=ws://127.0.0.1:4042/adp conversation=webui-new-conversation-fixed task=webui-new-task-fixed artifactDir=/Volumes/extension/code/freehand/artifacts/webui-online/webui-new-session-1784934872925`.
+  - Summary checks true: asset version served, mobile New opens conversation dialog, conversation persisted through owner truth without cwd, conversation selected with clean empty state, task dialog accepts cwd, task persisted through owner truth with cwd, task selected/projected, no top-level Worker sessions, and no horizontal overflow.
+- local proof:
+  - `node --check scripts/verify-webui-new-session-online.mjs` and related WebUI verifier syntax checks passed.
+  - `node --check apps/freehand-server/assets/webui.js` passed.
+  - `CARGO_TARGET_DIR=/tmp/freehand-target-new-session cargo test -p freehand-server --lib -- --nocapture --test-threads=1` passed 19/19; the printed dispatch-worker panic is the intentional negative test.
+  - `cargo fmt --check`, `cargo run -p xtask -- mainlines check`, `cargo run -p xtask -- gates check`, and `git diff --check` passed in the first verification pass.
+  - Final restore proof from that pass: S config was `minimax/MiniMax-M3`, `web_search_effective=hosted_declared`, inline auth, and fixture env grep was 0.
+- lesson:
+  - New/session online verifiers must not create random session spam. Use explicit test-gated fixed ids, then wait for owner `QuerySessionList` truth before asserting UI selection or persisted-session state.

@@ -1389,7 +1389,7 @@ mod tests {
         assert!(html.contains("/assets/webui.css"));
         assert!(html.contains("/assets/logo.png"));
         assert!(html.contains("/assets/webui.js"));
-        assert!(html.contains("20260725-session-search-ui"));
+        assert!(html.contains("20260725-new-session-ui"));
         assert!(html.contains("data-adp-endpoint=\"/adp\""));
         assert!(html.contains("data-selected-session=\"\""));
         assert!(html.contains("data-selected-turn=\"\""));
@@ -2150,6 +2150,7 @@ mod tests {
         assert!(js_body.contains("selectAllSessions"));
         assert!(js_body.contains("draftSessionId: null"));
         assert!(js_body.contains("state.draftSessionId === sessionId"));
+        assert!(js_body.contains("__freehandDraftSessionIdsForTest"));
         assert!(!js_body.contains("startsWith(\"webui-session-\")"));
         assert!(js_body.contains("if (state.draftSessionId)"));
         assert!(js_body.contains("Send a message to start this session."));

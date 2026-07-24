@@ -5,15 +5,15 @@ import path from 'node:path';
 
 const repo = process.cwd();
 const home = process.env.HOME;
-const baseUrl = normalizedBaseUrl(process.env.FREEHAND_SESSION_SEARCH_BASE_URL || 'http://127.0.0.1:4042/');
-const adpUrl = process.env.FREEHAND_SESSION_SEARCH_ADP_URL || adpUrlFromBaseUrl(baseUrl);
-const chromePath = process.env.FREEHAND_SESSION_SEARCH_CHROME || defaultBrowserPath();
-const debugPort = Number.parseInt(process.env.FREEHAND_SESSION_SEARCH_DEBUG_PORT || '9277', 10);
-const fixedSessionId = process.env.FREEHAND_SESSION_SEARCH_SESSION_ID || 'webui-session-search-fixed';
-const queryToken = process.env.FREEHAND_SESSION_SEARCH_QUERY || `session-search-proof-${fixedSessionId}`;
-const fixedTitle = `Session Search Proof ${queryToken}`;
+const baseUrl = normalizedBaseUrl(process.env.FREEHAND_NEW_SESSION_BASE_URL || 'http://127.0.0.1:4042/');
+const adpUrl = process.env.FREEHAND_NEW_SESSION_ADP_URL || adpUrlFromBaseUrl(baseUrl);
+const chromePath = process.env.FREEHAND_NEW_SESSION_CHROME || defaultBrowserPath();
+const debugPort = Number.parseInt(process.env.FREEHAND_NEW_SESSION_DEBUG_PORT || '9278', 10);
+const conversationSessionId = process.env.FREEHAND_NEW_CONVERSATION_SESSION_ID || 'webui-new-conversation-fixed';
+const taskSessionId = process.env.FREEHAND_NEW_TASK_SESSION_ID || 'webui-new-task-fixed';
+const taskCwd = process.env.FREEHAND_NEW_TASK_CWD || repo;
 const assetVersion = '20260725-new-session-ui';
-const runId = `webui-session-search-${Date.now()}`;
+const runId = `webui-new-session-${Date.now()}`;
 const artifactDir = path.join(repo, 'artifacts', 'webui-online', runId);
 
 await fs.mkdir(artifactDir, { recursive: true });
@@ -21,23 +21,17 @@ await fs.mkdir(artifactDir, { recursive: true });
 let chrome = null;
 let cdp = null;
 let chromeProfileDir = null;
-let summary = null;
 let chromeStdout = '';
 let chromeStderr = '';
+let summary = null;
 
 try {
   await waitHealth();
   await assertProductionPageReachable();
-
   const beforeSessions = sessionListPayload(await adpQuery('QuerySessionList'));
   await fs.writeFile(path.join(artifactDir, 'session-list-before.json'), JSON.stringify(beforeSessions, null, 2));
 
-  await ensureFixedSession();
-  const ownerSearch = searchPayload(await adpQuery({ QuerySessionSearch: { query: queryToken, limit: 20 } }));
-  await fs.writeFile(path.join(artifactDir, 'session-search-adp.json'), JSON.stringify(ownerSearch, null, 2));
-  assertOwnerSearch(ownerSearch);
-
-  chromeProfileDir = await fs.mkdtemp(path.join(os.tmpdir(), 'freehand-session-search-'));
+  chromeProfileDir = await fs.mkdtemp(path.join(os.tmpdir(), 'freehand-new-session-'));
   chrome = spawn(chromePath, [
     '--headless=new',
     `--remote-debugging-port=${debugPort}`,
@@ -56,106 +50,118 @@ try {
   chrome.stderr.on('data', (chunk) => { chromeStderr += chunk.toString(); });
 
   const target = await waitForPageTarget(baseUrl, 20_000);
-  cdp = await createCdpClient(target.webSocketDebuggerUrl);
+  cdp = createCdpClient(target.webSocketDebuggerUrl);
   await cdp.send('Page.enable');
   await cdp.send('Runtime.enable');
+  await cdp.send('Page.addScriptToEvaluateOnNewDocument', {
+    source: `window.__freehandEnableTestHooks = true; window.__freehandDraftSessionIdsForTest = ${JSON.stringify([conversationSessionId, taskSessionId])};`,
+  });
   await cdp.send('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 2, mobile: true });
   await cdp.send('Page.navigate', { url: baseUrl });
   await waitForLoad(cdp);
-  await waitForFunction(cdp, () => document.body.dataset.webuiJsReady === 'true' && !!document.getElementById('open-session-drawer-button') && !!document.getElementById('session-search-dialog'), 20_000, 'Search-capable WebUI shell ready');
+  await waitForFunction(
+    cdp,
+    () => document.body.dataset.webuiJsReady === 'true' && !!document.getElementById('mobile-new-entry-button') && !!document.getElementById('new-session-dialog'),
+    20_000,
+    'New-session-capable WebUI shell ready',
+  );
 
-  await evalInPage(cdp, (query) => {
+  await evalInPage(cdp, () => {
     window.dispatchEvent(new Event('resize'));
     window.__freehandLayout?.applyLayoutShape?.();
-    document.getElementById('open-session-drawer-button')?.click();
-    const input = document.getElementById('session-search-input');
-    input.value = query;
-    input.dispatchEvent(new Event('input', { bubbles: true }));
-    document.getElementById('session-search-form')?.dispatchEvent(new SubmitEvent('submit', { bubbles: true, cancelable: true }));
-  }, queryToken);
-
-  const dom = await waitForFunction(cdp, (sessionId) => {
-    const dialog = document.getElementById('session-search-dialog');
-    const cards = Array.from(document.querySelectorAll('.session-search-card'));
-    const targetCard = cards.find((card) => card.dataset.sessionId === sessionId);
-    if (!dialog?.open || !targetCard) return null;
-    const allCardSessionIds = cards.map((card) => card.dataset.sessionId || '');
+    document.getElementById('mobile-new-entry-button')?.click();
+  });
+  const conversationDialog = await waitForFunction(cdp, () => {
+    const dialog = document.getElementById('new-session-dialog');
+    if (!dialog?.open || dialog.dataset.kind !== 'conversation') return null;
     return {
-      dialogOpen: dialog.open,
-      statusText: document.getElementById('session-search-status')?.innerText || '',
-      allCardSessionIds,
-      targetText: targetCard.innerText || '',
-      childRows: Array.from(targetCard.querySelectorAll('.session-search-child')).map((row) => ({
-        parentSessionId: row.dataset.parentSessionId || '',
-        childSessionId: row.dataset.childSessionId || '',
-        text: row.innerText || '',
-      })),
-      bodyText: document.body.innerText || '',
-      noHorizontalOverflow: Math.max(document.body.scrollWidth, document.documentElement.scrollWidth) <= window.innerWidth + 2,
+      open: dialog.open,
+      kind: dialog.dataset.kind,
+      confirmText: document.getElementById('new-session-confirm-button')?.innerText || '',
     };
-  }, 30_000, 'Search DOM result', fixedSessionId);
-  await fs.writeFile(path.join(artifactDir, 'session-search-dom.json'), JSON.stringify(dom, null, 2));
-  await captureScreenshot(cdp, 'session-search-results.png');
+  }, 10_000, 'conversation New dialog');
+  await evalInPage(cdp, () => document.getElementById('new-session-form')?.requestSubmit());
+  const conversationOwnerRow = await waitForOwnerSession(conversationSessionId, (row) => row && !row.cwd, 30_000);
+  const conversationDom = await waitForSelectedSession(conversationSessionId, 30_000);
+  await captureScreenshot(cdp, 'new-conversation-selected.png');
+  const afterConversation = sessionListPayload(await adpQuery('QuerySessionList'));
+  await fs.writeFile(path.join(artifactDir, 'session-list-after-conversation.json'), JSON.stringify(afterConversation, null, 2));
 
-  await evalInPage(cdp, (sessionId) => {
-    document.querySelector(`.session-search-card[data-session-id="${sessionId}"] .session-search-card-head`)?.click();
-  }, fixedSessionId);
-  const selected = await waitForFunction(cdp, (sessionId) => {
-    const shell = document.querySelector('[data-webui-shell="true"]');
-    if (shell?.dataset?.selectedSession === sessionId) {
-      return {
-        selectedSession: shell.dataset.selectedSession,
-        sessionTitle: document.getElementById('session-title')?.innerText || '',
-        dialogOpen: !!document.getElementById('session-search-dialog')?.open,
-      };
-    }
-    return null;
-  }, 20_000, 'Search result opens selected session', fixedSessionId);
-  await fs.writeFile(path.join(artifactDir, 'selected-session-dom.json'), JSON.stringify(selected, null, 2));
-  await captureScreenshot(cdp, 'session-search-selected-session.png');
+  await evalInPage(cdp, (cwd) => {
+    document.getElementById('mobile-new-entry-button')?.click();
+    const taskRadio = document.querySelector('input[name="new-session-kind"][value="task"]');
+    taskRadio.checked = true;
+    taskRadio.dispatchEvent(new Event('change', { bubbles: true }));
+    const input = document.getElementById('new-session-cwd-input');
+    input.value = cwd;
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+  }, taskCwd);
+  const taskDialog = await waitForFunction(cdp, () => {
+    const dialog = document.getElementById('new-session-dialog');
+    if (!dialog?.open || dialog.dataset.kind !== 'task') return null;
+    return {
+      open: dialog.open,
+      kind: dialog.dataset.kind,
+      cwd: document.getElementById('new-session-cwd-input')?.value || '',
+      confirmText: document.getElementById('new-session-confirm-button')?.innerText || '',
+    };
+  }, 10_000, 'task New dialog');
+  await evalInPage(cdp, () => document.getElementById('new-session-form')?.requestSubmit());
+  const taskOwnerRow = await waitForOwnerSession(taskSessionId, (row) => row && row.cwd === taskCwd, 30_000);
+  const taskDom = await waitForSelectedSession(taskSessionId, 30_000);
+  await captureScreenshot(cdp, 'new-task-selected.png');
+  const afterTask = sessionListPayload(await adpQuery('QuerySessionList'));
+  await fs.writeFile(path.join(artifactDir, 'session-list-after-task.json'), JSON.stringify(afterTask, null, 2));
 
-  const afterSessions = sessionListPayload(await adpQuery('QuerySessionList'));
-  await fs.writeFile(path.join(artifactDir, 'session-list-after.json'), JSON.stringify(afterSessions, null, 2));
-
-  const beforeIds = sessionIds(beforeSessions);
-  const afterIds = sessionIds(afterSessions);
-  const allowedNew = new Set([fixedSessionId]);
-  const unexpectedNew = afterIds.filter((id) => !beforeIds.includes(id) && !allowedNew.has(id));
-  const workerTopLevelCards = dom.allCardSessionIds.filter((id) => id.startsWith('worker-task-'));
-  const workerTopLevelSessions = afterIds.filter((id) => id.startsWith('worker-task-'));
+  const conversationRow = findSession(afterTask, conversationSessionId);
+  const taskRow = findSession(afterTask, taskSessionId);
+  const topLevelWorkerRows = allSessionRows(afterTask).filter((row) => `${row.session_id || ''}`.startsWith('worker-task-'));
+  const bodyState = await evalInPage(cdp, () => ({
+    bodyText: document.body.innerText || '',
+    noHorizontalOverflow: Math.max(document.body.scrollWidth, document.documentElement.scrollWidth) <= window.innerWidth + 2,
+    selectedSession: document.querySelector('[data-webui-shell="true"]')?.dataset.selectedSession || '',
+    selectedCwd: document.querySelector('[data-webui-shell="true"]')?.dataset.selectedCwd || '',
+    messageText: document.getElementById('message-list')?.innerText || '',
+    commandStatus: document.getElementById('command-status')?.innerText || '',
+  }));
 
   summary = {
     ok: true,
     baseUrl,
     adpUrl,
     artifactDir,
-    fixedSessionId,
-    queryToken,
     assetVersion,
-    screenshots: ['session-search-results.png', 'session-search-selected-session.png'],
+    conversationSessionId,
+    taskSessionId,
+    taskCwd,
+    conversationDialog,
+    taskDialog,
+    conversationOwnerRow,
+    taskOwnerRow,
+    conversationDom,
+    taskDom,
+    bodyState,
     checks: {
-      ownerProjectionContainsFixedSession: ownerSearch.results.some((row) => row.session_id === fixedSessionId),
-      browserDialogOpened: dom.dialogOpen === true,
-      browserRowsMatchOwnerProjection: dom.allCardSessionIds.includes(fixedSessionId),
-      noTopLevelWorkerResultCards: workerTopLevelCards.length === 0,
-      selectedSessionOpened: selected.selectedSession === fixedSessionId,
-      dialogClosedAfterOpen: selected.dialogOpen === false,
-      noUnexpectedTopLevelSessionCreated: unexpectedNew.length === 0,
-      noTopLevelWorkerSessionsAfter: workerTopLevelSessions.length === 0,
-      noHorizontalOverflow: dom.noHorizontalOverflow === true,
       assetVersionServed: true,
+      conversationDialogOpenedFromMobileEntry: conversationDialog.open === true && conversationDialog.kind === 'conversation',
+      conversationCreatedThroughOwnerTruth: !!conversationOwnerRow && conversationOwnerRow.archived !== true && !conversationOwnerRow.cwd,
+      conversationSelectedInUi: conversationDom.selectedSession === conversationSessionId,
+      conversationEmptyStateClean: conversationDom.messageText.includes('New conversation') && conversationDom.messageText.includes('Send a message to start this session.'),
+      taskDialogOpenedAndCwdEntered: taskDialog.open === true && taskDialog.kind === 'task' && taskDialog.cwd === taskCwd,
+      taskCreatedThroughOwnerTruth: !!taskOwnerRow && taskOwnerRow.archived !== true && taskOwnerRow.cwd === taskCwd,
+      taskSelectedInUi: taskDom.selectedSession === taskSessionId,
+      taskCwdProjectedInUi: taskDom.selectedCwd === taskCwd || bodyState.selectedCwd === taskCwd,
+      noTopLevelWorkerSessions: topLevelWorkerRows.length === 0,
+      noHorizontalOverflow: bodyState.noHorizontalOverflow === true,
     },
-    unexpectedNew,
-    workerTopLevelCards,
-    workerTopLevelSessions,
   };
   summary.ok = Object.values(summary.checks).every(Boolean);
   await fs.writeFile(path.join(artifactDir, 'summary.json'), JSON.stringify(summary, null, 2));
   if (!summary.ok) {
     const failed = Object.entries(summary.checks).filter(([, value]) => value !== true).map(([key]) => key);
-    throw new Error(`webui_session_search_failed checks=${failed.join(',')} artifactDir=${artifactDir}`);
+    throw new Error(`webui_new_session_failed checks=${failed.join(',')} artifactDir=${artifactDir}`);
   }
-  console.log(`webui_session_search_ok url=${baseUrl} adp=${adpUrl} session=${fixedSessionId} artifactDir=${artifactDir}`);
+  console.log(`webui_new_session_ok url=${baseUrl} adp=${adpUrl} conversation=${conversationSessionId} task=${taskSessionId} artifactDir=${artifactDir}`);
 } catch (error) {
   await writeFailure(error);
   throw error;
@@ -165,43 +171,45 @@ try {
   if (chromeProfileDir) await fs.rm(chromeProfileDir, { recursive: true, force: true }).catch(() => null);
 }
 
-async function ensureFixedSession() {
-  const create = { CreateSession: { session_id: fixedSessionId, title: fixedTitle, cwd: repo } };
-  try {
-    await adpCommand(create, 20_000);
-  } catch (error) {
-    await adpCommand({ RenameSession: { session_id: fixedSessionId, title: fixedTitle } }, 20_000);
-  }
+async function waitForSelectedSession(sessionId, timeoutMs) {
+  return await waitForFunction(cdp, (expected) => {
+    const shell = document.querySelector('[data-webui-shell="true"]');
+    if (shell?.dataset?.selectedSession !== expected) return null;
+    return {
+      selectedSession: shell.dataset.selectedSession || '',
+      selectedCwd: shell.dataset.selectedCwd || '',
+      sessionTitle: document.getElementById('session-title')?.innerText || '',
+      messageText: document.getElementById('message-list')?.innerText || '',
+      commandStatus: document.getElementById('command-status')?.innerText || '',
+    };
+  }, timeoutMs, `selected session ${sessionId}`, sessionId);
 }
 
-function assertOwnerSearch(search) {
-  if (search.query !== queryToken) throw new Error(`unexpected search query echo ${search.query}`);
-  const row = search.results.find((candidate) => candidate.session_id === fixedSessionId);
-  if (!row) throw new Error(`owner search missing fixed session ${fixedSessionId}`);
-  if ((search.results || []).some((candidate) => `${candidate.session_id || ''}`.startsWith('worker-task-'))) {
-    throw new Error('owner search returned worker session as top-level result');
-  }
+async function waitForOwnerSession(sessionId, predicate, timeoutMs) {
+  return await waitFor(async () => {
+    const list = sessionListPayload(await adpQuery('QuerySessionList'));
+    const row = findSession(list, sessionId);
+    if (predicate(row)) return row;
+    return null;
+  }, timeoutMs, `owner session ${sessionId}`);
 }
 
-function searchPayload(result) {
-  return result?.SessionSearch || result?.session_search || result;
+function findSession(list, sessionId) {
+  return allSessionRows(list).find((row) => row.session_id === sessionId) || null;
+}
+
+function allSessionRows(list) {
+  if (Array.isArray(list?.active)) return list.active;
+  if (Array.isArray(list?.sessions)) return list.sessions;
+  return [];
 }
 
 function sessionListPayload(result) {
   return result?.SessionList || result?.session_list || result;
 }
 
-function sessionIds(list) {
-  const active = Array.isArray(list?.active) ? list.active : [];
-  return active.map((row) => row.session_id).filter(Boolean).sort();
-}
-
 async function adpQuery(query) {
   return await adpRequest('query', 'query', query, 30_000);
-}
-
-async function adpCommand(command, timeoutMs = 30_000) {
-  return await adpRequest('command', 'command', command, timeoutMs);
 }
 
 function adpRequest(kind, payloadKey, payload, timeoutMs) {
@@ -220,7 +228,6 @@ function adpRequest(kind, payloadKey, payload, timeoutMs) {
       socket.close();
       if (message.kind === 'failure') return reject(new Error(message.failure?.message || message.failure?.code || 'ADP failure'));
       if (message.kind === 'query_result') return resolve(message.result);
-      if (message.kind === 'command_receipt') return resolve(message.receipt);
       reject(new Error(`unexpected ADP ${kind} response: ${message.kind}`));
     });
     socket.addEventListener('error', () => {
@@ -294,10 +301,18 @@ async function writeFailure(error) {
   await fs.writeFile(path.join(failureDir, 'error.txt'), error.stack || error.message);
   await fs.writeFile(path.join(failureDir, 'chrome-stdout.txt'), chromeStdout);
   await fs.writeFile(path.join(failureDir, 'chrome-stderr.txt'), chromeStderr);
-  if (summary) await fs.writeFile(path.join(failureDir, 'summary.partial.json'), JSON.stringify(summary, null, 2));
-  await adpQuery({ QuerySessionSearch: { query: queryToken, limit: 20 } })
-    .then((value) => fs.writeFile(path.join(failureDir, 'session-search.json'), JSON.stringify(value, null, 2)))
-    .catch((queryError) => fs.writeFile(path.join(failureDir, 'session-search-error.txt'), queryError.stack || queryError.message));
+  await adpQuery('QuerySessionList')
+    .then((value) => fs.writeFile(path.join(failureDir, 'session-list.json'), JSON.stringify(value, null, 2)))
+    .catch((queryError) => fs.writeFile(path.join(failureDir, 'session-list-error.txt'), queryError.stack || queryError.message));
+  if (cdp) {
+    await evalInPage(cdp, () => ({
+      bodyText: document.body.innerText || '',
+      selectedSession: document.querySelector('[data-webui-shell="true"]')?.dataset.selectedSession || '',
+      selectedCwd: document.querySelector('[data-webui-shell="true"]')?.dataset.selectedCwd || '',
+    }))
+      .then((value) => fs.writeFile(path.join(failureDir, 'dom-state.json'), JSON.stringify(value, null, 2)))
+      .catch(() => null);
+  }
 }
 
 async function waitFor(fn, timeoutMs, label) {
@@ -319,8 +334,7 @@ function delay(ms) { return new Promise((resolve) => setTimeout(resolve, ms)); }
 function normalizedBaseUrl(value) { return value.endsWith('/') ? value : `${value}/`; }
 function adpUrlFromBaseUrl(value) { const url = new URL(value); url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:'; url.pathname = '/adp'; url.search = ''; return url.toString(); }
 function defaultBrowserPath() {
-  const cached = path.join(home, 'Library/Caches/ms-playwright/chromium_headless_shell-1194/chrome-mac/headless_shell');
-  return process.env.FREEHAND_SESSION_SEARCH_CHROME || cached;
+  return path.join(home, 'Library/Caches/ms-playwright/chromium_headless_shell-1194/chrome-mac/headless_shell');
 }
 
 function createCdpClient(wsUrl) {
