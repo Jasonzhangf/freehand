@@ -9,6 +9,7 @@
 - resource operations:
   - `task.project_to_ui`
   - `input_attachment.validate_submit_metadata`
+  - `debug_trace.read_snapshot`
 - owner entry symbols:
   - `UiTurnProjection`
   - `TurnProjectionInput`
@@ -33,9 +34,11 @@
   - `task`
   - `session`
   - `node_pairing`
+  - `debug_trace`
 - resource operations:
   - `task.project_to_ui`
   - `input_attachment.validate_submit_metadata`
+  - `debug_trace.read_snapshot`
 - forbidden shortcuts:
   - UI projection must not mutate task truth directly.
   - UI projection must not synthesize persisted sessions from temporary subagent turns.
@@ -111,6 +114,11 @@
   DTOs, while persisted index rows, metadata, and Worker-parent attachment
   truth must be supplied by runtime/reason/task owners, not protocol-local
   state.
+- Diagnostics `QueryDiagnostics` is a protocol-owned read-only ADP query shape.
+  Protocol defines `UiDiagnosticsProjection` and
+  `UiDiagnosticLogFileProjection`, while runtime/debug owners supply safe log
+  metadata and redacted tail lines without raw provider payloads, secrets, or
+  absolute user paths.
 - task list subscriptions are protocol-owned ADP/subscribe command shapes; task list projection contents must be supplied by runtime/task owners and remain read-only UI DTOs
 - error-center event queries and subscriptions are protocol-owned ADP/query/subscribe command shapes, but metadata truth remains owned by `metadata.core` and classified by `error.center`
 - config status query is a protocol-owned ADP/query command shape carrying the complete safe provider registry plus current primary/fallback selection, but selected config truth remains owned by `config.core` and supplied through `runtime.ui-command-dispatch`
@@ -168,6 +176,10 @@
 - SessionSearch query results expose UI-safe persisted session search rows
   supplied by runtime owner code. Worker matches are nested under their owning
   persisted Master session and never projected as top-level session results.
+- Diagnostics query results expose UI-safe runtime log metadata and redacted tail
+  lines supplied by runtime owner code through `UiRuntimeQueryPort`; protocol
+  does not read filesystem logs, expose absolute paths, or project raw provider
+  payloads/secrets.
 - task list subscription events expose the same UI-safe task list projection as query results so task panels can refresh from push without polling or app-local task state
 - error-center event query results expose UI-safe watermarked metadata fields plus raw hash only; raw provider/tool/request/user/assistant text is not part of the protocol DTO
 - config status query results expose UI-safe active agent/provider/model fields,
@@ -217,6 +229,9 @@
 - `QueryToolRegistry` sent to command ingress or local protocol-state query is
   rejected as route/source misuse instead of returning a browser/protocol-local
   hardcoded tool list
+- `QueryDiagnostics` sent to command ingress or local protocol-state query is
+  rejected as route/source misuse instead of returning a browser/protocol-local
+  diagnostics list or absolute-path log tail
 - empty `QuerySessionSearch.query`, command-ingress use, or local
   protocol-state handling is rejected explicitly instead of returning
   browser/protocol-local session search results
@@ -349,6 +364,7 @@
 | 29 | `UiTimerScheduleCommand` / `UiTimerRepeatCommand` / `UiCommand::QueryTimerList` / `UiCommand::ScheduleTimer` / `UiCommand::CancelTimer` / `UiQueryResult::TimerList` / `validate_timer_schedule_command` | `crates/freehand-ui-protocol/src/lib.rs` | define independent timer dashboard query/command DTOs, validate mode-specific schedule fields, and route mutation intent to runtime.master-worker-loop through runtime dispatch | timer list query, schedule command, or cancel command | validated timer query/result DTO or mutation intent routed to timer owner | ADP command/query transport | runtime.ui-command-dispatch | bound |
 | 30 | `UiCommand::QueryToolRegistry` / `UiQueryResult::ToolRegistry` / `UiToolRegistryProjection` / `UiToolRegistryToolProjection` | `crates/freehand-ui-protocol/src/lib.rs` | define read-only Tools dashboard query/result DTOs without owning tool registry truth or executing tools | tool registry query | runtime-backed UI-safe built-in tool registry projection or protocol-state route rejection | ADP query transport | runtime.ui-command-dispatch | bound |
 | 31 | `UiCommand::QuerySessionSearch` / `UiQueryResult::SessionSearch` / `UiSessionSearchProjection` / `UiSessionSearchResultProjection` / `UiSessionSearchChildProjection` | `crates/freehand-ui-protocol/src/lib.rs` | define read-only persisted-session Search dashboard query/result DTOs without owning session index truth or promoting Worker sessions to top-level results | search query text plus optional limit | runtime-backed UI-safe persisted session search projection or protocol-state route rejection | ADP query transport | runtime.ui-command-dispatch | bound |
+| 32 | `UiCommand::QueryDiagnostics` / `UiQueryResult::Diagnostics` / `UiDiagnosticsProjection` / `UiDiagnosticLogFileProjection` | `crates/freehand-ui-protocol/src/lib.rs` | define read-only diagnostics query/result DTOs without owning debug/log truth or exposing raw provider payloads, secrets, or absolute user paths | diagnostics query | runtime-backed UI-safe diagnostics projection or protocol-state route rejection | ADP query transport | runtime.ui-command-dispatch | bound |
 
 ## Sync Status Against Code
 
@@ -390,4 +406,5 @@
 - Timer dashboard command/query DTOs are landed and locked by protocol owner tests
 - Tools dashboard query/result DTOs are landed and locked by `cargo test -p freehand-ui-protocol tool_registry -- --nocapture`; protocol-state local query rejection proves the runtime/tool owner supplies the registry projection
 - Search dashboard query/result DTOs are landed and locked by `cargo test -p freehand-ui-protocol session_search -- --nocapture --test-threads=1`; protocol-state local query rejection proves runtime/reason owners supply the search projection
+- Diagnostics query/result DTOs are landed and locked by `cargo test -p freehand-ui-protocol diagnostics_query -- --nocapture`; protocol-state local query rejection proves runtime/debug owners supply the diagnostics projection
 - the generated wiki must be regenerated from `docs/mainline-calls/ui.protocol.json` when this function-map truth changes

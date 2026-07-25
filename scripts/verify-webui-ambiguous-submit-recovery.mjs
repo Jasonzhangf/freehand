@@ -17,7 +17,7 @@ const fixedPrompt =
 const attachmentFailurePrompt =
   process.env.FREEHAND_WEBUI_ATTACHMENT_FAILURE_PROMPT || 'fixed attachment failure retain proof prompt';
 const taskCwd = process.env.FREEHAND_WEBUI_ATTACHMENT_FAILURE_CWD || process.cwd();
-const assetVersion = '20260725-attachment-failure-ui';
+const assetVersion = '20260725-diagnostics-ui';
 const artifactDir =
   process.env.FREEHAND_WEBUI_AMBIGUOUS_ARTIFACT_DIR ||
   path.join(process.cwd(), 'artifacts', 'webui-online', 'ambiguous-submit-recovery-fixed');

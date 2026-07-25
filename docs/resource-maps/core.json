@@ -410,6 +410,15 @@
       "binding_status": "bound"
     },
     {
+      "operation_id": "debug_trace.read_snapshot",
+      "owner_feature_id": "runtime.ui-command-dispatch",
+      "source_resource": "debug_trace",
+      "target_resource": "ui_projection",
+      "effect": "project UI-safe diagnostics log metadata and redacted log tails from runtime debug/log truth without exposing raw provider payloads, secrets, or absolute user paths",
+      "mainline_call_doc": "docs/mainline-calls/runtime.ui-command-dispatch.json",
+      "binding_status": "bound"
+    },
+    {
       "operation_id": "task.project_to_ui",
       "owner_feature_id": "ui.protocol",
       "source_resource": "task",
@@ -945,6 +954,17 @@
       "call_table_step": "15",
       "file_path": "crates/freehand-tools/src/lib.rs",
       "symbol_path": "BuiltinToolRegistry::registry_projection",
+      "binding_status": "bound"
+    },
+    {
+      "edge_id": "runtime.ui-command-dispatch#30",
+      "operation_id": "debug_trace.read_snapshot",
+      "source_resource": "debug_trace",
+      "target_resource": "ui_projection",
+      "mainline_call_doc": "docs/mainline-calls/runtime.ui-command-dispatch.json",
+      "call_table_step": "30",
+      "file_path": "crates/freehand-runtime/src/lib.rs",
+      "symbol_path": "project_diagnostics_for_ui",
       "binding_status": "bound"
     },
     {
@@ -1541,6 +1561,14 @@
       "allowed_direct": true,
       "via_resources": [],
       "reason": "Tool registry owner may expose UI-safe built-in schema, examples, guidance, scope, and exposure metadata without executing tools or leaking provider-hosted search as a local function tool."
+    },
+    {
+      "rule_id": "debug-trace-projects-diagnostics-ui-direct",
+      "source_resource": "debug_trace",
+      "target_resource": "ui_projection",
+      "allowed_direct": true,
+      "via_resources": [],
+      "reason": "Runtime UI command dispatch may project UI-safe diagnostics metadata and redacted log tails from debug trace truth without exposing raw provider payloads, secrets, or absolute user paths."
     },
     {
       "rule_id": "tool-call-to-hosted-search-through-provider-request",

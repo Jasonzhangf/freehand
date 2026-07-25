@@ -8203,3 +8203,29 @@ Current real root cause split:
   - Fixture env grep for path diagnostic/provider retry/master autonomy keys returned 0 matches.
 - known note:
   - `scripts/verify-webui-path-diagnostic-online.mjs` still starts with `scripts/install-launchd.sh restartS`, which calls default-target `scripts/install-symlink.sh`; in this environment that build can stall before proof. The current dashboard proof avoided that path by using protocol owner commands plus the dedicated WebUI worker-subtasks verifier.
+
+# 2026-07-25 mobile UI tree Phase 2 diagnostics/logs slice
+
+- scope:
+  - Current work closes only the Diagnostics logs Settings slice.
+  - Full Phase 2 remains open for Android true-device update/permission/notification closure and final requirement audit.
+- implementation:
+  - `ui.protocol` now owns `QueryDiagnostics`, `UiDiagnosticsProjection`, and `UiDiagnosticLogFileProjection`; local protocol state rejects the query so runtime owner must answer.
+  - `runtime.ui-command-dispatch` projects diagnostics from the configured live runtime home only, reads `~/.freehand/logs/*.log`, returns relative `logs/<name>` metadata, and caps log tail reads to the last 64 KiB / 5 non-empty lines.
+  - Diagnostic tail lines redact provider payload/request markers, auth/API-key/token/secret markers, pair tokens, and absolute `/Users` or `/Volumes` path lines before UI projection.
+  - WebUI Settings renders a Diagnostics logs card from owner projection and refreshes through ADP `QueryDiagnostics`; it does not inspect browser-local files or raw runtime paths.
+  - `scripts/verify-webui-diagnostics-online.mjs` verifies ADP projection safety, DOM row matching, no top-level session creation, asset version, no horizontal overflow, and redacted diagnostics DOM content.
+- online proof:
+  - S-profile `scripts/install-launchd.sh restartS` completed; health was `ok`.
+  - Final config query stayed `provider=minimax`, `provider_protocol=messages`, `base_url_host=api.minimaxi.com`, `default_model=MiniMax-M3`, `web_search=auto`, `web_search_effective=hosted_declared`, and `auth_source=inline`.
+  - `FREEHAND_WEBUI_DIAGNOSTICS_CHROME=$HOME/Library/Caches/ms-playwright/chromium_headless_shell-1194/chrome-mac/headless_shell node scripts/verify-webui-diagnostics-online.mjs` passed.
+  - Output: `webui_diagnostics_ok url=http://127.0.0.1:4042/ adp=ws://127.0.0.1:4042/adp files=19 artifactDir=/Volumes/extension/code/freehand/artifacts/webui-online/webui-diagnostics-1784942454320`.
+  - Fixture/env grep returned 0 matches for provider retry, master autonomy, path diagnostic, and diagnostics fixture markers.
+- local proof:
+  - `node --check apps/freehand-server/assets/webui.js` and `node --check scripts/verify-webui-diagnostics-online.mjs` passed.
+  - `CARGO_TARGET_DIR=/tmp/freehand-target-diagnostics cargo test -p freehand-ui-protocol diagnostics_query -- --nocapture` passed.
+  - `CARGO_TARGET_DIR=/tmp/freehand-target-diagnostics cargo test -p freehand-runtime runtime_query_projects_diagnostics_without_raw_secrets_or_absolute_home -- --nocapture --test-threads=1` passed.
+  - `CARGO_TARGET_DIR=/tmp/freehand-target-diagnostics cargo test -p freehand-server webui_smoke_renders_shell_and_asset_routes -- --nocapture --test-threads=1` passed.
+  - `cargo fmt --check`, `CARGO_TARGET_DIR=/tmp/freehand-target-diagnostics cargo run -p xtask -- mainlines check`, `CARGO_TARGET_DIR=/tmp/freehand-target-diagnostics cargo run -p xtask -- gates check`, and `git diff --check` passed.
+- lesson:
+  - Diagnostics/log UI must compare DOM rows to ADP owner projection, prove redaction/no absolute-path leakage, and prove the global session list is unchanged.

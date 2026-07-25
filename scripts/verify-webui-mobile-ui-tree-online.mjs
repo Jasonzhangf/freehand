@@ -9,7 +9,7 @@ const debugPort = Number.parseInt(process.env.FREEHAND_WEBUI_DEBUG_PORT || '9247
 const baseUrl = normalizedBaseUrl(process.env.FREEHAND_WEBUI_BASE_URL || 'http://127.0.0.1:4042/');
 const runId = `mobile-ui-tree-phase1-${new Date().toISOString().replace(/[-:.]/g, '').slice(0, 15)}-${process.pid}`;
 const artifactDir = path.join(process.cwd(), 'artifacts', 'webui-online', runId);
-const assetVersion = '20260725-attachment-failure-ui';
+const assetVersion = '20260725-diagnostics-ui';
 const forbiddenUiTerms = [
   /rootfs/i,
   /shared-folder/i,
@@ -288,7 +288,7 @@ function collectPhaseOneState() {
   return {
     layoutShape: document.body.dataset.layoutShape || '',
     shellLayoutShape: shell?.dataset.layoutShape || '',
-    assetVersionSeen: html.includes('20260725-attachment-failure-ui'),
+    assetVersionSeen: html.includes('20260725-diagnostics-ui'),
     bodyText,
     bodyWidth: document.body.scrollWidth,
     docWidth: document.documentElement.scrollWidth,

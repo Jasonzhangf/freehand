@@ -5,19 +5,17 @@ import os from 'node:os';
 import path from 'node:path';
 
 const repo = process.cwd();
-const chromePath = process.env.FREEHAND_WEBUI_TOOLS_CHROME ||
-  defaultBrowserPath();
-const debugPort = Number.parseInt(process.env.FREEHAND_WEBUI_TOOLS_DEBUG_PORT || '9261', 10);
-const baseUrl = normalizedBaseUrl(process.env.FREEHAND_WEBUI_TOOLS_BASE_URL || 'http://127.0.0.1:4042/');
-const adpUrl = process.env.FREEHAND_WEBUI_TOOLS_ADP_URL || adpUrlFromBaseUrl(baseUrl);
-const runStamp = new Date().toISOString().replace(/[-:.]/g, '').slice(0, 15);
-const runId = `webui-tools-registry-${runStamp}-${process.pid}`;
+const chromePath = process.env.FREEHAND_WEBUI_DIAGNOSTICS_CHROME || defaultBrowserPath();
+const debugPort = Number.parseInt(process.env.FREEHAND_WEBUI_DIAGNOSTICS_DEBUG_PORT || '9279', 10);
+const baseUrl = normalizedBaseUrl(process.env.FREEHAND_WEBUI_DIAGNOSTICS_BASE_URL || 'http://127.0.0.1:4042/');
+const adpUrl = process.env.FREEHAND_WEBUI_DIAGNOSTICS_ADP_URL || adpUrlFromBaseUrl(baseUrl);
+const runId = `webui-diagnostics-${Date.now()}`;
 const artifactDir = path.join(repo, 'artifacts', 'webui-online', runId);
 const assetVersion = '20260725-diagnostics-ui';
+const forbiddenPattern = /\/Users\/|\/Volumes\/|authorization|api_key|apikey|x-api-key|bearer |pair_token|secret|provider request|provider payload/i;
 
 await fs.mkdir(artifactDir, { recursive: true });
-
-const chromeProfileDir = await fs.mkdtemp(path.join(os.tmpdir(), 'freehand-webui-tools-'));
+const chromeProfileDir = await fs.mkdtemp(path.join(os.tmpdir(), 'freehand-webui-diagnostics-'));
 let chrome = null;
 let cdp = null;
 let summary = null;
@@ -26,30 +24,27 @@ try {
   await waitHealth();
   await assertProductionPageReachable();
   const beforeSessions = sessionListPayload(await adpQuery('QuerySessionList'));
-  const registry = toolRegistryPayload(await adpQuery('QueryToolRegistry'));
+  const diagnostics = diagnosticsPayload(await adpQuery('QueryDiagnostics'));
   await fs.writeFile(path.join(artifactDir, 'session-list-before.json'), JSON.stringify(beforeSessions, null, 2));
-  await fs.writeFile(path.join(artifactDir, 'tool-registry-adp.json'), JSON.stringify(registry, null, 2));
-  assertOwnerProjection(registry);
+  await fs.writeFile(path.join(artifactDir, 'diagnostics-adp.json'), JSON.stringify(diagnostics, null, 2));
+  assertDiagnosticsProjection(diagnostics);
 
-  chrome = spawn(
-    chromePath,
-    [
-      '--headless=new',
-      `--remote-debugging-port=${debugPort}`,
-      '--remote-debugging-address=0.0.0.0',
-      `--user-data-dir=${chromeProfileDir}`,
-      '--no-first-run',
-      '--no-default-browser-check',
-      '--disable-background-networking',
-      '--disable-extensions',
-      '--disable-sync',
-      '--disable-gpu',
-      '--no-sandbox',
-      '--window-size=390,844',
-      baseUrl,
-    ],
-    { stdio: ['ignore', 'pipe', 'pipe'] },
-  );
+  chrome = spawn(chromePath, [
+    '--headless=new',
+    `--remote-debugging-port=${debugPort}`,
+    '--remote-debugging-address=0.0.0.0',
+    `--user-data-dir=${chromeProfileDir}`,
+    '--no-first-run',
+    '--no-default-browser-check',
+    '--disable-background-networking',
+    '--disable-extensions',
+    '--disable-sync',
+    '--disable-gpu',
+    '--no-sandbox',
+    '--window-size=390,844',
+    baseUrl,
+  ], { stdio: ['ignore', 'pipe', 'pipe'] });
+
   const chromeLog = [];
   chrome.stdout.on('data', (chunk) => chromeLog.push(`[stdout] ${chunk}`));
   chrome.stderr.on('data', (chunk) => chromeLog.push(`[stderr] ${chunk}`));
@@ -69,81 +64,67 @@ try {
   await waitForFunction(cdp, () => {
     return document.body.dataset.webuiJsReady === 'true' &&
       !!document.querySelector('[data-webui-shell="true"]') &&
-      !!document.getElementById('open-tools-dashboard-button') &&
-      !!document.getElementById('tools-dashboard-dialog');
-  }, 20_000, 'Tools-capable WebUI shell ready');
+      !!document.getElementById('open-settings-drawer-button') &&
+      !!document.getElementById('settings-diagnostics-refresh-button');
+  }, 20_000, 'diagnostics-capable WebUI shell ready');
 
   await evalInPage(cdp, () => {
     window.dispatchEvent(new Event('resize'));
     window.__freehandLayout?.applyLayoutShape?.();
-    document.getElementById('open-tools-dashboard-button')?.click();
+    document.getElementById('open-settings-drawer-button')?.click();
   });
   await waitForFunction(cdp, () => {
-    const dialog = document.getElementById('tools-dashboard-dialog');
-    return !!dialog && dialog.open;
-  }, 10_000, 'tools dashboard dialog open');
+    return !document.getElementById('settings-shell')?.hidden &&
+      !!document.getElementById('settings-diagnostics-refresh-button');
+  }, 10_000, 'settings diagnostics card visible');
 
-  const expectedNames = registry.tools.map((tool) => tool.name).filter(Boolean);
+  await evalInPage(cdp, () => {
+    document.getElementById('settings-diagnostics-refresh-button')?.click();
+  });
+  const expectedNames = diagnostics.files.map((file) => file.name).filter(Boolean).slice(0, 8);
   const dom = await waitForFunction(cdp, (names) => {
-    const rows = Array.from(document.querySelectorAll('.tool-registry-card'));
-    const rowNames = rows.map((row) => row.dataset.toolName || '');
-    if (names.every((name) => rowNames.includes(name))) {
-      const dialog = document.getElementById('tools-dashboard-dialog');
-      const bodyWidth = document.body.scrollWidth;
-      const docWidth = document.documentElement.scrollWidth;
+    const rows = Array.from(document.querySelectorAll('.diagnostic-log-row'));
+    const rowNames = rows.map((row) => row.dataset.logName || '');
+    const summaryText = document.getElementById('settings-diagnostics-summary')?.innerText || '';
+    if (names.length === 0 || names.every((name) => rowNames.includes(name))) {
       return {
-        dialogOpen: !!dialog?.open,
-        statusText: document.getElementById('tools-dashboard-status')?.innerText || '',
-        guidanceText: document.getElementById('tools-dashboard-guidance')?.innerText || '',
-        commandStatusText: document.getElementById('command-status')?.innerText || '',
+        summaryText,
+        runtimeHomeText: document.getElementById('settings-diagnostics-runtime-home')?.innerText || '',
+        statusText: document.getElementById('settings-diagnostics-status')?.innerText || '',
         rows: rows.map((row) => ({
-          toolName: row.dataset.toolName || '',
-          scope: row.dataset.scope || '',
-          implemented: row.dataset.implemented || '',
-          readOnly: row.dataset.readOnly || '',
-          exposedToMaster: row.dataset.exposedToMaster || '',
-          exposedToWorker: row.dataset.exposedToWorker || '',
+          logName: row.dataset.logName || '',
+          relativePath: row.dataset.relativePath || '',
           text: row.innerText || '',
         })),
+        cardText: document.getElementById('settings-diagnostics-list')?.innerText || '',
         bodyText: document.body.innerText || '',
-        noHorizontalOverflow: Math.max(bodyWidth, docWidth) <= window.innerWidth + 2,
+        noHorizontalOverflow: Math.max(document.body.scrollWidth, document.documentElement.scrollWidth) <= window.innerWidth + 2,
       };
     }
     return null;
-  }, 30_000, 'tool registry DOM rows', expectedNames);
-  await fs.writeFile(path.join(artifactDir, 'tool-registry-dom.json'), JSON.stringify(dom, null, 2));
-  await captureScreenshot(cdp, 'tools-registry-dashboard.png');
+  }, 30_000, 'diagnostics DOM rows', expectedNames);
+  await fs.writeFile(path.join(artifactDir, 'diagnostics-dom.json'), JSON.stringify(dom, null, 2));
+  await captureScreenshot(cdp, 'diagnostics-settings.png');
 
   const afterSessions = sessionListPayload(await adpQuery('QuerySessionList'));
   await fs.writeFile(path.join(artifactDir, 'session-list-after.json'), JSON.stringify(afterSessions, null, 2));
 
-  const byName = Object.fromEntries(dom.rows.map((row) => [row.toolName, row]));
   summary = {
     ok: true,
     baseUrl,
     adpUrl,
     artifactDir,
     assetVersion,
-    sourceAgentId: registry.source_agent_id,
-    registryVersion: registry.registry_version,
-    toolCount: registry.tools.length,
-    screenshots: ['tools-registry-dashboard.png'],
+    sourceAgentId: diagnostics.source_agent_id,
+    files: diagnostics.files.length,
+    screenshots: ['diagnostics-settings.png'],
     checks: {
       productionAssetVersion: true,
-      dialogOpened: dom.dialogOpen === true,
-      domMatchesAdpToolNames: expectedNames.every((name) => !!byName[name]),
-      coreToolsVisible: ['task', 'timer', 'web_fetch', 'read_file', 'glob', 'ls'].every((name) => !!byName[name]),
-      noLocalWebSearchTool: !expectedNames.includes('web_search') && !byName.web_search && !dom.bodyText.includes('data-tool-name="web_search"'),
-      taskMasterOnly: byName.task?.exposedToMaster === 'true' && byName.task?.exposedToWorker === 'false',
-      timerMasterOnly: byName.timer?.exposedToMaster === 'true' && byName.timer?.exposedToWorker === 'false',
-      webFetchMasterWorker: byName.web_fetch?.exposedToMaster === 'true' && byName.web_fetch?.exposedToWorker === 'true',
-      bashHiddenFromMasterWorker: byName.bash?.implemented === 'true' && byName.bash?.exposedToMaster === 'false' && byName.bash?.exposedToWorker === 'false',
-      workerToolsVisible: byName.todo_write?.exposedToWorker === 'true' && byName.complete_step?.exposedToWorker === 'true',
-      workerOnlyToolsHiddenFromMaster: byName.todo_write?.exposedToMaster === 'false' && byName.complete_step?.exposedToMaster === 'false',
-      pathGuidanceVisible: /locked workspace/i.test(byName.glob?.text || '') &&
-        /absolute/i.test(byName.glob?.text || '') &&
-        /symlink/i.test(byName.glob?.text || '') &&
-        /Leading-~|leading `~`/i.test(byName.glob?.text || ''),
+      adpProjectionSafe: diagnosticsProjectionSafe(diagnostics),
+      runtimeHomeRedacted: diagnostics.runtime_home === '~/.freehand' && dom.runtimeHomeText.includes('~/.freehand'),
+      logsDirRelative: diagnostics.logs_dir === 'logs' && diagnostics.files.every((file) => `${file.relative_path || ''}`.startsWith('logs/')),
+      domRowsMatchAdp: expectedNames.every((name) => dom.rows.some((row) => row.logName === name)),
+      domNoSecretsOrAbsolutePaths: !forbiddenPattern.test(dom.cardText),
       noTopLevelSessionCreated: sessionIds(beforeSessions).join('\n') === sessionIds(afterSessions).join('\n'),
       noHorizontalOverflow: dom.noHorizontalOverflow === true,
     },
@@ -154,9 +135,9 @@ try {
     const failed = Object.entries(summary.checks)
       .filter(([, value]) => value !== true)
       .map(([key]) => key);
-    throw new Error(`webui_tools_registry_failed checks=${failed.join(',')} artifactDir=${artifactDir}`);
+    throw new Error(`webui_diagnostics_failed checks=${failed.join(',')} artifactDir=${artifactDir}`);
   }
-  console.log(`webui_tools_registry_ok url=${baseUrl} adp=${adpUrl} tools=${registry.tools.length} artifactDir=${artifactDir}`);
+  console.log(`webui_diagnostics_ok url=${baseUrl} adp=${adpUrl} files=${diagnostics.files.length} artifactDir=${artifactDir}`);
 } catch (error) {
   await writeFailure(error);
   throw error;
@@ -174,56 +155,59 @@ async function writeFailure(error) {
   const failureDir = path.join(artifactDir, 'failure');
   await fs.mkdir(failureDir, { recursive: true });
   await fs.writeFile(path.join(failureDir, 'error.txt'), error.stack || error.message);
-  await adpQuery('QueryToolRegistry')
-    .then((value) => fs.writeFile(path.join(failureDir, 'tool-registry.json'), JSON.stringify(value, null, 2)))
-    .catch((queryError) => fs.writeFile(path.join(failureDir, 'tool-registry-error.txt'), queryError.stack || queryError.message));
+  await adpQuery('QueryDiagnostics')
+    .then((value) => fs.writeFile(path.join(failureDir, 'diagnostics.json'), JSON.stringify(value, null, 2)))
+    .catch((queryError) => fs.writeFile(path.join(failureDir, 'diagnostics-error.txt'), queryError.stack || queryError.message));
   if (summary) {
     await fs.writeFile(path.join(failureDir, 'summary.partial.json'), JSON.stringify(summary, null, 2));
   }
 }
 
-function assertOwnerProjection(registry) {
-  const names = registry.tools.map((tool) => tool.name);
-  for (const required of ['task', 'timer', 'web_fetch', 'read_file', 'glob', 'ls', 'bash', 'todo_write', 'complete_step']) {
-    if (!names.includes(required)) {
-      throw new Error(`ADP tool registry missing ${required}`);
-    }
+function assertDiagnosticsProjection(diagnostics) {
+  if (diagnostics.runtime_home !== '~/.freehand') {
+    throw new Error(`diagnostics runtime home leaked or changed: ${diagnostics.runtime_home}`);
   }
-  if (names.includes('web_search')) {
-    throw new Error('ADP tool registry exposed local web_search tool');
+  if (diagnostics.logs_dir !== 'logs') {
+    throw new Error(`diagnostics logs_dir is not relative logs: ${diagnostics.logs_dir}`);
   }
-  const task = toolByName(registry, 'task');
-  const timer = toolByName(registry, 'timer');
-  const webFetch = toolByName(registry, 'web_fetch');
-  const bash = toolByName(registry, 'bash');
-  if (!task.exposed_to_master || task.exposed_to_worker || task.execution_scope !== 'framework') {
-    throw new Error('task projection is not Master-only framework scope');
+  if (!Array.isArray(diagnostics.files)) {
+    throw new Error('diagnostics files missing');
   }
-  if (!timer.exposed_to_master || timer.exposed_to_worker || timer.execution_scope !== 'framework') {
-    throw new Error('timer projection is not Master-only framework scope');
-  }
-  if (!webFetch.exposed_to_master || !webFetch.exposed_to_worker || webFetch.execution_scope !== 'network') {
-    throw new Error('web_fetch projection is not Master+Worker network scope');
-  }
-  if (!bash.implemented || bash.exposed_to_master || bash.exposed_to_worker || bash.execution_scope !== 'shell') {
-    throw new Error('bash projection should be implemented but hidden from live Master/Worker');
-  }
-  const globText = [
-    toolByName(registry, 'glob').description,
-    ...(toolByName(registry, 'glob').guidance || []),
-    ...(toolByName(registry, 'glob').examples || []),
-  ].join('\n');
-  if (!/locked workspace/i.test(globText) || !/absolute/i.test(globText) || !/symlink/i.test(globText) || !/Leading-~|leading `~`/i.test(globText)) {
-    throw new Error('glob projection missing locked workspace absolute/symlink/leading-~ guidance');
+  if (!diagnosticsProjectionSafe(diagnostics)) {
+    throw new Error('diagnostics projection contains forbidden absolute path or sensitive marker');
   }
 }
 
-function toolByName(registry, name) {
-  const tool = registry.tools.find((candidate) => candidate.name === name);
-  if (!tool) {
-    throw new Error(`missing tool ${name}`);
-  }
-  return tool;
+function diagnosticsProjectionSafe(diagnostics) {
+  const raw = JSON.stringify(diagnostics);
+  return !forbiddenPattern.test(raw) &&
+    diagnostics.files.every((file) => `${file.relative_path || ''}`.startsWith('logs/') && `${file.name || ''}`.endsWith('.log'));
+}
+
+function diagnosticsPayload(result) {
+  const payload = result?.Diagnostics || result?.diagnostics || result;
+  return {
+    source_agent_id: payload?.source_agent_id || '',
+    generated_at: payload?.generated_at || 0,
+    runtime_home: payload?.runtime_home || '',
+    logs_dir: payload?.logs_dir || '',
+    files: Array.isArray(payload?.files) ? payload.files : [],
+  };
+}
+
+function sessionListPayload(result) {
+  const payload = result?.SessionList || result?.session_list || result;
+  return {
+    sessions: Array.isArray(payload?.sessions) ? payload.sessions : [],
+    archived: Array.isArray(payload?.archived) ? payload.archived : [],
+  };
+}
+
+function sessionIds(list) {
+  return (list.sessions || [])
+    .map((session) => session.session_id || '')
+    .filter(Boolean)
+    .sort();
 }
 
 async function waitHealth() {
@@ -242,40 +226,6 @@ async function assertProductionPageReachable() {
   if (!html.includes(assetVersion)) {
     throw new Error(`served WebUI asset version mismatch: expected ${assetVersion}`);
   }
-}
-
-async function captureScreenshot(cdpClient, fileName) {
-  const screenshot = await cdpClient.send('Page.captureScreenshot', {
-    format: 'png',
-    captureBeyondViewport: true,
-  });
-  await fs.writeFile(path.join(artifactDir, fileName), Buffer.from(screenshot.data, 'base64'));
-}
-
-function toolRegistryPayload(result) {
-  const payload = result?.ToolRegistry || result?.tool_registry || result;
-  return {
-    source_agent_id: payload?.source_agent_id || '',
-    generated_at: payload?.generated_at || 0,
-    registry_version: payload?.registry_version || '',
-    guidance: Array.isArray(payload?.guidance) ? payload.guidance : [],
-    tools: Array.isArray(payload?.tools) ? payload.tools : [],
-  };
-}
-
-function sessionListPayload(result) {
-  const payload = result?.SessionList || result?.session_list || result;
-  return {
-    sessions: Array.isArray(payload?.sessions) ? payload.sessions : [],
-    archived: Array.isArray(payload?.archived) ? payload.archived : [],
-  };
-}
-
-function sessionIds(list) {
-  return (list.sessions || [])
-    .map((session) => session.session_id || '')
-    .filter(Boolean)
-    .sort();
 }
 
 async function adpQuery(query) {
@@ -317,6 +267,14 @@ function adpRequest(kind, payloadKey, payload, timeoutMs) {
   });
 }
 
+async function captureScreenshot(cdpClient, fileName) {
+  const screenshot = await cdpClient.send('Page.captureScreenshot', {
+    format: 'png',
+    captureBeyondViewport: true,
+  });
+  await fs.writeFile(path.join(artifactDir, fileName), Buffer.from(screenshot.data, 'base64'));
+}
+
 async function waitForPageTarget(urlPrefix, timeoutMs) {
   return await waitFor(async () => {
     const response = await fetch(`http://127.0.0.1:${debugPort}/json/list`);
@@ -331,9 +289,7 @@ async function waitForPageTarget(urlPrefix, timeoutMs) {
 }
 
 async function waitForFunction(cdpClient, fn, timeoutMs, label, ...args) {
-  return await waitFor(async () => {
-    return await evalInPage(cdpClient, fn, ...args);
-  }, timeoutMs, label);
+  return await waitFor(async () => await evalInPage(cdpClient, fn, ...args), timeoutMs, label);
 }
 
 async function waitFor(fn, timeoutMs, label) {
@@ -460,7 +416,7 @@ function defaultBrowserPath() {
       return shellPath;
     }
   } catch (_) {
-    // Fall through to the system Chrome path when Playwright is not installed.
+    // Fall through to system Chrome when Playwright is not installed.
   }
   return '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
 }

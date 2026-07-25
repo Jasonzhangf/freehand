@@ -1389,7 +1389,7 @@ mod tests {
         assert!(html.contains("/assets/webui.css"));
         assert!(html.contains("/assets/logo.png"));
         assert!(html.contains("/assets/webui.js"));
-        assert!(html.contains("20260725-attachment-failure-ui"));
+        assert!(html.contains("20260725-diagnostics-ui"));
         assert!(html.contains("data-adp-endpoint=\"/adp\""));
         assert!(html.contains("data-selected-session=\"\""));
         assert!(html.contains("data-selected-turn=\"\""));
@@ -1610,6 +1610,8 @@ mod tests {
         assert!(root_body.contains("id=\"mobile-home-dashboard\""));
         assert!(root_body.contains("id=\"settings-shell\""));
         assert!(root_body.contains("id=\"settings-review-tree\""));
+        assert!(root_body.contains("id=\"settings-diagnostics-refresh-button\""));
+        assert!(root_body.contains("id=\"settings-diagnostics-list\""));
         assert!(root_body.contains("id=\"settings-provider-host\""));
         assert!(root_body.contains("id=\"settings-provider-auth\""));
         assert!(root_body.contains("id=\"settings-config-error\""));
@@ -1899,8 +1901,11 @@ mod tests {
         assert!(js_body.contains("function renderTimerDashboard"));
         assert!(js_body.contains("function scheduleTimerFromForm"));
         assert!(js_body.contains("QueryToolRegistry"));
+        assert!(js_body.contains("QueryDiagnostics"));
         assert!(js_body.contains("function renderToolsDashboard"));
         assert!(js_body.contains("function refreshToolsDashboard"));
+        assert!(js_body.contains("function renderSettingsDiagnostics"));
+        assert!(js_body.contains("function refreshDiagnosticsStatus"));
         assert!(js_body.contains("tool.exposed_to_master"));
         assert!(js_body.contains("tool.exposed_to_worker"));
         assert!(!js_body.contains("rootfs"));

@@ -39,6 +39,10 @@
     owner-projected persisted session rows plus nested Worker child matches
     without browser-local search state, new session creation, or top-level
     Worker promotion
+  - WebUI Settings diagnostics can query `QueryDiagnostics` and render
+    owner-projected log metadata plus redacted tail lines without browser-local
+    log truth, session creation, raw provider payloads, secrets, or absolute
+    paths
   - WebUI mobile Agent Dashboard derives one presentation model from owner-backed projections; the Header shows current running Agent count, Worker task lifecycle buckets, and active/review/blocked task title, while the first tap opens only the current session's Worker child-task list
   - WebUI Header session relationship surface is canonical for Master/Worker navigation: collapsed state is a compact dashbar, expanded state is a dropdown session tree capped at half the viewport, and the Worker return path is in the Header
   - WebUI Master/Worker relationship tests lock schema fields, not UI copy: persisted session metadata is the Master source, and `UiTaskSnapshotProjection.parent_session_id`, `attached_session_ids`, `worker_session_id`, and `task_id` are the only Worker relationship source; DOM `data-session-id` / `data-task-id` are checked only as projections of those fields
@@ -96,6 +100,10 @@
     `session-search-results`, `QuerySessionSearch`,
     `renderSessionSearchDashboard`, `submitSessionSearch`,
     `renderSessionSearchResult`, and `openSessionSearchResult`
+  - WebUI Settings diagnostics asset smoke for
+    `settings-diagnostics-refresh-button`, `settings-diagnostics-list`,
+    `QueryDiagnostics`, `renderSettingsDiagnostics`,
+    `renderDiagnosticLogRow`, and `refreshDiagnosticsStatus`
   - Android update route smoke for env/sidecar manifest JSON, explicit missing-sidecar failure, and explicit missing-APK 404
   - WebUI JS asset smoke locks ADP WebSocket command/query usage, rejects `fetch` as a live path, and requires `EventSource` only for latest-turn SSE display refresh
   - WebUI ADP subscription accepted/waiting status rendering smoke
@@ -218,6 +226,12 @@
   `QuerySessionSearch` owner projection truth, proves worker sessions are not
   top-level rows, clicks the result, and proves no extra top-level session ids
   were created
+- WebUI online Settings diagnostics coverage uses
+  `node scripts/verify-webui-diagnostics-online.mjs`: it queries
+  `QueryDiagnostics`, opens the production S-profile WebUI Settings card,
+  proves visible diagnostics rows match owner projection truth, proves no raw
+  provider payloads, secrets, or absolute user paths render, and proves top-level
+  persisted session ids are unchanged
 - WebUI mobile Agent Dashboard positive coverage must prove the Header and child-task list come from current-session TaskBoard/AgentBoard truth and that task selection refreshes `QuerySessionTurns` for the projected Worker session; `scripts/verify-worker-subtasks-online.py --parent-session <id>` is the read-only ADP checker for enumerating every current child task and verifying each projected Worker transcript one by one
 - `node scripts/verify-webui-path-diagnostic-online.mjs` is the fixed-session
   WebUI online closure for path-tool diagnostics: it creates/reuses the fixed
@@ -270,6 +284,8 @@
   - app boundary proves the Timer dashboard can consume runtime timer owner
     projections and command receipts without becoming timer schedule, ledger,
     due-fire, or recurrence truth
+  - app boundary proves the Settings diagnostics card can consume runtime debug
+    projection truth without becoming log truth or exposing raw diagnostics
   - machine-readable mainline truth remains the only source for generated wiki artifacts
 - fixtures / replay inputs / runtime evidence paths:
   - `~/.freehand/state/ui`
@@ -290,7 +306,7 @@
   - WebUI mobile v3 is not a desktop layout shrink: app bar is compact, conversation stream is continuous, internal runtime/session strips are absent, status floats as a small pill near the composer, and focused composer is the only state that reveals attachment/model/cwd controls
 - WebUI mobile session drawer right-swipe gesture and persisted-session -> indented worker-child hierarchy are landed and covered by asset smoke plus `scripts/webui_verify_online.mjs`
   - WebUI session rail now supports `/new` as the New dialog for global conversation or cwd-bound task creation, compact session summaries, and selected-session draft creation without inventing a separate navigation path
-  - WebUI settings shell is landed as a provider registry, provider definition add/update, provider web_search live-test trigger/status, model group registry/definition/active selection, active primary/fallback selector, and Worker-limit drawer, not a generic config/status drawer; it consumes owner-backed `QueryConfigStatus`, provider definition edits route through `UpsertProviderConfig`, model group edits route through `UpsertModelGroupConfig`, active provider selection changes route through `UpdateAgentProviderSelection`, active model group selection changes route through `UpdateAgentModelGroupSelection`, provider search tests route through `TestProviderWebSearch`, and unsupported agent/session/workspace/skills/files/tasks/diagnostics controls remain absent until owner-backed write contracts exist
+  - WebUI settings shell is landed as a provider registry, provider definition add/update, provider web_search live-test trigger/status, model group registry/definition/active selection, active primary/fallback selector, and Worker-limit drawer, not a generic config/status drawer; it consumes owner-backed `QueryConfigStatus`, provider definition edits route through `UpsertProviderConfig`, model group edits route through `UpsertModelGroupConfig`, active provider selection changes route through `UpdateAgentProviderSelection`, active model group selection changes route through `UpdateAgentModelGroupSelection`, provider search tests route through `TestProviderWebSearch`, and unsupported agent/session/workspace/skills/files/tasks controls remain absent until owner-backed write contracts exist
   - mobile Agent capacity control is config truth: no localStorage capacity, no synthetic AgentBoard rows, and no claim that added Workers are live before restart/process startup
 - WebUI online verifier owns its Settings valid-save fixture: it backs up S-profile config/env, injects a verifier-only credential env before the browser run, edits the currently selected primary provider instead of switching the agent to a configured fallback provider, and restores config/env afterward so Settings proof does not depend on stale local launchd environment or violate the primary/fallback-distinct config contract
   - WebUI online verifier now captures Phase 2D drawer proof by querying service truth through the same endpoint and comparing TaskBoard, AgentBoard, EventInbox, TaskHistory, and WorkerControl status text plus visible card counts
@@ -354,6 +370,9 @@
   - WebUI Search dashboard is landed for persisted session search through
     `QuerySessionSearch`; browser rows stay projection-only and Worker matches
     remain nested under parent sessions
+  - WebUI Settings diagnostics card is landed through `QueryDiagnostics`;
+    browser rows stay projection-only and redacted, and refresh does not mutate
+    session/task/timer truth
   - protocol-only transport library reuse is landed
   - app remains protocol-only by dependency gate
   - migrated mainline-call source and generated wiki are kept in sync with this test design

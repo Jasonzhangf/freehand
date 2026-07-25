@@ -6,6 +6,7 @@
 - resource operation coverage:
   - `task.project_to_ui`
   - `input_attachment.validate_submit_metadata`
+  - `debug_trace.read_snapshot`
 
 ## Resource Operation Test Coverage
 
@@ -13,6 +14,7 @@
 | --- | --- | --- | --- | --- |
 | `task.project_to_ui` | bound | `cargo test -p freehand-ui-protocol -- --nocapture` covers DTO validation, task/session projection filtering, command receipt, and worker-child session projection tests | `cargo test -p freehand-cli master_worker_autonomy -- --nocapture` covers ADP query/subscribe/command protocol smokes for task board, agent board, event inbox, task history, and session list | `make verify-webui-online` covers WebUI/CLI S-profile projection proofs that task truth renders through protocol projections without UI owning task state |
 | `input_attachment.validate_submit_metadata` | bound | `cargo test -p freehand-ui-protocol image -- --nocapture` covers image-only submit admission and missing-payload rejection | `cargo test -p freehand-server --lib android -- --nocapture` covers WebUI asset wiring for attachment metadata submit helpers and Android bridge payload fields | `node scripts/verify-webui-image-attachment-online.mjs` proves online WebUI submit sends `SubmitUserInput.metadata.attachments` with image base64 while persisted turn projection keeps metadata only |
+| `debug_trace.read_snapshot` | bound | `cargo test -p freehand-ui-protocol diagnostics_query -- --nocapture` covers Diagnostics DTO JSON, route separation, and protocol-state rejection | `cargo test -p freehand-runtime runtime_query_projects_diagnostics_without_raw_secrets_or_absolute_home -- --nocapture --test-threads=1` covers runtime-owned projection, redaction, and no absolute home path | `node scripts/verify-webui-diagnostics-online.mjs` proves browser Settings rows match `QueryDiagnostics` owner projection and do not create sessions |
 
 - lifecycle path under test:
   - commands enter protocol boundary
@@ -44,6 +46,8 @@
   - Tools dashboard QueryToolRegistry ADP frames use protocol-owned DTOs while
     runtime/tool registry owners supply the UI-safe registry rows, schema,
     examples, guidance, execution scopes, and Master/Worker exposure truth
+  - Diagnostics QueryDiagnostics ADP frames use protocol-owned DTOs while
+    runtime/debug owners supply safe log metadata and redacted tail truth
   - task list ADP subscribe frames use protocol-owned subscription shape and receive runtime-supplied task list projections without making protocol state the task truth owner
   - error-center ADP query/subscribe frames use protocol-owned commands and UI-safe DTOs while runtime owner code supplies metadata-backed truth
   - config status ADP query frames use protocol-owned command/result DTOs for complete safe provider registry plus current primary/fallback selection while runtime owner code supplies config.core-backed truth
@@ -130,6 +134,9 @@
   - Search dashboard validation covers QuerySessionSearch route separation,
     empty-query rejection, protocol-state local rejection, and no
     protocol-owned session index/search truth
+  - Diagnostics validation covers QueryDiagnostics route separation, DTO JSON
+    roundtrip, protocol-state local rejection, no protocol-owned filesystem log
+    read, and no absolute path/secret projection
   - task list subscription selector and matcher cover accepted task list projections and rejection of task query/history misuse on subscribe route
   - error-center query command validation covers empty session id and command-ingress rejection for query-route misuse
   - config status query covers command-ingress rejection, runtime-owned
@@ -181,6 +188,8 @@
   - ADP Search dashboard smoke proves protocol frames can carry SessionSearch
     projections without protocol-owned session index storage or worker-session
     top-level promotion
+  - ADP Diagnostics smoke proves protocol frames can carry Diagnostics
+    projections without protocol-owned debug/log storage or raw log payloads
   - `command_to_projection_smoke` asserts turn `created_at` survives protocol
     projection
   - ADP task list subscription smoke proves initial task list projection and subsequent runtime-published task changes use the same subscription channel

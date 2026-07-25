@@ -7,6 +7,7 @@
   - `input_attachment.prepare_provider_input`
   - `input_attachment.project_to_ui`
   - `session.list_persisted`
+  - `debug_trace.read_snapshot`
 
 ## Resource Operation Test Coverage
 
@@ -15,6 +16,7 @@
 | `input_attachment.prepare_provider_input` | bound | `cargo test -p freehand-runtime live_bridge_sends_image_payload_once_and_persists_metadata_only -- --nocapture` verifies current-submit image payload enters provider semantics only on round one | `cargo test -p freehand-runtime live_bridge_sends_image_payload_once_and_persists_metadata_only -- --nocapture` verifies continuation rounds and persisted turn truth do not retain image base64 | `node scripts/verify-webui-image-attachment-online.mjs` proves the daemon-served WebUI emits protocol attachment metadata/base64 only in the current submit command |
 | `input_attachment.project_to_ui` | bound | `cargo test -p freehand-runtime live_bridge_sends_image_payload_once_and_persists_metadata_only -- --nocapture` verifies turn projection contains metadata only | `cargo test -p freehand-ui-protocol image -- --nocapture` verifies image submit/projection contract validation without raw payload history | `node scripts/verify-webui-image-attachment-online.mjs` proves restored turn cards show attachment metadata and never raw base64 |
 | `session.list_persisted` | bound | `cargo test -p freehand-runtime runtime_query_session_search_returns_worker_hits_under_parent_session -- --nocapture --test-threads=1` verifies persisted session Search rows and nested Worker child matches | `cargo test -p freehand-ui-protocol session_search -- --nocapture --test-threads=1` verifies route separation and protocol-state rejection | `node scripts/verify-webui-session-search-online.mjs` proves browser Search queries owner-backed persisted session truth and does not create/promote top-level Worker sessions |
+| `debug_trace.read_snapshot` | bound | `cargo test -p freehand-runtime runtime_query_projects_diagnostics_without_raw_secrets_or_absolute_home -- --nocapture --test-threads=1` verifies .log metadata, bounded redacted tails, and no absolute home path | `cargo test -p freehand-ui-protocol diagnostics_query -- --nocapture` verifies protocol route separation and safe DTO serialization | `node scripts/verify-webui-diagnostics-online.mjs` proves WebUI Settings diagnostics matches owner projection and does not create sessions |
 - lifecycle path under test:
   - config-selected bootstrap becomes one runtime dispatcher
   - config-selected live bootstrap may seed one shared node metadata ledger before the first command
@@ -47,6 +49,9 @@
     `task.orchestration` TaskBoard parent truth; runtime projects persisted
     Master/user sessions only as top-level rows and nests Worker matches under
     the owning parent session
+  - runtime-backed Diagnostics QueryDiagnostics routes to runtime-home log truth
+    and projects only .log metadata plus bounded redacted tail lines, without raw
+    provider payloads, secrets, absolute paths, or browser-local fallback rows
   - runtime-backed read-only error-center queries route to metadata ledger projection and return UI-safe rows without becoming error truth writers
   - runtime-backed read-only config status queries reload config-owner truth and project the complete safe provider registry plus current primary/fallback selection without becoming config truth writers
   - runtime-backed provider definition upsert commands route to `config.core` persistence without changing the active provider binding, then expose pending restart-required projection without hot-reloading active runtime config
@@ -131,6 +136,9 @@
   - Search dashboard query coverage, including persisted parent metadata match,
     Worker child match nesting, no top-level worker session result, invalid
     empty query rejection, and no browser-local search fallback
+  - Diagnostics query coverage, including .log-only filtering, newest-first
+    projection, bounded tail reading, sensitive marker redaction, absolute path
+    redaction, and no browser-local diagnostics fallback
   - missing task history query target-not-found coverage
   - error-center runtime query coverage, including trace/turn/domain filters and no raw text in projection
   - config status runtime query coverage, including ordered multi-peer
@@ -199,6 +207,9 @@
   - daemon/WebUI Search dashboard smoke over the shared runtime query path,
     with browser rows matched to `QuerySessionSearch` persisted-session owner
     projection truth
+  - daemon/WebUI Diagnostics Settings smoke over the shared runtime query path,
+    with browser rows matched to `QueryDiagnostics` owner projection truth and
+    session list unchanged
 - project black-box impact:
   - runtime command execution stays outside app boundary while remaining compatible with protocol-owned transport contracts
 - fixtures / replay inputs / runtime evidence paths:
@@ -269,4 +280,6 @@
     `cargo test -p freehand-runtime tool_registry -- --nocapture`
   - runtime Search query bridge is covered by
     `cargo test -p freehand-runtime runtime_query_session_search_returns_worker_hits_under_parent_session -- --nocapture --test-threads=1`
+  - runtime Diagnostics query bridge is covered by
+    `cargo test -p freehand-runtime runtime_query_projects_diagnostics_without_raw_secrets_or_absolute_home -- --nocapture --test-threads=1`
   - migrated mainline-call source and generated wiki are kept in sync with this test design

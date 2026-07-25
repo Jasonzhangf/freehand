@@ -553,6 +553,11 @@ Use this skill for any non-trivial work in this repo.
   and Android remains an import/WebView host; none of those may silently own
   relay pass-through IO. Online relay verifiers must start only scoped
   upstream/relay processes and clean up exact recorded PIDs.
+- For diagnostics/log UI, consume only runtime owner projections. Do not render
+  raw logs, absolute runtime paths, provider payloads, secrets, or browser-local
+  diagnostic guesses. Online proof must compare DOM rows to ADP `QueryDiagnostics`
+  owner truth, prove redaction/no absolute-path leakage, and prove the top-level
+  persisted session list is unchanged.
 
 ## Memory Workflow
 

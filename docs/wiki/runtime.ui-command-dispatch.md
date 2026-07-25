@@ -12,6 +12,7 @@ Generated from `docs/mainline-calls/runtime.ui-command-dispatch.json`. Do not ed
 
 - input_attachment.prepare_provider_input
 - input_attachment.project_to_ui
+- debug_trace.read_snapshot
 
 ## Request Mainline
 
@@ -49,6 +50,7 @@ Generated from `docs/mainline-calls/runtime.ui-command-dispatch.json`. Do not ed
 - Phase 2 timer dashboard QueryTimerList, ScheduleTimer, and CancelTimer route through runtime into timer owner truth; runtime converts protocol DTOs, persists through TimerStore, and does not encode timers as Task Center truth
 - Phase 2 Tools dashboard QueryToolRegistry routes through runtime into tool.registry owner truth; runtime maps BuiltinToolRegistry::registry_projection rows into UI DTOs without executing tools, persisting registry truth, or synthesizing provider-hosted web_search as a local tool
 - Phase 2 Search dashboard QuerySessionSearch routes through runtime into reason.persistence persisted session index/metadata truth and task.orchestration TaskBoard parent-session truth; runtime returns persisted Master/user sessions only as top-level results and nests Worker matches under the owning parent session.
+- Diagnostics QueryDiagnostics routes through runtime into runtime-home log truth under ~/.freehand/logs; runtime projects file metadata and bounded redacted tail lines only, without exposing absolute user paths, provider raw payloads, secrets, or non-log files.
 - runtime passes Phase 2B replay_from_start and maps omitted limit to the owner full-drain sentinel so closeout samples can ignore stale persisted cursors and consume all pending events instead of only the first page
 
 ## Response Mainline
@@ -92,6 +94,7 @@ Generated from `docs/mainline-calls/runtime.ui-command-dispatch.json`. Do not ed
 - runtime-backed Timer dashboard commands return owner receipt evidence only after TimerStore accepts schedule or cancel truth, and QueryTimerList returns UI-safe timer schedule and ledger projections from timer owner truth
 - runtime-backed Tools dashboard query returns UI-safe registry rows from BuiltinToolRegistry::registry_projection, including schema, examples, guidance, scope, implemented/read-only state, and Master/Worker exposure flags without tool execution
 - runtime-backed Search dashboard query returns UI-safe persisted session results from ReasonPersistence::list_persisted_sessions plus metadata sidecars and nests Worker hits via TaskBoard worker_session_id / parent_session_id truth instead of exposing Worker sessions at top level
+- runtime-backed Diagnostics query returns UI-safe log file metadata and bounded redacted tail lines from runtime-home logs, sorted newest-first, without raw provider payloads, secrets, absolute user paths, or browser-local guesses.
 - runtime-backed EventInbox/MasterPoll closeout proof uses replay_from_start=true plus omitted limit; explicit finite limits are pagination and cannot prove no events remain after cursor persistence
 
 ## Error Mainline
@@ -123,6 +126,7 @@ Generated from `docs/mainline-calls/runtime.ui-command-dispatch.json`. Do not ed
 - timer schedule/cancel/list without a live runtime home, with invalid timer id, or with timer-store persistence failure maps to explicit dispatch failure; runtime must not create task truth or fake a timer projection
 - tool registry projection failure maps to explicit query failure; runtime must not fall back to a hardcoded browser/runtime tool list
 - persisted session search failures map to explicit query failure; runtime must not fall back to browser-local session filtering or id-prefix guessing
+- diagnostics log directory/metadata/tail read failures map to explicit query failure; runtime must not fall back to unredacted absolute paths, raw log dumps, or browser-local diagnostics rows.
 
 ## Shared Multi-Reference Functions
 
@@ -256,6 +260,7 @@ Generated from `docs/mainline-calls/runtime.ui-command-dispatch.json`. Do not ed
 | 26 | `RuntimeCommandDispatcher::dispatch_schedule_timer / RuntimeCommandDispatcher::dispatch_cancel_timer` | `crates/freehand-runtime/src/lib.rs` | route ScheduleTimer and CancelTimer command envelopes into TimerStore owner mutation APIs and return user-safe timer receipts | validated timer schedule or cancel command | timer_scheduled or timer_cancelled receipt, or explicit owner failure | RuntimeCommandDispatcher::dispatch | TimerStore::schedule_from_request / TimerStore::upsert_schedule / TimerStore::cancel |  |  |  | bound |
 | 27 | `RuntimeCommandDispatcher::query_runtime / project_tool_registry_for_ui` | `crates/freehand-runtime/src/lib.rs` | route QueryToolRegistry into tool.registry owner projection and convert rows into UI-safe protocol DTOs without executing tools | tool registry query | UiToolRegistryProjection or explicit query failure | ADP query transport | BuiltinToolRegistry::registry_projection |  |  |  | bound |
 | 28a | `RuntimeCommandDispatcher::query_runtime / query_session_search_for_ui / worker_parent_session_map` | `crates/freehand-runtime/src/lib.rs` | route QuerySessionSearch into reason.persistence persisted session index/metadata truth, join Worker matches through TaskBoard parent-session truth, and return only persisted Master/user sessions as top-level results | search query plus optional limit | UiSessionSearchProjection or explicit search/query failure | ADP query transport | ReasonPersistence::list_persisted_sessions / ReasonPersistence::load_session_metadata / TaskRuntime::query_task_board |  |  |  | bound |
+| 30 | `project_diagnostics_for_ui` | `crates/freehand-runtime/src/lib.rs` | route QueryDiagnostics into runtime-home diagnostics log projection, include only .log metadata plus bounded redacted tail lines, and keep raw payloads, secrets, and absolute user paths out of UI DTOs | diagnostics query plus live runtime home | UiDiagnosticsProjection or explicit query failure | ADP query transport | runtime logs under ~/.freehand/logs | debug_trace | ui_projection | debug_trace.read_snapshot | bound |
 
 ## Sync Status Against Mainline Call
 
@@ -296,3 +301,4 @@ Generated from `docs/mainline-calls/runtime.ui-command-dispatch.json`. Do not ed
 - runtime Phase 2C WorkerControl dispatch/query bridge is covered by runtime_dispatches_worker_control_to_task_owner and runtime_worker_control_invalid_target_returns_explicit_failure
 - runtime Tools dashboard query bridge is covered by runtime_query_projects_tool_registry_owner_truth
 - runtime Search dashboard query bridge is covered by runtime_query_session_search_returns_worker_hits_under_parent_session
+- runtime Diagnostics query bridge is implemented as a thin projection route to runtime log metadata/redacted tail truth and is covered by runtime_query_projects_diagnostics_without_raw_secrets_or_absolute_home.

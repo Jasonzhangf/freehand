@@ -15,7 +15,7 @@ const debugPort = Number.parseInt(process.env.FREEHAND_MODEL_GROUP_UI_DEBUG_PORT
 const chromePath =
   process.env.FREEHAND_MODEL_GROUP_UI_CHROME ||
   '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
-const assetVersion = '20260725-attachment-failure-ui';
+const assetVersion = '20260725-diagnostics-ui';
 const runId = `model-group-ui-${Date.now()}`;
 const artifactDir = path.join(repo, 'artifacts', 'webui-online', runId);
 const testGroupId = process.env.FREEHAND_MODEL_GROUP_UI_GROUP_ID || `ui.verify.${Date.now()}`;

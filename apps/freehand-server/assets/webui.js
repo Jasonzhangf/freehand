@@ -1,4 +1,4 @@
-import { initializeThemeToggle } from "/assets/theme.js?v=20260725-attachment-failure-ui";
+import { initializeThemeToggle } from "/assets/theme.js?v=20260725-diagnostics-ui";
 
 initializeThemeToggle(document);
 
@@ -156,6 +156,11 @@ const settingsApkUpdateSummary = document.getElementById("settings-apk-update-su
 const settingsApkUpdateSource = document.getElementById("settings-apk-update-source");
 const settingsApkUpdateStatus = document.getElementById("settings-apk-update-status");
 const settingsApkUpdateCheckButton = document.getElementById("settings-apk-update-check-button");
+const settingsDiagnosticsSummary = document.getElementById("settings-diagnostics-summary");
+const settingsDiagnosticsRuntimeHome = document.getElementById("settings-diagnostics-runtime-home");
+const settingsDiagnosticsStatus = document.getElementById("settings-diagnostics-status");
+const settingsDiagnosticsRefreshButton = document.getElementById("settings-diagnostics-refresh-button");
+const settingsDiagnosticsList = document.getElementById("settings-diagnostics-list");
 const newConversationButton = document.getElementById("new-conversation-button");
 const newTaskButton = document.getElementById("new-task-button");
 const taskCwdInput = document.getElementById("task-cwd-input");
@@ -353,6 +358,9 @@ const state = {
   agentResourceSaveError: null,
   androidApkUpdateStatus: null,
   androidApkUpdateInFlight: false,
+  diagnostics: null,
+  diagnosticsError: null,
+  diagnosticsInFlight: false,
   sessionTreeOpen: false,
   toolTimings: new Map(),
   lifecycleClocks: new Map(),
@@ -5500,6 +5508,70 @@ function renderSettingsReviewTree() {
   settingsReviewTree.replaceChildren(note, ...sections);
 }
 
+function renderSettingsDiagnostics() {
+  const files = Array.isArray(state.diagnostics?.files) ? state.diagnostics.files : [];
+  setText(
+    "settings-diagnostics-summary",
+    state.diagnosticsError
+      ? "query failed"
+      : state.diagnostics
+        ? `${files.length} log file(s)`
+        : "loading",
+  );
+  setText("settings-diagnostics-runtime-home", state.diagnostics?.runtime_home || "loading");
+  if (settingsDiagnosticsStatus) {
+    settingsDiagnosticsStatus.textContent = state.diagnosticsError
+      ? `Diagnostics query failed: ${state.diagnosticsError}`
+      : state.diagnostics
+        ? `Redacted log metadata from ${state.diagnostics.logs_dir || "logs"} · generated ${formatUnixTime(state.diagnostics.generated_at)}`
+        : "Diagnostics show service-owned log metadata and redacted tail lines.";
+  }
+  if (settingsDiagnosticsRefreshButton) {
+    settingsDiagnosticsRefreshButton.disabled = state.diagnosticsInFlight;
+    settingsDiagnosticsRefreshButton.textContent = state.diagnosticsInFlight
+      ? "Refreshing diagnostics..."
+      : "Refresh diagnostics";
+  }
+  if (!settingsDiagnosticsList) {
+    return;
+  }
+  settingsDiagnosticsList.replaceChildren();
+  if (state.diagnosticsError) {
+    settingsDiagnosticsList.textContent = state.diagnosticsError;
+    return;
+  }
+  if (files.length === 0) {
+    settingsDiagnosticsList.textContent = state.diagnostics ? "No log files projected." : "waiting for diagnostics projection";
+    return;
+  }
+  files.slice(0, 8).forEach((file) => {
+    settingsDiagnosticsList.appendChild(renderDiagnosticLogRow(file));
+  });
+}
+
+function renderDiagnosticLogRow(file) {
+  const row = document.createElement("article");
+  row.className = "settings-review-row diagnostic-log-row";
+  row.dataset.logName = file.name || "";
+  row.dataset.relativePath = file.relative_path || "";
+  const marker = document.createElement("span");
+  marker.className = "settings-status-marker ok";
+  marker.setAttribute("aria-hidden", "true");
+  const copy = document.createElement("span");
+  const label = document.createElement("strong");
+  label.textContent = file.name || file.relative_path || "log file";
+  const meta = document.createElement("small");
+  meta.textContent = compactSentence(
+    `${file.relative_path || "logs"} · ${Number(file.size_bytes || 0)} bytes · ${formatUnixTime(file.modified_at)}`,
+    150,
+  );
+  const tail = document.createElement("small");
+  tail.textContent = compactSentence((file.tail_lines || []).join(" / ") || "no tail lines", 180);
+  copy.append(label, meta, tail);
+  row.append(marker, copy);
+  return row;
+}
+
 function renderDraftSessionItem() {
   const item = document.createElement("button");
   item.className = `session-item session-button${state.draftSessionId === state.selectedSessionId ? " active" : ""}`;
@@ -5610,6 +5682,13 @@ function applyPhase2QueryResult(result) {
     state.toolRegistry = toolRegistry;
     state.toolRegistryError = null;
     renderToolsDashboard();
+    return true;
+  }
+  const diagnostics = variantPayload(result, "Diagnostics");
+  if (diagnostics !== undefined) {
+    state.diagnostics = diagnostics;
+    state.diagnosticsError = null;
+    renderSettingsDiagnostics();
     return true;
   }
   const sessionSearch = variantPayload(result, "SessionSearch");
@@ -7395,6 +7474,7 @@ function renderSettingsShell() {
   renderSettingsModelGroupRegistry();
   renderSystemAgentResourceConfig();
   renderAndroidApkUpdateSettings();
+  renderSettingsDiagnostics();
   renderSettingsReviewTree();
   showInspectorPanel(state.inspectorPanel);
 }
@@ -8378,6 +8458,21 @@ async function refreshConfigStatus() {
   }
 }
 
+async function refreshDiagnosticsStatus() {
+  state.diagnosticsInFlight = true;
+  renderSettingsDiagnostics();
+  try {
+    const result = await adpQuery("QueryDiagnostics");
+    applyPhase2QueryResult(result);
+  } catch (error) {
+    state.diagnosticsError = error.message;
+    setCommandStatus(`diagnostics refresh failed: ${error.message}`, { stickyMs: 9000 });
+  } finally {
+    state.diagnosticsInFlight = false;
+    renderSettingsDiagnostics();
+  }
+}
+
 async function refreshAllProtocolState() {
   await refreshSessions();
   try {
@@ -8390,6 +8485,7 @@ async function refreshAllProtocolState() {
   }
   await refreshCheckpoints();
   await refreshConfigStatus();
+  await refreshDiagnosticsStatus();
   await refreshPhase2Status();
 }
 
@@ -9149,6 +9245,15 @@ if (settingsModelGroupSwitchButton) {
 if (settingsApkUpdateCheckButton) {
   settingsApkUpdateCheckButton.addEventListener("click", () => {
     requestAndroidApkUpdateCheck();
+  });
+}
+if (settingsDiagnosticsRefreshButton) {
+  settingsDiagnosticsRefreshButton.addEventListener("click", () => {
+    refreshDiagnosticsStatus().catch((error) => {
+      state.diagnosticsInFlight = false;
+      state.diagnosticsError = error.message;
+      renderSettingsDiagnostics();
+    });
   });
 }
 if (closeDetailDrawerButton) {

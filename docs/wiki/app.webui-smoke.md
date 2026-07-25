@@ -46,6 +46,7 @@ Generated from `docs/mainline-calls/app.webui-smoke.json`. Do not edit by hand.
 - front-end Timer dashboard queries QueryTimerList through ADP/runtime owner truth, submits ScheduleTimer and CancelTimer only as protocol commands, and must not store timer schedules, infer timer status, or encode timer state as task/browser truth
 - front-end Tools dashboard queries QueryToolRegistry through ADP/runtime owner truth and renders only owner-projected schema, examples, guidance, execution scope, and Master/Worker exposure without executing tools, rendering session-specific tool turns, synthesizing a local web_search tool, or storing browser-local registry truth
 - front-end Search dashboard queries QuerySessionSearch through ADP/runtime owner truth and renders only owner-projected persisted session search rows; it must not search browser-local session state, create a new session, or promote Worker/subagent sessions into top-level global results
+- front-end Settings diagnostics card queries QueryDiagnostics through ADP/runtime owner truth and renders only owner-projected log file metadata and redacted tail lines without browser-local log truth, session creation, raw provider payloads, secrets, or absolute paths.
 - front-end Worker labels derive from Worker-only resource ordinals; the Master AgentBoard row must not offset configured Worker labels
 - transport-facing app routes expose SSE subscribe for latest turn and per-turn debug snapshot
 - HTTP query and POST command ingress remain compatibility routes; SSE latest-turn subscribe is consumed by WebUI as a display-refresh mirror without owning command dispatch
@@ -110,6 +111,7 @@ Generated from `docs/mainline-calls/app.webui-smoke.json`. Do not edit by hand.
 - terminal cards use protocol-projected status strings so cancelled and failed terminal states do not render as success
 - front-end cancel handling uses CancelTurn when turn_id is known and CancelLatestActiveTurn during submit-in-flight pre-SSE window
 - ADP task list subscription returns accepted plus initial runtime task list projection and later runtime-published task list events
+- WebUI Settings diagnostics renders owner-projected QueryDiagnostics rows; repeated refreshes replace only the diagnostics projection and never create sessions, tasks, timers, tool executions, or unredacted log dumps.
 
 ## Error Mainline
 
@@ -136,6 +138,7 @@ Generated from `docs/mainline-calls/app.webui-smoke.json`. Do not edit by hand.
 - Timer dashboard QueryTimerList, ScheduleTimer, and CancelTimer failures render explicit user-visible timer status errors and must not backfill timer rows from local browser guesses or task state
 - Tools dashboard QueryToolRegistry failures render explicit user-visible status errors and must not backfill tool rows from local browser guesses, static arrays, or provider capability text
 - Search dashboard QuerySessionSearch failures render explicit user-visible status errors and must not backfill results from local browser guesses, DOM session rows, or worker id prefixes
+- Settings diagnostics QueryDiagnostics failures render explicit user-visible status errors and must not backfill diagnostics from browser-local guesses, absolute filesystem paths, or raw log dumps.
 
 ## Shared Multi-Reference Functions
 
@@ -185,6 +188,7 @@ Generated from `docs/mainline-calls/app.webui-smoke.json`. Do not edit by hand.
 | 15 | `loadSamplePrompt` | `apps/freehand-server/assets/webui.js` | load hidden success/failure diagnostic prompts into the composer without inventing a second command path or rendering persistent sample buttons | sample kind | composer text plus visible command status | WebUI shell | normal ADP submit path |  |  |  | bound |
 | 16 | `initial_adp_subscription_projection` | `apps/freehand-server/src/lib.rs` | serve initial ADP subscription snapshot including runtime-backed task list and error-center projections | subscription command plus protocol state plus runtime query port | optional UI projection or failure | handle_adp_subscribe | UiRuntimeQueryPort::query_runtime / UiProtocolState::query |  |  |  | bound |
 | 11l | `openSessionSearchDashboard / submitSessionSearch / renderSessionSearchDashboard / renderSessionSearchResult / openSessionSearchResult` | `apps/freehand-server/assets/webui.js` | render persisted-session Search from owner-projected SessionSearch truth, submit query text through QuerySessionSearch, show Worker child matches only under parent sessions, and open parent sessions without browser-local search/index truth | Search quick-entry click, query form submit, and UiQueryResult::SessionSearch | owner-backed persisted session search rows, nested Worker child matches, explicit empty/error status, or selected parent session switch | WebUI mobile home Search entry | runtime session search owner projection through ADP |  |  |  | bound |
+| 11m | `renderSettingsDiagnostics / renderDiagnosticLogRow / refreshDiagnosticsStatus` | `apps/freehand-server/assets/webui.js` | render Settings diagnostics from owner-projected Diagnostics truth, refresh through QueryDiagnostics, and show only redacted log metadata/tail rows without browser-local log reads | Settings diagnostics refresh click and UiQueryResult::Diagnostics | owner-backed diagnostics rows, summary, runtime-home label, explicit empty state, or explicit diagnostics error status | WebUI Settings shell | runtime diagnostics owner projection through ADP |  |  |  | bound |
 
 ## Sync Status Against Mainline Call
 
@@ -236,3 +240,4 @@ Generated from `docs/mainline-calls/app.webui-smoke.json`. Do not edit by hand.
 - WebUI settings provider definition save submits UpsertProviderConfig over ADP, active provider switch submits UpdateAgentProviderSelection, both show validation errors or restart-required success, re-query owner-backed config projection, and avoid raw API-key values/direct config writes
 - WebUI settings model group definition save submits UpsertModelGroupConfig over ADP, active group switch submits UpdateAgentModelGroupSelection, both show validation errors or restart-required success, re-query owner-backed config projection, avoid direct config writes, and are covered by node scripts/verify-model-group-ui-online.mjs
 - WebUI settings includes an Android-only APK update trigger/status card that delegates all check/download/install semantics to the Android bridge owner and renders desktop/browser use as unavailable
+- WebUI settings diagnostics owner projection wiring is landed and covered by node scripts/verify-webui-diagnostics-online.mjs.

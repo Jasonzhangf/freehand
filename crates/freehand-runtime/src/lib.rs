@@ -51,6 +51,7 @@ use std::cell::RefCell;
 use std::collections::BTreeMap;
 use std::env;
 use std::fs;
+use std::io::{Read, Seek, SeekFrom};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::Receiver;
@@ -145,25 +146,25 @@ use freehand_ui_protocol::{
     UiAttachmentMetadataProjection, UiClientKind, UiCommand, UiCommandDispatchEnvelope,
     UiCommandDispatchPort, UiCommandDispatchPortError, UiCommandDispatchReceipt,
     UiCompletionSchemaRetryWaiting, UiConfigPeerProjection, UiConfigStatusProjection,
-    UiErrorCenterEventListProjection, UiErrorCenterEventProjection, UiExecutionFactCommand,
-    UiExecutionFactKind, UiInputAttachmentKind, UiMasterPollClassificationProjection,
-    UiMasterPollProjection, UiModelGroupConfigProjection, UiModelGroupConfigUpdate,
-    UiModelRequestKind, UiModelRequestWaiting, UiModelRouteProjection, UiModelRouteUpdate,
-    UiModelTransportActivity, UiModelTransportKind, UiModelWeightedRouteProjection,
-    UiModelWeightedRouteUpdate, UiProtocolState, UiProviderConfigSummaryProjection,
-    UiProviderConfigUpdate, UiQueryResult, UiRuntimeQueryPort, UiSchedulerTickCommand,
-    UiSessionMetadataProjection, UiSessionSearchChildProjection, UiSessionSearchProjection,
-    UiSessionSearchResultProjection, UiSubmitMetadata, UiTaskAgentCreateCommand,
-    UiTaskAssignCommand, UiTaskBoardProjection, UiTaskClaimCommand, UiTaskCreateCommand,
-    UiTaskDispatchCommand, UiTaskEventInboxEntryProjection, UiTaskEventInboxProjection,
-    UiTaskHistoryProjection, UiTaskLedgerEventProjection, UiTaskListProjection,
-    UiTaskReviewCommand, UiTaskReviewRejectionCommand, UiTaskSnapshotProjection,
-    UiTimerEventProjection, UiTimerListProjection, UiTimerProjection, UiTimerRepeatCommand,
-    UiTimerScheduleCommand, UiToolRegistryProjection, UiToolRegistryToolProjection,
-    UiTurnProjection, UiTurnTimingProjection, UiWorkerControlCommand,
-    UiWorkerControlEventProjection, UiWorkerControlProjection,
-    checkpoint_projection_from_runtime_summary, turn_projection_for_client,
-    turn_projection_from_events,
+    UiDiagnosticLogFileProjection, UiDiagnosticsProjection, UiErrorCenterEventListProjection,
+    UiErrorCenterEventProjection, UiExecutionFactCommand, UiExecutionFactKind,
+    UiInputAttachmentKind, UiMasterPollClassificationProjection, UiMasterPollProjection,
+    UiModelGroupConfigProjection, UiModelGroupConfigUpdate, UiModelRequestKind,
+    UiModelRequestWaiting, UiModelRouteProjection, UiModelRouteUpdate, UiModelTransportActivity,
+    UiModelTransportKind, UiModelWeightedRouteProjection, UiModelWeightedRouteUpdate,
+    UiProtocolState, UiProviderConfigSummaryProjection, UiProviderConfigUpdate, UiQueryResult,
+    UiRuntimeQueryPort, UiSchedulerTickCommand, UiSessionMetadataProjection,
+    UiSessionSearchChildProjection, UiSessionSearchProjection, UiSessionSearchResultProjection,
+    UiSubmitMetadata, UiTaskAgentCreateCommand, UiTaskAssignCommand, UiTaskBoardProjection,
+    UiTaskClaimCommand, UiTaskCreateCommand, UiTaskDispatchCommand,
+    UiTaskEventInboxEntryProjection, UiTaskEventInboxProjection, UiTaskHistoryProjection,
+    UiTaskLedgerEventProjection, UiTaskListProjection, UiTaskReviewCommand,
+    UiTaskReviewRejectionCommand, UiTaskSnapshotProjection, UiTimerEventProjection,
+    UiTimerListProjection, UiTimerProjection, UiTimerRepeatCommand, UiTimerScheduleCommand,
+    UiToolRegistryProjection, UiToolRegistryToolProjection, UiTurnProjection,
+    UiTurnTimingProjection, UiWorkerControlCommand, UiWorkerControlEventProjection,
+    UiWorkerControlProjection, checkpoint_projection_from_runtime_summary,
+    turn_projection_for_client, turn_projection_from_events,
 };
 use serde_json::{Map, Value, json};
 use thiserror::Error;
@@ -3391,6 +3392,17 @@ impl RuntimeCommandDispatcher {
             UiCommand::QueryToolRegistry => Ok(Some(UiQueryResult::ToolRegistry(
                 project_tool_registry_for_ui(state.config.reason_agent_id.clone()),
             ))),
+            UiCommand::QueryDiagnostics => {
+                let Some(live) = state.config.live.as_ref() else {
+                    return Ok(None);
+                };
+                Ok(Some(UiQueryResult::Diagnostics(
+                    project_diagnostics_for_ui(
+                        state.config.reason_agent_id.clone(),
+                        &live.runtime_home,
+                    )?,
+                )))
+            }
             UiCommand::QueryEventInbox {
                 after_cursor,
                 limit,
@@ -6729,6 +6741,162 @@ fn project_tool_registry_for_ui(source_agent_id: AgentId) -> UiToolRegistryProje
             })
             .collect(),
     }
+}
+
+fn project_diagnostics_for_ui(
+    source_agent_id: AgentId,
+    runtime_home: &Path,
+) -> Result<UiDiagnosticsProjection, UiCommandDispatchPortError> {
+    let logs_dir = runtime_home.join("logs");
+    let mut files = Vec::new();
+    if logs_dir.exists() {
+        for entry in fs::read_dir(&logs_dir).map_err(|err| {
+            UiCommandDispatchPortError::DispatchFailed(format!(
+                "failed to read diagnostics logs directory: {err}"
+            ))
+        })? {
+            let entry = entry.map_err(|err| {
+                UiCommandDispatchPortError::DispatchFailed(format!(
+                    "failed to read diagnostics log entry: {err}"
+                ))
+            })?;
+            let path = entry.path();
+            let Some(name) = path.file_name().and_then(|value| value.to_str()) else {
+                continue;
+            };
+            if !name.ends_with(".log") {
+                continue;
+            }
+            let metadata = entry.metadata().map_err(|err| {
+                UiCommandDispatchPortError::DispatchFailed(format!(
+                    "failed to read diagnostics log metadata for {name}: {err}"
+                ))
+            })?;
+            if !metadata.is_file() {
+                continue;
+            }
+            files.push(project_diagnostic_log_file(
+                name.to_owned(),
+                path,
+                metadata,
+            )?);
+        }
+    }
+    files.sort_by(|left, right| {
+        right
+            .modified_at
+            .cmp(&left.modified_at)
+            .then_with(|| left.name.cmp(&right.name))
+    });
+    files.truncate(20);
+    Ok(UiDiagnosticsProjection {
+        source_agent_id,
+        generated_at: now_unix_seconds(),
+        runtime_home: "~/.freehand".to_owned(),
+        logs_dir: "logs".to_owned(),
+        files,
+    })
+}
+
+fn project_diagnostic_log_file(
+    name: String,
+    path: PathBuf,
+    metadata: fs::Metadata,
+) -> Result<UiDiagnosticLogFileProjection, UiCommandDispatchPortError> {
+    let tail_lines = diagnostic_log_tail_lines(&path)?;
+    Ok(UiDiagnosticLogFileProjection {
+        relative_path: format!("logs/{name}"),
+        name,
+        size_bytes: metadata.len(),
+        modified_at: metadata
+            .modified()
+            .ok()
+            .and_then(|time| time.duration_since(UNIX_EPOCH).ok())
+            .map(|duration| duration.as_secs()),
+        tail_lines,
+    })
+}
+
+fn diagnostic_log_tail_lines(path: &Path) -> Result<Vec<String>, UiCommandDispatchPortError> {
+    const MAX_TAIL_BYTES: usize = 64 * 1024;
+    let mut file = fs::File::open(path).map_err(|err| {
+        UiCommandDispatchPortError::DispatchFailed(format!(
+            "failed to read diagnostics log tail for {}: {err}",
+            path.file_name()
+                .and_then(|value| value.to_str())
+                .unwrap_or("unknown.log")
+        ))
+    })?;
+    let file_len = file
+        .metadata()
+        .map_err(|err| {
+            UiCommandDispatchPortError::DispatchFailed(format!(
+                "failed to read diagnostics log metadata for {}: {err}",
+                path.file_name()
+                    .and_then(|value| value.to_str())
+                    .unwrap_or("unknown.log")
+            ))
+        })?
+        .len();
+    let tail_len = file_len.min(MAX_TAIL_BYTES as u64);
+    file.seek(SeekFrom::Start(file_len.saturating_sub(tail_len)))
+        .map_err(|err| {
+            UiCommandDispatchPortError::DispatchFailed(format!(
+                "failed to seek diagnostics log tail for {}: {err}",
+                path.file_name()
+                    .and_then(|value| value.to_str())
+                    .unwrap_or("unknown.log")
+            ))
+        })?;
+    let mut bytes = Vec::with_capacity(tail_len as usize);
+    file.read_to_end(&mut bytes).map_err(|err| {
+        UiCommandDispatchPortError::DispatchFailed(format!(
+            "failed to read diagnostics log tail for {}: {err}",
+            path.file_name()
+                .and_then(|value| value.to_str())
+                .unwrap_or("unknown.log")
+        ))
+    })?;
+    let text = String::from_utf8_lossy(&bytes);
+    let text = if file_len > tail_len {
+        text.split_once('\n').map(|(_, rest)| rest).unwrap_or("")
+    } else {
+        text.as_ref()
+    };
+    let mut lines = text
+        .lines()
+        .rev()
+        .filter_map(|line| {
+            let trimmed = line.trim();
+            if trimmed.is_empty() {
+                None
+            } else {
+                Some(redact_diagnostic_log_line(trimmed))
+            }
+        })
+        .take(5)
+        .collect::<Vec<_>>();
+    lines.reverse();
+    Ok(lines)
+}
+
+fn redact_diagnostic_log_line(line: &str) -> String {
+    let lower = line.to_ascii_lowercase();
+    if lower.contains("authorization")
+        || lower.contains("api_key")
+        || lower.contains("apikey")
+        || lower.contains("x-api-key")
+        || lower.contains("bearer ")
+        || lower.contains("pair_token")
+        || lower.contains("secret")
+        || lower.contains("provider request")
+        || lower.contains("provider payload")
+        || lower.contains("/users/")
+        || lower.contains("/volumes/")
+    {
+        return "[redacted diagnostic line: sensitive marker]".to_owned();
+    }
+    line.chars().take(240).collect()
 }
 
 fn timer_schedule_is_nonterminal(schedule: &TimerSchedule) -> bool {

@@ -2271,6 +2271,57 @@ fn runtime_query_projects_tool_registry_owner_truth() {
 }
 
 #[test]
+fn runtime_query_projects_diagnostics_without_raw_secrets_or_absolute_home() {
+    let runtime_home = temp_runtime_home();
+    let logs_dir = runtime_home.join("logs");
+    fs::create_dir_all(&logs_dir).expect("create logs dir");
+    fs::write(
+        logs_dir.join("daemonS.stdout.log"),
+        "booting\nservice ready\nAuthorization: Bearer secret-token\nprovider request payload\nopened /Volumes/extension/code/freehand\n",
+    )
+    .expect("write diagnostics log");
+    fs::write(logs_dir.join("ignore.txt"), "not a log").expect("write ignored file");
+    let runtime = RuntimeCommandDispatcher::from_selected_agent_with_live(
+        &live_selected_agent(
+            "http://127.0.0.1:1".to_owned(),
+            freehand_config::ProviderType::Anthropic,
+        ),
+        runtime_home.clone(),
+        false,
+    )
+    .expect("runtime bootstrap");
+
+    let result = runtime
+        .query_runtime(&UiCommand::QueryDiagnostics)
+        .expect("diagnostics query")
+        .expect("runtime-owned diagnostics projection");
+
+    match result {
+        UiQueryResult::Diagnostics(projection) => {
+            assert_eq!(projection.source_agent_id, AgentId::new("agent-live"));
+            assert_eq!(projection.runtime_home, "~/.freehand");
+            assert_eq!(projection.logs_dir, "logs");
+            assert_eq!(projection.files.len(), 1);
+            let file = &projection.files[0];
+            assert_eq!(file.name, "daemonS.stdout.log");
+            assert_eq!(file.relative_path, "logs/daemonS.stdout.log");
+            assert!(file.size_bytes > 0);
+            assert!(file.modified_at.is_some());
+            let tail = file.tail_lines.join("\n");
+            assert!(tail.contains("service ready"));
+            assert!(tail.contains("[redacted diagnostic line: sensitive marker]"));
+            assert!(!tail.contains("secret-token"));
+            assert!(!tail.contains("provider request payload"));
+            assert!(!tail.contains("/Volumes/extension"));
+            assert!(!tail.contains(runtime_home.to_string_lossy().as_ref()));
+        }
+        other => panic!("unexpected diagnostics query result: {other:?}"),
+    }
+
+    fs::remove_dir_all(runtime_home).expect("cleanup runtime home");
+}
+
+#[test]
 fn runtime_query_projects_config_status_without_secrets() {
     let runtime_home = temp_runtime_home();
     fs::create_dir_all(&runtime_home).expect("create runtime home");

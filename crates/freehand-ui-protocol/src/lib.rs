@@ -158,6 +158,7 @@ pub enum UiCommand {
         include_terminal: bool,
     },
     QueryToolRegistry,
+    QueryDiagnostics,
     QueryErrorCenterEvents {
         session_id: SessionId,
         #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -1228,6 +1229,26 @@ pub struct UiToolRegistryToolProjection {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct UiDiagnosticsProjection {
+    pub source_agent_id: AgentId,
+    pub generated_at: u64,
+    pub runtime_home: String,
+    pub logs_dir: String,
+    #[serde(default)]
+    pub files: Vec<UiDiagnosticLogFileProjection>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct UiDiagnosticLogFileProjection {
+    pub name: String,
+    pub relative_path: String,
+    pub size_bytes: u64,
+    pub modified_at: Option<u64>,
+    #[serde(default)]
+    pub tail_lines: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct UiWorkerControlCommand {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub control_id: Option<String>,
@@ -1332,6 +1353,7 @@ pub enum UiQueryResult {
     ConfigStatus(UiConfigStatusProjection),
     TimerList(UiTimerListProjection),
     ToolRegistry(UiToolRegistryProjection),
+    Diagnostics(UiDiagnosticsProjection),
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -2095,6 +2117,7 @@ impl UiProtocolState {
             | UiCommand::QueryWorkerControl { .. }
             | UiCommand::QueryTimerList { .. }
             | UiCommand::QueryToolRegistry
+            | UiCommand::QueryDiagnostics
             | UiCommand::RunMasterPoll { .. }
             | UiCommand::WorkerControl { .. }
             | UiCommand::TestProviderWebSearch { .. }
@@ -3403,6 +3426,7 @@ fn command_kind(command: &UiCommand) -> &'static str {
         UiCommand::QueryWorkerControl { .. } => "query_worker_control",
         UiCommand::QueryTimerList { .. } => "query_timer_list",
         UiCommand::QueryToolRegistry => "query_tool_registry",
+        UiCommand::QueryDiagnostics => "query_diagnostics",
         UiCommand::QueryErrorCenterEvents { .. } => "query_error_center_events",
         UiCommand::UpdateProviderConfig { .. } => "update_provider_config",
         UiCommand::UpsertProviderConfig { .. } => "upsert_provider_config",
@@ -4560,6 +4584,44 @@ mod tests {
         assert!(!encoded.contains("\"web_search\",\"description\""));
         let decoded: UiAdpResponse =
             serde_json::from_str(&encoded).expect("tool registry response decode");
+        assert_eq!(decoded, response);
+    }
+
+    #[test]
+    fn diagnostics_query_stays_runtime_owned_and_projects_safe_log_surface() {
+        let query = UiCommand::QueryDiagnostics;
+        validate_command(&query).expect("valid diagnostics query");
+        let err =
+            accept_command_ingress(&query).expect_err("diagnostics query is not command ingress");
+        assert_eq!(err, UiProtocolError::IngressCommandKindMismatch);
+        let err = UiProtocolState::default()
+            .query(&query)
+            .expect_err("protocol state cannot answer diagnostics locally");
+        assert_eq!(err, UiProtocolError::StreamKindMismatch);
+        assert_eq!(command_kind(&query), "query_diagnostics");
+
+        let response = UiAdpResponse::QueryResult {
+            request_id: "diagnostics-query".to_owned(),
+            result: UiQueryResult::Diagnostics(UiDiagnosticsProjection {
+                source_agent_id: AgentId::new("master"),
+                generated_at: 100,
+                runtime_home: "~/.freehand".to_owned(),
+                logs_dir: "logs".to_owned(),
+                files: vec![UiDiagnosticLogFileProjection {
+                    name: "daemonS.stdout.log".to_owned(),
+                    relative_path: "logs/daemonS.stdout.log".to_owned(),
+                    size_bytes: 42,
+                    modified_at: Some(99),
+                    tail_lines: vec!["service ready".to_owned()],
+                }],
+            }),
+        };
+        let encoded = serde_json::to_string(&response).expect("diagnostics response json");
+        assert!(encoded.contains("Diagnostics"));
+        assert!(encoded.contains("daemonS.stdout.log"));
+        assert!(!encoded.contains("/Users/"));
+        let decoded: UiAdpResponse =
+            serde_json::from_str(&encoded).expect("diagnostics response decode");
         assert_eq!(decoded, response);
     }
 
