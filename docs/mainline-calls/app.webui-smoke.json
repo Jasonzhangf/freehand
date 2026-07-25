@@ -106,7 +106,7 @@
     "terminal cards use protocol-projected status strings so cancelled and failed terminal states do not render as success",
     "front-end cancel handling uses CancelTurn when turn_id is known and CancelLatestActiveTurn during submit-in-flight pre-SSE window",
     "ADP task list subscription returns accepted plus initial runtime task list projection and later runtime-published task list events",
-    "WebUI Diagnostics top-level entry renders owner-projected QueryDiagnostics rows; repeated refreshes replace only the diagnostics projection and never create sessions, tasks, timers, tool executions, or unredacted log dumps."
+    "WebUI Observability diagnostics detail renders owner-projected QueryDiagnostics rows; repeated refreshes replace only the diagnostics projection and never create sessions, tasks, timers, tool executions, or unredacted log dumps."
   ],
   "error_mainline": [
     "invalid smoke input or missing projection returns explicit app error",
@@ -132,7 +132,7 @@
     "Timer dashboard QueryTimerList, ScheduleTimer, and CancelTimer failures render explicit user-visible timer status errors and must not backfill timer rows from local browser guesses or task state",
     "Tools dashboard QueryToolRegistry failures render explicit user-visible status errors and must not backfill tool rows from local browser guesses, static arrays, or provider capability text",
     "Search dashboard QuerySessionSearch failures render explicit user-visible status errors and must not backfill results from local browser guesses, DOM session rows, or worker id prefixes",
-    "Diagnostics top-level entry QueryDiagnostics failures render explicit user-visible status errors and must not backfill diagnostics from browser-local guesses, absolute filesystem paths, or raw log dumps."
+    "Observability diagnostics detail QueryDiagnostics failures render explicit user-visible status errors and must not backfill diagnostics from browser-local guesses, absolute filesystem paths, or raw log dumps."
   ],
   "shared_functions": [
     {
@@ -311,9 +311,9 @@
       "step": "11h",
       "symbol_path": "internalRuntimeSessionId / topLevelPersistedSessions / renderMobileHomeDashboard / activeSessionsForHome / renderMobileHomeActiveList / renderMobileHomeSessionList / phaseOneSettingsTree / renderSettingsReviewTree",
       "file_path": "apps/freehand-server/assets/webui.js",
-      "responsibility": "implement Phase 1 mobile UI tree presentation only: exclude internal runtime sessions from global session projections, render the home dashboard as exactly two lists, active sessions monitor plus persisted Master session history, keep Timer and New Session as corner-entry surfaces outside the home body, and render a settings/config review tree with UI-only rows for provider family, provider configuration, provider switching and strategy, model groups, token usage, appearance, skills, memory, MCP, env vars, runtime dirs, daemon connection, Worker capability, Android update/permissions, logs, and about",
+      "responsibility": "implement Phase 1 mobile UI tree presentation only: exclude internal runtime sessions from global session projections, render the home dashboard as exactly two lists, active sessions monitor plus persisted Master session history, keep Timer and New Session as corner-entry surfaces outside the home body, and render a Settings tree whose first level is Models, Agent Runtime, Connectivity, Observability, Appearance, and About while provider configuration, provider switching and strategy, model groups, token usage, skills, memory, MCP, env vars, runtime dirs, daemon connection, Worker capability, Android update/permissions, and logs remain child rows",
       "input_semantic": "SessionList projection plus selected-session/task projections plus static reviewed UI tree rows",
-      "output_semantic": "global session list without worker-task, master-lifecycle, or master-timer entries; mobile home active sessions monitor list; mobile home persisted Master history list; settings review tree with small hollow green/red status markers",
+      "output_semantic": "global session list without worker-task, master-lifecycle, or master-timer entries; mobile home active sessions monitor list; mobile home persisted Master history list; grouped Settings review tree with small hollow green owner-backed, orange partial, and red placeholder status markers",
       "caller": "WebUI shell",
       "callee": "ui.protocol projections plus reviewed prototype contract",
       "binding_status": "bound"
@@ -490,10 +490,10 @@
       "step": "11m",
       "symbol_path": "renderSettingsDiagnostics / renderDiagnosticLogRow / refreshDiagnosticsStatus",
       "file_path": "apps/freehand-server/assets/webui.js",
-      "responsibility": "render the Diagnostics top-level entry from owner-projected Diagnostics truth, refresh through QueryDiagnostics, and show only redacted log metadata/tail rows without browser-local log reads",
+      "responsibility": "render the Observability diagnostics detail from owner-projected Diagnostics truth, refresh through QueryDiagnostics, and show only redacted log metadata/tail rows without browser-local log reads",
       "input_semantic": "Diagnostics refresh click and UiQueryResult::Diagnostics",
       "output_semantic": "owner-backed diagnostics rows, summary, runtime-home label, explicit empty state, or explicit diagnostics error status",
-      "caller": "WebUI Settings Diagnostics entry",
+      "caller": "WebUI Settings Observability details",
       "callee": "runtime diagnostics owner projection through ADP",
       "binding_status": "bound"
     }

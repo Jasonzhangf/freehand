@@ -9,7 +9,7 @@ const debugPort = Number.parseInt(process.env.FREEHAND_WEBUI_DEBUG_PORT || '9247
 const baseUrl = normalizedBaseUrl(process.env.FREEHAND_WEBUI_BASE_URL || 'http://127.0.0.1:4042/');
 const runId = `mobile-ui-tree-phase1-${new Date().toISOString().replace(/[-:.]/g, '').slice(0, 15)}-${process.pid}`;
 const artifactDir = path.join(process.cwd(), 'artifacts', 'webui-online', runId);
-const assetVersion = '20260725-settings-ia-ui';
+const assetVersion = '20260725-settings-layer-ui';
 const forbiddenUiTerms = [
   /rootfs/i,
   /shared-folder/i,
@@ -157,7 +157,7 @@ async function captureSettingsTree(cdp) {
     return tree &&
       tree.innerText.includes('Provider configuration') &&
       tree.innerText.includes('Provider switching and strategy') &&
-      tree.innerText.includes('Diagnostics entry');
+      tree.innerText.includes('Diagnostics logs');
   }, 10_000, 'settings review tree visible');
   const state = await evalInPage(cdp, collectPhaseOneState);
   const screenshot = await cdp.send('Page.captureScreenshot', {
@@ -213,10 +213,14 @@ function buildSummary({ snapshots, settings }) {
       settingsReviewTreeHasProviderConfig: settings.state.settingsReviewTreeText.includes('Provider configuration'),
       settingsReviewTreeHasProviderStrategy: settings.state.settingsReviewTreeText.includes('Provider switching and strategy'),
       settingsReviewTreeHasModelGroups: settings.state.settingsReviewTreeText.includes('Model groups'),
-      settingsReviewTreeHasDiagnosticsEntry: settings.state.settingsReviewTreeText.includes('Diagnostics entry'),
-      settingsReviewTreeHasAndroid: settings.state.settingsReviewTreeText.includes('Android 更新与权限'),
+      settingsReviewTreeHasDiagnosticsLogs: settings.state.settingsReviewTreeText.includes('Diagnostics logs'),
+      settingsReviewTreeHasAndroid: settings.state.settingsReviewTreeText.includes('Android update'),
       settingsProviderPagesAreSplit: settings.state.providerConfigPageExists && settings.state.providerStrategyPageExists,
-      diagnosticsIsTopLevelEntry: settings.state.diagnosticsPageExists,
+      settingsTopLevelGrouped: ['Models', 'Agent Runtime', 'Connectivity', 'Observability', 'Appearance', 'About'].every((label) => settings.state.settingsNavText.includes(label)),
+      settingsNoFlatLlmProviderEntry: !settings.state.settingsNavTopTitles.includes('LLM Provider'),
+      settingsPartialMarkersPresent: settings.state.statusMarkerToneCounts.partial > 0 && settings.state.settingsReviewToneCounts.partial > 0,
+      settingsAttentionMarkersPresent: settings.state.statusMarkerToneCounts.attention > 0 && settings.state.settingsReviewToneCounts.attention > 0,
+      diagnosticsIsObservabilityDetail: settings.state.diagnosticsPageExists && settings.state.diagnosticsGroup === 'observability',
       noForbiddenUiStorageTerms: !forbiddenUiTerms.some((pattern) => pattern.test(allTexts)),
       statusMarkersAreHollow: settings.state.statusMarkerCount > 0 && settings.state.statusMarkerAllHollow,
     },
@@ -305,7 +309,7 @@ function collectPhaseOneState() {
   return {
     layoutShape: document.body.dataset.layoutShape || '',
     shellLayoutShape: shell?.dataset.layoutShape || '',
-    assetVersionSeen: html.includes('20260725-settings-ia-ui'),
+    assetVersionSeen: html.includes('20260725-settings-layer-ui'),
     bodyText,
     bodyWidth: document.body.scrollWidth,
     docWidth: document.documentElement.scrollWidth,
@@ -324,9 +328,12 @@ function collectPhaseOneState() {
     homeHasNewEntryButtonInsideHome: !!document.querySelector('#mobile-home-dashboard #mobile-new-entry-button'),
     settingsReviewTreeVisible: localIsVisible(document.getElementById('settings-review-tree')),
     settingsReviewTreeText: document.getElementById('settings-review-tree')?.innerText || '',
+    settingsNavText: document.querySelector('.settings-nav-grid')?.innerText || '',
+    settingsNavTopTitles: Array.from(document.querySelectorAll('.settings-nav-card strong')).map((node) => node.textContent?.trim() || ''),
     providerConfigPageExists: !!document.getElementById('settings-provider-config-page'),
     providerStrategyPageExists: !!document.getElementById('settings-provider-strategy-page'),
     diagnosticsPageExists: !!document.querySelector('.settings-diagnostics-page'),
+    diagnosticsGroup: document.querySelector('.settings-diagnostics-page')?.dataset.settingsGroup || '',
     quickEntries: {
       items: quickEntries,
       visibleCount: visibleEntries.length,
@@ -334,6 +341,19 @@ function collectPhaseOneState() {
       positionsSeparated: localQuickEntryPositionsSeparated(quickEntries),
     },
     statusMarkerCount: markerNodes.length,
+    statusMarkerToneCounts: markerNodes.reduce((counts, node) => {
+      ['ok', 'partial', 'attention'].forEach((tone) => {
+        if (node.classList.contains(tone)) {
+          counts[tone] = (counts[tone] || 0) + 1;
+        }
+      });
+      return counts;
+    }, {}),
+    settingsReviewToneCounts: Array.from(document.querySelectorAll('#settings-review-tree .settings-review-row')).reduce((counts, node) => {
+      const tone = node.dataset.settingsState || 'unknown';
+      counts[tone] = (counts[tone] || 0) + 1;
+      return counts;
+    }, {}),
     statusMarkerAllHollow: markerNodes.every((node) => {
       const style = getComputedStyle(node);
       return style.backgroundColor === 'rgba(0, 0, 0, 0)' || style.backgroundColor === 'transparent';

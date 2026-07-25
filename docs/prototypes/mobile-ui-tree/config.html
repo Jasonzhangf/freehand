@@ -24,107 +24,43 @@
             <h2>设置</h2>
           </header>
 
-          <section class="settings-group">
-            <h3>LLM 提供商</h3>
-            <div class="settings-list">
-              <div class="settings-item">
-                <span class="settings-icon provider-icon"></span>
-                <div><strong>Provider 配置</strong><p>registry、Base URL、协议、认证、能力测试</p></div>
-                <span class="chevron">›</span>
-              </div>
-              <div class="settings-item">
-                <span class="settings-icon model-icon"></span>
-                <div><strong>Provider 切换与策略</strong><p>primary / fallback、模型组、路由、负载均衡</p></div>
-                <span class="chevron">›</span>
-              </div>
-              <div class="settings-item">
-                <span class="settings-icon usage-icon"></span>
-                <div><strong>Token 用量</strong><p>按 provider / session 查看使用情况</p></div>
-                <span class="chevron">›</span>
-              </div>
-            </div>
-          </section>
+          <div class="config-status-legend" aria-label="状态说明">
+            <span><i class="status-dot"></i>已实现</span>
+            <span><i class="status-dot partial"></i>部分实现</span>
+            <span><i class="status-dot idle"></i>占位</span>
+          </div>
 
           <section class="settings-group">
-            <h3>Diagnostics</h3>
+            <h3>一级入口</h3>
             <div class="settings-list">
               <div class="settings-item">
-                <span class="settings-icon logs-icon"></span>
-                <div><strong>诊断列表</strong><p>一级入口；点开后才显示日志、导出和红acted tail</p></div>
-                <span class="chevron">›</span>
-              </div>
-            </div>
-          </section>
-
-          <section class="settings-group">
-            <h3>外观</h3>
-            <div class="settings-list">
-              <div class="settings-item">
-                <span class="settings-icon appearance-icon"></span>
-                <div><strong>外观</strong><p>主题、字号、密度、手机显示策略</p></div>
-                <span class="chevron">›</span>
-              </div>
-            </div>
-          </section>
-
-          <section class="settings-group">
-            <h3>Agent 运行时</h3>
-            <div class="settings-list">
-              <div class="settings-item">
-                <span class="settings-icon skill-icon"></span>
-                <div><strong>Skills</strong><p>Freehand skill 根、项目 skill、兼容导入</p></div>
+                <span class="status-dot partial"></span>
+                <div><strong>Models</strong><p>Provider、模型组、路由与能力测试</p></div>
                 <span class="chevron">›</span>
               </div>
               <div class="settings-item">
-                <span class="settings-icon memory-icon"></span>
-                <div><strong>记忆</strong><p>session history、持久记忆、清理策略</p></div>
+                <span class="status-dot partial"></span>
+                <div><strong>Agent Runtime</strong><p>Worker、Skills、Memory、MCP、环境与目录</p></div>
                 <span class="chevron">›</span>
               </div>
               <div class="settings-item">
-                <span class="settings-icon mcp-icon"></span>
-                <div><strong>MCP / 集成</strong><p>外部工具服务和账号连接</p></div>
+                <span class="status-dot partial"></span>
+                <div><strong>Connectivity</strong><p>Daemon、Tailscale、Relay、QR、Android shell</p></div>
                 <span class="chevron">›</span>
               </div>
               <div class="settings-item">
-                <span class="settings-icon env-icon"></span>
-                <div><strong>环境变量</strong><p>daemon 注入变量，不暴露 secret</p></div>
+                <span class="status-dot partial"></span>
+                <div><strong>Observability</strong><p>Diagnostics、生命周期证据与导出</p></div>
                 <span class="chevron">›</span>
               </div>
               <div class="settings-item">
-                <span class="settings-icon runtime-icon"></span>
-                <div><strong>运行时目录</strong><p>只读展示 daemon runtime home 和状态目录</p></div>
-                <span class="chevron">›</span>
-              </div>
-            </div>
-          </section>
-
-          <section class="settings-group">
-            <h3>Daemon 与手机壳</h3>
-            <div class="settings-list">
-              <div class="settings-item">
-                <span class="settings-icon daemon-icon"></span>
-                <div><strong>Daemon 连接</strong><p>本机、Tailscale、Relay、二维码导入</p></div>
+                <span class="status-dot partial"></span>
+                <div><strong>Appearance</strong><p>主题已实现；字号和密度待完成</p></div>
                 <span class="chevron">›</span>
               </div>
               <div class="settings-item">
-                <span class="settings-icon worker-icon"></span>
-                <div><strong>Worker 能力</strong><p>数量上限、capability、状态一致性</p></div>
-                <span class="chevron">›</span>
-              </div>
-              <div class="settings-item">
-                <span class="settings-icon android-icon"></span>
-                <div><strong>Android 更新与权限</strong><p>APK 更新、通知、文件访问授权</p></div>
-                <span class="chevron">›</span>
-              </div>
-            </div>
-          </section>
-
-          <section class="settings-group">
-            <h3>关于</h3>
-            <div class="settings-list">
-              <div class="settings-item">
-                <span class="settings-icon about-icon"></span>
-                <div><strong>关于 Freehand</strong><p>版本、隐私、反馈</p></div>
+                <span class="status-dot idle"></span>
+                <div><strong>About</strong><p>版本、隐私、反馈页尚未实现</p></div>
                 <span class="chevron">›</span>
               </div>
             </div>
@@ -134,7 +70,7 @@
         <div class="config-phone secondary-config-phone">
           <header class="config-topbar compact">
             <span class="back-link">‹</span>
-            <h2>LLM Provider</h2>
+            <h2>Models</h2>
             <span class="plus-action">+</span>
           </header>
 
@@ -211,7 +147,7 @@
           </article>
           <article>
             <h3>观测边界</h3>
-            <p>Diagnostics 是独立一级入口，点开后才显示日志列表；不放进 provider settings，也不替代 session / worker 生命周期可观察状态。</p>
+            <p>Diagnostics 属于 Observability，点开后才显示日志列表；不放进 Models，也不替代 session / worker 生命周期可观察状态。</p>
           </article>
         </div>
 

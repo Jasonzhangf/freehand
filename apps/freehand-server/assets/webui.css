@@ -4837,8 +4837,27 @@ button.mobile-agent-card {
   border-color: var(--logo-green);
 }
 
+.settings-status-marker.partial {
+  border-color: var(--running);
+}
+
 .settings-status-marker.attention {
   border-color: var(--fail);
+}
+
+.settings-status-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 14px;
+  margin: 0;
+  color: var(--text-soft);
+  font-size: 0.72rem;
+}
+
+.settings-status-legend span {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
 }
 
 .settings-review-tree {

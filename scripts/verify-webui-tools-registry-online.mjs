@@ -13,7 +13,7 @@ const adpUrl = process.env.FREEHAND_WEBUI_TOOLS_ADP_URL || adpUrlFromBaseUrl(bas
 const runStamp = new Date().toISOString().replace(/[-:.]/g, '').slice(0, 15);
 const runId = `webui-tools-registry-${runStamp}-${process.pid}`;
 const artifactDir = path.join(repo, 'artifacts', 'webui-online', runId);
-const assetVersion = '20260725-settings-ia-ui';
+const assetVersion = '20260725-settings-layer-ui';
 
 await fs.mkdir(artifactDir, { recursive: true });
 

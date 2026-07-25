@@ -1,4 +1,4 @@
-import { initializeThemeToggle } from "/assets/theme.js?v=20260725-settings-ia-ui";
+import { initializeThemeToggle } from "/assets/theme.js?v=20260725-settings-layer-ui";
 
 initializeThemeToggle(document);
 
@@ -234,44 +234,54 @@ const samplePrompts = {
 
 const phaseOneSettingsTree = [
   {
-    title: "LLM 提供商",
+    title: "Models",
     items: [
       ["Provider configuration", "registry / endpoint / auth env var / protocol / default model / capability test", "ok"],
       ["Provider switching and strategy", "primary / fallback provider, active model group, role routes, load balance", "ok"],
-      ["Provider family", "OpenAI / Anthropic / Gemini / xAI / OpenRouter family review UI", "attention"],
       ["Model groups", "primary / sub / search / title / fallback / load balance owner-backed config", "ok"],
-      ["Token 用量", "provider / session 用量投影，Phase 2 接 owner truth", "attention"],
+      ["Provider family templates", "OpenAI / Anthropic 已接入；Gemini / xAI / OpenRouter 模板未完成", "partial"],
+      ["Token usage", "provider / session 用量投影尚未接 owner truth", "attention"],
     ],
   },
   {
-    title: "外观",
-    items: [["外观", "主题、字号、密度、手机显示策略", "attention"]],
-  },
-  {
-    title: "Agent 运行时",
+    title: "Agent Runtime",
     items: [
+      ["Worker limit", "config owner-backed，支持 1..=5", "ok"],
+      ["Worker capability", "Tools registry 已投影；capability 配置页未完成", "partial"],
       ["Skills", "Freehand skills、项目 skills、兼容导入审计", "attention"],
-      ["记忆", "daemon runtime home 中的 session/turn/history", "attention"],
+      ["Memory", "session / turn / history 已持久化；管理页未完成", "partial"],
       ["MCP / 集成", "外部工具服务和账号连接", "attention"],
-      ["环境变量", "daemon 注入变量，只显示安全投影", "attention"],
-      ["运行时目录", "只读展示 runtime home 和状态目录", "attention"],
+      ["Environment", "已有安全配置投影；独立管理页未完成", "partial"],
+      ["Runtime directories", "Diagnostics 已展示 runtime home；目录页未完成", "partial"],
     ],
   },
   {
-    title: "Daemon 与手机壳",
+    title: "Connectivity",
     items: [
-      ["Daemon 连接", "本机、Tailscale、Relay、二维码导入", "attention"],
-      ["Worker 能力", "数量上限、capability、状态一致性", "ok"],
-      ["Android 更新与权限", "APK 更新、通知、文件访问授权", "ok"],
+      ["Daemon connection", "本机和远程 daemon registry 已有 owner；Settings 页未完成", "partial"],
+      ["Tailscale / Relay / QR", "路由与 bootstrap 基础已接入；完整管理页未完成", "partial"],
+      ["Android update", "APK 检查桥接已接入；真机闭环仍待完成", "partial"],
+      ["Android permissions / notifications", "启动授权与完成通知已接入；真机证据仍待完成", "partial"],
     ],
   },
   {
-    title: "Diagnostics",
+    title: "Observability",
     items: [
-      ["Diagnostics entry", "一级入口；点开后才展示 owner-projected logs 列表", "ok"],
-      ["日志", "导出 UI / daemon / provider 诊断包", "attention"],
-      ["关于 Freehand", "版本、隐私、反馈", "attention"],
+      ["Diagnostics logs", "owner-projected log metadata 和脱敏 tail", "ok"],
+      ["Session / Worker lifecycle", "owner-backed task / agent / turn 状态可观察", "ok"],
+      ["Export bundle", "UI / daemon / provider 诊断包导出未完成", "attention"],
     ],
+  },
+  {
+    title: "Appearance",
+    items: [
+      ["Theme", "已有 light / dark 切换；Settings 外观页未完成", "partial"],
+      ["Typography / density", "字号、密度、手机显示策略未完成", "attention"],
+    ],
+  },
+  {
+    title: "About",
+    items: [["About Freehand", "版本、隐私、反馈页未完成", "attention"]],
   },
 ];
 
@@ -5480,8 +5490,10 @@ function renderSettingsReviewTree() {
       const row = document.createElement("article");
       row.className = "settings-review-row";
       const marker = document.createElement("span");
-      marker.className = `settings-status-marker ${tone === "ok" ? "ok" : "attention"}`;
+      const markerTone = ["ok", "partial", "attention"].includes(tone) ? tone : "attention";
+      marker.className = `settings-status-marker ${markerTone}`;
       marker.setAttribute("aria-hidden", "true");
+      row.dataset.settingsState = markerTone;
       const copy = document.createElement("span");
       const label = document.createElement("strong");
       label.textContent = name;

@@ -8302,3 +8302,33 @@ Current real root cause split:
   - `git diff --check` passed.
 - remaining gap:
   - The mobile UI tree goal is not fully complete while the Android true-device WebView/update/permission/notification proof remains blocked by the locked/dozing device.
+# 2026-07-25 Settings IA layering / partial marker closeout
+
+- scope:
+  - Current work fixes Settings first-level IA only. It does not add provider/config/runtime semantics.
+  - First-level Settings is now grouped as `Models`, `Agent Runtime`, `Connectivity`, `Observability`, `Appearance`, and `About`.
+  - Provider configuration and Provider switching/strategy remain second-level pages under Models.
+  - Diagnostics is an Observability detail, not a Provider child or flat first-level LLM-adjacent entry.
+  - Status marker semantics are locked: green hollow square = owner-backed, orange hollow square = partial, red hollow square = placeholder/not implemented.
+- implementation:
+  - Production WebUI asset version bumped to `20260725-settings-layer-ui`.
+  - `apps/freehand-server/src/page.rs` renders grouped Settings nav cards and a green/orange/red legend.
+  - `apps/freehand-server/assets/webui.js` renders grouped review tree rows and preserves `partial` instead of mapping every non-ok row to red.
+  - `apps/freehand-server/assets/webui.css` adds `.settings-status-marker.partial { border-color: var(--running); }`.
+  - Static prototype config tree mirrors the grouped Settings IA and orange partial marker.
+  - Function map, test design, mainline JSON, and generated wiki were synced.
+- online proof:
+  - S-profile deployed with `/tmp/freehand-target-settings-layer`; health and `freehand-cliS adp-smoke --url ws://127.0.0.1:4042/adp` passed.
+  - `FREEHAND_WEBUI_CHROME=$HOME/Library/Caches/ms-playwright/chromium_headless_shell-1194/chrome-mac/headless_shell node scripts/verify-webui-mobile-ui-tree-online.mjs` passed with artifact `artifacts/webui-online/mobile-ui-tree-phase1-20260725T045905-74490`.
+  - Artifact checks prove first-level titles `Models, Agent Runtime, Connectivity, Observability, Appearance, About`, no flat `LLM Provider`, `partial` marker counts in both nav/review tree, hollow markers, and `Diagnostics` under Observability.
+  - `FREEHAND_WEBUI_DIAGNOSTICS_CHROME=... node scripts/verify-webui-diagnostics-online.mjs` passed with artifact `artifacts/webui-online/webui-diagnostics-1784955564587`.
+  - `FREEHAND_PROVIDER_REGISTRY_UI_CHROME=... node scripts/verify-provider-registry-ui-online.mjs` passed with artifact `artifacts/webui-online/provider-registry-ui-1784955579027`.
+  - `FREEHAND_MODEL_GROUP_UI_CHROME=... node scripts/verify-model-group-ui-online.mjs` passed with artifact `artifacts/webui-online/model-group-ui-1784955618922`.
+  - First `verify-provider-web-search-settings-ui-online.mjs` run failed because MiniMax hosted web_search returned provider text error without observing a hosted search call; config/env restored. Immediate rerun passed with artifact `artifacts/webui-online/provider-web-search-settings-ui-1784955890342`, proving the UI route still works and the first failure was provider-side transient.
+- local proof:
+  - `node --check apps/freehand-server/assets/webui.js` and touched WebUI verifier scripts passed.
+  - `CARGO_TARGET_DIR=/tmp/freehand-target-settings-layer cargo test -p freehand-server --lib -- --nocapture --test-threads=1` passed 19/19.
+  - `cargo fmt --check`, `CARGO_TARGET_DIR=/tmp/freehand-target-settings-layer cargo run -p xtask -- mainlines generate/check`, `CARGO_TARGET_DIR=/tmp/freehand-target-settings-layer cargo run -p xtask -- gates check`, and `git diff --check` passed.
+- restore proof:
+  - Final config query returned `provider=minimax`, `fallback_provider=cc`, `provider_protocol=messages`, `base_url_host=api.minimaxi.com`, `default_model=MiniMax-M3`, `web_search_effective=hosted_declared`, and `auth_source=inline`.
+  - Fixture env grep returned 0 matches for provider retry, master autonomy, provider registry, provider web_search, and model group verifier keys.

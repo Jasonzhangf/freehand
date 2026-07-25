@@ -10,6 +10,7 @@
   --logo-green-dark: #1f6e4c;
   --status-red: #d5665e;
   --status-red-soft: #fff4f2;
+  --status-orange: #c98831;
   --accent-soft: #eefcf4;
   --center: #14211d;
   --soft-settings: #f4fff8;
@@ -747,6 +748,31 @@ h1 {
 
 .status-dot.idle {
   border-color: var(--status-red);
+}
+
+.status-dot.partial {
+  border-color: var(--status-orange);
+}
+
+.config-status-legend {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px 12px;
+  margin: 14px 18px 4px;
+  color: var(--muted);
+  font-size: 12px;
+}
+
+.config-status-legend span {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+}
+
+.config-status-legend .status-dot {
+  width: 11px;
+  height: 11px;
+  margin: 0;
 }
 
 .provider-detail-card,
