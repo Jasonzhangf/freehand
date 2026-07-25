@@ -7,10 +7,17 @@ const chromePath =
   process.env.FREEHAND_WEBUI_CHROME || '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
 const debugPort = Number.parseInt(process.env.FREEHAND_WEBUI_DEBUG_PORT || '9238', 10);
 const baseUrl = normalizedBaseUrl(process.env.FREEHAND_WEBUI_BASE_URL || 'http://127.0.0.1:4042/');
+const adpUrl = process.env.FREEHAND_WEBUI_AMBIGUOUS_ADP_URL || adpUrlFromBaseUrl(baseUrl);
 const fixedSessionId =
   process.env.FREEHAND_WEBUI_AMBIGUOUS_SESSION || 'webui-ambiguous-submit-recovery-fixed';
+const fixedAttachmentSessionId =
+  process.env.FREEHAND_WEBUI_ATTACHMENT_FAILURE_SESSION || 'webui-attachment-failure-retain-fixed';
 const fixedPrompt =
   process.env.FREEHAND_WEBUI_AMBIGUOUS_PROMPT || 'fixed ambiguous submit recovery prompt';
+const attachmentFailurePrompt =
+  process.env.FREEHAND_WEBUI_ATTACHMENT_FAILURE_PROMPT || 'fixed attachment failure retain proof prompt';
+const taskCwd = process.env.FREEHAND_WEBUI_ATTACHMENT_FAILURE_CWD || process.cwd();
+const assetVersion = '20260725-attachment-failure-ui';
 const artifactDir =
   process.env.FREEHAND_WEBUI_AMBIGUOUS_ARTIFACT_DIR ||
   path.join(process.cwd(), 'artifacts', 'webui-online', 'ambiguous-submit-recovery-fixed');
@@ -21,6 +28,13 @@ const profileDir = await fs.mkdtemp(path.join(os.tmpdir(), 'freehand-webui-ambig
 let chrome;
 
 try {
+  await waitHealth();
+  await assertProductionPageReachable();
+  const imagePath = path.join(artifactDir, 'attachment-failure-proof.png');
+  await fs.writeFile(
+    imagePath,
+    Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAusB9Wl2n1cAAAAASUVORK5CYII=', 'base64'),
+  );
   chrome = spawn(
     chromePath,
     [
@@ -32,7 +46,7 @@ try {
       '--disable-background-networking',
       '--disable-extensions',
       '--disable-sync',
-      '--window-size=1400,1000',
+      '--window-size=390,844',
       baseUrl,
     ],
     { stdio: ['ignore', 'pipe', 'pipe'] },
@@ -44,9 +58,12 @@ try {
   const cdp = await createCdpClient(target.webSocketDebuggerUrl);
   await cdp.send('Page.enable');
   await cdp.send('Runtime.enable');
+  await cdp.send('DOM.enable');
+  await cdp.send('Network.enable');
   await cdp.send('Page.addScriptToEvaluateOnNewDocument', {
-    source: 'window.__freehandEnableTestHooks = true;',
+    source: `window.__freehandEnableTestHooks = true; window.__freehandDraftSessionIdsForTest = ${JSON.stringify([fixedAttachmentSessionId])};`,
   });
+  await cdp.send('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 2, mobile: true });
   await cdp.send('Page.navigate', { url: baseUrl });
   await waitForLoad(cdp);
   await waitFor(
@@ -59,17 +76,47 @@ try {
     'WebUI shell',
   );
 
-  const result = await evalPage(cdp, runAmbiguousSubmitRecoveryProof, fixedSessionId, fixedPrompt);
+  const attachmentFailure = await runAttachmentFailureRetentionProof(
+    cdp,
+    fixedAttachmentSessionId,
+    attachmentFailurePrompt,
+    taskCwd,
+    imagePath,
+  );
+  await cdp.send('Network.emulateNetworkConditions', {
+    offline: false,
+    latency: 0,
+    downloadThroughput: -1,
+    uploadThroughput: -1,
+  });
+  await cdp.send('Page.navigate', { url: baseUrl });
+  await waitForLoad(cdp);
+  await waitFor(
+    () => evalPage(cdp, () => !!document.querySelector('[data-webui-shell="true"]') && !!window.__freehandWebUiTest),
+    20_000,
+    'WebUI shell after attachment failure proof',
+  );
+  const ambiguous = await evalPage(cdp, runAmbiguousSubmitRecoveryProof, fixedSessionId, fixedPrompt);
+  const result = {
+    ok: true,
+    baseUrl,
+    assetVersion,
+    fixedSessionId,
+    fixedAttachmentSessionId,
+    taskCwd,
+    attachmentFailure,
+    ambiguous,
+    checks: {
+      ...attachmentFailure.checks,
+      ...ambiguous.checks,
+    },
+  };
   await fs.writeFile(path.join(artifactDir, 'summary.json'), JSON.stringify(result, null, 2));
-  if (
-    !result.checks.materializedClearsPending ||
-    !result.checks.taskTruthClearsPending ||
-    !result.checks.unverifiedKeepsPendingSession
-  ) {
+  if (Object.values(result.checks).some((passed) => !passed)) {
     throw new Error(`ambiguous submit recovery proof failed: ${JSON.stringify(result.checks)}`);
   }
   console.log(
-    `webui_ambiguous_submit_recovery_ok session=${fixedSessionId} artifact=${path.join(artifactDir, 'summary.json')}`,
+    `webui_ambiguous_submit_recovery_ok session=${fixedSessionId} attachment_session=${fixedAttachmentSessionId} artifact=${path.join(artifactDir, 'summary.json')}`,
   );
   await cdp.close();
 } finally {
@@ -78,6 +125,139 @@ try {
     await new Promise((resolve) => chrome.once('exit', resolve));
   }
   await fs.rm(profileDir, { recursive: true, force: true }).catch(() => {});
+}
+
+async function captureFailureState(cdp, name) {
+  if (!cdp) return;
+  const state = await evalPage(cdp, () => {
+    const hook = window.__freehandWebUiTest;
+    return {
+      attachmentState: hook?.captureAttachmentState?.() || null,
+      bodyText: document.body.innerText || '',
+    };
+  }).catch((error) => ({ captureError: error.message }));
+  await fs.writeFile(path.join(artifactDir, `${name}.json`), JSON.stringify(state, null, 2));
+}
+
+async function runAttachmentFailureRetentionProof(cdp, sessionId, prompt, cwd, imagePath) {
+  await evalPage(cdp, (targetCwd) => {
+    window.dispatchEvent(new Event('resize'));
+    window.__freehandLayout?.applyLayoutShape?.();
+    document.getElementById('mobile-new-entry-button')?.click();
+    const taskRadio = document.querySelector('input[name="new-session-kind"][value="task"]');
+    taskRadio.checked = true;
+    taskRadio.dispatchEvent(new Event('change', { bubbles: true }));
+    const input = document.getElementById('new-session-cwd-input');
+    input.value = targetCwd;
+    input.dispatchEvent(new Event('input', { bubbles: true }));
+  }, cwd);
+  await waitFor(
+    () => evalPage(cdp, () => {
+      const dialog = document.getElementById('new-session-dialog');
+      return dialog?.open && dialog.dataset.kind === 'task';
+    }),
+    10_000,
+    'task New dialog for attachment failure proof',
+  );
+  await evalPage(cdp, () => document.getElementById('new-session-form')?.requestSubmit());
+  const ownerSession = await waitForOwnerSession(sessionId, (row) => row && row.cwd === cwd, 30_000);
+  const selectedAfterCreate = await waitForSelectedSession(cdp, sessionId, cwd, 30_000);
+
+  const { root } = await cdp.send('DOM.getDocument', {});
+  const { nodeId } = await cdp.send('DOM.querySelector', {
+    nodeId: root.nodeId,
+    selector: '#attachment-image-input',
+  });
+  if (!nodeId) {
+    throw new Error('attachment image input not found');
+  }
+  await cdp.send('DOM.setFileInputFiles', { nodeId, files: [imagePath] });
+  await evalPage(cdp, () => {
+    const input = document.getElementById('attachment-image-input');
+    input?.dispatchEvent(new Event('change', { bubbles: true }));
+  });
+  const selectedAttachment = await waitFor(
+    () => evalPage(cdp, () => window.__freehandWebUiTest.captureAttachmentState()),
+    10_000,
+    'selected image attachment',
+  );
+  await cdp.send('Network.emulateNetworkConditions', {
+    offline: true,
+    latency: 0,
+    downloadThroughput: 0,
+    uploadThroughput: 0,
+  });
+  await evalPage(cdp, () => window.__freehandWebUiTest.closeAdpSocketForTest());
+  await evalPage(cdp, (text) => {
+    document.getElementById('composer-input').value = text;
+    document.getElementById('composer-form').requestSubmit();
+  }, prompt);
+  let retainedAfterFailure;
+  try {
+    retainedAfterFailure = await waitFor(
+      () => evalPage(cdp, (expectedPrompt, expectedSession, expectedCwd) => {
+        const state = window.__freehandWebUiTest.captureAttachmentState();
+        if (
+          state.selectedSession === expectedSession &&
+          state.selectedCwd === expectedCwd &&
+          state.pendingUserInput === expectedPrompt &&
+          state.pendingSubmitSessionId === expectedSession &&
+          state.attachmentCount === 1 &&
+          state.pendingAttachments === 1 &&
+          state.messageText.includes(expectedPrompt) &&
+          state.messageText.includes('Attachments') &&
+          state.messageText.includes('ready') &&
+          state.turnStatus.includes('checking service truth') &&
+          state.messageText.includes('Draft attachments retained')
+        ) {
+          return state;
+        }
+        return null;
+      }, prompt, sessionId, cwd),
+      30_000,
+      'attachment failure retention state',
+    );
+  } catch (error) {
+    await captureFailureState(cdp, 'attachment-failure-retention-timeout');
+    throw error;
+  }
+  const ownerAfterFailure = await waitForOwnerSession(sessionId, (row) => row && row.cwd === cwd, 30_000);
+  return {
+    sessionId,
+    prompt,
+    cwd,
+    ownerSession,
+    selectedAfterCreate,
+    selectedAttachment,
+    retainedAfterFailure,
+    ownerAfterFailure,
+    checks: {
+      attachmentSessionCreatedThroughOwnerTruth:
+        !!ownerSession && ownerSession.session_id === sessionId && ownerSession.cwd === cwd,
+      attachmentTaskSelectedWithCwd:
+        selectedAfterCreate.selectedSession === sessionId && selectedAfterCreate.selectedCwd === cwd,
+      imageSelectedThroughInput:
+        selectedAttachment.attachmentCount === 1 &&
+        selectedAttachment.thumbCount === 1 &&
+        selectedAttachment.removeCount === 1 &&
+        selectedAttachment.trayText.includes('attachment-failure-proof.png') &&
+        selectedAttachment.commandStatus.includes('1 attachment draft'),
+      failureKeepsSessionCwdAndPendingCard:
+        retainedAfterFailure.selectedSession === sessionId &&
+        retainedAfterFailure.selectedCwd === cwd &&
+        retainedAfterFailure.pendingUserInput === prompt &&
+        retainedAfterFailure.messageText.includes(prompt) &&
+        retainedAfterFailure.turnStatus.includes('checking service truth'),
+      failureKeepsAttachmentDraft:
+        retainedAfterFailure.attachmentCount === 1 &&
+        retainedAfterFailure.pendingAttachments === 1 &&
+        retainedAfterFailure.messageText.includes('Attachments') &&
+        retainedAfterFailure.messageText.includes('ready') &&
+        retainedAfterFailure.messageText.includes('Draft attachments retained'),
+      ownerSessionStillCwdBoundAfterFailure:
+        !!ownerAfterFailure && ownerAfterFailure.session_id === sessionId && ownerAfterFailure.cwd === cwd,
+    },
+  };
 }
 
 function runAmbiguousSubmitRecoveryProof(sessionId, prompt) {
@@ -243,6 +423,86 @@ async function waitPageTarget() {
   }, 20_000, 'Chrome DevTools page target');
 }
 
+async function waitHealth() {
+  await waitFor(async () => {
+    const response = await fetch(new URL('/health', baseUrl));
+    return response.ok && (await response.text()).trim() === 'ok';
+  }, 60_000, 'S-profile health');
+}
+
+async function assertProductionPageReachable() {
+  const response = await fetch(baseUrl, { cache: 'no-store' });
+  if (!response.ok) throw new Error(`production WebUI not reachable: ${response.status} ${response.statusText}`);
+  const html = await response.text();
+  if (!html.includes(assetVersion)) throw new Error(`served WebUI asset version mismatch: expected ${assetVersion}`);
+}
+
+async function waitForSelectedSession(cdp, sessionId, cwd, timeoutMs) {
+  return await waitFor(
+    () => evalPage(cdp, (expectedSession, expectedCwd) => {
+      const shell = document.querySelector('[data-webui-shell="true"]');
+      if (shell?.dataset?.selectedSession !== expectedSession) return null;
+      if (expectedCwd && shell?.dataset?.selectedCwd !== expectedCwd) return null;
+      return {
+        selectedSession: shell.dataset.selectedSession || '',
+        selectedCwd: shell.dataset.selectedCwd || '',
+        messageText: document.getElementById('message-list')?.innerText || '',
+        commandStatus: document.getElementById('command-status')?.innerText || '',
+      };
+    }, sessionId, cwd),
+    timeoutMs,
+    `selected session ${sessionId}`,
+  );
+}
+
+async function waitForOwnerSession(sessionId, predicate, timeoutMs) {
+  return await waitFor(async () => {
+    const list = sessionListPayload(await adpQuery('QuerySessionList'));
+    const row = allSessionRows(list).find((session) => session.session_id === sessionId) || null;
+    if (predicate(row)) return row;
+    return null;
+  }, timeoutMs, `owner session ${sessionId}`);
+}
+
+function sessionListPayload(result) {
+  return result?.SessionList || result?.session_list || result;
+}
+
+function allSessionRows(list) {
+  if (Array.isArray(list?.active)) return list.active;
+  if (Array.isArray(list?.sessions)) return list.sessions;
+  return [];
+}
+
+async function adpQuery(query) {
+  return await adpRequest('query', 'query', query, 30_000);
+}
+
+function adpRequest(kind, payloadKey, payload, timeoutMs) {
+  const socket = new WebSocket(adpUrl);
+  const requestId = `${kind}-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => {
+      socket.close();
+      reject(new Error(`ADP ${kind} timeout`));
+    }, timeoutMs);
+    socket.addEventListener('open', () => socket.send(JSON.stringify({ kind, request_id: requestId, [payloadKey]: payload })));
+    socket.addEventListener('message', (event) => {
+      const message = JSON.parse(event.data);
+      if (message.request_id !== requestId) return;
+      clearTimeout(timer);
+      socket.close();
+      if (message.kind === 'failure') return reject(new Error(message.failure?.message || message.failure?.code || 'ADP failure'));
+      if (message.kind === 'query_result') return resolve(message.result);
+      reject(new Error(`unexpected ADP ${kind} response: ${message.kind}`));
+    });
+    socket.addEventListener('error', () => {
+      clearTimeout(timer);
+      reject(new Error(`ADP ${kind} socket error`));
+    });
+  });
+}
+
 function createCdpClient(webSocketUrl) {
   const socket = new WebSocket(webSocketUrl);
   const pending = new Map();
@@ -345,4 +605,12 @@ function normalizedBaseUrl(value) {
     parsed.pathname = `${parsed.pathname}/`;
   }
   return parsed.toString();
+}
+
+function adpUrlFromBaseUrl(value) {
+  const url = new URL(value);
+  url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:';
+  url.pathname = '/adp';
+  url.search = '';
+  return url.toString();
 }

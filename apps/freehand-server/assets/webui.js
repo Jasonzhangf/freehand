@@ -1,4 +1,4 @@
-import { initializeThemeToggle } from "/assets/theme.js?v=20260725-session-search-ui";
+import { initializeThemeToggle } from "/assets/theme.js?v=20260725-attachment-failure-ui";
 
 initializeThemeToggle(document);
 
@@ -1643,6 +1643,9 @@ function pendingExecutionCard(renderPending) {
 
 function pendingChatCards(renderPending) {
   const elapsed = renderPending.elapsed;
+  const retainedAttachmentCount = Array.isArray(renderPending.attachments)
+    ? renderPending.attachments.length
+    : 0;
   const userRow = {
     kind: "user",
     title: "User",
@@ -1656,6 +1659,9 @@ function pendingChatCards(renderPending) {
       ? [
           "Submit receipt is being verified against service truth.",
           "Do not send a duplicate until the service refresh finishes.",
+          retainedAttachmentCount > 0
+            ? `Draft attachments retained for retry: ${retainedAttachmentCount}.`
+            : "Draft attachments retained for retry: none.",
         ]
       : ["Request accepted. Waiting for service dispatch."],
     status: renderPending.error ? "checking service truth" : elapsed || "0s",
@@ -9492,7 +9498,13 @@ function installWebUiTestHooks() {
     },
     captureAttachmentState() {
       const messageText = document.getElementById("message-list")?.innerText || "";
+      const shell = document.querySelector('[data-webui-shell="true"]');
       return {
+        selectedSession: shell?.dataset.selectedSession || "",
+        selectedCwd: shell?.dataset.selectedCwd || "",
+        composerValue: composerInput.value || "",
+        turnStatus: document.getElementById("turn-status")?.textContent?.trim() || "",
+        commandStatus: document.getElementById("command-status")?.textContent?.trim() || "",
         attachmentCount: currentAttachments().length,
         trayText: document.getElementById("attachment-tray")?.innerText || "",
         thumbCount: document.querySelectorAll(".attachment-thumb").length,
@@ -9500,6 +9512,9 @@ function installWebUiTestHooks() {
         overlayCount: document.querySelectorAll(".attachment-preview-overlay").length,
         messageText,
         pendingAttachments: state.pendingAttachments.length,
+        pendingUserInput: state.pendingUserInput,
+        pendingSubmitSessionId: state.pendingSubmitSessionId,
+        pendingSubmitError: state.pendingSubmitError,
       };
     },
     clickFirstAttachmentPreviewForTest() {
@@ -9518,6 +9533,15 @@ function installWebUiTestHooks() {
       composerInput.value = text || "";
       composerForm.requestSubmit();
       await new Promise((resolve) => setTimeout(resolve, 0));
+      return this.captureAttachmentState();
+    },
+    closeAdpSocketForTest() {
+      if (state.adpSocket) {
+        state.adpSocket.close();
+      }
+      state.adpSocket = null;
+      state.adpOpened = null;
+      clearAdpReconnectTimer();
       return this.captureAttachmentState();
     },
     applyTurnProjectionForTest(turn) {

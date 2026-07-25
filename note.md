@@ -8154,3 +8154,31 @@ Current real root cause split:
   - Final restore proof from that pass: S config was `minimax/MiniMax-M3`, `web_search_effective=hosted_declared`, inline auth, and fixture env grep was 0.
 - lesson:
   - New/session online verifiers must not create random session spam. Use explicit test-gated fixed ids, then wait for owner `QuerySessionList` truth before asserting UI selection or persisted-session state.
+
+# 2026-07-25 mobile UI tree Phase 2 attachment failure-retention slice
+
+- scope:
+  - Current work closes only the New/task attachment failure-retention proof slice.
+  - Full Phase 2 remains open for current-session lifecycle dashboard closure, Android true-device update/permission/notification closure, diagnostics/logs owner-safe projection, and final requirement audit.
+- implementation:
+  - Production WebUI asset version is bumped to `20260725-attachment-failure-ui`.
+  - Pending submit failure cards now show whether draft attachments were retained for retry.
+  - WebUI test hooks expose selected session/cwd, pending submit state, attachment tray counts, and a test-only ADP socket close helper.
+  - `scripts/verify-webui-ambiguous-submit-recovery.mjs` now also creates a fixed cwd-bound task session through the real mobile New dialog, selects an actual image via browser file input, forces deterministic offline/closed-socket submit failure, and proves owner/session/cwd/pending-card/attachment retention before running the existing ambiguous-submit branches.
+- online proof:
+  - `FREEHAND_WEBUI_CHROME=$HOME/Library/Caches/ms-playwright/chromium_headless_shell-1194/chrome-mac/headless_shell node scripts/verify-webui-ambiguous-submit-recovery.mjs` passed on S-profile.
+  - Output: `webui_ambiguous_submit_recovery_ok session=webui-ambiguous-submit-recovery-fixed attachment_session=webui-attachment-failure-retain-fixed artifact=/Volumes/extension/code/freehand/artifacts/webui-online/ambiguous-submit-recovery-fixed/summary.json`.
+  - Summary checks true: `attachmentSessionCreatedThroughOwnerTruth`, `attachmentTaskSelectedWithCwd`, `imageSelectedThroughInput`, `failureKeepsSessionCwdAndPendingCard`, `failureKeepsAttachmentDraft`, `ownerSessionStillCwdBoundAfterFailure`, `materializedClearsPending`, `taskTruthClearsPending`, `unverifiedKeepsPendingSession`.
+  - Evidence includes selected image `attachment-failure-proof.png`, `attachmentCount=1`, `thumbCount=1`, `removeCount=1`, command status `1 attachment draft(s) in selected session`, and failure text `Draft attachments retained for retry: 1.`.
+- local proof:
+  - `node --check apps/freehand-server/assets/webui.js` passed.
+  - `node --check scripts/verify-webui-ambiguous-submit-recovery.mjs` passed.
+  - Related WebUI verifier syntax checks passed: model group, mobile UI tree, New session, session search, Timer dashboard, and Tools registry.
+  - `CARGO_TARGET_DIR=/tmp/freehand-target-attachment-failure cargo test -p freehand-server --lib -- --nocapture --test-threads=1` passed 19/19; the printed dispatch-worker panic is the intentional negative test.
+  - `cargo fmt --check` passed.
+  - `CARGO_TARGET_DIR=/tmp/freehand-target-attachment-failure cargo run -p xtask -- mainlines check` passed.
+  - `CARGO_TARGET_DIR=/tmp/freehand-target-attachment-failure cargo run -p xtask -- gates check` passed.
+  - `git diff --check` passed.
+- restore proof:
+  - Final config query returned `provider=minimax`, `fallback_provider=cc`, `provider_protocol=messages`, `base_url_host=api.minimaxi.com`, `default_model=MiniMax-M3`, `web_search=auto`, `web_search_effective=hosted_declared`, `auth_source=inline`.
+  - Fixture env grep for provider retry/master autonomy/WebUI verifier/provider registry keys returned 0 matches.
