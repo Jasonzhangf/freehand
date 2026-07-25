@@ -8182,3 +8182,24 @@ Current real root cause split:
 - restore proof:
   - Final config query returned `provider=minimax`, `fallback_provider=cc`, `provider_protocol=messages`, `base_url_host=api.minimaxi.com`, `default_model=MiniMax-M3`, `web_search=auto`, `web_search_effective=hosted_declared`, `auth_source=inline`.
   - Fixture env grep for provider retry/master autonomy/WebUI verifier/provider registry keys returned 0 matches.
+
+# 2026-07-25 mobile UI tree Phase 2 current-session dashboard proof
+
+- scope:
+  - Current work closes only the current-session dashboard / Worker child navigation online proof slice.
+  - Full Phase 2 remains open for Android true-device update/permission/notification closure, diagnostics/logs owner-safe projection, and final requirement audit.
+- setup:
+  - Created fixed persisted parent session `webui-current-dashboard-fixed` through ADP `CreateSession`.
+  - Created fixed owner TaskBoard child `task-webui-current-dashboard-fixed` through ADP `CreateTask`, assigned to `worker`, claimed execution `exec-webui-current-dashboard-fixed`, and applied a `running` execution fact.
+  - Owner truth row: status `running`, parent `webui-current-dashboard-fixed`, worker session `worker-task-task-webui-current-dashboard-fixed`, active execution `exec-webui-current-dashboard-fixed`, target cwd `/Volumes/extension/code/freehand`.
+- online proof:
+  - `FREEHAND_WEBUI_CHROME=$HOME/Library/Caches/ms-playwright/chromium_headless_shell-1194/chrome-mac/headless_shell FREEHAND_WORKER_SUBTASKS_PARENT_SESSION=webui-current-dashboard-fixed FREEHAND_WORKER_SUBTASKS_EXPECTED_COUNT=1 FREEHAND_WORKER_SUBTASKS_MAX_WORKER_LABEL=3 FREEHAND_WORKER_SUBTASKS_WEBUI_ARTIFACT_DIR=artifacts/webui-online/worker-subtasks-current-dashboard-fixed node scripts/verify-worker-subtasks-webui-online.mjs` passed.
+  - Artifact: `artifacts/webui-online/worker-subtasks-current-dashboard-fixed/summary.json`; screenshots: `01-mobile-agent-sheet.png`, `02-worker-01-task-webui-current-dashboard-fixed.png`, `03-returned-parent.png`.
+  - Header proof: selected parent `webui-current-dashboard-fixed`, summary `0 running · 1 running task · limit 3`, copy `running: Current dashboard fixed Worker proof`.
+  - Sheet proof: `1 active · 0 review · 0 blocked · 0 closed · 0 stale`, one card with `data-task-id=task-webui-current-dashboard-fixed`, `data-worker-session-id=worker-task-task-webui-current-dashboard-fixed`, label `Worker 1` within configured limit 3.
+  - Worker navigation proof: clicking the task selected `worker-task-task-webui-current-dashboard-fixed`, showed Worker nav, had zero user-message/internal-prompt leaks, and returned to exact parent session.
+- restore proof:
+  - Final config query returned `provider=minimax`, `fallback_provider=cc`, `provider_protocol=messages`, `base_url_host=api.minimaxi.com`, `default_model=MiniMax-M3`, `web_search=auto`, `web_search_effective=hosted_declared`, `auth_source=inline`.
+  - Fixture env grep for path diagnostic/provider retry/master autonomy keys returned 0 matches.
+- known note:
+  - `scripts/verify-webui-path-diagnostic-online.mjs` still starts with `scripts/install-launchd.sh restartS`, which calls default-target `scripts/install-symlink.sh`; in this environment that build can stall before proof. The current dashboard proof avoided that path by using protocol owner commands plus the dedicated WebUI worker-subtasks verifier.
