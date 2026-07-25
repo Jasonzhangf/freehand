@@ -63,6 +63,7 @@
   - `bash -n scripts/release.sh`
   - `bash -n scripts/source-search.sh`
   - `bash -n scripts/verify-webui-online.sh`
+  - `node --check scripts/verify-mobile-ui-tree-goal-audit.mjs`
   - `python3 -m py_compile scripts/verify-adp-fixed-session-observability-online.py`
   - `bash -n scripts/install-global.sh`
   - `bash -n scripts/install-symlink.sh`
@@ -90,6 +91,7 @@
     `FREEHAND_*_SECRET` provider env keys from the matching Master profile
   - `make verify-webui-online` runs the fixed S-profile `127.0.0.1:4042` real-browser WebUI + ADP proof after symlink install/restartS, injects the verifier-only provider credential env required for Settings valid-save proof, restores S-profile config/env afterward, and saves screenshots plus `summary.json` under `artifacts/webui-online/`; `make verify-webui-release-online` is the explicit release-profile `127.0.0.1:4041` proof
   - `scripts/verify-adp-fixed-session-observability-online.py --url ws://127.0.0.1:4042/adp --session <fixed-id>` proves fixed-session submit observability with pending/final selected-session turns plus TaskBoard/AgentBoard owner truth, without creating random sessions
+  - `node scripts/verify-mobile-ui-tree-goal-audit.mjs` reads the accepted mobile UI tree artifact summaries, checks live S-profile config/env restoration, records ADB lockscreen/device state, and produces a JSON/Markdown pass/block/missing/fail report without creating test sessions
   - machine-readable mainline truth remains the only source for generated wiki artifacts
   - loop governance starts as report-only project control, not unattended automation
 - fixtures / replay inputs / runtime evidence paths:

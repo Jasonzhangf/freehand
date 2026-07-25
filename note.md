@@ -8252,3 +8252,26 @@ Current real root cause split:
   - `node --check scripts/verify-provider-web-search-settings-ui-online.mjs` passed.
 - lesson:
   - Provider capability UI closure requires a browser-click proof from Settings to `TestProviderWebSearch`, not just CLI/ADP proof. For provider-hosted search, also prove the provider request declares hosted `web_search` and does not expose a local function tool named `web_search`.
+
+# 2026-07-25 mobile UI tree final audit scaffold and Android blocker
+
+- scope:
+  - Current work did not add runtime/UI semantics. It adds a reusable final-audit verifier for the active mobile UI tree goal and records current true-device blocker evidence.
+  - The verifier is foundation/workspace evidence tooling: it reads already accepted WebUI/Android artifact summaries, live S-profile config, `~/.freehand/daemonS.env`, and ADB lockscreen signals. It does not create sessions or mutate owner truth.
+- implementation:
+  - Added `scripts/verify-mobile-ui-tree-goal-audit.mjs`.
+  - Updated `docs/function-maps/foundation.workspace.md` and `docs/testing/foundation.workspace.md` to document the audit verifier and its blocked-vs-failed behavior.
+  - The script outputs `summary.json` and `report.md` under `artifacts/webui-online/<run-id>/`, classifying entries as `passed`, `blocked`, `missing`, `failed`, or `weak`.
+- evidence:
+  - `node scripts/verify-mobile-ui-tree-goal-audit.mjs` returned `mobile_ui_tree_goal_audit_blocked artifactDir=/Volumes/extension/code/freehand/artifacts/webui-online/mobile-ui-tree-goal-audit-1784946703448 passed=18 blocked=1 missing=0 failed=0 weak=0`.
+  - The only blocker in that summary is `android_true_device`, with latest evidence `artifacts/android-device/20260725T022834Z-100.104.163.65_5555-92759/summary.json`.
+  - Official Android verifier re-run with no reinstall: `FREEHAND_ANDROID_SKIP_INSTALL=1 FREEHAND_ANDROID_SERIAL=100.104.163.65:5555 apps/freehand-android/scripts/verify-device-ui.sh 100.104.163.65:5555` exited blocked with `device_locked_or_dreaming`; window truth remained `mCurrentFocus=NotificationShade`, `mFocusedApp=com.zterm.android/.MainActivity`, `mDreamingLockscreen=true`.
+  - S-profile restore proof after audit: `freehand-cliS adp-config-query --url ws://127.0.0.1:4042/adp` returned `provider=minimax`, `provider_protocol=messages`, `base_url_host=api.minimaxi.com`, `default_model=MiniMax-M3`, `web_search_effective=hosted_declared`, `auth_source=inline`; fixture env grep returned 0 matches.
+- validation:
+  - `node --check scripts/verify-mobile-ui-tree-goal-audit.mjs` passed.
+  - `cargo fmt --check` passed.
+  - `cargo run -p xtask -- mainlines check` passed.
+  - `cargo run -p xtask -- gates check` passed.
+  - `git diff --check` passed.
+- remaining gap:
+  - The mobile UI tree goal is not fully complete while the Android true-device WebView/update/permission/notification proof remains blocked by the locked/dozing device.

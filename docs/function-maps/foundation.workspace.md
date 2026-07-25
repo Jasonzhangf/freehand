@@ -36,6 +36,7 @@
 - release script runs full regression, release binary builds, Android JVM regression, Android release APK packaging with Android release lint disabled in Gradle config, extracts APK version truth, and stages deterministic Android update artifacts including `dist/android/update.json`
 - WebUI online verification wrapper checks fixed S-profile `127.0.0.1:4042` daemon health and invokes the real browser WebUI + ADP proof for alpha promotion; release-profile `127.0.0.1:4041` proof is a separate explicit target
 - fixed-session ADP observability verifier submits with the correct internally tagged ADP envelope and queries selected session plus TaskBoard/AgentBoard owner truth so receipt waits cannot masquerade as lifecycle proof
+- mobile UI tree goal audit verifier reads existing owner-backed WebUI/Android evidence summaries plus live S-profile config/env and ADB lockscreen signals, then writes a pass/block/missing/fail report without creating sessions or mutating runtime truth
 - global install script installs the staged host binaries into one explicit prefix and copies compiled Android update artifacts into runtime-home distribution truth without inventing runtime config truth
 - symlink install script builds debug host binaries, exposes `freehand-cliS`, `freehand-serverS`, and `freehand-daemonS` as symlinks, and installs a copied `freehand-daemon-launchdS` wrapper for development without replacing global release commands
 - launchd install script installs host binaries, stages compiled Android update artifacts into runtime-home distribution truth, writes the LaunchAgent plist, writes daemon environment truth with explicit daemon binary and Android update artifact paths, starts the user service, and exposes fixed WebUI/log paths
@@ -68,6 +69,7 @@
 - release artifacts include `freehand-cli`, `freehand-server`, `freehand-daemon`, the Android release APK, and `dist/android/update.json` under `dist/`
 - S-profile WebUI online verification writes screenshots and `summary.json` under `artifacts/webui-online/<run-id>/`, proving composer clear, visible submitted input, multi-round failed-tool continuation, no stale historical animation, refresh persistence, and ADP session truth alignment
 - fixed-session ADP observability verifier returns one JSON summary containing pending selected-session turn truth, final selected-session turn truth, command receipt or timeout, and current Worker/blocked-task owner truth
+- mobile UI tree goal audit verifier returns one JSON/Markdown report under `artifacts/webui-online/<run-id>/`, with WebUI slices separated from Android true-device blockers and final S-profile restore evidence
 - global install exposes `freehand-cli`, `freehand-server`, and `freehand-daemon` on the chosen install prefix, plus Android update APK/manifest artifacts under `$HOME/.freehand/dist/android` or `FREEHAND_RUNTIME_HOME/dist/android`
 - symlink install exposes `freehand-cliS`, `freehand-serverS`, `freehand-daemonS`, and `freehand-daemon-launchdS` on the chosen prefix, pointing host commands at repo debug binaries while keeping the launchd wrapper executable as a prefix-local file
 - launchd install exposes `com.freehand.daemon` as a user LaunchAgent with `RunAtLoad`, `KeepAlive`, explicit `FREEHAND_DAEMON_BIN`, explicit Android update manifest/APK paths, fixed `127.0.0.1:4041` WebUI, and logs under `~/.freehand/logs`
@@ -99,6 +101,7 @@
 - missing source-only search exclusions, missing unsafe-argument guards, or missing `scripts/source-search.sh` policy snippets surface as gate failure
 - missing release prerequisites such as Java or Cargo surface as script failure before artifacts are claimed
 - missing fixed-port daemon health, Chrome/CDP availability, WebUI browser failures, or ADP mismatch surface as online verification failure before alpha success is claimed
+- missing mobile UI tree evidence summaries, failed required checks, or unrestored S-profile config/env surface as mobile UI tree audit failure; a locked/unavailable Android device is reported as blocked rather than completion
 - launchd bootstrap, kickstart, or env-backed health endpoint failure surfaces as script failure before background service success is claimed
 - macOS protected-folder permission denial surfaces as launchd install/restart preflight failure before the service is claimed healthy; `FREEHAND_FILE_PERMISSION_PREFLIGHT=warn` is an explicit operator override, not the default
 - mismatched launchd daemon binary prefix surfaces as install script failure before service success is claimed

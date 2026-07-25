@@ -563,6 +563,11 @@ Use this skill for any non-trivial work in this repo.
   proof from the Settings provider card/control to `TestProviderWebSearch`, visible
   DOM pass/fail status, S-profile restore, and request-shape evidence for hosted
   `web_search` when a fixture provider is used.
+- For mobile UI tree closeout, run `node scripts/verify-mobile-ui-tree-goal-audit.mjs`
+  after the slice verifiers. Treat `mobile_ui_tree_goal_audit_blocked` as an
+  explicit blocker report, not completion; an Android locked/dozing state must be
+  shown with the latest `apps/freehand-android/scripts/verify-device-ui.sh`
+  artifact and ADB window signals before reporting the remaining gap.
 
 ## Memory Workflow
 
