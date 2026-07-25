@@ -8229,3 +8229,26 @@ Current real root cause split:
   - `cargo fmt --check`, `CARGO_TARGET_DIR=/tmp/freehand-target-diagnostics cargo run -p xtask -- mainlines check`, `CARGO_TARGET_DIR=/tmp/freehand-target-diagnostics cargo run -p xtask -- gates check`, and `git diff --check` passed.
 - lesson:
   - Diagnostics/log UI must compare DOM rows to ADP owner projection, prove redaction/no absolute-path leakage, and prove the global session list is unchanged.
+
+# 2026-07-25 mobile UI tree Phase 2 Provider web_search Settings UI proof
+
+- scope:
+  - Current work closes the Provider Settings live-test UI proof gap: the Settings UI `Test web_search` buttons must actually submit `TestProviderWebSearch` and render owner-backed pass/fail status.
+  - Full Phase 2 remains open only where true-device Android proof is blocked by device lockscreen and for final requirement audit.
+- implementation:
+  - Added `scripts/verify-provider-web-search-settings-ui-online.mjs`.
+  - The verifier opens production S-profile WebUI Settings, proves `minimax` is visible as `anthropic/messages` with `web_search=auto -> hosted_declared`, clicks the `minimax` provider card's `Test web_search` button, and waits for DOM pass status.
+  - It then adds an OpenAI/Responses fixture provider through the real Settings form, proves owner-projected `hosted_declared`, clicks that fixture provider card's `Test web_search` button, captures the fixture request, and verifies `tools=[{"type":"web_search"}]` without a function tool named `web_search`.
+  - It restores `~/.freehand/config.toml` and `~/.freehand/daemonS.env`, service-scoped restarts S-profile, and verifies the fixture provider/env marker is gone.
+- online proof:
+  - First failed attempt `artifacts/webui-online/provider-web-search-settings-ui-1784944848042` was real product evidence: Settings button returned a provider failure because MiniMax did not observe hosted search in that attempt. CLI immediately after passed on the same S-profile, proving the provider/path can work and the initial failure was not a missing UI command route.
+  - Script bug in browser-context predicate was fixed after second attempt hit `ReferenceError: fixtureProviderId is not defined`; this was verifier-only, not product code.
+  - Final proof passed:
+    - `FREEHAND_PROVIDER_WEB_SEARCH_UI_CHROME=$HOME/Library/Caches/ms-playwright/chromium_headless_shell-1194/chrome-mac/headless_shell node scripts/verify-provider-web-search-settings-ui-online.mjs`
+    - output: `provider_web_search_settings_ui_ok url=http://127.0.0.1:4042/ adp=ws://127.0.0.1:4042/adp minimax=passed openai_responses=passed fixture_requests=1 artifactDir=/Volumes/extension/code/freehand/artifacts/webui-online/provider-web-search-settings-ui-1784945356860`
+- restore proof:
+  - The verifier final summary recorded `restored=true`, final provider `minimax`, final model `MiniMax-M3`, and fixture env grep `matchCount=0`.
+- local proof:
+  - `node --check scripts/verify-provider-web-search-settings-ui-online.mjs` passed.
+- lesson:
+  - Provider capability UI closure requires a browser-click proof from Settings to `TestProviderWebSearch`, not just CLI/ADP proof. For provider-hosted search, also prove the provider request declares hosted `web_search` and does not expose a local function tool named `web_search`.

@@ -558,6 +558,11 @@ Use this skill for any non-trivial work in this repo.
   diagnostic guesses. Online proof must compare DOM rows to ADP `QueryDiagnostics`
   owner truth, prove redaction/no absolute-path leakage, and prove the top-level
   persisted session list is unchanged.
+- For provider capability Settings UI, do not treat CLI/ADP capability tests as
+  proof that the phone Settings surface is wired. Closure requires a browser-click
+  proof from the Settings provider card/control to `TestProviderWebSearch`, visible
+  DOM pass/fail status, S-profile restore, and request-shape evidence for hosted
+  `web_search` when a fixture provider is used.
 
 ## Memory Workflow
 
