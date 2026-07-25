@@ -35,7 +35,7 @@ Phase 2 is accepted only after Phase 1 is committed, and all visible entries are
 ## Locked UI Direction
 
 - Home is the main page.
-- Home contains persisted session history, timer dashboard, and current session dashboard.
+- Home contains exactly two content areas: active/background sessions monitor and persisted Master session history. Timer, New Conversation, Tools, Search, and Config remain separated quick-entry surfaces.
 - Top-level session list never shows worker/subagent temporary sessions.
 - Worker sessions appear only inside their owning Master session, through the header/session tree with a clear return path.
 - Four corner quick entries use icons, not text labels.
@@ -65,7 +65,7 @@ Finish the reviewed static UI tree in production WebUI/Android WebView using exi
 ### Required Work
 
 1. Replace mobile navigation with icon-only quick entries in fixed corner positions.
-2. Render home as persisted session history plus timer dashboard plus current session dashboard.
+2. Render home as active/background sessions monitor plus persisted Master session history.
 3. Filter top-level session lists to persisted user sessions only.
 4. Keep worker/subagent sessions out of global history and show them only under the owning Master session header/session tree.
 5. Add the reviewed settings/config UI tree as a readable shell.

@@ -646,6 +646,49 @@ body.theme-dark .phase2-failed {
   gap: 8px;
 }
 
+.settings-nav-grid {
+  display: grid;
+  gap: 8px;
+}
+
+.settings-nav-card,
+.settings-subpage-head {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 8px;
+  align-items: start;
+  padding: 9px;
+  border: 1px solid rgba(31, 108, 88, 0.12);
+  border-radius: 12px;
+  background: rgba(247, 251, 248, 0.72);
+}
+
+.settings-nav-card strong,
+.settings-subpage-head strong {
+  display: block;
+  overflow: hidden;
+  color: var(--text);
+  font-size: 12px;
+  line-height: 1.25;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.settings-nav-card small,
+.settings-subpage-head small {
+  display: block;
+  margin-top: 2px;
+  color: var(--text-soft);
+  font-size: 10.5px;
+  line-height: 1.35;
+}
+
+.settings-provider-hierarchy,
+.settings-subpage {
+  display: grid;
+  gap: 10px;
+}
+
 .settings-card {
   overflow: hidden;
 }
@@ -945,7 +988,9 @@ body.theme-dark .settings-card {
   border-color: rgba(88, 176, 141, 0.22);
 }
 
-body.theme-dark .settings-row {
+body.theme-dark .settings-row,
+body.theme-dark .settings-nav-card,
+body.theme-dark .settings-subpage-head {
   background: rgba(255, 255, 255, 0.035);
 }
 
@@ -958,7 +1003,8 @@ body.theme-dark .settings-model-group-form {
 body.theme-dark .settings-provider-switch,
 body.theme-dark .settings-provider-card,
 body.theme-dark .settings-model-group-switch,
-body.theme-dark .settings-model-group-card {
+body.theme-dark .settings-model-group-card,
+body.theme-dark .settings-subpage {
   background: rgba(255, 255, 255, 0.035);
   border-color: rgba(88, 176, 141, 0.22);
 }
@@ -4944,12 +4990,6 @@ body[data-layout-shape="tablet_portrait"] .mobile-home-dashboard {
   padding: 0 10px 8px;
 }
 
-.mobile-home-grid {
-  display: grid;
-  grid-template-columns: repeat(2, minmax(0, 1fr));
-  gap: 8px;
-}
-
 .mobile-home-card {
   min-width: 0;
   display: grid;
@@ -4996,6 +5036,8 @@ body[data-layout-shape="tablet_portrait"] .mobile-home-dashboard {
 .mobile-home-session-list {
   display: grid;
   gap: 5px;
+  max-height: 132px;
+  overflow: auto;
   color: var(--text-soft);
   font-size: 11px;
 }

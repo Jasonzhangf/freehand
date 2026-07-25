@@ -9,7 +9,7 @@ const debugPort = Number.parseInt(process.env.FREEHAND_WEBUI_DEBUG_PORT || '9247
 const baseUrl = normalizedBaseUrl(process.env.FREEHAND_WEBUI_BASE_URL || 'http://127.0.0.1:4042/');
 const runId = `mobile-ui-tree-phase1-${new Date().toISOString().replace(/[-:.]/g, '').slice(0, 15)}-${process.pid}`;
 const artifactDir = path.join(process.cwd(), 'artifacts', 'webui-online', runId);
-const assetVersion = '20260725-diagnostics-ui';
+const assetVersion = '20260725-settings-ia-ui';
 const forbiddenUiTerms = [
   /rootfs/i,
   /shared-folder/i,
@@ -154,7 +154,10 @@ async function captureSettingsTree(cdp) {
   });
   await waitForFunction(cdp, () => {
     const tree = document.getElementById('settings-review-tree');
-    return tree && tree.innerText.includes('Provider registry') && tree.innerText.includes('Model group');
+    return tree &&
+      tree.innerText.includes('Provider configuration') &&
+      tree.innerText.includes('Provider switching and strategy') &&
+      tree.innerText.includes('Diagnostics entry');
   }, 10_000, 'settings review tree visible');
   const state = await evalInPage(cdp, collectPhaseOneState);
   const screenshot = await cdp.send('Page.captureScreenshot', {
@@ -195,11 +198,25 @@ function buildSummary({ snapshots, settings }) {
         .filter((snapshot) => snapshot.viewport.width >= 1180)
         .every((snapshot) => !snapshot.state.mobileHomeDashboardVisible),
       globalSessionListExcludesInternalSessions: !internalSessionTerms.some((pattern) => pattern.test(globalSessionText)),
+      homeShowsOnlyActivityAndHistory: portraitSnapshots.every((snapshot) =>
+        snapshot.state.mobileHomeActiveVisible &&
+        snapshot.state.mobileHomeHistoryVisible &&
+        snapshot.state.mobileHomeCardCount === 2 &&
+        !snapshot.state.homeHasTimerList &&
+        !snapshot.state.homeHasTimerMarker &&
+        !snapshot.state.homeHasCurrentCard &&
+        !snapshot.state.homeHasNewEntryButtonInsideHome &&
+        !snapshot.state.mobileHomeText.includes('timer dashboard') &&
+        !snapshot.state.mobileHomeText.includes('Timer owner truth')
+      ),
       settingsReviewTreeVisible: settings.state.settingsReviewTreeVisible,
-      settingsReviewTreeHasProviderFamily: settings.state.settingsReviewTreeText.includes('Add provider family'),
-      settingsReviewTreeHasProviderDetail: settings.state.settingsReviewTreeText.includes('Provider detail'),
-      settingsReviewTreeHasModelGroup: settings.state.settingsReviewTreeText.includes('Model group'),
+      settingsReviewTreeHasProviderConfig: settings.state.settingsReviewTreeText.includes('Provider configuration'),
+      settingsReviewTreeHasProviderStrategy: settings.state.settingsReviewTreeText.includes('Provider switching and strategy'),
+      settingsReviewTreeHasModelGroups: settings.state.settingsReviewTreeText.includes('Model groups'),
+      settingsReviewTreeHasDiagnosticsEntry: settings.state.settingsReviewTreeText.includes('Diagnostics entry'),
       settingsReviewTreeHasAndroid: settings.state.settingsReviewTreeText.includes('Android 更新与权限'),
+      settingsProviderPagesAreSplit: settings.state.providerConfigPageExists && settings.state.providerStrategyPageExists,
+      diagnosticsIsTopLevelEntry: settings.state.diagnosticsPageExists,
       noForbiddenUiStorageTerms: !forbiddenUiTerms.some((pattern) => pattern.test(allTexts)),
       statusMarkersAreHollow: settings.state.statusMarkerCount > 0 && settings.state.statusMarkerAllHollow,
     },
@@ -288,7 +305,7 @@ function collectPhaseOneState() {
   return {
     layoutShape: document.body.dataset.layoutShape || '',
     shellLayoutShape: shell?.dataset.layoutShape || '',
-    assetVersionSeen: html.includes('20260725-diagnostics-ui'),
+    assetVersionSeen: html.includes('20260725-settings-ia-ui'),
     bodyText,
     bodyWidth: document.body.scrollWidth,
     docWidth: document.documentElement.scrollWidth,
@@ -297,8 +314,19 @@ function collectPhaseOneState() {
       Math.max(document.body.scrollWidth, document.documentElement.scrollWidth) <= window.innerWidth + 2,
     globalSessionText,
     mobileHomeDashboardVisible: localIsVisible(document.getElementById('mobile-home-dashboard')),
+    mobileHomeText: document.getElementById('mobile-home-dashboard')?.innerText || '',
+    mobileHomeActiveVisible: localIsVisible(document.getElementById('mobile-home-active-list')),
+    mobileHomeHistoryVisible: localIsVisible(document.getElementById('mobile-home-session-list')),
+    mobileHomeCardCount: document.querySelectorAll('#mobile-home-dashboard .mobile-home-card').length,
+    homeHasTimerList: !!document.getElementById('mobile-home-timer-list'),
+    homeHasTimerMarker: !!document.getElementById('mobile-home-timer-marker'),
+    homeHasCurrentCard: !!document.querySelector('#mobile-home-dashboard .mobile-current-card'),
+    homeHasNewEntryButtonInsideHome: !!document.querySelector('#mobile-home-dashboard #mobile-new-entry-button'),
     settingsReviewTreeVisible: localIsVisible(document.getElementById('settings-review-tree')),
     settingsReviewTreeText: document.getElementById('settings-review-tree')?.innerText || '',
+    providerConfigPageExists: !!document.getElementById('settings-provider-config-page'),
+    providerStrategyPageExists: !!document.getElementById('settings-provider-strategy-page'),
+    diagnosticsPageExists: !!document.querySelector('.settings-diagnostics-page'),
     quickEntries: {
       items: quickEntries,
       visibleCount: visibleEntries.length,

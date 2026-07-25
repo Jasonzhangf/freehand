@@ -326,6 +326,16 @@ Use this skill for any non-trivial work in this repo.
 - Do not invent `/workspace`, `/tmp`, or sibling output directories when the user supplied a repo path. Missing target paths must report exact original/expanded/canonicalization evidence rather than broad searching or path substitution.
 - For real-provider master/worker claims, task creation and assignment alone are failure evidence, not partial success. Run `scripts/verify-real-provider-master-worker-history.sh --task <task_id>` against every real-provider-created worker task; any history that is empty or only `TaskCreated,TaskAssigned` means the production worker runner/scheduler did not execute and the claim must stay red.
 - For development validation, prefer the symlink service profile: `scripts/install-launchd.sh installS` for first setup and `scripts/install-launchd.sh restartS` after rebuilds. `restartS` must refresh the launchd debug daemon binary copy, health-check the env-backed bind from `~/.freehand/daemonS.env`, and keep Android relay service `com.freehand.relayS` synchronized through `scripts/install-relay-launchd.sh restartS`. S-profile daemon defaults stay fixed at `127.0.0.1:4042`; Android/WebView reaches it through the Tailscale relay `100.66.1.82:44042/relay/daemon/studio-host/`, not by moving the daemon bind to Tailscale. If mobile behavior looks stale, verify relay-served asset version and WebView DOM before debugging application code. This keeps global release service `com.freehand.daemon` on `127.0.0.1:4041` untouched.
+- Config/env-only online verifiers that temporarily mutate
+  `~/.freehand/config.toml` or `~/.freehand/daemonS.env` must restore the
+  original files and restart only the existing S service with
+  `launchctl kickstart -k "gui/$(id -u)/com.freehand.daemonS"`. Do not call
+  `scripts/install-launchd.sh restartS` from a verifier `finally` unless that
+  verifier intentionally validates rebuild/install, because rebuilding in the
+  restore path can hang before the daemon reloads restored config and leave the
+  live S-profile on fixture/provider settings. After restore, query
+  `freehand-cliS adp-config-query`, grep fixture env markers, and check no
+  verifier-owned cargo/rustc chain remains.
 - Android WebView proof is not closed by local `127.0.0.1:4042` served hashes. For phone-visible changes, verify the relay HTML asset version, relay-served JS contains the changed marker after path rewriting, relay ADP smoke passes, and true-device CDP/screenshot shows the current DOM. A terminal backend session with stale `[data-live="true"]` on the phone is a WebUI projection/cache/connection bug until the relay-loaded DOM proves `liveCount=0`.
 - If Jason reports that the phone still looks hung after a WebUI/relay fix, manual CDP reload evidence is not enough. Run an app-level true-device relaunch proof such as `FREEHAND_ANDROID_SKIP_INSTALL=1 apps/freehand-android/scripts/verify-device-ui.sh <adb-serial>`, reconnect CDP to the new Freehand PID, and prove the post-relaunch DOM has the relay asset version, terminal selected turn, `liveCount=0`, and no stale provider-retry text before claiming the mobile path is recovered.
 - Use the global `scripts/install-global.sh` plus `scripts/install-launchd.sh restart` path only for release/promotion closeout or when explicitly validating the installed release surface.

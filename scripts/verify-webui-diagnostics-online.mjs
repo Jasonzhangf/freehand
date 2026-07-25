@@ -11,7 +11,7 @@ const baseUrl = normalizedBaseUrl(process.env.FREEHAND_WEBUI_DIAGNOSTICS_BASE_UR
 const adpUrl = process.env.FREEHAND_WEBUI_DIAGNOSTICS_ADP_URL || adpUrlFromBaseUrl(baseUrl);
 const runId = `webui-diagnostics-${Date.now()}`;
 const artifactDir = path.join(repo, 'artifacts', 'webui-online', runId);
-const assetVersion = '20260725-diagnostics-ui';
+const assetVersion = '20260725-settings-ia-ui';
 const forbiddenPattern = /\/Users\/|\/Volumes\/|authorization|api_key|apikey|x-api-key|bearer |pair_token|secret|provider request|provider payload/i;
 
 await fs.mkdir(artifactDir, { recursive: true });
@@ -75,10 +75,14 @@ try {
   });
   await waitForFunction(cdp, () => {
     return !document.getElementById('settings-shell')?.hidden &&
-      !!document.getElementById('settings-diagnostics-refresh-button');
-  }, 10_000, 'settings diagnostics card visible');
+      !!document.querySelector('.settings-diagnostics-page');
+  }, 10_000, 'diagnostics top-level entry visible');
 
   await evalInPage(cdp, () => {
+    const diagnostics = document.querySelector('.settings-diagnostics-page');
+    if (diagnostics && !diagnostics.open) {
+      diagnostics.querySelector('summary')?.click();
+    }
     document.getElementById('settings-diagnostics-refresh-button')?.click();
   });
   const expectedNames = diagnostics.files.map((file) => file.name).filter(Boolean).slice(0, 8);
@@ -91,6 +95,8 @@ try {
         summaryText,
         runtimeHomeText: document.getElementById('settings-diagnostics-runtime-home')?.innerText || '',
         statusText: document.getElementById('settings-diagnostics-status')?.innerText || '',
+        diagnosticsPageOpen: document.querySelector('.settings-diagnostics-page')?.open === true,
+        diagnosticsTopLevelText: document.querySelector('.settings-diagnostics-page > summary')?.innerText || '',
         rows: rows.map((row) => ({
           logName: row.dataset.logName || '',
           relativePath: row.dataset.relativePath || '',
@@ -121,6 +127,7 @@ try {
     checks: {
       productionAssetVersion: true,
       adpProjectionSafe: diagnosticsProjectionSafe(diagnostics),
+      diagnosticsOpenedAsSeparateEntry: dom.diagnosticsPageOpen === true && /Diagnostics/.test(dom.diagnosticsTopLevelText),
       runtimeHomeRedacted: diagnostics.runtime_home === '~/.freehand' && dom.runtimeHomeText.includes('~/.freehand'),
       logsDirRelative: diagnostics.logs_dir === 'logs' && diagnostics.files.every((file) => `${file.relative_path || ''}`.startsWith('logs/')),
       domRowsMatchAdp: expectedNames.every((name) => dom.rows.some((row) => row.logName === name)),

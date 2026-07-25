@@ -15,7 +15,7 @@ const debugPort = Number.parseInt(process.env.FREEHAND_MODEL_GROUP_UI_DEBUG_PORT
 const chromePath =
   process.env.FREEHAND_MODEL_GROUP_UI_CHROME ||
   '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
-const assetVersion = '20260725-diagnostics-ui';
+const assetVersion = '20260725-settings-ia-ui';
 const runId = `model-group-ui-${Date.now()}`;
 const artifactDir = path.join(repo, 'artifacts', 'webui-online', runId);
 const testGroupId = process.env.FREEHAND_MODEL_GROUP_UI_GROUP_ID || `ui.verify.${Date.now()}`;
@@ -252,7 +252,7 @@ try {
   try {
     await fs.writeFile(configPath, originalConfig);
     await fs.writeFile(envPath, originalEnv);
-    await must(['scripts/install-launchd.sh', 'restartS']);
+    await restartSProfile();
     await waitHealth();
     restored = true;
   } catch (error) {
@@ -703,6 +703,14 @@ async function must(argv, opts = {}) {
       }
     });
   });
+}
+
+async function restartSProfile() {
+  const uid = typeof process.getuid === 'function' ? process.getuid() : null;
+  if (!Number.isInteger(uid)) {
+    throw new Error('cannot resolve current uid for service-scoped S-profile restart');
+  }
+  await must(['launchctl', 'kickstart', '-k', `gui/${uid}/com.freehand.daemonS`]);
 }
 
 async function grepFixtureEnv() {

@@ -248,7 +248,7 @@ try {
   try {
     await fs.writeFile(configPath, originalConfig);
     await fs.writeFile(envPath, originalEnv);
-    await must(['scripts/install-launchd.sh', 'restartS']);
+    await restartSProfile();
     await waitHealth();
     restored = true;
   } catch (error) {
@@ -642,6 +642,14 @@ async function must(argv, opts = {}) {
       }
     });
   });
+}
+
+async function restartSProfile() {
+  const uid = typeof process.getuid === 'function' ? process.getuid() : null;
+  if (!Number.isInteger(uid)) {
+    throw new Error('cannot resolve current uid for service-scoped S-profile restart');
+  }
+  await must(['launchctl', 'kickstart', '-k', `gui/${uid}/com.freehand.daemonS`]);
 }
 
 async function grepFixtureEnv() {

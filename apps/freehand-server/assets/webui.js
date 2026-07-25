@@ -1,4 +1,4 @@
-import { initializeThemeToggle } from "/assets/theme.js?v=20260725-diagnostics-ui";
+import { initializeThemeToggle } from "/assets/theme.js?v=20260725-settings-ia-ui";
 
 initializeThemeToggle(document);
 
@@ -84,9 +84,9 @@ const openToolsDashboardButton = document.getElementById("open-tools-dashboard-b
 const mobileNewEntryButton = document.getElementById("mobile-new-entry-button");
 const closeDetailDrawerButton = document.getElementById("close-detail-drawer-button");
 const mobileHomeDashboard = document.getElementById("mobile-home-dashboard");
+const mobileHomeActiveMarker = document.getElementById("mobile-home-active-marker");
+const mobileHomeActiveList = document.getElementById("mobile-home-active-list");
 const mobileHomeSessionList = document.getElementById("mobile-home-session-list");
-const mobileHomeTimerMarker = document.getElementById("mobile-home-timer-marker");
-const mobileHomeTimerList = document.getElementById("mobile-home-timer-list");
 const settingsReviewTree = document.getElementById("settings-review-tree");
 const mobileAgentSummaryStrip = document.getElementById("mobile-agent-summary-strip");
 const openMobileAgentSheetButton = document.getElementById("open-mobile-agent-sheet-button");
@@ -236,11 +236,10 @@ const phaseOneSettingsTree = [
   {
     title: "LLM 提供商",
     items: [
-      ["Active provider", "当前 provider / model / auth / web_search safe projection", "ok"],
-      ["Provider registry", "已配置 provider 列表和加载到表单", "ok"],
-      ["Add provider family", "OpenAI / Anthropic / Gemini / xAI / OpenRouter family review UI", "attention"],
-      ["Provider detail", "API key / OAuth / Base URL / protocol / capability test", "ok"],
-      ["Model group", "primary / sub / search / title / fallback / load balance owner-backed config", "ok"],
+      ["Provider configuration", "registry / endpoint / auth env var / protocol / default model / capability test", "ok"],
+      ["Provider switching and strategy", "primary / fallback provider, active model group, role routes, load balance", "ok"],
+      ["Provider family", "OpenAI / Anthropic / Gemini / xAI / OpenRouter family review UI", "attention"],
+      ["Model groups", "primary / sub / search / title / fallback / load balance owner-backed config", "ok"],
       ["Token 用量", "provider / session 用量投影，Phase 2 接 owner truth", "attention"],
     ],
   },
@@ -267,8 +266,9 @@ const phaseOneSettingsTree = [
     ],
   },
   {
-    title: "观测与关于",
+    title: "Diagnostics",
     items: [
+      ["Diagnostics entry", "一级入口；点开后才展示 owner-projected logs 列表", "ok"],
       ["日志", "导出 UI / daemon / provider 诊断包", "attention"],
       ["关于 Freehand", "版本、隐私、反馈", "attention"],
     ],
@@ -5348,39 +5348,36 @@ function renderMobileHomeDashboard() {
   if (!mobileHomeDashboard) {
     return;
   }
-  const selected = selectedParentSessionSummary() || sessionSummaryForSelected() || state.sessions[state.sessions.length - 1] || null;
-  const tasks = currentSessionTasks();
-  const counts = currentSessionTaskCounts(tasks);
-  const liveObservation = globalLiveSessionObservation();
-  const title = selected
-    ? selected.title || selected.session_id
-    : state.draftSessionId || "No session selected";
-  const copy = liveObservation
-    ? liveObservationLine(liveObservation)
-    : selected
-      ? compactSentence(selected.latest_summary || selected.latest_status || "Persisted session selected", 132)
-      : "Select a persisted session or create a new conversation.";
-  const timerStats = timerDashboardStats();
-  const timerCopy = state.timerStatusError
-    ? `Timer query failed: ${compactSentence(state.timerStatusError, 96)}`
-    : state.timerList
-      ? timerDashboardSummary(timerStats)
-      : "waiting for owner-backed timer projection";
-  setText("mobile-home-current-title", compactSentence(title, 80));
-  setText("mobile-home-current-copy", copy);
+  const activeSessions = activeSessionsForHome();
+  setText("mobile-home-active-title", `${activeSessions.length} active session${activeSessions.length === 1 ? "" : "s"}`);
   setText(
-    "mobile-home-current-metrics",
-    `${counts.activeCount} running · ${counts.reviewCount} review · ${counts.blockedCount} blocked · ${counts.closedCount} closed`,
+    "mobile-home-active-copy",
+    activeSessions.length > 0
+      ? "Background session monitor from owner-projected session and lifecycle truth."
+      : "Running, retrying, or waiting sessions appear here.",
   );
-  setText("mobile-home-timer-title", state.timerList ? "Timer owner truth" : "Timer loading");
-  setText("mobile-home-timer-copy", timerCopy);
-  if (mobileHomeTimerMarker) {
-    mobileHomeTimerMarker.classList.toggle("ok", !state.timerStatusError && timerStats.activeCount > 0);
-    mobileHomeTimerMarker.classList.toggle("attention", !!state.timerStatusError || timerStats.activeCount === 0);
+  if (mobileHomeActiveMarker) {
+    mobileHomeActiveMarker.classList.toggle("ok", activeSessions.length > 0);
+    mobileHomeActiveMarker.classList.toggle("attention", activeSessions.length === 0);
   }
-  renderMobileHomeTimerList();
+  renderMobileHomeActiveList(activeSessions);
   setText("mobile-home-session-count", `${state.sessions.length} persisted session(s)`);
   renderMobileHomeSessionList();
+}
+
+function activeSessionsForHome() {
+  const bySession = new Map();
+  const selectedObservation = globalLiveSessionObservation();
+  if (selectedObservation && selectedObservation.sessionId) {
+    bySession.set(selectedObservation.sessionId, selectedObservation);
+  }
+  (state.sessions || []).forEach((session) => {
+    const observation = sessionLiveObservation(session.session_id);
+    if (observation && observation.sessionId) {
+      bySession.set(observation.sessionId, { ...observation, scope: observation.scope || "active Master" });
+    }
+  });
+  return Array.from(bySession.values()).slice(0, 4);
 }
 
 function timerDashboardStats() {
@@ -5404,41 +5401,36 @@ function timerDashboardSummary(stats = timerDashboardStats()) {
   return `${stats.activeCount} active · ${stats.terminalCount} terminal${next}`;
 }
 
-function renderMobileHomeTimerList() {
-  if (!mobileHomeTimerList) {
+function renderMobileHomeActiveList(activeSessions = activeSessionsForHome()) {
+  if (!mobileHomeActiveList) {
     return;
   }
-  mobileHomeTimerList.replaceChildren();
-  if (state.timerStatusError) {
-    mobileHomeTimerList.textContent = compactSentence(state.timerStatusError, 96);
+  mobileHomeActiveList.replaceChildren();
+  if (activeSessions.length === 0) {
+    mobileHomeActiveList.textContent = state.sessionListLoaded ? "No active background sessions." : "waiting for activity truth";
     return;
   }
-  const timers = ((state.timerList && state.timerList.timers) || [])
-    .slice()
-    .sort((left, right) => Number(left.next_due_at || 0) - Number(right.next_due_at || 0))
-    .slice(0, 3);
-  if (timers.length === 0) {
-    mobileHomeTimerList.textContent = state.timerList ? "No timers." : "waiting for timer truth";
-    return;
-  }
-  timers.forEach((timer) => {
+  activeSessions.forEach((observation) => {
     const item = document.createElement("button");
     item.className = "mobile-home-session-item";
     item.type = "button";
-    item.dataset.timerId = timer.timer_id || "";
+    item.dataset.sessionId = observation.sessionId || "";
+    if (observation.turnId) {
+      item.dataset.turnId = observation.turnId;
+    }
     const marker = document.createElement("span");
-    marker.className = `settings-status-marker ${["active", "running"].includes(timer.status) ? "ok" : "attention"}`;
+    marker.className = `settings-status-marker ${observation.tone === "phase2-failed" ? "attention" : "ok"}`;
     marker.setAttribute("aria-hidden", "true");
     const copy = document.createElement("span");
     copy.className = "mobile-home-session-copy";
     const title = document.createElement("strong");
-    title.textContent = compactSentence(timer.reason || timer.timer_id, 72);
+    title.textContent = compactSentence(observation.title || observation.sessionId, 72);
     const meta = document.createElement("small");
-    meta.textContent = compactSentence(`${timer.status} · ${formatUnixTime(timer.next_due_at)}`, 72);
+    meta.textContent = compactSentence(liveObservationLine(observation), 88);
     copy.append(title, meta);
     item.append(marker, copy);
-    item.addEventListener("click", () => openTimerDashboard());
-    mobileHomeTimerList.appendChild(item);
+    item.addEventListener("click", () => switchConversationSession(observation.sessionId));
+    mobileHomeActiveList.appendChild(item);
   });
 }
 
@@ -7427,11 +7419,11 @@ function showInspectorPanel(panel) {
     inspectorEyebrow.textContent = showingSettings ? "settings" : "lifecycle observer";
   }
   if (inspectorTitle) {
-    inspectorTitle.textContent = showingSettings ? "Provider Settings" : "Task and Agent Lifecycle";
+    inspectorTitle.textContent = showingSettings ? "System Settings" : "Task and Agent Lifecycle";
   }
   if (inspectorCopy) {
     inspectorCopy.textContent = showingSettings
-      ? "Edit provider endpoint, model, and credential environment variable. Runtime status lives under Status."
+      ? "Open separated settings pages for provider configuration, provider strategy, diagnostics, runtime, and Android shell controls."
       : "观察 Master/Worker 生命周期、当前执行、事件和必要的调试摘要；活跃 Worker 会高亮并可点击查看对应任务进度。";
   }
   if (settingsShellToggle) {

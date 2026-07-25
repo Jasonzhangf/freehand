@@ -8230,6 +8230,33 @@ Current real root cause split:
 - lesson:
   - Diagnostics/log UI must compare DOM rows to ADP owner projection, prove redaction/no absolute-path leakage, and prove the global session list is unchanged.
 
+# 2026-07-25 mobile UI tree home/settings IA closeout
+
+- implementation:
+  - Mobile home body is now only two cards: `active sessions monitor` and `master session history`.
+  - Timer dashboard and New Session remain reachable only from the mobile corner entries, not duplicated as body dashboard cards.
+  - Settings top-level entries are split into LLM Provider, Diagnostics, Agent Runtime, and Android Shell.
+  - LLM Provider is hierarchical: Provider configuration is separate from Provider switching and strategy.
+  - Diagnostics is a top-level Settings page, not nested under Provider settings.
+  - Provider registry/model-group/web_search online verifiers now restore config/env with service-scoped `launchctl kickstart -k gui/<uid>/com.freehand.daemonS` instead of rebuilding through `install-launchd.sh restartS` in `finally`.
+- online proof:
+  - `FREEHAND_WEBUI_CHROME=$HOME/Library/Caches/ms-playwright/chromium_headless_shell-1194/chrome-mac/headless_shell node scripts/verify-webui-mobile-ui-tree-online.mjs` passed with artifact `artifacts/webui-online/mobile-ui-tree-phase1-20260725T041144-9793`.
+  - `FREEHAND_WEBUI_DIAGNOSTICS_CHROME=$HOME/Library/Caches/ms-playwright/chromium_headless_shell-1194/chrome-mac/headless_shell node scripts/verify-webui-diagnostics-online.mjs` passed with artifact `artifacts/webui-online/webui-diagnostics-1784952756601`.
+  - `FREEHAND_WEBUI_TOOLS_CHROME=$HOME/Library/Caches/ms-playwright/chromium_headless_shell-1194/chrome-mac/headless_shell node scripts/verify-webui-tools-registry-online.mjs` passed with artifact `artifacts/webui-online/webui-tools-registry-20260725T041236-15439`.
+  - `FREEHAND_WEBUI_TIMER_CHROME=$HOME/Library/Caches/ms-playwright/chromium_headless_shell-1194/chrome-mac/headless_shell node scripts/verify-webui-timer-dashboard-online.mjs` passed with timer `timer-master-source-less-ui-1784952762021826000-1`.
+  - `FREEHAND_SESSION_SEARCH_CHROME=$HOME/Library/Caches/ms-playwright/chromium_headless_shell-1194/chrome-mac/headless_shell node scripts/verify-webui-session-search-online.mjs` passed with fixed session `webui-session-search-fixed`.
+  - `FREEHAND_NEW_SESSION_CHROME=$HOME/Library/Caches/ms-playwright/chromium_headless_shell-1194/chrome-mac/headless_shell node scripts/verify-webui-new-session-online.mjs` passed with fixed sessions `webui-new-conversation-fixed` and `webui-new-task-fixed`.
+  - `FREEHAND_PROVIDER_REGISTRY_UI_CHROME=$HOME/Library/Caches/ms-playwright/chromium_headless_shell-1194/chrome-mac/headless_shell node scripts/verify-provider-registry-ui-online.mjs` passed with artifact `artifacts/webui-online/provider-registry-ui-1784953122380`.
+  - `FREEHAND_MODEL_GROUP_UI_CHROME=$HOME/Library/Caches/ms-playwright/chromium_headless_shell-1194/chrome-mac/headless_shell node scripts/verify-model-group-ui-online.mjs` passed with artifact `artifacts/webui-online/model-group-ui-1784953154684`.
+  - `FREEHAND_PROVIDER_WEB_SEARCH_UI_CHROME=$HOME/Library/Caches/ms-playwright/chromium_headless_shell-1194/chrome-mac/headless_shell node scripts/verify-provider-web-search-settings-ui-online.mjs` passed with artifact `artifacts/webui-online/provider-web-search-settings-ui-1784953187858`.
+- local proof:
+  - `node --check` passed for `apps/freehand-server/assets/webui.js` and touched WebUI verifier scripts.
+  - `CARGO_TARGET_DIR=/tmp/freehand-target-settings-ia cargo test -p freehand-server --lib -- --nocapture --test-threads=1` passed 19/19.
+  - `cargo fmt --check`, `CARGO_TARGET_DIR=/tmp/freehand-target-settings-ia cargo run -p xtask -- mainlines check`, `CARGO_TARGET_DIR=/tmp/freehand-target-settings-ia cargo run -p xtask -- gates check`, and `git diff --check` passed.
+- restore proof:
+  - Final `freehand-cliS adp-config-query --url ws://127.0.0.1:4042/adp` returned `provider=minimax`, `fallback_provider=cc`, `provider_protocol=messages`, `base_url_host=api.minimaxi.com`, `default_model=MiniMax-M3`, `web_search_effective=hosted_declared`, and `auth_source=inline`.
+  - Fixture env grep returned 0 matches.
+
 # 2026-07-25 mobile UI tree Phase 2 Provider web_search Settings UI proof
 
 - scope:

@@ -354,7 +354,7 @@ h1 {
 .home-overview {
   min-height: 0;
   display: grid;
-  grid-template-rows: auto auto 1fr;
+  grid-template-rows: auto 1fr;
   gap: 10px;
   overflow: hidden;
 }
@@ -397,7 +397,6 @@ h1 {
   font-size: 11px;
 }
 
-.timer-dashboard,
 .session-history {
   padding: 13px;
   border-radius: 22px;
@@ -425,23 +424,21 @@ h1 {
   white-space: nowrap;
 }
 
-.timer-row {
+.activity-row {
   display: grid;
-  grid-template-columns: 48px 1fr;
-  gap: 10px;
-  align-items: center;
+  gap: 2px;
   margin-top: 8px;
   padding: 8px 9px;
   border-radius: 15px;
-  background: var(--soft-timer);
+  background: var(--accent-soft);
 }
 
-.timer-row strong {
+.activity-row strong {
   color: var(--logo-green-dark);
   font-size: 13px;
 }
 
-.timer-row p {
+.activity-row p {
   color: #4b4339;
   font-size: 12px;
   line-height: 1.35;

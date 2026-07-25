@@ -42,7 +42,7 @@
     "front-end Timer dashboard queries QueryTimerList through ADP/runtime owner truth, submits ScheduleTimer and CancelTimer only as protocol commands, and must not store timer schedules, infer timer status, or encode timer state as task/browser truth",
     "front-end Tools dashboard queries QueryToolRegistry through ADP/runtime owner truth and renders only owner-projected schema, examples, guidance, execution scope, and Master/Worker exposure without executing tools, rendering session-specific tool turns, synthesizing a local web_search tool, or storing browser-local registry truth",
     "front-end Search dashboard queries QuerySessionSearch through ADP/runtime owner truth and renders only owner-projected persisted session search rows; it must not search browser-local session state, create a new session, or promote Worker/subagent sessions into top-level global results",
-    "front-end Settings diagnostics card queries QueryDiagnostics through ADP/runtime owner truth and renders only owner-projected log file metadata and redacted tail lines without browser-local log truth, session creation, raw provider payloads, secrets, or absolute paths.",
+    "front-end Diagnostics top-level Settings entry queries QueryDiagnostics through ADP/runtime owner truth and renders only owner-projected log file metadata and redacted tail lines without browser-local log truth, session creation, raw provider payloads, secrets, or absolute paths.",
     "front-end Worker labels derive from Worker-only resource ordinals; the Master AgentBoard row must not offset configured Worker labels",
     "transport-facing app routes expose SSE subscribe for latest turn and per-turn debug snapshot",
     "HTTP query and POST command ingress remain compatibility routes; SSE latest-turn subscribe is consumed by WebUI as a display-refresh mirror without owning command dispatch",
@@ -106,7 +106,7 @@
     "terminal cards use protocol-projected status strings so cancelled and failed terminal states do not render as success",
     "front-end cancel handling uses CancelTurn when turn_id is known and CancelLatestActiveTurn during submit-in-flight pre-SSE window",
     "ADP task list subscription returns accepted plus initial runtime task list projection and later runtime-published task list events",
-    "WebUI Settings diagnostics renders owner-projected QueryDiagnostics rows; repeated refreshes replace only the diagnostics projection and never create sessions, tasks, timers, tool executions, or unredacted log dumps."
+    "WebUI Diagnostics top-level entry renders owner-projected QueryDiagnostics rows; repeated refreshes replace only the diagnostics projection and never create sessions, tasks, timers, tool executions, or unredacted log dumps."
   ],
   "error_mainline": [
     "invalid smoke input or missing projection returns explicit app error",
@@ -132,7 +132,7 @@
     "Timer dashboard QueryTimerList, ScheduleTimer, and CancelTimer failures render explicit user-visible timer status errors and must not backfill timer rows from local browser guesses or task state",
     "Tools dashboard QueryToolRegistry failures render explicit user-visible status errors and must not backfill tool rows from local browser guesses, static arrays, or provider capability text",
     "Search dashboard QuerySessionSearch failures render explicit user-visible status errors and must not backfill results from local browser guesses, DOM session rows, or worker id prefixes",
-    "Settings diagnostics QueryDiagnostics failures render explicit user-visible status errors and must not backfill diagnostics from browser-local guesses, absolute filesystem paths, or raw log dumps."
+    "Diagnostics top-level entry QueryDiagnostics failures render explicit user-visible status errors and must not backfill diagnostics from browser-local guesses, absolute filesystem paths, or raw log dumps."
   ],
   "shared_functions": [
     {
@@ -309,23 +309,23 @@
     },
     {
       "step": "11h",
-      "symbol_path": "internalRuntimeSessionId / topLevelPersistedSessions / renderMobileHomeDashboard / renderMobileHomeSessionList / phaseOneSettingsTree / renderSettingsReviewTree",
+      "symbol_path": "internalRuntimeSessionId / topLevelPersistedSessions / renderMobileHomeDashboard / activeSessionsForHome / renderMobileHomeActiveList / renderMobileHomeSessionList / phaseOneSettingsTree / renderSettingsReviewTree",
       "file_path": "apps/freehand-server/assets/webui.js",
-      "responsibility": "implement Phase 1 mobile UI tree presentation only: exclude internal runtime sessions from global session projections, render mobile home current-session/timer/persisted-session dashboard, and render a settings/config review tree with UI-only rows for provider family, provider detail, model group, token usage, appearance, skills, memory, MCP, env vars, runtime dirs, daemon connection, Worker capability, Android update/permissions, logs, and about",
+      "responsibility": "implement Phase 1 mobile UI tree presentation only: exclude internal runtime sessions from global session projections, render the home dashboard as exactly two lists, active sessions monitor plus persisted Master session history, keep Timer and New Session as corner-entry surfaces outside the home body, and render a settings/config review tree with UI-only rows for provider family, provider configuration, provider switching and strategy, model groups, token usage, appearance, skills, memory, MCP, env vars, runtime dirs, daemon connection, Worker capability, Android update/permissions, logs, and about",
       "input_semantic": "SessionList projection plus selected-session/task projections plus static reviewed UI tree rows",
-      "output_semantic": "global session list without worker-task, master-lifecycle, or master-timer entries; mobile home dashboard; settings review tree with small hollow green/red status markers",
+      "output_semantic": "global session list without worker-task, master-lifecycle, or master-timer entries; mobile home active sessions monitor list; mobile home persisted Master history list; settings review tree with small hollow green/red status markers",
       "caller": "WebUI shell",
       "callee": "ui.protocol projections plus reviewed prototype contract",
       "binding_status": "bound"
     },
     {
       "step": "11i",
-      "symbol_path": "openTimerDashboard / refreshTimerDashboard / renderTimerDashboard / renderTimerDashboardList / renderTimerDashboardHistory / renderMobileHomeTimerList / scheduleTimerFromForm / cancelTimer",
+      "symbol_path": "openTimerDashboard / refreshTimerDashboard / renderTimerDashboard / renderTimerDashboardList / renderTimerDashboardHistory / scheduleTimerFromForm / cancelTimer",
       "file_path": "apps/freehand-server/assets/webui.js",
-      "responsibility": "render the mobile Timer dashboard from owner-projected TimerList truth, submit relative, absolute, and recurring schedule forms through ScheduleTimer, cancel active timers through CancelTimer, refresh QueryTimerList after receipts, and keep timer schedules independent from Task Center or browser truth",
+      "responsibility": "render the mobile Timer dashboard only from the top-right Timer entry using owner-projected TimerList truth, submit relative, absolute, and recurring schedule forms through ScheduleTimer, cancel active timers through CancelTimer, refresh QueryTimerList after receipts, and keep timer schedules independent from Task Center, browser truth, and the home dashboard",
       "input_semantic": "Timer dashboard button, form fields, selected source session id, UiQueryResult::TimerList, ScheduleTimer receipt, and CancelTimer receipt",
-      "output_semantic": "owner-backed Timer dashboard rows, home Timer summary, schedule/cancel status, visible timer history, or explicit timer error status",
-      "caller": "WebUI mobile home and Timer dashboard dialog",
+      "output_semantic": "owner-backed Timer dashboard rows, schedule/cancel status, visible timer history, or explicit timer error status",
+      "caller": "WebUI Timer dashboard dialog",
       "callee": "runtime timer owner projections and commands through ADP",
       "binding_status": "bound"
     },
@@ -490,10 +490,10 @@
       "step": "11m",
       "symbol_path": "renderSettingsDiagnostics / renderDiagnosticLogRow / refreshDiagnosticsStatus",
       "file_path": "apps/freehand-server/assets/webui.js",
-      "responsibility": "render Settings diagnostics from owner-projected Diagnostics truth, refresh through QueryDiagnostics, and show only redacted log metadata/tail rows without browser-local log reads",
-      "input_semantic": "Settings diagnostics refresh click and UiQueryResult::Diagnostics",
+      "responsibility": "render the Diagnostics top-level entry from owner-projected Diagnostics truth, refresh through QueryDiagnostics, and show only redacted log metadata/tail rows without browser-local log reads",
+      "input_semantic": "Diagnostics refresh click and UiQueryResult::Diagnostics",
       "output_semantic": "owner-backed diagnostics rows, summary, runtime-home label, explicit empty state, or explicit diagnostics error status",
-      "caller": "WebUI Settings shell",
+      "caller": "WebUI Settings Diagnostics entry",
       "callee": "runtime diagnostics owner projection through ADP",
       "binding_status": "bound"
     }
@@ -528,7 +528,7 @@
     "WebUI Phase 2D status drawer now renders TaskBoard, AgentBoard, EventInbox, task history, and WorkerControl from runtime owner query results; it does not write browser-persisted task/control truth",
     "WebUI mobile Agent Dashboard Worker labels now use Worker-only ordinals so configured worker/worker-2/worker-3 render as Worker 1/2/3 even when AgentBoard includes Master",
     "WebUI WorkerControl buttons now send WorkerControl commands through ADP and re-query the owner projection; the visible receipt hides internal feature ids",
-    "WebUI Timer dashboard now queries QueryTimerList, schedules timers through ScheduleTimer, cancels through CancelTimer, updates the mobile home Timer summary from owner projection, and keeps schedule/history truth in the runtime timer owner instead of browser state",
+    "WebUI Timer dashboard now queries QueryTimerList, schedules timers through ScheduleTimer, cancels through CancelTimer, renders only through the top-right Timer entry, and keeps schedule/history truth in the runtime timer owner instead of browser or home dashboard state",
     "WebUI Tools dashboard now queries QueryToolRegistry, renders owner projection rows and guidance, proves no local web_search function row, and keeps session-specific tool turns in conversation rendering instead of this registry/settings surface",
     "WebUI Search dashboard now queries QuerySessionSearch, renders owner persisted session rows plus nested Worker child matches, and keeps global session history free of worker/subagent temporary sessions",
     "generated wiki must be regenerated from `docs/mainline-calls/app.webui-smoke.json` when this function-map truth changes",

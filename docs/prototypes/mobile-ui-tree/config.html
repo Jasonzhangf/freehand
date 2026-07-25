@@ -29,17 +29,28 @@
             <div class="settings-list">
               <div class="settings-item">
                 <span class="settings-icon provider-icon"></span>
-                <div><strong>管理提供商</strong><p>API key、OAuth、Base URL、能力测试</p></div>
+                <div><strong>Provider 配置</strong><p>registry、Base URL、协议、认证、能力测试</p></div>
                 <span class="chevron">›</span>
               </div>
               <div class="settings-item">
                 <span class="settings-icon model-icon"></span>
-                <div><strong>模型组</strong><p>主模型、辅助模型、回退与负载均衡</p></div>
+                <div><strong>Provider 切换与策略</strong><p>primary / fallback、模型组、路由、负载均衡</p></div>
                 <span class="chevron">›</span>
               </div>
               <div class="settings-item">
                 <span class="settings-icon usage-icon"></span>
                 <div><strong>Token 用量</strong><p>按 provider / session 查看使用情况</p></div>
+                <span class="chevron">›</span>
+              </div>
+            </div>
+          </section>
+
+          <section class="settings-group">
+            <h3>Diagnostics</h3>
+            <div class="settings-list">
+              <div class="settings-item">
+                <span class="settings-icon logs-icon"></span>
+                <div><strong>诊断列表</strong><p>一级入口；点开后才显示日志、导出和红acted tail</p></div>
                 <span class="chevron">›</span>
               </div>
             </div>
@@ -109,13 +120,8 @@
           </section>
 
           <section class="settings-group">
-            <h3>观测与关于</h3>
+            <h3>关于</h3>
             <div class="settings-list">
-              <div class="settings-item">
-                <span class="settings-icon logs-icon"></span>
-                <div><strong>日志</strong><p>导出 UI / daemon / provider 诊断包</p></div>
-                <span class="chevron">›</span>
-              </div>
               <div class="settings-item">
                 <span class="settings-icon about-icon"></span>
                 <div><strong>关于 Freehand</strong><p>版本、隐私、反馈</p></div>
@@ -128,12 +134,12 @@
         <div class="config-phone secondary-config-phone">
           <header class="config-topbar compact">
             <span class="back-link">‹</span>
-            <h2>管理提供商</h2>
+            <h2>LLM Provider</h2>
             <span class="plus-action">+</span>
           </header>
 
           <section class="provider-stack">
-            <h3>ACTIVE</h3>
+            <h3>Provider 配置</h3>
             <article class="provider-card active-provider">
               <span class="status-dot"></span>
               <div><strong>MiniMax M3</strong><p>Anthropic Messages · web_search auto</p></div>
@@ -147,7 +153,7 @@
           </section>
 
           <section class="provider-detail-card">
-            <span class="node-id">Provider Detail</span>
+            <span class="node-id">Provider Configuration</span>
             <h3>新增 / 编辑提供商</h3>
             <label>标签 <strong>OpenAI Compatible</strong></label>
             <label>认证 <strong>API Key / OAuth</strong></label>
@@ -168,8 +174,8 @@
           </section>
 
           <section class="model-group-card">
-            <span class="node-id">Model Group</span>
-            <h3>Default Models</h3>
+            <span class="node-id">Provider Switching / Strategy</span>
+            <h3>Default Strategy</h3>
             <div class="model-line"><strong>Primary</strong><span>MiniMax-M3</span></div>
             <div class="model-line"><strong>Sub</strong><span>gpt-5.5 title/search</span></div>
             <div class="model-line"><strong>Policy</strong><span>fallback + load balance</span></div>
@@ -185,7 +191,7 @@
         <div class="config-contract-grid">
           <article>
             <h3>Provider / 模型组</h3>
-            <p>Provider 是 registry，可以新增多个实例；模型组选择 primary / sub / search 等用途模型。能力来自 provider 配置和测试结果，不靠 UI 猜。</p>
+            <p>Provider 配置单独管理 registry、endpoint、auth、protocol、capability test；切换和策略单独管理 primary/fallback、模型组和路由，不混在同一扁平列表。</p>
           </article>
           <article>
             <h3>记忆位置</h3>
@@ -205,7 +211,7 @@
           </article>
           <article>
             <h3>观测边界</h3>
-            <p>日志和诊断包只用于证据导出，不作为 debug 主导航，不替代 session / worker 生命周期可观察状态。</p>
+            <p>Diagnostics 是独立一级入口，点开后才显示日志列表；不放进 provider settings，也不替代 session / worker 生命周期可观察状态。</p>
           </article>
         </div>
 

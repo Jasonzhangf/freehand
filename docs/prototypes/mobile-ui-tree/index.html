@@ -12,8 +12,8 @@
         <div class="kicker">review-only static prototype</div>
         <h1>Freehand 手机入口 UI Tree</h1>
         <p>
-          本页只整理入口和页面树，不接 ADP、不读运行时、不实现功能。首页先展示历史 session、
-          定时任务和当前 session dashboard；worker 只进入 session 后作为内部关系展示。
+          本页只整理入口和页面树，不接 ADP、不读运行时、不实现功能。首页只分活动列表和
+          Master 历史列表；Timer 和 New 已经有四角入口，不在首页重复占位。
         </p>
       </section>
 
@@ -27,7 +27,7 @@
           <div class="tree-node root-node">
             <span class="node-id">Root</span>
             <strong>Mobile Shell / Home</strong>
-            <em>首页为历史 session + timer + 当前 session dashboard</em>
+            <em>首页为 active sessions monitor + Master history</em>
           </div>
 
           <div class="tree-grid">
@@ -95,12 +95,12 @@
             <article class="tree-card conversation">
               <span class="node-id">Center</span>
               <h3>首页内容</h3>
-              <p>一级入口只显示持久化 session、定时任务和当前 session dashboard。</p>
+              <p>一级内容只显示后台活动监控和 Master 历史 session 列表。</p>
               <ul>
-                <li>历史 session 列表</li>
-                <li>定时任务 dashboard</li>
-                <li>当前 session dashboard</li>
+                <li>活动 session 列表</li>
+                <li>Master 历史 session 列表</li>
                 <li>不在首页一级展示 worker session 内容</li>
+                <li>不重复显示 Timer / New 入口</li>
               </ul>
             </article>
           </div>
@@ -135,29 +135,22 @@
 
           <section class="home-overview" aria-label="Home dashboard preview">
             <article class="current-dashboard">
-              <span class="small-label">current session dashboard</span>
-              <h2>project-analysis-0724</h2>
+              <span class="small-label">active sessions monitor</span>
+              <h2>2 background sessions</h2>
               <div class="metric-grid">
                 <span>running</span>
-                <span>last turn 09:44</span>
-                <span>2 active workers</span>
+                <span>retrying</span>
+                <span>waiting review</span>
               </div>
-              <p>只显示当前 session 总览；worker 详情进入该 session 后再展开。</p>
-            </article>
-
-            <article class="timer-dashboard">
-              <div class="section-title-line">
-                <h3>定时任务</h3>
-                <span>3 active</span>
+              <div class="activity-row">
+                <strong>project-analysis-0724</strong>
+                <p>selected · waiting model · runtime-turn-4</p>
               </div>
-              <div class="timer-row">
-                <strong>10:30</strong>
-                <p>回来检查 worker review</p>
+              <div class="activity-row">
+                <strong>provider-debug-0725</strong>
+                <p>active Master · provider retry · runtime-turn-2</p>
               </div>
-              <div class="timer-row">
-                <strong>cron</strong>
-                <p>每天同步 provider 状态</p>
-              </div>
+              <p>只显示正在后台运行、retry、waiting 的 sessions；Timer 从右上角入口进入。</p>
             </article>
 
             <section class="session-history" aria-label="Persisted session list">
@@ -224,7 +217,7 @@
             <span>Tools -> select / shell / daemon workspace / browser</span>
             <span>New -> conversation / task / cwd</span>
             <span>Search -> persisted sessions only</span>
-            <span>Home -> history sessions / timers / current dashboard</span>
+            <span>Home -> active sessions monitor / Master history</span>
           </div>
         </aside>
       </section>
@@ -263,8 +256,8 @@
         <div class="design-lock">
           <span class="node-id">Design Lock</span>
           <p>
-            主界面锁定为四角图标入口 + 首页三块内容：历史持久化 session、定时任务、当前 session
-            dashboard。首页一级列表禁止显示 worker session 内容；worker 关系只在进入所属 session 后展开。
+            主界面锁定为四角图标入口 + 首页两块内容：活动 sessions 监控和 Master 历史 session
+            列表。首页一级列表禁止显示 worker session、Timer dashboard、New session 重复入口；worker 关系只在进入所属 session 后展开。
           </p>
         </div>
 
@@ -274,7 +267,7 @@
             <h3>配置入口</h3>
             <dl>
               <dt>页面树</dt>
-              <dd>Provider / 模型组 -> Daemon / 远程连接 -> Worker 能力 -> Android 更新与权限。</dd>
+              <dd>Provider configuration -> Provider switching / strategy -> Diagnostics -> Daemon / 远程连接 -> Worker 能力 -> Android 更新与权限。</dd>
               <dt>职责</dt>
               <dd>管理低频系统配置和能力声明，配置变更给出重启或测试入口。</dd>
               <dt>禁止</dt>

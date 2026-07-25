@@ -16,7 +16,7 @@
   - app boundary receives protocol-owned command ingress intent and returns dispatch receipt/failure only
   - app boundary renders a usable protocol-driven WebUI shell
   - app boundary serves split theme, WebUI, and shared logo assets
-  - WebUI Phase 1 mobile UI tree renders icon-only quick entries, a home dashboard, persisted-session preview, and a settings review tree without adding new runtime/timer/search/tool/config mutation semantics
+  - WebUI Phase 1 mobile UI tree renders icon-only quick entries, a home dashboard split into an active sessions monitor list and a persisted Master session history list, and a settings review tree without adding new runtime/timer/search/tool/config mutation semantics
   - WebUI global session lists consume only persisted user sessions; Worker/subagent temporary sessions are allowed only inside the owning Master session Header/session tree from TaskBoard owner truth
   - app boundary renders a compact session rail with separate new-conversation and new-task affordances; new task requires a visible target cwd, while new conversation does not require cwd
   - app boundary renders protocol-owned debug query projection
@@ -39,7 +39,7 @@
     owner-projected persisted session rows plus nested Worker child matches
     without browser-local search state, new session creation, or top-level
     Worker promotion
-  - WebUI Settings diagnostics can query `QueryDiagnostics` and render
+  - WebUI Diagnostics top-level entry can query `QueryDiagnostics` and render
     owner-projected log metadata plus redacted tail lines without browser-local
     log truth, session creation, raw provider payloads, secrets, or absolute
     paths
@@ -55,7 +55,7 @@
   - WebUI default command/query/status path uses ADP WebSocket `/adp`; latest-turn SSE is consumed as a display-refresh mirror
   - WebUI exposes hidden success/failure diagnostic prompts through slash commands and keyboard shortcuts while preserving the normal ADP submit path; persistent Success/Failure composer buttons must not render
 - WebUI control strip and session rail expose session switching, `/new` New dialog, `/task` task mode in that dialog, refresh, cwd selection, model selection, attachment upload, file/image/video preview, slash commands, and keyboard shortcuts as input-layer affordances
-- WebUI settings shell exposes the owner-backed provider registry, current primary/fallback selectors, provider definition add/update form, provider web_search live-test trigger/status, model group registry/definition/active selection, Worker-limit settings, and Android-only APK update bridge card without parsing or directly mutating daemon config files; Phase 1 settings review rows for provider family/token usage/appearance/skills/memory/MCP/env/runtime dirs/daemon/Worker/Android/logs/about are UI-only until owner-backed Phase 2 wiring lands
+- WebUI settings shell exposes top-level entries for LLM Provider, Diagnostics, Agent Runtime, and Android Shell. LLM Provider is split into Provider configuration for registry/form/web_search testing and Provider switching/strategy for current primary/fallback selection plus model group registry/definition/active selection; Diagnostics is independent from provider settings; Agent Runtime owns Worker-limit settings; Android Shell owns the Android-only APK update bridge card. The shell does not parse or directly mutate daemon config files, and Phase 1 settings review rows for provider family/token usage/appearance/skills/memory/MCP/env/runtime dirs/daemon/Worker/Android/logs/about are UI-only until owner-backed Phase 2 wiring lands
 - WebUI aspect-ratio layout classifier applies presentation-only shape attributes for phone portrait, tall phone, phone landscape, tablet portrait, tablet landscape, foldable unfolded, and desktop large without mutating protocol/session state
 - WebUI root route renders `?client=android-webview` with server-side `tablet_portrait` initial layout attributes before JS loads, while the normal browser root remains unpinned
 - WebUI phone/tall-phone/tablet-portrait layout defaults to the conversation workspace; sessions and debug/config detail panels are hidden in explicit overlay drawers and never consume the normal conversation flow
@@ -78,12 +78,12 @@
   - WebUI root shell smoke, including shared logo reference
   - WebUI theme and shared logo asset smoke
   - WebUI JS asset smoke
-  - WebUI Phase 1 mobile UI tree asset smoke for `open-settings-drawer-button`, `open-timer-dashboard-button`, `open-tools-dashboard-button`, `mobile-new-entry-button`, `open-session-drawer-button`, `mobile-home-dashboard`, `settings-review-tree`, `internalRuntimeSessionId`, `topLevelPersistedSessions`, `renderMobileHomeDashboard`, `renderMobileHomeSessionList`, `phaseOneSettingsTree`, `renderSettingsReviewTree`, small hollow status markers, logo green, and no production UI storage-management wording for Android
+  - WebUI Phase 1 mobile UI tree asset smoke for `open-settings-drawer-button`, `open-timer-dashboard-button`, `open-tools-dashboard-button`, `mobile-new-entry-button`, `open-session-drawer-button`, `mobile-home-dashboard`, `mobile-home-active-list`, `mobile-home-session-list`, `settings-review-tree`, `internalRuntimeSessionId`, `topLevelPersistedSessions`, `renderMobileHomeDashboard`, `activeSessionsForHome`, `renderMobileHomeActiveList`, `renderMobileHomeSessionList`, `phaseOneSettingsTree`, `renderSettingsReviewTree`, small hollow status markers, logo green, no home Timer/New duplicate body card, and no production UI storage-management wording for Android
   - WebUI Timer dashboard asset smoke for `QueryTimerList`,
     `ScheduleTimer`, `CancelTimer`, `openTimerDashboard`,
     `refreshTimerDashboard`, `renderTimerDashboard`,
     `renderTimerDashboardList`, `renderTimerDashboardHistory`,
-    `renderMobileHomeTimerList`, `scheduleTimerFromForm`, and `cancelTimer`
+    `scheduleTimerFromForm`, and `cancelTimer`
   - WebUI model group settings asset smoke for `model_group_registry`,
     `settings-model-group-registry-list`, `settings-model-group-current-select`,
     `syncModelGroupSelectionControls`, `syncSettingsModelGroupForm`,
@@ -100,7 +100,7 @@
     `session-search-results`, `QuerySessionSearch`,
     `renderSessionSearchDashboard`, `submitSessionSearch`,
     `renderSessionSearchResult`, and `openSessionSearchResult`
-  - WebUI Settings diagnostics asset smoke for
+  - WebUI Diagnostics top-level entry asset smoke for
     `settings-diagnostics-refresh-button`, `settings-diagnostics-list`,
     `QueryDiagnostics`, `renderSettingsDiagnostics`,
     `renderDiagnosticLogRow`, and `refreshDiagnosticsStatus`
@@ -226,9 +226,9 @@
   `QuerySessionSearch` owner projection truth, proves worker sessions are not
   top-level rows, clicks the result, and proves no extra top-level session ids
   were created
-- WebUI online Settings diagnostics coverage uses
+- WebUI online Diagnostics coverage uses
   `node scripts/verify-webui-diagnostics-online.mjs`: it queries
-  `QueryDiagnostics`, opens the production S-profile WebUI Settings card,
+  `QueryDiagnostics`, opens the production S-profile WebUI Diagnostics entry,
   proves visible diagnostics rows match owner projection truth, proves no raw
   provider payloads, secrets, or absolute user paths render, and proves top-level
   persisted session ids are unchanged
@@ -284,7 +284,7 @@
   - app boundary proves the Timer dashboard can consume runtime timer owner
     projections and command receipts without becoming timer schedule, ledger,
     due-fire, or recurrence truth
-  - app boundary proves the Settings diagnostics card can consume runtime debug
+  - app boundary proves the Diagnostics top-level entry can consume runtime debug
     projection truth without becoming log truth or exposing raw diagnostics
   - machine-readable mainline truth remains the only source for generated wiki artifacts
 - fixtures / replay inputs / runtime evidence paths:
@@ -370,7 +370,7 @@
   - WebUI Search dashboard is landed for persisted session search through
     `QuerySessionSearch`; browser rows stay projection-only and Worker matches
     remain nested under parent sessions
-  - WebUI Settings diagnostics card is landed through `QueryDiagnostics`;
+  - WebUI Diagnostics top-level entry is landed through `QueryDiagnostics`;
     browser rows stay projection-only and redacted, and refresh does not mutate
     session/task/timer truth
   - protocol-only transport library reuse is landed
