@@ -650,7 +650,7 @@ async function verifyHeaderSessionTree(expectedCard) {
   webuiEvidence.headerTree = headerTree;
   await fs.writeFile(path.join(artifactDir, 'webui-header-tree.json'), JSON.stringify(headerTree, null, 2));
   if (headerTree.ariaExpanded !== 'true' || headerTree.dropdownHidden || !headerTree.halfScreenOk) {
-    throw new Error(`Header session tree is not an open half-screen dropdown: ${JSON.stringify(headerTree)}`);
+    throw new Error(`Header session tree is not an open inline panel: ${JSON.stringify(headerTree)}`);
   }
   await screenshot(cdp, path.join(artifactDir, '04b-header-session-tree.png'));
   await evalInPage(cdp, (workerSessionId, expectedTaskId) => {

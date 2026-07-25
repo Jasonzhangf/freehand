@@ -9,13 +9,13 @@ const chromePath = process.env.FREEHAND_WEBUI_DIAGNOSTICS_CHROME || defaultBrows
 const debugPort = Number.parseInt(process.env.FREEHAND_WEBUI_DIAGNOSTICS_DEBUG_PORT || '9279', 10);
 const baseUrl = normalizedBaseUrl(process.env.FREEHAND_WEBUI_DIAGNOSTICS_BASE_URL || 'http://127.0.0.1:4042/');
 const adpUrl = process.env.FREEHAND_WEBUI_DIAGNOSTICS_ADP_URL || adpUrlFromBaseUrl(baseUrl);
-const runId = `webui-diagnostics-${Date.now()}`;
+const runId = `webui-诊断-${Date.now()}`;
 const artifactDir = path.join(repo, 'artifacts', 'webui-online', runId);
-const assetVersion = '20260725-settings-layer-ui';
+const assetVersion = '20260725-session-panel-ui';
 const forbiddenPattern = /\/Users\/|\/Volumes\/|authorization|api_key|apikey|x-api-key|bearer |pair_token|secret|provider request|provider payload/i;
 
 await fs.mkdir(artifactDir, { recursive: true });
-const chromeProfileDir = await fs.mkdtemp(path.join(os.tmpdir(), 'freehand-webui-diagnostics-'));
+const chromeProfileDir = await fs.mkdtemp(path.join(os.tmpdir(), 'freehand-webui-诊断-'));
 let chrome = null;
 let cdp = null;
 let summary = null;
@@ -26,7 +26,7 @@ try {
   const beforeSessions = sessionListPayload(await adpQuery('QuerySessionList'));
   const diagnostics = diagnosticsPayload(await adpQuery('QueryDiagnostics'));
   await fs.writeFile(path.join(artifactDir, 'session-list-before.json'), JSON.stringify(beforeSessions, null, 2));
-  await fs.writeFile(path.join(artifactDir, 'diagnostics-adp.json'), JSON.stringify(diagnostics, null, 2));
+  await fs.writeFile(path.join(artifactDir, '诊断-adp.json'), JSON.stringify(diagnostics, null, 2));
   assertDiagnosticsProjection(diagnostics);
 
   chrome = spawn(chromePath, [
@@ -66,7 +66,7 @@ try {
       !!document.querySelector('[data-webui-shell="true"]') &&
       !!document.getElementById('open-settings-drawer-button') &&
       !!document.getElementById('settings-diagnostics-refresh-button');
-  }, 20_000, 'diagnostics-capable WebUI shell ready');
+  }, 20_000, '诊断-capable WebUI shell 就绪');
 
   await evalInPage(cdp, () => {
     window.dispatchEvent(new Event('resize'));
@@ -75,14 +75,18 @@ try {
   });
   await waitForFunction(cdp, () => {
     return !document.getElementById('settings-shell')?.hidden &&
-      !!document.querySelector('.settings-diagnostics-page');
-  }, 10_000, 'diagnostics top-level entry visible');
+      !!document.querySelector('.settings-nav-card[data-settings-target="observability"]');
+  }, 10_000, '可观测性 settings entry visible');
 
   await evalInPage(cdp, () => {
+    document.querySelector('.settings-nav-card[data-settings-target="observability"]')?.click();
+  });
+  await waitForFunction(cdp, () => {
     const diagnostics = document.querySelector('.settings-diagnostics-page');
-    if (diagnostics && !diagnostics.open) {
-      diagnostics.querySelector('summary')?.click();
-    }
+    return diagnostics && diagnostics.hidden === false;
+  }, 10_000, '可观测性 diagnostics detail visible');
+
+  await evalInPage(cdp, () => {
     document.getElementById('settings-diagnostics-refresh-button')?.click();
   });
   const expectedNames = diagnostics.files.map((file) => file.name).filter(Boolean).slice(0, 8);
@@ -95,8 +99,8 @@ try {
         summaryText,
         runtimeHomeText: document.getElementById('settings-diagnostics-runtime-home')?.innerText || '',
         statusText: document.getElementById('settings-diagnostics-status')?.innerText || '',
-        diagnosticsPageOpen: document.querySelector('.settings-diagnostics-page')?.open === true,
-        diagnosticsTopLevelText: document.querySelector('.settings-diagnostics-page > summary')?.innerText || '',
+        diagnosticsPageOpen: document.querySelector('.settings-diagnostics-page')?.hidden === false,
+        diagnosticsTopLevelText: document.querySelector('.settings-diagnostics-page')?.innerText || '',
         rows: rows.map((row) => ({
           logName: row.dataset.logName || '',
           relativePath: row.dataset.relativePath || '',
@@ -108,9 +112,9 @@ try {
       };
     }
     return null;
-  }, 30_000, 'diagnostics DOM rows', expectedNames);
-  await fs.writeFile(path.join(artifactDir, 'diagnostics-dom.json'), JSON.stringify(dom, null, 2));
-  await captureScreenshot(cdp, 'diagnostics-settings.png');
+  }, 30_000, '诊断 DOM rows', expectedNames);
+  await fs.writeFile(path.join(artifactDir, '诊断-dom.json'), JSON.stringify(dom, null, 2));
+  await captureScreenshot(cdp, '诊断-settings.png');
 
   const afterSessions = sessionListPayload(await adpQuery('QuerySessionList'));
   await fs.writeFile(path.join(artifactDir, 'session-list-after.json'), JSON.stringify(afterSessions, null, 2));
@@ -123,11 +127,13 @@ try {
     assetVersion,
     sourceAgentId: diagnostics.source_agent_id,
     files: diagnostics.files.length,
-    screenshots: ['diagnostics-settings.png'],
+    screenshots: ['诊断-settings.png'],
     checks: {
       productionAssetVersion: true,
       adpProjectionSafe: diagnosticsProjectionSafe(diagnostics),
-      diagnosticsOpenedAsSeparateEntry: dom.diagnosticsPageOpen === true && /Diagnostics/.test(dom.diagnosticsTopLevelText),
+      diagnosticsOpenedAsSeparateEntry: dom.diagnosticsPageOpen === true &&
+        /可观测性/.test(dom.diagnosticsTopLevelText) &&
+        /诊断日志/.test(dom.diagnosticsTopLevelText),
       runtimeHomeRedacted: diagnostics.runtime_home === '~/.freehand' && dom.runtimeHomeText.includes('~/.freehand'),
       logsDirRelative: diagnostics.logs_dir === 'logs' && diagnostics.files.every((file) => `${file.relative_path || ''}`.startsWith('logs/')),
       domRowsMatchAdp: expectedNames.every((name) => dom.rows.some((row) => row.logName === name)),
@@ -142,9 +148,9 @@ try {
     const failed = Object.entries(summary.checks)
       .filter(([, value]) => value !== true)
       .map(([key]) => key);
-    throw new Error(`webui_diagnostics_failed checks=${failed.join(',')} artifactDir=${artifactDir}`);
+    throw new Error(`webui_诊断_failed checks=${failed.join(',')} artifactDir=${artifactDir}`);
   }
-  console.log(`webui_diagnostics_ok url=${baseUrl} adp=${adpUrl} files=${diagnostics.files.length} artifactDir=${artifactDir}`);
+  console.log(`webui_诊断_ok url=${baseUrl} adp=${adpUrl} files=${diagnostics.files.length} artifactDir=${artifactDir}`);
 } catch (error) {
   await writeFailure(error);
   throw error;
@@ -163,8 +169,8 @@ async function writeFailure(error) {
   await fs.mkdir(failureDir, { recursive: true });
   await fs.writeFile(path.join(failureDir, 'error.txt'), error.stack || error.message);
   await adpQuery('QueryDiagnostics')
-    .then((value) => fs.writeFile(path.join(failureDir, 'diagnostics.json'), JSON.stringify(value, null, 2)))
-    .catch((queryError) => fs.writeFile(path.join(failureDir, 'diagnostics-error.txt'), queryError.stack || queryError.message));
+    .then((value) => fs.writeFile(path.join(failureDir, '诊断.json'), JSON.stringify(value, null, 2)))
+    .catch((queryError) => fs.writeFile(path.join(failureDir, '诊断-error.txt'), queryError.stack || queryError.message));
   if (summary) {
     await fs.writeFile(path.join(failureDir, 'summary.partial.json'), JSON.stringify(summary, null, 2));
   }
@@ -172,16 +178,16 @@ async function writeFailure(error) {
 
 function assertDiagnosticsProjection(diagnostics) {
   if (diagnostics.runtime_home !== '~/.freehand') {
-    throw new Error(`diagnostics runtime home leaked or changed: ${diagnostics.runtime_home}`);
+    throw new Error(`诊断 运行时目录 leaked or changed: ${diagnostics.runtime_home}`);
   }
   if (diagnostics.logs_dir !== 'logs') {
-    throw new Error(`diagnostics logs_dir is not relative logs: ${diagnostics.logs_dir}`);
+    throw new Error(`诊断 logs_dir is not relative logs: ${diagnostics.logs_dir}`);
   }
   if (!Array.isArray(diagnostics.files)) {
-    throw new Error('diagnostics files missing');
+    throw new Error('诊断 files missing');
   }
   if (!diagnosticsProjectionSafe(diagnostics)) {
-    throw new Error('diagnostics projection contains forbidden absolute path or sensitive marker');
+    throw new Error('诊断 projection contains forbidden absolute path or sensitive marker');
   }
 }
 

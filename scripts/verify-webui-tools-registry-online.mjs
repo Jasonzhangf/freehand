@@ -13,7 +13,7 @@ const adpUrl = process.env.FREEHAND_WEBUI_TOOLS_ADP_URL || adpUrlFromBaseUrl(bas
 const runStamp = new Date().toISOString().replace(/[-:.]/g, '').slice(0, 15);
 const runId = `webui-tools-registry-${runStamp}-${process.pid}`;
 const artifactDir = path.join(repo, 'artifacts', 'webui-online', runId);
-const assetVersion = '20260725-settings-layer-ui';
+const assetVersion = '20260725-session-panel-ui';
 
 await fs.mkdir(artifactDir, { recursive: true });
 
@@ -71,7 +71,7 @@ try {
       !!document.querySelector('[data-webui-shell="true"]') &&
       !!document.getElementById('open-tools-dashboard-button') &&
       !!document.getElementById('tools-dashboard-dialog');
-  }, 20_000, 'Tools-capable WebUI shell ready');
+  }, 20_000, 'tool-capable WebUI shell ready');
 
   await evalInPage(cdp, () => {
     window.dispatchEvent(new Event('resize'));

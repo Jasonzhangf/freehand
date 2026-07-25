@@ -1,4 +1,4 @@
-import { initializeThemeToggle } from "/assets/theme.js?v=20260725-settings-layer-ui";
+import { initializeThemeToggle } from "/assets/theme.js?v=20260725-session-panel-ui";
 
 initializeThemeToggle(document);
 
@@ -87,7 +87,6 @@ const mobileHomeDashboard = document.getElementById("mobile-home-dashboard");
 const mobileHomeActiveMarker = document.getElementById("mobile-home-active-marker");
 const mobileHomeActiveList = document.getElementById("mobile-home-active-list");
 const mobileHomeSessionList = document.getElementById("mobile-home-session-list");
-const settingsReviewTree = document.getElementById("settings-review-tree");
 const mobileAgentSummaryStrip = document.getElementById("mobile-agent-summary-strip");
 const openMobileAgentSheetButton = document.getElementById("open-mobile-agent-sheet-button");
 const closeMobileAgentSheetButton = document.getElementById("close-mobile-agent-sheet-button");
@@ -232,59 +231,6 @@ const samplePrompts = {
     'Call the task tool exactly once with {"op":"query","task_id":"definitely-missing-freehand-task"}, then use the failed tool result to continue and report success through the required Freehand completion schema.',
 };
 
-const phaseOneSettingsTree = [
-  {
-    title: "Models",
-    items: [
-      ["Provider configuration", "registry / endpoint / auth env var / protocol / default model / capability test", "ok"],
-      ["Provider switching and strategy", "primary / fallback provider, active model group, role routes, load balance", "ok"],
-      ["Model groups", "primary / sub / search / title / fallback / load balance owner-backed config", "ok"],
-      ["Provider family templates", "OpenAI / Anthropic 已接入；Gemini / xAI / OpenRouter 模板未完成", "partial"],
-      ["Token usage", "provider / session 用量投影尚未接 owner truth", "attention"],
-    ],
-  },
-  {
-    title: "Agent Runtime",
-    items: [
-      ["Worker limit", "config owner-backed，支持 1..=5", "ok"],
-      ["Worker capability", "Tools registry 已投影；capability 配置页未完成", "partial"],
-      ["Skills", "Freehand skills、项目 skills、兼容导入审计", "attention"],
-      ["Memory", "session / turn / history 已持久化；管理页未完成", "partial"],
-      ["MCP / 集成", "外部工具服务和账号连接", "attention"],
-      ["Environment", "已有安全配置投影；独立管理页未完成", "partial"],
-      ["Runtime directories", "Diagnostics 已展示 runtime home；目录页未完成", "partial"],
-    ],
-  },
-  {
-    title: "Connectivity",
-    items: [
-      ["Daemon connection", "本机和远程 daemon registry 已有 owner；Settings 页未完成", "partial"],
-      ["Tailscale / Relay / QR", "路由与 bootstrap 基础已接入；完整管理页未完成", "partial"],
-      ["Android update", "APK 检查桥接已接入；真机闭环仍待完成", "partial"],
-      ["Android permissions / notifications", "启动授权与完成通知已接入；真机证据仍待完成", "partial"],
-    ],
-  },
-  {
-    title: "Observability",
-    items: [
-      ["Diagnostics logs", "owner-projected log metadata 和脱敏 tail", "ok"],
-      ["Session / Worker lifecycle", "owner-backed task / agent / turn 状态可观察", "ok"],
-      ["Export bundle", "UI / daemon / provider 诊断包导出未完成", "attention"],
-    ],
-  },
-  {
-    title: "Appearance",
-    items: [
-      ["Theme", "已有 light / dark 切换；Settings 外观页未完成", "partial"],
-      ["Typography / density", "字号、密度、手机显示策略未完成", "attention"],
-    ],
-  },
-  {
-    title: "About",
-    items: [["About Freehand", "版本、隐私、反馈页未完成", "attention"]],
-  },
-];
-
 const selectedSessionStorageKey = "freehand-webui-selected-session";
 const selectedCwdStorageKey = "freehand-webui-selected-cwd";
 const attachmentDraftStorageKey = "freehand-webui-attachment-drafts-v1";
@@ -297,7 +243,7 @@ const adpReconnectMaxDelayMs = 10000;
 const liveTruthWatchdogIntervalMs = 10000;
 const workerTranscriptRefreshRetryDelayMs = 3000;
 const shortcutHelp =
-  "Shortcuts: Cmd/Ctrl+Enter send · Esc cancel · Cmd/Ctrl+R refresh · Cmd/Ctrl+K focus · Cmd/Ctrl+1 success · Cmd/Ctrl+2 failure. Slash: /help /new /task /settings /cwd /sessions /reload /success /failure /cancel /clear /attachments /model";
+  "快捷键：Cmd/Ctrl+Enter 发送 · Esc 停止/清空 · Cmd/Ctrl+R 刷新 · Cmd/Ctrl+K 聚焦输入框 · Cmd/Ctrl+1 成功样例 · Cmd/Ctrl+2 失败样例。Slash：/help /new /task /设置 /cwd /sessions /reload /success /failure /cancel /clear /附件 /model";
 const initialSelectedSessionId = window.localStorage.getItem(selectedSessionStorageKey) || null;
 const initialSelectedCwd = window.localStorage.getItem(selectedCwdStorageKey) || "";
 
@@ -371,6 +317,7 @@ const state = {
   diagnostics: null,
   diagnosticsError: null,
   diagnosticsInFlight: false,
+  settingsPage: "root",
   sessionTreeOpen: false,
   toolTimings: new Map(),
   lifecycleClocks: new Map(),
@@ -394,7 +341,7 @@ const state = {
   inspectorPanel: "debug",
   submitStartedAt: null,
   submitInFlight: false,
-  commandStatusMessage: "connecting to service...",
+  commandStatusMessage: "正在连接服务...",
   commandStatusStickyUntil: 0,
   adpFailure: null,
   adpStatus: "connecting",
@@ -577,7 +524,11 @@ function handleBackNavigationIntent() {
   const focused = focusedEditableElement();
   if (focused) {
     focused.blur();
-    setCommandStatus("input focus cleared", { stickyMs: 2000 });
+    setCommandStatus("输入框焦点已清除", { stickyMs: 2000 });
+    return true;
+  }
+  if (selectedSessionRefreshErrorForRender() && !selectedWorkerTranscriptRefreshRetryable()) {
+    returnToSessionListFromRefreshError();
     return true;
   }
   return closeVisibleNavigationSurface();
@@ -850,12 +801,12 @@ function scheduleAdpReconnect(reason) {
     adpReconnectBaseDelayMs * (2 ** Math.min(state.adpReconnectAttempt, 4)),
   );
   state.adpReconnectAttempt += 1;
-  setBackgroundCommandStatus(`connection closed; reconnecting after ${reason}...`);
+  setBackgroundCommandStatus(`连接已关闭，${reason} 后重连...`);
   state.adpReconnectTimer = window.setTimeout(() => {
     state.adpReconnectTimer = null;
     refreshAllProtocolStateAfterReconnect(reason).catch((error) => {
-      setCommandStatus(`service reconnect failed: ${error.message}`, { stickyMs: 5000 });
-      scheduleAdpReconnect("retry failure");
+      setCommandStatus(`服务重连失败：${error.message}`, { stickyMs: 5000 });
+      scheduleAdpReconnect("重试失败");
     });
   }, delay);
 }
@@ -867,7 +818,7 @@ async function refreshAllProtocolStateAfterReconnect(reason) {
   state.adpReconnectAttempt = 0;
   clearPendingUserInputIfMaterialized();
   renderAll();
-  setBackgroundCommandStatus(`service truth refreshed after ${reason}`);
+  setBackgroundCommandStatus(`${reason} 后已刷新服务真源`);
 }
 
 function ensureAdpSocket() {
@@ -881,7 +832,7 @@ function ensureAdpSocket() {
   const socket = new WebSocket(adpUrl());
   state.adpSocket = socket;
   state.adpStatus = "connecting";
-  setCommandStatus("connecting to service...");
+  setCommandStatus("正在连接服务...");
 
   state.adpOpened = new Promise((resolve, reject) => {
     socket.addEventListener("open", () => {
@@ -889,7 +840,7 @@ function ensureAdpSocket() {
       state.adpFailure = null;
       state.adpReconnectAttempt = 0;
       clearAdpReconnectTimer();
-      setCommandStatus("connected; waiting for updates...");
+      setCommandStatus("已连接，等待更新...");
       renderAll();
       resolve(socket);
     });
@@ -897,32 +848,32 @@ function ensureAdpSocket() {
       try {
         handleAdpFrame(JSON.parse(event.data));
       } catch (error) {
-        state.adpFailure = `connection decode failed: ${error.message}`;
+        state.adpFailure = `连接解码失败：${error.message}`;
         setCommandStatus(state.adpFailure);
         renderAll();
       }
     });
     socket.addEventListener("error", () => {
       state.adpStatus = "error";
-      setCommandStatus("connection error");
+      setCommandStatus("连接错误");
       renderAll();
-      reject(new Error("connection error"));
+      reject(new Error("连接错误"));
     });
     socket.addEventListener("close", () => {
       state.adpStatus = "closed";
-      setCommandStatus("connection closed");
+      setCommandStatus("连接已关闭");
       state.adpSocket = null;
       state.adpOpened = null;
       state.adpSubscriptions.clear();
       for (const { reject: rejectRequest } of state.adpRequests.values()) {
-        rejectRequest(new Error("connection closed"));
+        rejectRequest(new Error("连接已关闭"));
       }
       for (const { timeoutId } of state.adpRequests.values()) {
         window.clearTimeout(timeoutId);
       }
       state.adpRequests.clear();
       renderAll();
-      scheduleAdpReconnect("transport close");
+      scheduleAdpReconnect("传输关闭");
     });
   });
 
@@ -984,69 +935,69 @@ function setCommandStatus(message, options = {}) {
 
 function providerConfigReceiptStatus(receipt) {
   if (receipt && receipt.dispatch_status === "provider_config_saved_restart_required") {
-    return "Provider config saved. Restart required.";
+    return "模型服务配置已保存，需要重启。";
   }
-  throw new Error("Config save returned an unexpected service status.");
+  throw new Error("配置保存返回了未预期的服务状态。");
 }
 
 function providerConfigUpsertReceiptStatus(receipt) {
   if (receipt && receipt.dispatch_status === "provider_config_upserted_restart_required") {
-    return "Provider definition saved. Restart required.";
+    return "模型服务定义已保存，需要重启。";
   }
-  throw new Error("Provider definition save returned an unexpected service status.");
+  throw new Error("模型服务定义保存返回了未预期的服务状态。");
 }
 
 function providerWebSearchTestReceiptStatus(receipt) {
   const status = receipt?.dispatch_status || "";
   if (status.startsWith("provider_web_search_test_passed:")) {
-    return `Provider web_search test passed: ${status}`;
+    return `模型服务联网搜索测试通过：${status}`;
   }
-  throw new Error("Provider web_search test returned an unexpected service status.");
+  throw new Error("模型服务联网搜索测试返回了未预期的服务状态。");
 }
 
 function providerSelectionReceiptStatus(receipt) {
   if (receipt && receipt.dispatch_status === "agent_provider_selection_saved_restart_required") {
-    return "Provider selection saved. Restart required.";
+    return "模型服务选择已保存，需要重启。";
   }
-  throw new Error("Provider selection save returned an unexpected service status.");
+  throw new Error("模型服务选择保存返回了未预期的服务状态。");
 }
 
 function modelGroupUpsertReceiptStatus(receipt) {
   if (receipt && receipt.dispatch_status === "model_group_config_upserted_restart_required") {
-    return "Model group saved. Restart required.";
+    return "模型组已保存，需要重启。";
   }
-  throw new Error("Model group save returned an unexpected service status.");
+  throw new Error("模型组保存返回了未预期的服务状态。");
 }
 
 function modelGroupSelectionReceiptStatus(receipt) {
   if (receipt && receipt.dispatch_status === "model_group_selection_saved_restart_required") {
-    return "Model group selection saved. Restart required.";
+    return "模型组选择已保存，需要重启。";
   }
-  throw new Error("Model group selection save returned an unexpected service status.");
+  throw new Error("模型组选择保存返回了未预期的服务状态。");
 }
 
 function agentResourceConfigReceiptStatus(receipt, expectedCount) {
   const expected = `agent_resource_config_saved_restart_required:count=${expectedCount}`;
   if (receipt && receipt.dispatch_status === expected) {
-    return `Worker limit saved: ${expectedCount}. Restart required.`;
+    return `工作器上限已保存：${expectedCount}。需要重启。`;
   }
-  throw new Error("Agent resource save returned an unexpected service status.");
+  throw new Error("Agent 资源保存返回了未预期的服务状态。");
 }
 
 function timerScheduleReceiptStatus(receipt) {
   const status = receipt?.dispatch_status || "";
   if (status.startsWith("timer_scheduled:timer_id=")) {
-    return `Timer scheduled: ${status}`;
+    return `定时器已创建：${status}`;
   }
-  throw new Error("Timer schedule returned an unexpected service status.");
+  throw new Error("定时器创建返回了未预期的服务状态。");
 }
 
 function timerCancelReceiptStatus(receipt) {
   const status = receipt?.dispatch_status || "";
   if (status.startsWith("timer_cancelled:timer_id=")) {
-    return `Timer cancelled: ${status}`;
+    return `定时器已取消：${status}`;
   }
-  throw new Error("Timer cancel returned an unexpected service status.");
+  throw new Error("定时器取消返回了未预期的服务状态。");
 }
 
 function setBackgroundCommandStatus(message) {
@@ -1084,7 +1035,7 @@ function handleAdpFrame(frame) {
         request.resolve(frame.selector);
       }
       state.adpSubscriptions.add(frame.request_id);
-      setBackgroundCommandStatus(`updates connected: ${frame.selector.stream_kind}`);
+      setBackgroundCommandStatus(`更新流已连接：${frame.selector.stream_kind}`);
       return;
     case "subscription_event":
       state.adpFailure = null;
@@ -1097,10 +1048,10 @@ function handleAdpFrame(frame) {
         window.clearTimeout(request.timeoutId);
         request.reject(new Error(frame.failure.message || frame.failure.code));
       }
-      setCommandStatus(`request failed: ${frame.failure.code}`);
+      setCommandStatus(`请求失败：${frame.failure.code}`);
       return;
     default:
-      setCommandStatus(`unsupported service message: ${frame.kind}`);
+      setCommandStatus(`不支持的服务消息：${frame.kind}`);
   }
 }
 
@@ -1113,7 +1064,7 @@ function setText(id, value) {
 
 function webSearchStatusLabel(provider) {
   if (!provider) {
-    return "loading";
+    return "加载中";
   }
   const configured = provider.provider_web_search || "auto";
   const effective = provider.provider_web_search_effective || "unknown";
@@ -1250,7 +1201,7 @@ function attachmentKind(file, forcedKind = null) {
 
 function formatBytes(size) {
   if (!Number.isFinite(size)) {
-    return "unknown size";
+    return "未知大小";
   }
   if (size < 1024) {
     return `${size} B`;
@@ -1279,7 +1230,7 @@ function addAttachmentFiles(files, forcedKind = null) {
   });
   state.attachmentsPreviewOpen = true;
   setCurrentAttachments(next);
-  setCommandStatus(`${next.length} attachment draft(s) in selected session`, { stickyMs: 4000 });
+  setCommandStatus(`当前会话已有 ${next.length} 个附件草稿`, { stickyMs: 4000 });
 }
 
 function addAndroidAttachmentDrafts(kind, files) {
@@ -1287,7 +1238,7 @@ function addAndroidAttachmentDrafts(kind, files) {
   Array.from(files || []).forEach((file) => {
     next.push({
       id: browserRandomId(),
-      name: file.name || "attachment",
+      name: file.name || "附件",
       size: Number.isFinite(file.size) ? file.size : -1,
       type: file.type || "application/octet-stream",
       kind: attachmentKind({ type: file.type || "" }, kind),
@@ -1304,7 +1255,7 @@ function addAndroidAttachmentDrafts(kind, files) {
   });
   state.attachmentsPreviewOpen = true;
   setCurrentAttachments(next);
-  setCommandStatus(`${next.length} attachment draft(s) in selected session`, { stickyMs: 4000 });
+  setCommandStatus(`当前会话已有 ${next.length} 个附件草稿`, { stickyMs: 4000 });
 }
 
 window.__freehandAndroidAttachmentSelected = (kind, files) => {
@@ -1314,7 +1265,7 @@ window.__freehandAndroidAttachmentSelected = (kind, files) => {
 function removeAttachment(id) {
   const next = currentAttachments().filter((attachment) => attachment.id !== id);
   setCurrentAttachments(next);
-  setCommandStatus("attachment removed", { stickyMs: 3000 });
+  setCommandStatus("附件已移除", { stickyMs: 3000 });
 }
 
 function clearCurrentAttachments() {
@@ -1325,11 +1276,11 @@ function attachmentDisplayLines(attachments = currentAttachments(), options = {}
   if (attachments.length === 0) {
     return [];
   }
-  const lines = [options.heading || "Attachments"];
+  const lines = [options.heading || "附件"];
   attachments.forEach((attachment) => {
     const mediaType = attachment.type || attachment.media_type || "unknown";
     const sizeBytes = Number.isFinite(attachment.size) ? attachment.size : attachment.size_bytes;
-    const availability = attachment.available ? "ready" : options.defaultAvailability || "metadata-only";
+    const availability = attachment.available ? "可发送" : options.defaultAvailability || "仅元数据";
     lines.push(
       `- ${attachment.kind}: ${attachment.name} (${formatBytes(sizeBytes)}, ${mediaType}, ${availability})`,
     );
@@ -1347,8 +1298,8 @@ function textWithAttachmentDisplay(text, attachments = currentAttachments()) {
 
 function textWithSubmittedAttachmentDisplay(text, attachments = []) {
   const lines = attachmentDisplayLines(attachments, {
-    heading: "Submitted attachments",
-    defaultAvailability: "metadata-only",
+    heading: "已提交附件",
+    defaultAvailability: "仅元数据",
   });
   if (lines.length === 0) {
     return text;
@@ -1358,10 +1309,10 @@ function textWithSubmittedAttachmentDisplay(text, attachments = []) {
 
 function attachmentSummary(attachments = currentAttachments()) {
   if (attachments.length === 0) {
-    return "no draft attachments";
+    return "没有附件草稿";
   }
   const ready = attachments.filter((attachment) => attachment.available).length;
-  return `${attachments.length} draft attachment(s), ${ready} ready in this page`;
+  return `${attachments.length} 个附件草稿，本页可发送 ${ready} 个`;
 }
 
 function renderAttachmentTray() {
@@ -1394,10 +1345,10 @@ function renderAttachmentTray() {
       const imageButton = document.createElement("button");
       imageButton.className = "attachment-thumb-button";
       imageButton.type = "button";
-      imageButton.title = "Preview selected image";
+      imageButton.title = "预览选中的图片";
       const img = document.createElement("img");
       img.className = "attachment-thumb";
-      img.alt = attachment.name || "selected image";
+      img.alt = attachment.name || "已选图片";
       img.src = attachment.previewUrl;
       imageButton.appendChild(img);
       imageButton.addEventListener("click", () => showAttachmentPreview(attachment));
@@ -1408,14 +1359,14 @@ function renderAttachmentTray() {
     text.className = "attachment-chip-text";
     text.textContent = `${attachment.kind} · ${attachment.name} · ${formatBytes(attachment.size)}`;
     text.title = attachment.available
-      ? "This page still holds the File handle for retry."
-      : "Metadata restored from session; reselect the file before sending binary payload.";
+      ? "本页仍持有 File handle，可用于重试。"
+      : "已从会话恢复元数据；发送二进制内容前需要重新选择文件。";
 
     const remove = document.createElement("button");
     remove.className = "attachment-remove";
     remove.type = "button";
     remove.textContent = "×";
-    remove.setAttribute("aria-label", `Remove ${attachment.name}`);
+    remove.setAttribute("aria-label", `移除 ${attachment.name}`);
     remove.addEventListener("click", (event) => {
       event.stopPropagation();
       removeAttachment(attachment.id);
@@ -1429,7 +1380,7 @@ function renderAttachmentTray() {
 
 function showAttachmentPreview(attachment) {
   if (attachment.kind !== "image" || !attachment.previewUrl) {
-    setCommandStatus("image preview is not available; reselect the image if it was restored from metadata", { stickyMs: 5000 });
+    setCommandStatus("图片预览不可用；如果它来自元数据恢复，请重新选择图片", { stickyMs: 5000 });
     return;
   }
   const overlay = document.createElement("div");
@@ -1440,14 +1391,14 @@ function showAttachmentPreview(attachment) {
   close.className = "attachment-preview-close";
   close.type = "button";
   close.textContent = "×";
-  close.setAttribute("aria-label", "Close image preview");
+  close.setAttribute("aria-label", "关闭图片预览");
   const img = document.createElement("img");
   img.className = "attachment-preview-image";
   img.src = attachment.previewUrl;
-  img.alt = attachment.name || "selected image";
+  img.alt = attachment.name || "已选图片";
   const caption = document.createElement("div");
   caption.className = "attachment-preview-caption";
-  caption.textContent = `${attachment.name || "image"} · ${attachment.type || "unknown"} · ${formatBytes(attachment.size)}`;
+  caption.textContent = `${attachment.name || "图片"} · ${attachment.type || "未知类型"} · ${formatBytes(attachment.size)}`;
   panel.append(close, img, caption);
   overlay.appendChild(panel);
   const dismiss = () => overlay.remove();
@@ -1461,7 +1412,7 @@ function showAttachmentPreview(attachment) {
 function fileToBase64(file) {
   return new Promise((resolve, reject) => {
     const reader = new FileReader();
-    reader.onerror = () => reject(reader.error || new Error("failed to read image"));
+    reader.onerror = () => reject(reader.error || new Error("读取图片失败"));
     reader.onload = () => {
       const value = String(reader.result || "");
       const comma = value.indexOf(",");
@@ -1480,7 +1431,7 @@ async function attachmentsForSubmit(attachments) {
       dataBase64 = await fileToBase64(attachment.file);
     }
     if (!dataBase64) {
-      throw new Error(`image ${attachment.name || attachment.id} is metadata-only; reselect it before sending`);
+      throw new Error(`图片 ${attachment.name || attachment.id} 只有元数据；发送前请重新选择。`);
     }
     payloads.push({
       attachment_id: attachment.id,
@@ -1549,24 +1500,18 @@ function card(role, status, title, body, variant = "assistant", identity = null)
 
 function turnLifecycleForRender(turn) {
   if (!turn) {
-    return { phase: "neutral", className: "pending", label: "idle", isLive: false, elapsed: "" };
+    return { phase: "neutral", className: "pending", label: "空闲", isLive: false, elapsed: "" };
   }
   if (turn.terminal_text || isTerminalStatus(turn.terminal_status) || isToolPendingStatus(turn.terminal_status)) {
     const terminal = `${turn.terminal_status || "success"}`.toLowerCase();
     const phase = terminal === "success" ? "completed" : terminal;
     if (terminal === "running" || isToolPendingStatus(terminal)) {
-      return {
-        phase: "waiting_lifecycle",
-        className: "running",
-        label: "waiting lifecycle",
-        isLive: false,
-        elapsed: "",
-      };
+      return toolPendingLifecycleForRender(turn);
     }
-    const label = terminalTurnStatusLabel(terminal);
+    const label = terminalTurnStatusLabelForTurn(turn, terminal);
     return {
       phase,
-      className: label === "completed" ? "success" : "failed",
+      className: terminal === "success" ? "success" : "failed",
       label,
       isLive: false,
       elapsed: "",
@@ -1595,7 +1540,7 @@ function turnLifecycleForRender(turn) {
     return {
       phase: "dispatching",
       className: "running",
-      label: elapsed ? `dispatching... ${elapsed}` : "dispatching...",
+      label: elapsed ? `派发中... ${elapsed}` : "派发中...",
       isLive: true,
       elapsed,
     };
@@ -1604,7 +1549,7 @@ function turnLifecycleForRender(turn) {
   if (inactiveToolLifecycle) {
     return inactiveToolLifecycle;
   }
-  return { phase: "neutral", className: "pending", label: "waiting", isLive: false, neutral: true, elapsed: "" };
+  return { phase: "neutral", className: "pending", label: "等待中", isLive: false, neutral: true, elapsed: "" };
 }
 
 function inactiveToolLifecycleForRender(turn) {
@@ -1617,7 +1562,7 @@ function inactiveToolLifecycleForRender(turn) {
     return {
       phase: "tool_failed",
       className: "failed",
-      label: "failed",
+      label: "失败",
       isLive: false,
       elapsed: "",
     };
@@ -1626,7 +1571,7 @@ function inactiveToolLifecycleForRender(turn) {
     return {
       phase: "tool_completed",
       className: "success",
-      label: "completed",
+      label: "已完成",
       isLive: false,
       elapsed: "",
     };
@@ -1639,21 +1584,21 @@ function pendingExecutionCard(renderPending) {
   const article = executionShell({
     status: {
       className: renderPending.isLive ? "running" : "pending",
-      label: elapsed ? `dispatching · ${elapsed}` : "dispatching",
+      label: elapsed ? `派发中 · ${elapsed}` : "派发中",
     },
     live: renderPending.isLive,
   });
   const body = article.querySelector(".execution-body");
   body.appendChild(executionRow({
     kind: "user",
-    title: "User",
+    title: "用户",
     body: [textWithAttachmentDisplay(renderPending.text, renderPending.attachments)],
-    status: "submitted",
+    status: "已提交",
   }));
   body.appendChild(executionRow({
     kind: "system",
-    title: "Client",
-    body: ["Request accepted. Waiting for service dispatch."],
+    title: "客户端",
+    body: ["请求已接收，等待服务派发。"],
     status: elapsed || "0s",
   }));
   return article;
@@ -1666,23 +1611,23 @@ function pendingChatCards(renderPending) {
     : 0;
   const userRow = {
     kind: "user",
-    title: "User",
+    title: "用户",
     body: [textWithAttachmentDisplay(renderPending.text, renderPending.attachments)],
-    status: "submitted",
+    status: "已提交",
   };
   const assistantRows = [{
     kind: "system",
-    title: "Client",
+    title: "客户端",
     body: renderPending.error
       ? [
-          "Submit receipt is being verified against service truth.",
-          "Do not send a duplicate until the service refresh finishes.",
+          "正在根据服务真源验证提交收据。",
+          "服务刷新完成前不要重复发送。",
           retainedAttachmentCount > 0
-            ? `Draft attachments retained for retry: ${retainedAttachmentCount}.`
-            : "Draft attachments retained for retry: none.",
+            ? `已保留 ${retainedAttachmentCount} 个附件草稿用于重试。`
+            : "已保留附件草稿用于重试：无。",
         ]
-      : ["Request accepted. Waiting for service dispatch."],
-    status: renderPending.error ? "checking service truth" : elapsed || "0s",
+      : ["请求已接收，等待服务派发。"],
+    status: renderPending.error ? "检查服务真源" : elapsed || "0s",
   }];
   const renderTurn = {
     turnId: "pending-submit",
@@ -1690,10 +1635,10 @@ function pendingChatCards(renderPending) {
     lifecycle: {
       className: renderPending.error ? "running" : renderPending.isLive ? "running" : "pending",
       label: renderPending.error
-        ? "checking service truth"
+        ? "检查服务真源"
         : elapsed
-          ? `dispatching... ${elapsed}`
-          : "dispatching",
+          ? `派发中... ${elapsed}`
+          : "派发中",
       isLive: renderPending.isLive || !!renderPending.error,
     },
   };
@@ -1707,25 +1652,25 @@ function acceptedSubmitReceiptChatCards(receipt) {
     .join(" · ");
   const userRow = {
     kind: "user",
-    title: "User",
+    title: "用户",
     body: [text],
-    status: "submitted",
+    status: "已提交",
   };
   const assistantRows = [{
     kind: "system",
-    title: "Service",
+    title: "服务",
     body: [
-      "Service accepted this request through TaskBoard truth.",
-      taskLine ? `Worker task: ${taskLine}` : "Worker lifecycle is visible in the Agent task list.",
+      "服务已通过 任务面板 真源接收该请求。",
+      taskLine ? `工作器任务：${taskLine}` : "工作器生命周期可在 智能体任务列表中观察。",
     ],
-    status: "accepted",
+    status: "已接收",
   }];
   const renderTurn = {
     turnId: "accepted-submit",
     createdAt: receipt.createdAt || receipt.created_at || Date.now(),
     lifecycle: {
       className: "running",
-      label: "service accepted",
+      label: "服务已接收",
       isLive: true,
     },
   };
@@ -1733,48 +1678,86 @@ function acceptedSubmitReceiptChatCards(receipt) {
 }
 
 function failureChatBubble(message) {
+  const failure = typeof message === "object" && message !== null ? message : { message };
+  if (failure.sessionRefresh) {
+    return sessionRefreshFailureBubble(failure);
+  }
   return assistantChatBubble(
     {
       turnId: "adp-failure",
-      lifecycle: { className: "failed", label: "failed", isLive: false },
+      lifecycle: { className: "failed", label: "失败", isLive: false },
     },
     [{
       kind: "error",
-      title: "Connection",
-      body: [message],
-      status: "failed",
+      title: "连接",
+      body: [failure.message || message],
+      status: "失败",
     }],
   );
+}
+
+function sessionRefreshFailureBubble(failure) {
+  const body = [
+    failure.message || "选中会话刷新失败",
+    "这是选中 transcript 的刷新错误，不是全局连接失败。可以新建会话、返回会话列表，或先关闭这条错误提示。",
+  ];
+  const article = assistantChatBubble(
+    {
+      turnId: "session-refresh-failure",
+      lifecycle: { className: "failed", label: "会话刷新失败", isLive: false },
+    },
+    [{
+      kind: "error",
+      title: "会话刷新",
+      body,
+      status: "失败",
+    }],
+  );
+  const bar = document.createElement("div");
+  bar.className = "turn-action-bar session-refresh-action-bar";
+  const newButton = turnActionButton("新建会话");
+  newButton.addEventListener("click", () => {
+    exitSessionRefreshErrorToNewConversation().catch((error) => {
+      setCommandStatus(`新建会话失败：${error.message}`, { stickyMs: 9000 });
+    });
+  });
+  const listButton = turnActionButton("返回会话列表");
+  listButton.addEventListener("click", returnToSessionListFromRefreshError);
+  const dismissButton = turnActionButton("忽略错误");
+  dismissButton.addEventListener("click", dismissSessionRefreshError);
+  bar.append(newButton, listButton, dismissButton);
+  article.appendChild(bar);
+  return article;
 }
 
 function workerTranscriptWaitingBubble(error) {
   const detail = error || {};
   const body = [
-    "Worker transcript is not persisted yet; TaskBoard still shows this Worker task as active.",
+    "工作器记录 尚未持久化；任务面板 仍显示该 工作器任务处于活动状态。",
   ];
   const taskLine = [detail.task_id, detail.task_status, detail.assignee_agent_id]
     .filter(Boolean)
     .join(" · ");
   if (taskLine) {
-    body.push(`TaskBoard: ${taskLine}`);
+    body.push(`任务面板: ${taskLine}`);
   }
   if (detail.session_id) {
-    body.push(`Worker session: ${detail.session_id}`);
+    body.push(`工作器会话：${detail.session_id}`);
   }
   if (detail.message) {
-    body.push(`Last refresh: ${compactSentence(detail.message, 180)}`);
+    body.push(`最近刷新：${compactSentence(detail.message, 180)}`);
   }
-  body.push("Refreshing the same owner-projected Worker session; this is not a task dispatch failure.");
+  body.push("正在刷新同一个 owner 投影的 工作器会话；这不是任务派发失败。");
   return assistantChatBubble(
     {
       turnId: "worker-transcript-waiting",
-      lifecycle: { className: "running", label: "worker transcript waiting", isLive: true },
+      lifecycle: { className: "running", label: "等待 工作器记录", isLive: true },
     },
     [{
       kind: "system",
-      title: "Worker transcript",
+      title: "工作器记录",
       body,
-      status: "waiting",
+      status: "等待中",
     }],
   );
 }
@@ -1783,13 +1766,13 @@ function loadingConversationBubble() {
   return assistantChatBubble(
     {
       turnId: "session-refresh-loading",
-      lifecycle: { className: "running", label: "loading conversation", isLive: true },
+      lifecycle: { className: "running", label: "加载会话中", isLive: true },
     },
     [{
       kind: "system",
-      title: "Conversation",
-      body: ["Loading selected session transcript from runtime truth."],
-      status: "loading",
+      title: "会话",
+      body: ["正在从运行时真源加载选中会话 transcript。"],
+      status: "加载中",
     }],
   );
 }
@@ -1804,7 +1787,7 @@ function turnExecutionCard(renderTurn) {
   }
   const body = article.querySelector(".execution-body");
   if (renderTurn.rows.length === 0) {
-    body.appendChild(executionRow({ kind: "system", title: "Turn", body: ["Waiting for projection."], status: lifecycle.label }));
+    body.appendChild(executionRow({ kind: "system", title: "Turn", body: ["等待投影。"], status: lifecycle.label }));
     return article;
   }
   renderTurn.rows.forEach((row) => {
@@ -1838,7 +1821,7 @@ function turnChatCards(renderTurn) {
     cards.push(assistantChatBubble(renderTurn, [{
       kind: "system",
       title: "Turn",
-      body: ["Waiting for projection."],
+      body: ["等待投影。"],
       status: renderTurn.lifecycle.label,
       identity: { turnId: renderTurn.turnId },
     }]));
@@ -1855,7 +1838,7 @@ function userChatBubble(renderTurn, row) {
   meta.className = "chat-message-meta";
   const label = document.createElement("span");
   label.className = "chat-role-label";
-  label.textContent = "User";
+  label.textContent = "用户";
   const status = document.createElement("span");
   status.className = "chat-row-status";
   status.textContent = row.status || "";
@@ -1885,7 +1868,7 @@ function assistantChatBubble(renderTurn, rows) {
   meta.className = "chat-message-meta";
   const label = document.createElement("span");
   label.className = "chat-role-label";
-  label.textContent = "Assistant";
+  label.textContent = "助手";
   const status = document.createElement("span");
   status.className = `chat-state-pill ${className}`;
   status.textContent = chatAssistantStatusLabel(lifecycle, rows);
@@ -1901,25 +1884,28 @@ function assistantChatBubble(renderTurn, rows) {
 }
 
 function appendTurnActionBar(article, renderTurn, rows) {
+  if (renderTurn && renderTurn.turnId === "session-refresh-failure") {
+    return;
+  }
   const bar = document.createElement("div");
   bar.className = "turn-action-bar";
   bar.dataset.turnId = renderTurn.turnId || "";
-  const copyButton = turnActionButton("Copy");
+  const copyButton = turnActionButton("复制");
   copyButton.addEventListener("click", () => {
     copyTurnActionText(renderTurn, rows).catch((error) => {
-      setCommandStatus(`copy failed: ${error.message}`, { stickyMs: 6000 });
+      setCommandStatus(`复制失败：${error.message}`, { stickyMs: 6000 });
     });
   });
-  const editButton = turnActionButton("Edit from here");
+  const editButton = turnActionButton("从这里编辑重跑");
   editButton.addEventListener("click", () => {
     editAndRerunFromTurn(renderTurn).catch((error) => {
-      setCommandStatus(`edit from here failed: ${error.message}`, { stickyMs: 9000 });
+      setCommandStatus(`从这里编辑失败：${error.message}`, { stickyMs: 9000 });
     });
   });
-  const newSessionButton = turnActionButton("New session");
+  const newSessionButton = turnActionButton("从这里新建会话");
   newSessionButton.addEventListener("click", () => {
     newSessionFromTurn(renderTurn, rows).catch((error) => {
-      setCommandStatus(`new session from here failed: ${error.message}`, { stickyMs: 9000 });
+      setCommandStatus(`从这里新建会话失败：${error.message}`, { stickyMs: 9000 });
     });
   });
   bar.append(copyButton, editButton, newSessionButton);
@@ -1937,31 +1923,31 @@ function turnActionButton(label) {
 async function copyTurnActionText(renderTurn, rows) {
   const text = turnActionText(renderTurn, rows);
   if (!text) {
-    setCommandStatus("nothing to copy", { stickyMs: 4000 });
+    setCommandStatus("没有可复制内容", { stickyMs: 4000 });
     return;
   }
   await copyTextToClipboard(text);
-  setCommandStatus("copied turn text", { stickyMs: 3000 });
+  setCommandStatus("已复制 turn 文本", { stickyMs: 3000 });
 }
 
 async function editAndRerunFromTurn(renderTurn) {
   if (!renderTurn || !renderTurn.turnId) {
-    setCommandStatus("selected turn has no durable id", { stickyMs: 6000 });
+    setCommandStatus("选中的 turn 没有持久化 ID", { stickyMs: 6000 });
     return;
   }
   if (!state.selectedSessionId || isDraftSessionId(state.selectedSessionId)) {
-    setCommandStatus("edit from here requires a persisted selected session", { stickyMs: 6000 });
+    setCommandStatus("从这里编辑需要选中持久化会话", { stickyMs: 6000 });
     return;
   }
   const userText = turnUserTextForAction(renderTurn.turnId);
   if (!userText) {
-    setCommandStatus("selected turn has no editable user prompt", { stickyMs: 6000 });
+    setCommandStatus("选中的 turn 没有可编辑用户提示词", { stickyMs: 6000 });
     return;
   }
   await rollbackEffectiveTranscriptThroughTurn(renderTurn.turnId);
   composerInput.value = userText;
   composerInput.focus();
-  setCommandStatus("rolled back to this turn; edit and send replacement", { stickyMs: 8000 });
+  setCommandStatus("已回滚到该 turn；编辑后发送替换内容", { stickyMs: 8000 });
 }
 
 async function newSessionFromTurn(renderTurn, rows) {
@@ -2000,19 +1986,19 @@ async function rollbackEffectiveTranscriptThroughTurn(turnId) {
     await refreshSessions();
     await refreshSelectedSession();
   }
-  throw new Error("rollback guard reached before selected turn was removed");
+  throw new Error("选中 turn 移除前触发了回滚保护");
 }
 
 async function startNewConversationFromText(text) {
   const draftText = `${text || ""}`.trim();
   if (!draftText) {
-    setCommandStatus("selected turn has no text for a new session", { stickyMs: 6000 });
+    setCommandStatus("选中的 turn 没有可用于新会话的文本", { stickyMs: 6000 });
     return;
   }
   await startNewConversation();
   composerInput.value = draftText;
   composerInput.focus();
-  setCommandStatus("new session ready; edit and send from copied turn", { stickyMs: 7000 });
+  setCommandStatus("新会话已就绪；可基于复制的 turn 编辑发送", { stickyMs: 7000 });
 }
 
 async function copyTextToClipboard(text) {
@@ -2030,7 +2016,7 @@ async function copyTextToClipboard(text) {
   const copied = document.execCommand("copy");
   textarea.remove();
   if (!copied) {
-    throw new Error("clipboard unavailable");
+    throw new Error("剪贴板不可用");
   }
 }
 
@@ -2092,19 +2078,22 @@ function chatAssistantStateClass(lifecycle, rows) {
 function chatAssistantStatusLabel(lifecycle, rows) {
   const failedTool = rows.find((row) => row.kind === "tool" && `${row.status || ""}`.toLowerCase().includes("失败"));
   if (failedTool) {
-    return "tool failed";
+    return "工具失败";
   }
   if (lifecycle.isLive) {
-    return lifecycle.label || "running";
+    return lifecycle.label || "运行中";
   }
-  if (rows.some((row) => row.kind === "final" && `${row.status || ""}`.toLowerCase() === "running")) {
-    return "waiting lifecycle";
+  const waitingFinal = rows.find((row) =>
+    row.kind === "final" && ["running", "pending", "waiting_user"].includes(`${row.status || ""}`.toLowerCase())
+  );
+  if (waitingFinal) {
+    return waitingFinal.label || waitingFinal.statusText || waitingFinal.status || lifecycle.label || "等待中";
   }
   const finalRow = rows.find((row) => row.kind === "final");
   if (finalRow) {
-    return finalRow.status || lifecycle.label || "completed";
+    return finalRow.status || lifecycle.label || "已完成";
   }
-  return lifecycle.label || "received";
+  return lifecycle.label || "已接收";
 }
 
 function chatAssistantSection(row) {
@@ -2158,7 +2147,17 @@ function assistantSectionHeadingLabel(row) {
     return "";
   }
   if (row.kind === "final") {
-    return `${row.status || ""}`.toLowerCase() === "running" ? "Lifecycle" : "Final";
+    if (row.title) {
+      return row.title;
+    }
+    const status = `${row.status || ""}`.toLowerCase();
+    if (status === "running") {
+      return "生命周期";
+    }
+    if (status === "waiting_user") {
+      return "等待用户";
+    }
+    return "最终结果";
   }
   if (row.kind === "system") {
     return row.title || "Model";
@@ -2300,7 +2299,7 @@ function toolStateClass(status) {
   if (normalized.includes("失败") || normalized === "failed") {
     return "failed";
   }
-  if (normalized.includes("等待") || normalized === "waiting") {
+  if (normalized.includes("等待") || normalized === "等待中") {
     return "running";
   }
   return "success";
@@ -2363,35 +2362,35 @@ function commandReceiptStatus(receipt) {
   const rawStatus = `${(receipt && receipt.dispatch_status) || ""}`.trim();
   const statusCode = commandReceiptCode(rawStatus);
   if (!statusCode) {
-    return "unsupported command receipt: missing dispatch status";
+    return "不支持的命令回执：缺少派发状态";
   }
   switch (statusCode) {
     case "reason_live_turn_cancel_requested":
-      return "cancel requested";
+      return "已请求停止";
     case "reason_turn_cancelled":
-      return "request cancelled";
+      return "请求已取消";
     case "runtime_checkpoint_rewound":
-      return "checkpoint restored";
+      return "检查点已恢复";
     case "session_metadata_updated":
     case "session_turn_rolled_back":
-      return "session updated";
+      return "会话已更新";
     case "reason_turn_started":
-      return "request accepted";
+      return "请求已接收";
     case "reason_live_turn_completed":
-      return "request completed";
+      return "请求已完成";
     case "provider_config_saved_restart_required":
     case "provider_config_upserted_restart_required":
     case "agent_provider_selection_saved_restart_required":
     case "model_group_config_upserted_restart_required":
     case "model_group_selection_saved_restart_required":
     case "agent_resource_config_saved_restart_required":
-      return "settings saved";
+      return "设置已保存";
     case "node_direct_message_dispatched":
-      return "worker message sent";
+      return "Worker 消息已发送";
     case "worker_control_applied":
-      return "worker control accepted";
+      return "工作器控制已接收";
     case "task_agent_created":
-      return "worker updated";
+      return "Worker 已更新";
     case "task_created":
     case "task_assigned":
     case "task_claimed":
@@ -2402,11 +2401,11 @@ function commandReceiptStatus(receipt) {
     case "execution_fact_applied":
     case "scheduler_tick_recorded":
     case "master_poll_recorded":
-      return "task updated";
+      return "任务已更新";
     case "queued_by_static_dispatch_port":
-      return "command queued";
+      return "命令已排队";
     default:
-      return `unsupported command receipt: ${truncateForChat(statusCode, 80)}`;
+      return `不支持的命令回执：${truncateForChat(statusCode, 80)}`;
   }
 }
 
@@ -2564,7 +2563,11 @@ function selectedSessionRefreshFailureForRender() {
   if (!error || selectedWorkerTranscriptRefreshRetryable(error.session_id)) {
     return null;
   }
-  return { message: error.message || "selected session refresh failed" };
+  return {
+    sessionRefresh: true,
+    sessionId: error.session_id || state.selectedSessionId || "",
+    message: error.message || "选中会话刷新失败",
+  };
 }
 
 function selectedSessionIsLoading() {
@@ -2678,23 +2681,23 @@ function buildModelRequestRenderRow(turn, lifecycle) {
 }
 
 function modelRequestTitle(turn) {
-  return modelRequestPhase(turn) === "schema_retry" ? "Schema" : "Model";
+  return modelRequestPhase(turn) === "schema_retry" ? "Schema 修复" : "模型";
 }
 
 function modelRequestDisplayLines(turn) {
   const request = (turn && turn.model_request) || {};
   const lines = [];
-  const mainDetail = request.detail || "Waiting for model response.";
+  const mainDetail = request.detail || "等待模型响应。";
   if (mainDetail) {
     lines.push(mainDetail);
   }
   const timingLine = turnTimingLine(turn, { includeLiveWait: true });
   if (timingLine) {
-    lines.push(`timing: ${timingLine}`);
+    lines.push(`耗时：${timingLine}`);
   }
   const transport = modelRequestTransport(turn);
   if (transport && transport.detail) {
-    lines.push(`${modelRequestTransportLabel(transport)}: ${transport.detail}`);
+    lines.push(`${modelRequestTransportLabel(transport)}：${transport.detail}`);
   }
   return lines;
 }
@@ -2702,24 +2705,24 @@ function modelRequestDisplayLines(turn) {
 function modelRequestStaticStatus(turn) {
   const transportPhase = modelRequestTransportPhase(turn);
   if (transportPhase === "provider_retry") {
-    return "transport retrying";
+    return "传输重试中";
   }
   if (transportPhase === "provider_failover") {
-    return "transport switching";
+    return "传输切换中";
   }
   const timing = turnTimingProjection(turn);
   if (timing && Number.isFinite(timing.timeToFirstResponseMs)) {
-    return `wait ${formatDuration(timing.timeToFirstResponseMs)}`;
+    return `等待 ${formatDuration(timing.timeToFirstResponseMs)}`;
   }
-  return "waiting";
+  return "等待中";
 }
 
 function buildObservableLiveTurnRenderRow(turn, lifecycle) {
-  const status = lifecycle.elapsed ? `${lifecycle.label || "working"}... ${lifecycle.elapsed}` : lifecycle.label || "working";
+  const status = lifecycle.elapsed ? `${lifecycle.label || "处理中"}... ${lifecycle.elapsed}` : lifecycle.label || "处理中";
   return {
     kind: "system",
     title: "Turn",
-    body: ["request accepted; waiting for protocol-visible turn details"],
+    body: ["请求已接收；等待协议可见的 turn 详情"],
     status,
     identity: { turnId: turn.turn_id },
   };
@@ -2737,15 +2740,15 @@ function buildTerminalRenderRow(turn, item) {
 
 function assistantRowStatus(turn, status) {
   if (isToolPendingStatus(turn.terminal_status)) {
-    return "running";
+    return toolPendingStatusLabelForTurn(turn);
   }
   if (turn.terminal_text || isTerminalStatus(turn.terminal_status)) {
-    return terminalTurnStatusLabel(turn.terminal_status);
+    return terminalTurnStatusLabelForTurn(turn, turn.terminal_status);
   }
   if (turnIsCurrentLiveTurn(turn)) {
-    return status || "streaming";
+    return status || "流式响应中";
   }
-  return status === "streaming" ? "received" : status;
+  return status === "streaming" ? "已接收" : status;
 }
 
 function toolStatusLabel(status) {
@@ -2771,24 +2774,104 @@ function isToolPendingStatus(status) {
   return normalized === "toolpending";
 }
 
+function lifecycleOwnerProjectionLoaded() {
+  return state.taskBoard !== null && state.timerList !== null;
+}
+
+function turnHasWaitingToolActivity(turn) {
+  return ((turn && turn.tool_activities) || []).some(
+    (tool) => `${tool.status || ""}`.toLowerCase() === "waiting",
+  );
+}
+
+function sessionHasOpenTaskLifecycle(sessionId) {
+  const id = `${sessionId || ""}`.trim();
+  if (!id || !state.taskBoard) {
+    return false;
+  }
+  return ((state.taskBoard && state.taskBoard.tasks) || []).some((task) =>
+    taskVisibleInSession(task, id) && !terminalTaskStatus(task.status)
+  );
+}
+
+function sessionHasOpenTimerLifecycle(sessionId) {
+  const id = `${sessionId || ""}`.trim();
+  if (!id || !state.timerList) {
+    return false;
+  }
+  return ((state.timerList && state.timerList.timers) || []).some((timer) =>
+    timer &&
+      timer.source_session_id === id &&
+      ["active", "running"].includes(`${timer.status || ""}`.toLowerCase())
+  );
+}
+
+function sessionHasOpenLifecycleOwner(sessionId) {
+  return sessionHasOpenTaskLifecycle(sessionId) || sessionHasOpenTimerLifecycle(sessionId);
+}
+
+function toolPendingRepresentsLifecycle(turn) {
+  if (!turn || !isToolPendingStatus(turn.terminal_status)) {
+    return false;
+  }
+  if (turnHasWaitingToolActivity(turn) || turn.model_request) {
+    return true;
+  }
+  const sessionId = turn.session_id || state.selectedSessionId || "";
+  if (sessionHasOpenLifecycleOwner(sessionId)) {
+    return true;
+  }
+  return !lifecycleOwnerProjectionLoaded();
+}
+
+function toolPendingStatusLabelForTurn(turn) {
+  return toolPendingRepresentsLifecycle(turn) ? "等待生命周期" : "等待用户选择";
+}
+
+function toolPendingLifecycleForRender(turn) {
+  if (toolPendingRepresentsLifecycle(turn)) {
+    return {
+      phase: "waiting_lifecycle",
+      className: "running",
+      label: "等待生命周期",
+      isLive: false,
+      elapsed: "",
+    };
+  }
+  return {
+    phase: "waiting_user",
+    className: "pending",
+    label: "等待用户选择",
+    isLive: false,
+    elapsed: "",
+  };
+}
+
+function terminalTurnStatusLabelForTurn(turn, status) {
+  if (isToolPendingStatus(status)) {
+    return toolPendingStatusLabelForTurn(turn);
+  }
+  return terminalTurnStatusLabel(status);
+}
+
 function terminalTurnStatusLabel(status) {
   const normalized = `${status || ""}`.toLowerCase().replace(/[_-]/g, "");
   if (normalized === "toolpending" || normalized === "running") {
-    return "waiting lifecycle";
+    return "等待生命周期";
   }
   if (normalized === "failed") {
-    return "failed";
+    return "失败";
   }
   if (normalized === "blocked") {
-    return "blocked";
+    return "已阻塞";
   }
   if (normalized === "interrupted") {
-    return "interrupted";
+    return "已中断";
   }
   if (normalized === "cancelled") {
-    return "cancelled";
+    return "已取消";
   }
-  return "completed";
+  return "已完成";
 }
 
 function maybeNotifyAndroidTurnFinished(previousTurn, nextTurn) {
@@ -2817,7 +2900,7 @@ function maybeNotifyAndroidTurnFinished(previousTurn, nextTurn) {
   state.androidNotifiedTurns.add(key);
   state.androidObservedNonTerminalTurns.delete(turnKey);
   persistAndroidNotifiedTurns();
-  const label = terminalTurnStatusLabel(nextTurn.terminal_status);
+  const label = terminalTurnStatusLabelForTurn(nextTurn, nextTurn.terminal_status);
   const summary = nextTurn.terminal_text || nextTurn.text?.slice(-1)?.[0] || label;
   bridge.turnFinished(JSON.stringify({
     sessionId: nextTurn.session_id || "",
@@ -2901,12 +2984,12 @@ function modelRequestTimingKey(turn) {
 function modelRequestLabel(turn) {
   const kind = modelRequestKind(turn);
   if (kind === "schemaretry" || kind === "schema_retry") {
-    return "schema polishing";
+    return "Schema 修复中";
   }
   if (kind === "toolresultcontinuation" || kind === "tool_result_continuation") {
-    return "thinking after tool result";
+    return "工具结果后继续推理";
   }
-  return "thinking";
+  return "推理中";
 }
 
 function modelRequestTransport(turn) {
@@ -2932,12 +3015,12 @@ function modelRequestTransportPhase(turn) {
 function modelRequestTransportLabel(transport) {
   const kind = `${(transport && transport.kind) || ""}`.toLowerCase();
   if (kind === "providerretry" || kind === "provider_retry") {
-    return "transport retry";
+    return "传输重试";
   }
   if (kind === "providerfailover" || kind === "provider_failover") {
-    return "transport switch";
+    return "传输切换";
   }
-  return "transport";
+  return "传输";
 }
 
 function turnTimingProjection(turn) {
@@ -2968,13 +3051,13 @@ function turnTimingLine(turn, options = {}) {
   const parts = [];
   const waitMs = turnWaitDurationMs(turn, timing, options);
   if (Number.isFinite(waitMs)) {
-    parts.push(`wait ${formatDuration(waitMs)}`);
+    parts.push(`等待 ${formatDuration(waitMs)}`);
   }
   if (Number.isFinite(timing.timeToFirstResponseMs)) {
-    parts.push(`first response ${formatDuration(timing.timeToFirstResponseMs)}`);
+    parts.push(`首字 ${formatDuration(timing.timeToFirstResponseMs)}`);
   }
   if (Number.isFinite(timing.totalElapsedMs)) {
-    parts.push(`total ${formatDuration(timing.totalElapsedMs)}`);
+    parts.push(`总耗时 ${formatDuration(timing.totalElapsedMs)}`);
   }
   return parts.join(" · ");
 }
@@ -3131,7 +3214,7 @@ function waitingToolStatus(tools, turn = state.turn) {
     .filter((elapsed) => Number.isFinite(elapsed));
   const longestElapsed = elapsedValues.length > 0 ? Math.max(...elapsedValues) : null;
   const elapsed = longestElapsed === null ? "" : formatDuration(longestElapsed);
-  return elapsed ? `tool executing: ${names} · ${elapsed}` : `tool executing: ${names}`;
+  return elapsed ? `工具执行中：${names} · ${elapsed}` : `工具执行中：${names}`;
 }
 
 function toolTimingKey(turn, toolCallId) {
@@ -3153,9 +3236,9 @@ function derivePublicConversation(turn) {
   if (turn.user_text && !isInternalRuntimePrompt(turn)) {
     items.push({
       kind: "UserText",
-      title: "User",
+      title: "用户",
       body: textWithSubmittedAttachmentDisplay(turn.user_text, turn.attachments || []),
-      status: "submitted",
+      status: "已提交",
     });
   }
   const assistantBodies = [];
@@ -3168,16 +3251,16 @@ function derivePublicConversation(turn) {
   if (assistantBodies.length > 0) {
     items.push({
       kind: "AssistantText",
-      title: "Assistant",
+      title: "助手",
       body: assistantBodies.join("\n"),
-      status: "streaming",
+      status: "流式响应中",
     });
   }
   (turn.tool_activities || []).forEach((tool) => {
     const status = `${tool.status || "waiting"}`.toLowerCase();
     items.push({
       kind: "ToolSummary",
-      title: tool.display && tool.display.action ? tool.display.action : tool.tool_name || "Tool",
+      title: tool.display && tool.display.action ? tool.display.action : tool.tool_name || "工具",
       body: tool.detail || status,
       status,
       tool_call_id: tool.tool_call_id,
@@ -3187,9 +3270,10 @@ function derivePublicConversation(turn) {
   if (turn.terminal_text) {
     const terminalStatus = `${turn.terminal_status || "Success"}`.toLowerCase();
     const isToolPending = isToolPendingStatus(terminalStatus);
+    const toolPendingIsLifecycle = isToolPending && toolPendingRepresentsLifecycle(turn);
     const status =
       isToolPending
-        ? "running"
+        ? toolPendingIsLifecycle ? "running" : "waiting_user"
         : terminalStatus === "failed"
         ? "failed"
         : terminalStatus === "cancelled"
@@ -3201,9 +3285,11 @@ function derivePublicConversation(turn) {
               : "completed";
     items.push({
       kind: "Terminal",
-      title: isToolPending ? "Lifecycle" : "Final",
-      body: terminalBodyForDisplay(turn.terminal_text),
-      status,
+      title: isToolPending ? (toolPendingIsLifecycle ? "生命周期" : "等待用户") : "最终结果",
+      body: terminalBodyForDisplay(turn.terminal_text, {
+        waitingUserToolPending: isToolPending && !toolPendingIsLifecycle,
+      }),
+      status: isToolPending ? toolPendingStatusLabelForTurn(turn) : status,
     });
   }
   (turn.errors || []).forEach((error) => {
@@ -3217,13 +3303,21 @@ function derivePublicConversation(turn) {
   return items;
 }
 
-function terminalBodyForDisplay(text) {
+function terminalBodyForDisplay(text, options = {}) {
   const stripped = stripFreehandCompletionBlock(text);
   if (state.debugDetailsVisible) {
     return stripped;
   }
   const summary = terminalSummaryBlock(stripped);
-  return summary || stripDebugTerminalLines(stripped);
+  const body = summary || stripDebugTerminalLines(stripped);
+  return options.waitingUserToolPending ? normalizeWaitingUserToolPendingTerminalBody(body) : body;
+}
+
+function normalizeWaitingUserToolPendingTerminalBody(text) {
+  return `${text || ""}`
+    .replace(/^\s*Waiting for lifecycle\s*[:：]\s*/i, "等待用户选择：")
+    .replace(/^\s*等待生命周期\s*[:：]\s*/, "等待用户选择：")
+    .trim();
 }
 
 function terminalSummaryBlock(text) {
@@ -3538,7 +3632,7 @@ function renderSessionRefreshFailure(error, requestedSessionId = state.selectedS
   if (requestedSessionId && state.selectedSessionId !== requestedSessionId) {
     return;
   }
-  const message = `session refresh failed: ${error && error.message ? error.message : error}`;
+  const message = `会话刷新失败：${error && error.message ? error.message : error}`;
   const retryContext = workerTranscriptRetryContext(requestedSessionId || state.selectedSessionId, message);
   state.sessionRefreshInFlight = null;
   if (retryContext) {
@@ -3551,11 +3645,11 @@ function renderSessionRefreshFailure(error, requestedSessionId = state.selectedS
       assignee_agent_id: retryContext.assignee_agent_id,
       message,
     };
-    if (`${state.adpFailure || ""}`.startsWith("session refresh failed:")) {
+    if (`${state.adpFailure || ""}`.startsWith("会话刷新失败：")) {
       state.adpFailure = null;
     }
     setCommandStatus(
-      `Worker transcript not ready · task ${retryContext.task_id || "unknown"} is ${retryContext.task_status || "active"}; retrying`,
+      `工作器记录 未就绪 · 任务 ${retryContext.task_id || "unknown"} 状态 ${statusLabel(retryContext.task_status || "active")}；正在重试`,
       { stickyMs: 6000 },
     );
     scheduleSessionRefreshRetry();
@@ -3567,8 +3661,35 @@ function renderSessionRefreshFailure(error, requestedSessionId = state.selectedS
     session_id: requestedSessionId || state.selectedSessionId || "",
     message,
   };
-  state.adpFailure = message;
+  if (`${state.adpFailure || ""}`.startsWith("会话刷新失败：")) {
+    state.adpFailure = null;
+  }
   setCommandStatus(message, { stickyMs: 8000 });
+  renderAll();
+}
+
+async function exitSessionRefreshErrorToNewConversation() {
+  const failedSessionId = state.selectedSessionId;
+  clearSessionRefreshState(failedSessionId);
+  await startNewConversation();
+}
+
+function returnToSessionListFromRefreshError() {
+  const failedSessionId = state.selectedSessionId;
+  clearSessionRefreshState(failedSessionId);
+  state.sessionTurns = [];
+  state.turn = null;
+  state.publicConversation = [];
+  state.debug = null;
+  setSelectedSessionId(null);
+  setMobileDrawer("sessions");
+  setCommandStatus("已退出当前错误状态；请选择会话或新建会话。", { stickyMs: 6000 });
+  renderAll();
+}
+
+function dismissSessionRefreshError() {
+  clearSessionRefreshState(state.selectedSessionId);
+  setCommandStatus("会话刷新错误已关闭；当前 transcript 未重新加载。", { stickyMs: 5000 });
   renderAll();
 }
 
@@ -3579,7 +3700,7 @@ function clearSessionRefreshState(sessionId) {
   if (!sessionId || (state.sessionRefreshError && state.sessionRefreshError.session_id === sessionId)) {
     state.sessionRefreshError = null;
     clearSessionRefreshRetryTimer();
-    if (`${state.adpFailure || ""}`.startsWith("session refresh failed:")) {
+    if (`${state.adpFailure || ""}`.startsWith("会话刷新失败：")) {
       state.adpFailure = null;
     }
   }
@@ -3616,7 +3737,7 @@ function requireTaskCwd(action) {
     setSelectedCwd(cwd);
     return cwd;
   }
-  setCommandStatus(`${action} requires a task target directory`, { stickyMs: 6000 });
+  setCommandStatus(`${action} 需要任务目标目录`, { stickyMs: 6000 });
   (taskCwdInput || cwdInput || composerInput).focus();
   return "";
 }
@@ -3635,7 +3756,7 @@ function syncNewSessionDialogMode() {
     newSessionDialog.dataset.kind = kind;
   }
   if (newSessionConfirmButton) {
-    newSessionConfirmButton.textContent = kind === "task" ? "Create task" : "Create session";
+    newSessionConfirmButton.textContent = kind === "task" ? "创建任务会话" : "创建会话";
   }
 }
 
@@ -3644,11 +3765,11 @@ function openNewSessionDialog(kind = "conversation") {
   if (!newSessionDialog || !newSessionForm) {
     if (state.newSessionKind === "task") {
       startNewTask().catch((error) => {
-        setCommandStatus(`new task failed: ${error.message}`, { stickyMs: 8000 });
+        setCommandStatus(`新建任务失败：${error.message}`, { stickyMs: 8000 });
       });
     } else {
       startNewConversation().catch((error) => {
-        setCommandStatus(`new conversation failed: ${error.message}`, { stickyMs: 8000 });
+        setCommandStatus(`新建会话失败：${error.message}`, { stickyMs: 8000 });
       });
     }
     return;
@@ -3681,11 +3802,11 @@ async function chooseNewTaskDirectory() {
   const firstPreset = newTaskPathPresets?.querySelector(".path-preset-button");
   if (firstPreset) {
     firstPreset.focus();
-    setCommandStatus("choose a directory preset or type a path", { stickyMs: 5000 });
+    setCommandStatus("选择一个目录预设，或手动输入路径", { stickyMs: 5000 });
     return;
   }
   newSessionCwdInput?.focus();
-  setCommandStatus("type a task target directory", { stickyMs: 5000 });
+  setCommandStatus("请输入任务目标目录", { stickyMs: 5000 });
 }
 
 async function submitNewSessionDialog() {
@@ -3693,7 +3814,7 @@ async function submitNewSessionDialog() {
   if (kind === "task") {
     const cwd = normalizeCwd(newSessionCwdInput && newSessionCwdInput.value);
     if (!cwd) {
-      setCommandStatus("new task requires a target directory", { stickyMs: 6000 });
+      setCommandStatus("新建任务需要目标目录", { stickyMs: 6000 });
       newSessionCwdInput?.focus();
       return;
     }
@@ -3785,48 +3906,48 @@ async function startNewConversation() {
   const sessionId = newDraftSessionId();
   resetLocalConversationState(sessionId);
   setSelectedCwd("");
-  setCommandStatus("creating conversation session...", { stickyMs: 5000 });
+  setCommandStatus("正在创建会话...", { stickyMs: 5000 });
   try {
     await adpCommand({
       CreateSession: {
         session_id: sessionId,
-        title: "New conversation",
+        title: "新会话",
       },
     });
     state.draftSessionId = null;
     await refreshSessions();
     await refreshSelectedSession();
     closeMobileDrawer();
-    setCommandStatus("new conversation ready", { stickyMs: 5000 });
+    setCommandStatus("新会话已就绪", { stickyMs: 5000 });
   } catch (error) {
-    setCommandStatus(`new conversation failed: ${error.message}`, { stickyMs: 8000 });
+    setCommandStatus(`新建会话失败：${error.message}`, { stickyMs: 8000 });
     throw error;
   }
 }
 
 async function startNewTask(options = {}) {
-  const cwd = normalizeCwd(options.cwd) || requireTaskCwd("new task");
+  const cwd = normalizeCwd(options.cwd) || requireTaskCwd("新建任务");
   if (!cwd) {
     return;
   }
   const sessionId = newDraftSessionId();
   resetLocalConversationState(sessionId);
   setSelectedCwd(cwd);
-  setCommandStatus(`creating task session · cwd ${cwd}`, { stickyMs: 5000 });
+  setCommandStatus(`正在创建任务会话 · cwd ${cwd}`, { stickyMs: 5000 });
   try {
     await adpCommand({
       CreateSession: {
         session_id: sessionId,
-        title: `Task · ${cwd}`,
+        title: `任务 · ${cwd}`,
         cwd,
       },
     });
     await refreshSessions();
     await refreshSelectedSession();
     closeMobileDrawer();
-    setCommandStatus(`new task ready · cwd ${cwd}`, { stickyMs: 5000 });
+    setCommandStatus(`新任务已就绪 · cwd ${cwd}`, { stickyMs: 5000 });
   } catch (error) {
-    setCommandStatus(`new task failed: ${error.message}`, { stickyMs: 8000 });
+    setCommandStatus(`新建任务失败：${error.message}`, { stickyMs: 8000 });
   }
 }
 
@@ -3908,7 +4029,7 @@ function selectAllSessions() {
 async function deleteSelectedSessions() {
   const sessionIds = selectedManagedSessionIds();
   if (sessionIds.length === 0) {
-    setCommandStatus("select sessions to remove", { stickyMs: 5000 });
+    setCommandStatus("请选择要移除的会话", { stickyMs: 5000 });
     return;
   }
   setCommandStatus(`removing ${sessionIds.length} session(s)...`, { stickyMs: 8000 });
@@ -3927,7 +4048,7 @@ async function deleteSelectedSessions() {
     await refreshSelectedSession();
     setCommandStatus(`removed ${sessionIds.length} session(s)`, { stickyMs: 6000 });
   } catch (error) {
-    setCommandStatus(`remove session failed: ${error.message}`, { stickyMs: 9000 });
+    setCommandStatus(`移除会话失败: ${error.message}`, { stickyMs: 9000 });
   }
 }
 
@@ -3935,7 +4056,7 @@ async function renameSelectedSession() {
   const sessionIds = selectedManagedSessionIds();
   const sessionId = sessionIds.length === 1 ? sessionIds[0] : state.selectedSessionId;
   if (!sessionId || isDraftSessionId(sessionId)) {
-    setCommandStatus("select one persisted session to rename", { stickyMs: 5000 });
+    setCommandStatus("请选择一个持久化会话重命名", { stickyMs: 5000 });
     return;
   }
   const current = state.sessions.find((session) => session.session_id === sessionId);
@@ -3945,17 +4066,17 @@ async function renameSelectedSession() {
   }
   const title = nextTitle.trim();
   if (!title) {
-    setCommandStatus("rename requires a non-empty title", { stickyMs: 6000 });
+    setCommandStatus("重命名需要非空标题", { stickyMs: 6000 });
     return;
   }
-  setCommandStatus("renaming session...", { stickyMs: 5000 });
+  setCommandStatus("正在重命名会话...", { stickyMs: 5000 });
   try {
     await adpCommand({ RenameSession: { session_id: sessionId, title } });
     await refreshSessions();
     await refreshSelectedSession();
-    setCommandStatus(`renamed session · ${title}`, { stickyMs: 5000 });
+    setCommandStatus(`会话已重命名 · ${title}`, { stickyMs: 5000 });
   } catch (error) {
-    setCommandStatus(`rename failed: ${error.message}`, { stickyMs: 9000 });
+    setCommandStatus(`重命名失败: ${error.message}`, { stickyMs: 9000 });
   }
 }
 
@@ -3967,11 +4088,11 @@ function latestRollbackUserText() {
 
 async function rollbackLatestSessionTurn() {
   if (!state.selectedSessionId || isDraftSessionId(state.selectedSessionId)) {
-    setCommandStatus("rollback requires a persisted selected session", { stickyMs: 6000 });
+    setCommandStatus("回滚需要选中持久化会话", { stickyMs: 6000 });
     return;
   }
   const userText = latestRollbackUserText();
-  setCommandStatus("rolling back latest session turn...", { stickyMs: 8000 });
+  setCommandStatus("正在回滚最新会话轮次...", { stickyMs: 8000 });
   try {
     await adpCommand({ RollbackLatestSessionTurn: { session_id: state.selectedSessionId } });
     await refreshSessions();
@@ -3980,9 +4101,9 @@ async function rollbackLatestSessionTurn() {
       composerInput.value = userText;
       composerInput.focus();
     }
-    setCommandStatus("latest turn rolled back; edit and send replacement", { stickyMs: 7000 });
+    setCommandStatus("最新轮次已回滚；编辑后发送替换内容", { stickyMs: 7000 });
   } catch (error) {
-    setCommandStatus(`rollback failed: ${error.message}`, { stickyMs: 9000 });
+    setCommandStatus(`回滚失败: ${error.message}`, { stickyMs: 9000 });
   }
 }
 
@@ -4203,12 +4324,12 @@ function locallyCancelledProjection(turnId) {
       return {
         ...tool,
         status: "Failed",
-        result_summary: tool.result_summary || "cancelled by user",
-        error: tool.error || "cancelled by user",
+        result_summary: tool.result_summary || "用户已取消",
+        error: tool.error || "用户已取消",
       };
     }),
     terminal_status: "Cancelled",
-    terminal_text: source.terminal_text || "live turn cancelled",
+    terminal_text: source.terminal_text || "实时轮次已取消",
   };
 }
 
@@ -4242,7 +4363,7 @@ function applyAdpQueryResult(result) {
     renderAll();
     if (state.turn) {
       refreshDebug().catch((error) => {
-      setCommandStatus(`debug query failed: ${error.message}`);
+      setCommandStatus(`调试查询失败：${error.message}`);
       });
     }
     return;
@@ -4262,8 +4383,8 @@ function applyAdpQueryResult(result) {
   const debug = variantPayload(result, "Debug");
   if (debug !== undefined) {
     state.debug = debug || {
-      status_text: "debug pending",
-      detail_lines: ["waiting for debug snapshot"],
+      status_text: "等待调试",
+      detail_lines: ["等待调试快照"],
     };
     renderDebug();
     return;
@@ -4301,7 +4422,7 @@ function applyAdpSubscriptionEvent(event) {
       return;
     }
     setTurnProjection(turn);
-    setBackgroundCommandStatus("conversation updated");
+    setBackgroundCommandStatus("会话已更新");
     renderAll();
     ensureDebugSubscription();
     return;
@@ -4321,11 +4442,11 @@ function applyAdpSubscriptionEvent(event) {
 
 function liveTurnStatus() {
   if (state.pendingSubmitError) {
-    return "checking service truth · submit receipt not verified";
+    return "检查服务真源 · 提交回执未验证";
   }
   if (state.submitInFlight && !state.turn) {
     const elapsed = elapsedSince(state.submitStartedAt);
-    return elapsed ? `dispatching... ${elapsed}` : "dispatching...";
+    return elapsed ? `派发中... ${elapsed}` : "派发中...";
   }
   const turn = activeTurnForSelectedSession();
   if (!turn) {
@@ -4333,7 +4454,7 @@ function liveTurnStatus() {
   }
 
   if (turn.terminal_text || isTerminalStatus(turn.terminal_status) || isToolPendingStatus(turn.terminal_status)) {
-    return terminalTurnStatusLabel(turn.terminal_status);
+    return terminalTurnStatusLabelForTurn(turn, turn.terminal_status);
   }
 
   const waitingTools = (turn.tool_activities || []).filter(
@@ -4341,14 +4462,14 @@ function liveTurnStatus() {
   );
   if (waitingTools.length > 0) {
     if (!protocolConnectionCanRenderLive()) {
-      return "connection closed; refreshing service truth";
+      return "连接已关闭，正在刷新服务真源";
     }
     return waitingToolStatus(waitingTools);
   }
 
   if (turnIsWaitingForModelResponse(turn)) {
     if (!protocolConnectionCanRenderLive()) {
-      return "connection closed; refreshing service truth";
+      return "连接已关闭，正在刷新服务真源";
     }
     const elapsed = elapsedSince(lifecycleClockStartedAt(modelRequestTimingKey(turn)));
     const label = modelRequestLabel(turn);
@@ -4357,7 +4478,7 @@ function liveTurnStatus() {
 
   if (state.submitInFlight) {
     const elapsed = elapsedSince(state.submitStartedAt);
-    return elapsed ? `dispatching... ${elapsed}` : "dispatching...";
+    return elapsed ? `派发中... ${elapsed}` : "派发中...";
   }
 
   return null;
@@ -4404,12 +4525,12 @@ function renderMessages() {
       renderModel.sessionRefreshError.kind === "worker_transcript_pending";
     fragments.push(cycleCardFromChatCards(
       {
-        kind: "loading",
+        kind: "加载中",
         turnId: waitingForWorkerTranscript ? "worker-transcript-waiting" : "session-refresh-loading",
         sessionId: state.selectedSessionId || "",
         lifecycle: {
           className: "running",
-          label: waitingForWorkerTranscript ? "worker transcript waiting" : "loading conversation",
+          label: waitingForWorkerTranscript ? "等待 工作器记录" : "加载会话中",
           isLive: true,
         },
         terminal: false,
@@ -4427,10 +4548,10 @@ function renderMessages() {
     empty.className = "chat-empty-state";
     const title = document.createElement("div");
     title.className = "chat-empty-title";
-    title.textContent = "New conversation";
+    title.textContent = "新会话";
     const copy = document.createElement("div");
     copy.className = "chat-empty-copy";
-    copy.textContent = "Send a message to start this session.";
+    copy.textContent = "发送消息开始这个会话。";
     empty.append(title, copy);
     fragments.push(empty);
   }
@@ -4508,7 +4629,29 @@ function frozenCycleCardNeedsAuthoritativeMetadataRefresh(existing, nextCard) {
   return (
     (!existing.dataset.timeToFirstResponseMs && !!nextCard.dataset.timeToFirstResponseMs) ||
     (!existing.dataset.totalElapsedMs && !!nextCard.dataset.totalElapsedMs) ||
-    (!existingCreatedAt && !!nextCreatedAt)
+    (!existingCreatedAt && !!nextCreatedAt) ||
+    frozenCycleCardNeedsLifecycleClassificationRefresh(existing, nextCard)
+  );
+}
+
+function frozenCycleCardNeedsLifecycleClassificationRefresh(existing, nextCard) {
+  if (!existing || !nextCard) {
+    return false;
+  }
+  const existingKey = cycleCardKeyFromNode(existing);
+  const nextKey = cycleCardKeyFromNode(nextCard);
+  if (!existingKey || existingKey !== nextKey) {
+    return false;
+  }
+  const refreshablePhases = new Set(["waiting_lifecycle", "waiting_user"]);
+  const existingPhase = existing.dataset.lifecyclePhase || "";
+  const nextPhase = nextCard.dataset.lifecyclePhase || "";
+  if (!refreshablePhases.has(existingPhase) && !refreshablePhases.has(nextPhase)) {
+    return false;
+  }
+  return (
+    existingPhase !== nextPhase ||
+    (existing.dataset.lifecycleClass || "") !== (nextCard.dataset.lifecycleClass || "")
   );
 }
 
@@ -4548,7 +4691,7 @@ function timelineItemChatCards(item) {
     return acceptedSubmitReceiptChatCards(item.acceptedSubmitReceipt);
   }
   if (item.kind === "failure") {
-    return [failureChatBubble(item.failure.message)];
+    return [failureChatBubble(item.failure)];
   }
   return [];
 }
@@ -4559,7 +4702,7 @@ function timelineItemCycleCard(item) {
 
 function cycleCardFromChatCards(meta, chatCards) {
   const kind = `${(meta && meta.kind) || "turn"}`.trim() || "turn";
-  const lifecycle = (meta && meta.lifecycle) || { className: "pending", label: "waiting", isLive: false };
+  const lifecycle = (meta && meta.lifecycle) || { className: "pending", label: "等待中", isLive: false };
   const article = document.createElement("article");
   article.className = `turn-cycle-card ${lifecycle.className || "pending"}-state`;
   article.dataset.cycleKey = cycleCardKey(meta);
@@ -4567,6 +4710,8 @@ function cycleCardFromChatCards(meta, chatCards) {
   article.dataset.turnId = `${(meta && meta.turnId) || ""}`;
   article.dataset.sessionId = `${(meta && meta.sessionId) || ""}`;
   article.dataset.submitId = `${(meta && meta.submitId) || ""}`;
+  article.dataset.lifecycleClass = `${lifecycle.className || ""}`;
+  article.dataset.lifecyclePhase = `${lifecycle.phase || ""}`;
   const createdAt = (meta && meta.createdAt) || "";
   if (createdAt) {
     article.dataset.createdAt = `${createdAt}`;
@@ -4588,7 +4733,7 @@ function cycleCardFromChatCards(meta, chatCards) {
       article.dataset.totalElapsedMs = `${timing.totalElapsedMs}`;
     }
   }
-  article.setAttribute("aria-label", `request cycle ${kind} ${lifecycle.label || ""}`.trim());
+  article.setAttribute("aria-label", `请求周期 ${kind} ${lifecycle.label || ""}`.trim());
   const header = cycleCardHeader(meta);
   if (header) {
     article.appendChild(header);
@@ -4604,11 +4749,11 @@ function cycleCardHeader(meta) {
   const items = [];
   const createdAtMs = timestampToMilliseconds(meta.createdAt);
   if (createdAtMs) {
-    items.push({ label: "time", value: localChatTimeLabel(createdAtMs) });
+    items.push({ label: "时间", value: localChatTimeLabel(createdAtMs) });
   }
   const timingLine = turnTimingLine(meta.sourceTurn || null, { includeLiveWait: true });
   if (timingLine) {
-    items.push({ label: "timing", value: timingLine });
+    items.push({ label: "耗时", value: timingLine });
   }
   if (items.length === 0) {
     return null;
@@ -4649,7 +4794,7 @@ function cycleCardKeyFromNode(node) {
 
 function cycleCardMetaForTimelineItem(item) {
   if (!item) {
-    return { kind: "unknown", lifecycle: { className: "pending", label: "waiting", isLive: false } };
+    return { kind: "unknown", lifecycle: { className: "pending", label: "等待中", isLive: false } };
   }
   if (item.kind === "turn") {
     const renderTurn = item.renderTurn || {};
@@ -4678,10 +4823,10 @@ function cycleCardMetaForTimelineItem(item) {
       lifecycle: {
         className: pendingSubmit.error || pendingSubmit.isLive ? "running" : "pending",
         label: pendingSubmit.error
-          ? "checking service truth"
+          ? "检查服务真源"
           : elapsed
-            ? `dispatching... ${elapsed}`
-            : "dispatching",
+            ? `派发中... ${elapsed}`
+            : "派发中",
         isLive: pendingSubmit.isLive || !!pendingSubmit.error,
       },
       terminal: false,
@@ -4695,20 +4840,25 @@ function cycleCardMetaForTimelineItem(item) {
       sessionId: receipt.sessionId || "",
       submitId: receipt.submitId || "",
       createdAt: receipt.createdAt || receipt.created_at || "",
-      lifecycle: { className: "running", label: "service accepted", isLive: true },
+      lifecycle: { className: "running", label: "服务已接收", isLive: true },
       terminal: false,
     };
   }
   if (item.kind === "failure") {
+    const failure = item.failure || {};
     return {
       kind: "failure",
-      turnId: "adp-failure",
+      turnId: failure.sessionRefresh ? "session-refresh-failure" : "adp-failure",
       sessionId: state.selectedSessionId || "",
-      lifecycle: { className: "failed", label: "failed", isLive: false },
+      lifecycle: {
+        className: "failed",
+        label: failure.sessionRefresh ? "会话刷新失败" : "失败",
+        isLive: false,
+      },
       terminal: true,
     };
   }
-  return { kind: item.kind || "unknown", lifecycle: { className: "pending", label: "waiting", isLive: false } };
+  return { kind: item.kind || "unknown", lifecycle: { className: "pending", label: "等待中", isLive: false } };
 }
 
 function cycleCardIsTerminal(meta) {
@@ -4859,9 +5009,9 @@ function appendSessionParts(item, label, title, meta) {
 
 function sessionKindLabel(session) {
   if (session && session.temporary) {
-    return "worker";
+    return "Worker";
   }
-  return normalizeCwd(session && session.cwd) ? "task" : "global";
+  return normalizeCwd(session && session.cwd) ? "任务" : "全局";
 }
 
 function normalizeAgentId(value) {
@@ -4920,7 +5070,7 @@ function selectedParentSessionSummary() {
   return (
     state.sessions.find((session) => session.session_id === parentSessionId) ||
     (state.draftSessionId === parentSessionId
-      ? { session_id: parentSessionId, title: "Draft session", temporary: false }
+      ? { session_id: parentSessionId, title: "草稿会话", temporary: false }
       : null)
   );
 }
@@ -4974,7 +5124,7 @@ function currentSessionTaskCounts(tasks = currentSessionTasks()) {
 
 function currentSessionTaskStatusLabel(tasks = currentSessionTasks()) {
   const counts = currentSessionTaskCounts(tasks);
-  return `${counts.activeCount} active · ${counts.reviewCount} review · ${counts.blockedCount} blocked · ${counts.closedCount} closed · ${counts.staleCount} stale`;
+  return `${counts.activeCount} 活动 · ${counts.reviewCount} 审核 · ${counts.blockedCount} 阻塞 · ${counts.closedCount} 关闭 · ${counts.staleCount} 过期`;
 }
 
 function sessionSummaryById(sessionId) {
@@ -5057,7 +5207,9 @@ function turnHasObservableSessionActivity(turn) {
   const waitingTools = (turn.tool_activities || []).some(
     (tool) => tool.status === "Waiting" || tool.status === "waiting",
   );
-  return isToolPendingStatus(turn.terminal_status) || turnIsWaitingForModelResponse(turn) || waitingTools;
+  return (isToolPendingStatus(turn.terminal_status) && toolPendingRepresentsLifecycle(turn)) ||
+    turnIsWaitingForModelResponse(turn) ||
+    waitingTools;
 }
 
 function latestClosedTurnForSession(sessionId) {
@@ -5107,6 +5259,15 @@ function activeTurnForSession(sessionId) {
 
 function sessionHasObservableActiveStatus(session) {
   const status = `${(session && session.latest_status) || ""}`.toLowerCase();
+  if (
+    session &&
+    isToolPendingStatus(status) &&
+    !session.active_turn_id &&
+    lifecycleOwnerProjectionLoaded() &&
+    !sessionHasOpenLifecycleOwner(session.session_id)
+  ) {
+    return false;
+  }
   return Boolean(
     session &&
       (session.active_turn_id ||
@@ -5117,8 +5278,22 @@ function sessionHasObservableActiveStatus(session) {
 function sessionLiveObservation(sessionId) {
   const summary = sessionSummaryById(sessionId);
   const turn = activeTurnForSession(sessionId);
-  if (!summary && !turn) {
+  const waitingUserTurn = latestSessionTurnMatching(sessionId, (candidate) =>
+    candidate && isToolPendingStatus(candidate.terminal_status) && !toolPendingRepresentsLifecycle(candidate)
+  );
+  if (!summary && !turn && !waitingUserTurn) {
     return null;
+  }
+  if (!turn && waitingUserTurn) {
+    return {
+      sessionId: `${waitingUserTurn.session_id || sessionId || ""}`,
+      title: `${(summary && summary.title) || waitingUserTurn.session_id || "会话"}`,
+      turnId: `${waitingUserTurn.turn_id || ""}`,
+      status: "waiting_user",
+      label: "等待用户选择",
+      detail: (summary && summary.latest_summary) || waitingUserTurn.terminal_text || "",
+      tone: "phase2-muted",
+    };
   }
   const latestClosedTurn = latestClosedTurnForSession(sessionId);
   if (
@@ -5129,20 +5304,26 @@ function sessionLiveObservation(sessionId) {
   }
   const turnId = `${(turn && turn.turn_id) || (summary && summary.active_turn_id) || (summary && summary.latest_turn_id) || ""}`.trim();
   const status = `${(summary && summary.latest_status) || ""}`.trim();
-  const label = turn && turnIsWaitingForModelResponse(turn)
-    ? modelRequestLabel(turn)
-    : statusLabel(status || "active");
+  const label = turn && isToolPendingStatus(turn.terminal_status)
+    ? toolPendingStatusLabelForTurn(turn)
+    : turn && turnIsWaitingForModelResponse(turn)
+      ? modelRequestLabel(turn)
+      : isToolPendingStatus(status) && lifecycleOwnerProjectionLoaded() && !sessionHasOpenLifecycleOwner(sessionId)
+        ? "等待用户选择"
+        : statusLabel(status || "active");
   const detail = turn && turn.model_request && turn.model_request.detail
     ? turn.model_request.detail
     : (summary && summary.latest_summary) || "";
   return {
     sessionId: `${(summary && summary.session_id) || (turn && turn.session_id) || sessionId || ""}`,
-    title: `${(summary && summary.title) || (summary && summary.session_id) || (turn && turn.session_id) || "session"}`,
+    title: `${(summary && summary.title) || (summary && summary.session_id) || (turn && turn.session_id) || "会话"}`,
     turnId,
     status: status || (turn && turnIsWaitingForModelResponse(turn) ? "waiting_model" : "active"),
     label,
     detail,
-    tone: turn && modelRequestTransportPhase(turn).startsWith("provider")
+    tone: turn && isToolPendingStatus(turn.terminal_status) && !toolPendingRepresentsLifecycle(turn)
+      ? "phase2-muted"
+      : turn && modelRequestTransportPhase(turn).startsWith("provider")
       ? "phase2-running"
       : phase2StatusClass(status || "running"),
   };
@@ -5152,16 +5333,16 @@ function globalLiveSessionObservation() {
   if (state.selectedSessionId) {
     const selected = sessionLiveObservation(state.selectedSessionId);
     if (selected) {
-      return { ...selected, scope: "selected" };
+    return { ...selected, scope: "当前会话" };
     }
     const selectedWorkerSession = workerChildSessionForSessionId(state.selectedSessionId);
     const parentSessionId = selectedWorkerSession && selectedWorkerSession.parent_session_id;
     const parent = parentSessionId ? sessionLiveObservation(parentSessionId) : null;
-    return parent ? { ...parent, scope: "parent Master" } : null;
+    return parent ? { ...parent, scope: "父 Master" } : null;
   }
   const activeSummary = (state.sessions || []).find(sessionHasObservableActiveStatus);
   const active = activeSummary ? sessionLiveObservation(activeSummary.session_id) : null;
-  return active ? { ...active, scope: "active Master" } : null;
+  return active ? { ...active, scope: "活动 Master" } : null;
 }
 
 function liveObservationLine(observation) {
@@ -5214,7 +5395,7 @@ function renderSessionItem(session) {
   selector.className = "session-selector";
   selector.type = "checkbox";
   selector.checked = state.selectedSessionIds.has(session.session_id);
-  selector.setAttribute("aria-label", `Select session ${session.session_id}`);
+  selector.setAttribute("aria-label", `选择会话 ${session.session_id}`);
   selector.disabled = !!session.temporary;
   selector.addEventListener("change", () => {
     toggleSessionSelection(session.session_id, selector.checked);
@@ -5228,15 +5409,15 @@ function renderSessionItem(session) {
   const cwd = normalizeCwd(session.cwd);
   const cwdTail = cwd ? ` · ${cwd.split("/").filter(Boolean).slice(-2).join("/") || cwd}` : "";
   const turnText = session.latest_turn_id
-    ? `${session.latest_turn_id} · ${session.turn_count} turn(s)${cwdTail}`
-    : `${session.turn_count} turn(s)${cwdTail}`;
+    ? `${session.latest_turn_id} · ${session.turn_count} 个 turn${cwdTail}`
+    : `${session.turn_count} 个 turn${cwdTail}`;
   const observation = sessionLiveObservation(session.session_id);
   appendSessionParts(
     button,
-    observation ? `active · ${observation.label}` : `${sessionKindLabel(session)} · ${session.latest_status || "session"}`,
+    observation ? `活动 · ${observation.label}` : `${sessionKindLabel(session)} · ${statusLabel(session.latest_status || "session")}`,
     session.title || session.session_id,
     observation
-      ? `${observation.turnId || session.active_turn_id || session.latest_turn_id} · ${observation.status} · ${session.turn_count} turn(s)${cwdTail}`
+      ? `${observation.turnId || session.active_turn_id || session.latest_turn_id} · ${statusLabel(observation.status)} · ${session.turn_count} 个 turn${cwdTail}`
       : turnText,
   );
 
@@ -5291,7 +5472,7 @@ function renderSessionAgentGroup(sessions) {
 
   const count = document.createElement("span");
   count.className = "session-agent-count";
-  count.textContent = `${sessions.length} session(s)`;
+  count.textContent = `${sessions.length} 个会话`;
   toggle.append(main, count);
 
   const sessionNodes = document.createElement("div");
@@ -5315,7 +5496,7 @@ function renderSessionBulkToolbar() {
   }
   const selectedCount = selectedManagedSessionIds().length;
   const selectableCount = state.sessions.filter((session) => !isDraftSessionId(session.session_id)).length;
-  sessionBulkCount.textContent = `${selectedCount} selected`;
+  sessionBulkCount.textContent = `已选 ${selectedCount} 个`;
   sessionDeleteSelectedButton.disabled = selectedCount === 0;
   if (sessionRenameSelectedButton) {
     sessionRenameSelectedButton.disabled = selectedCount > 1;
@@ -5341,7 +5522,7 @@ function renderSessions() {
     }
     const empty = document.createElement("section");
     empty.className = "session-item active";
-    appendSessionParts(empty, "empty", "no sessions", "waiting for first turn");
+    appendSessionParts(empty, "空", "暂无会话", "等待第一轮对话");
     sessionList.appendChild(empty);
     return;
   }
@@ -5359,35 +5540,78 @@ function renderMobileHomeDashboard() {
     return;
   }
   const activeSessions = activeSessionsForHome();
-  setText("mobile-home-active-title", `${activeSessions.length} active session${activeSessions.length === 1 ? "" : "s"}`);
+  setText("mobile-home-active-title", activeSessions.length > 0 ? `${activeSessions.length} 个运行中会话` : "暂无运行中会话");
   setText(
     "mobile-home-active-copy",
     activeSessions.length > 0
-      ? "Background session monitor from owner-projected session and lifecycle truth."
-      : "Running, retrying, or waiting sessions appear here.",
+      ? "运行、重试、等待用户选择的会话都在这里；可以同时存在多个活着的 Agent。"
+      : "运行、重试或等待中的会话会显示在这里。",
   );
   if (mobileHomeActiveMarker) {
     mobileHomeActiveMarker.classList.toggle("ok", activeSessions.length > 0);
     mobileHomeActiveMarker.classList.toggle("attention", activeSessions.length === 0);
   }
   renderMobileHomeActiveList(activeSessions);
-  setText("mobile-home-session-count", `${state.sessions.length} persisted session(s)`);
-  renderMobileHomeSessionList();
+  const historySessions = mobileHomeHistorySessions(activeSessions);
+  setText("mobile-home-session-count", `${historySessions.length} 个历史会话 · 按时间展开`);
+  renderMobileHomeSessionList(historySessions);
+}
+
+function mobileHomeHistorySessions(activeSessions = activeSessionsForHome()) {
+  const activeSessionIds = new Set(
+    (activeSessions || [])
+      .map((observation) => `${(observation && observation.sessionId) || ""}`.trim())
+      .filter(Boolean),
+  );
+  return (state.sessions || [])
+    .filter((session) => session && session.session_id && !activeSessionIds.has(session.session_id))
+    .sort(compareSessionSummaryForDisplay);
+}
+
+function compareSessionSummaryForDisplay(left, right) {
+  const leftTime = sessionSummaryTimeRank(left);
+  const rightTime = sessionSummaryTimeRank(right);
+  if (leftTime !== rightTime) {
+    return rightTime - leftTime;
+  }
+  return `${right && right.session_id || ""}`.localeCompare(`${left && left.session_id || ""}`);
+}
+
+function sessionSummaryTimeRank(session) {
+  const latestTurn = latestSessionTurnMatching(session && session.session_id);
+  const turnCreatedAt = timestampToMilliseconds(latestTurn && latestTurn.created_at) || 0;
+  if (turnCreatedAt) {
+    return turnCreatedAt;
+  }
+  const id = `${(session && session.session_id) || ""}`;
+  const stamp = id.match(/(20\d{12})/);
+  if (stamp) {
+    const raw = stamp[1];
+    const iso = `${raw.slice(0, 4)}-${raw.slice(4, 6)}-${raw.slice(6, 8)}T${raw.slice(8, 10)}:${raw.slice(10, 12)}:${raw.slice(12, 14)}Z`;
+    const parsed = Date.parse(iso);
+    if (Number.isFinite(parsed)) {
+      return parsed;
+    }
+  }
+  const turnOrdinal = turnOrderKey(session && session.latest_turn_id).ordinal || 0;
+  return turnOrdinal;
 }
 
 function activeSessionsForHome() {
   const bySession = new Map();
+  (state.sessions || []).forEach((session) => {
+    const observation = sessionLiveObservation(session.session_id);
+    if (observation && observation.sessionId) {
+      bySession.set(observation.sessionId, { ...observation, scope: observation.scope || "运行中" });
+    }
+  });
   const selectedObservation = globalLiveSessionObservation();
   if (selectedObservation && selectedObservation.sessionId) {
     bySession.set(selectedObservation.sessionId, selectedObservation);
   }
-  (state.sessions || []).forEach((session) => {
-    const observation = sessionLiveObservation(session.session_id);
-    if (observation && observation.sessionId) {
-      bySession.set(observation.sessionId, { ...observation, scope: observation.scope || "active Master" });
-    }
-  });
-  return Array.from(bySession.values()).slice(0, 4);
+  return Array.from(bySession.values()).sort((left, right) =>
+    compareSessionSummaryForDisplay(sessionSummaryById(left.sessionId), sessionSummaryById(right.sessionId))
+  );
 }
 
 function timerDashboardStats() {
@@ -5405,10 +5629,10 @@ function timerDashboardStats() {
 
 function timerDashboardSummary(stats = timerDashboardStats()) {
   if (!state.timerList) {
-    return "waiting for timer truth";
+    return "等待定时器真源";
   }
-  const next = stats.next ? ` · next ${formatUnixTime(stats.next.next_due_at)}` : "";
-  return `${stats.activeCount} active · ${stats.terminalCount} terminal${next}`;
+  const next = stats.next ? ` · 下次 ${formatUnixTime(stats.next.next_due_at)}` : "";
+  return `${stats.activeCount} 活动 · ${stats.terminalCount} 终态${next}`;
 }
 
 function renderMobileHomeActiveList(activeSessions = activeSessionsForHome()) {
@@ -5417,99 +5641,125 @@ function renderMobileHomeActiveList(activeSessions = activeSessionsForHome()) {
   }
   mobileHomeActiveList.replaceChildren();
   if (activeSessions.length === 0) {
-    mobileHomeActiveList.textContent = state.sessionListLoaded ? "No active background sessions." : "waiting for activity truth";
+    mobileHomeActiveList.textContent = state.sessionListLoaded ? "暂无运行中会话。" : "等待活动真源";
     return;
   }
   activeSessions.forEach((observation) => {
-    const item = document.createElement("button");
-    item.className = "mobile-home-session-item";
-    item.type = "button";
-    item.dataset.sessionId = observation.sessionId || "";
-    if (observation.turnId) {
-      item.dataset.turnId = observation.turnId;
-    }
-    const marker = document.createElement("span");
-    marker.className = `settings-status-marker ${observation.tone === "phase2-failed" ? "attention" : "ok"}`;
-    marker.setAttribute("aria-hidden", "true");
-    const copy = document.createElement("span");
-    copy.className = "mobile-home-session-copy";
-    const title = document.createElement("strong");
-    title.textContent = compactSentence(observation.title || observation.sessionId, 72);
-    const meta = document.createElement("small");
-    meta.textContent = compactSentence(liveObservationLine(observation), 88);
-    copy.append(title, meta);
-    item.append(marker, copy);
-    item.addEventListener("click", () => switchConversationSession(observation.sessionId));
-    mobileHomeActiveList.appendChild(item);
+    const summary = sessionSummaryById(observation.sessionId);
+    mobileHomeActiveList.appendChild(
+      mobileHomeSessionButton({
+        session: summary || { session_id: observation.sessionId, title: observation.title },
+        markerClass: observation.tone === "phase2-failed" ? "attention" : "ok",
+        primary: observation.title || observation.sessionId,
+        meta: liveObservationLine(observation),
+        status: observation.label || statusLabel(observation.status),
+        turnId: observation.turnId,
+        live: true,
+      }),
+    );
   });
 }
 
-function renderMobileHomeSessionList() {
+function renderMobileHomeSessionList(sessions = mobileHomeHistorySessions()) {
   if (!mobileHomeSessionList) {
     return;
   }
   mobileHomeSessionList.replaceChildren();
-  const sessions = state.sessions.slice(-3).reverse();
   if (sessions.length === 0) {
-    mobileHomeSessionList.textContent = state.sessionListLoaded ? "No persisted sessions." : "waiting for session truth";
+    mobileHomeSessionList.textContent = state.sessionListLoaded ? "暂无历史会话。" : "等待会话真源";
     return;
   }
   sessions.forEach((session) => {
-    const item = document.createElement("button");
-    item.className = "mobile-home-session-item";
-    item.type = "button";
-    item.dataset.sessionId = session.session_id || "";
-    const marker = document.createElement("span");
-    marker.className = `settings-status-marker ${sessionHasObservableActiveStatus(session) ? "ok" : ""}`;
-    marker.setAttribute("aria-hidden", "true");
-    const copy = document.createElement("span");
-    copy.className = "mobile-home-session-copy";
-    const title = document.createElement("strong");
-    title.textContent = compactSentence(session.title || session.session_id, 72);
-    const meta = document.createElement("small");
-    meta.textContent = compactSentence(`${sessionKindLabel(session)} · ${session.latest_status || "session"}`, 72);
-    copy.append(title, meta);
-    item.append(marker, copy);
-    item.addEventListener("click", () => switchConversationSession(session.session_id));
-    mobileHomeSessionList.appendChild(item);
+    mobileHomeSessionList.appendChild(mobileHomeHistorySessionNode(session));
   });
 }
 
-function renderSettingsReviewTree() {
-  if (!settingsReviewTree) {
-    return;
-  }
-  const sections = phaseOneSettingsTree.map((section) => {
-    const block = document.createElement("section");
-    block.className = "settings-review-section";
-    const title = document.createElement("h3");
-    title.textContent = section.title;
-    const list = document.createElement("div");
-    list.className = "settings-review-list";
-    section.items.forEach(([name, detail, tone]) => {
-      const row = document.createElement("article");
-      row.className = "settings-review-row";
-      const marker = document.createElement("span");
-      const markerTone = ["ok", "partial", "attention"].includes(tone) ? tone : "attention";
-      marker.className = `settings-status-marker ${markerTone}`;
-      marker.setAttribute("aria-hidden", "true");
-      row.dataset.settingsState = markerTone;
-      const copy = document.createElement("span");
-      const label = document.createElement("strong");
-      label.textContent = name;
-      const note = document.createElement("small");
-      note.textContent = detail;
-      copy.append(label, note);
-      row.append(marker, copy);
-      list.append(row);
+function mobileHomeHistorySessionNode(session) {
+  const children = workerChildSessionsForParent(session.session_id);
+  const fragment = document.createElement("section");
+  fragment.className = "mobile-home-session-group";
+  fragment.dataset.sessionId = session.session_id || "";
+  fragment.appendChild(
+    mobileHomeSessionButton({
+      session,
+      markerClass: sessionHasObservableActiveStatus(session) ? "ok" : "",
+      primary: session.title || session.session_id,
+      meta: mobileHomeSessionMeta(session),
+      status: statusLabel(session.latest_status || "session"),
+      live: false,
+    }),
+  );
+  if (children.length > 0) {
+    const childList = document.createElement("div");
+    childList.className = "mobile-home-worker-children";
+    children.forEach((child) => {
+      childList.appendChild(
+        mobileHomeSessionButton({
+          session: child,
+          markerClass: phase2StatusClass(child.latest_status) === "phase2-failed" ? "attention" : "partial",
+          primary: child.title || child.session_id,
+          meta: [statusLabel(child.latest_status), assigneeLabel(child.assignee_agent_id), child.session_id].filter(Boolean).join(" · "),
+          status: statusLabel(child.latest_status),
+          live: !terminalTaskStatus(child.latest_status),
+          child: true,
+        }),
+      );
     });
-    block.append(title, list);
-    return block;
-  });
-  const note = document.createElement("p");
-  note.className = "settings-review-note";
-  note.textContent = "Phase 1 audit tree: unconnected rows are UI-only placeholders until owner-backed Phase 2 wiring lands. Android remains a daemon-hosted WebUI shell; phone-local filesystem management is not part of this surface.";
-  settingsReviewTree.replaceChildren(note, ...sections);
+    fragment.appendChild(childList);
+  }
+  return fragment;
+}
+
+function mobileHomeSessionButton({ session, markerClass = "", primary, meta, status, turnId = "", live = false, child = false }) {
+  const item = document.createElement("button");
+  item.className = ["mobile-home-session-item", child ? "is-worker" : "", live ? "is-live" : ""].filter(Boolean).join(" ");
+  item.type = "button";
+  item.dataset.sessionId = (session && session.session_id) || "";
+  item.dataset.sessionKind = child ? "worker" : sessionKindLabel(session);
+  if (turnId) {
+    item.dataset.turnId = turnId;
+  }
+  if (session && session.task_id) {
+    item.dataset.taskId = session.task_id;
+  }
+  const marker = document.createElement("span");
+  marker.className = ["settings-status-marker", markerClass].filter(Boolean).join(" ");
+  marker.setAttribute("aria-hidden", "true");
+  const copy = document.createElement("span");
+  copy.className = "mobile-home-session-copy";
+  const title = document.createElement("strong");
+  title.textContent = compactSentence(primary || (session && session.session_id) || "会话", 88);
+  const metaNode = document.createElement("small");
+  metaNode.textContent = compactSentence(meta || "等待会话真源", 120);
+  copy.append(title, metaNode);
+  const statusNode = document.createElement("span");
+  statusNode.className = "mobile-home-session-status";
+  statusNode.textContent = status || "状态";
+  item.append(marker, copy, statusNode);
+  item.addEventListener("click", () => switchConversationSession(session && session.session_id));
+  return item;
+}
+
+function mobileHomeSessionMeta(session) {
+  const cwd = normalizeCwd(session && session.cwd);
+  const cwdTail = cwd ? cwd.split("/").filter(Boolean).slice(-2).join("/") || cwd : "";
+  const timeLabel = mobileHomeSessionTimeLabel(session);
+  return [
+    timeLabel,
+    sessionKindLabel(session),
+    `${(session && session.turn_count) || 0} 个 turn`,
+    cwdTail,
+  ].filter(Boolean).join(" · ");
+}
+
+function mobileHomeSessionTimeLabel(session) {
+  const latestTurn = latestSessionTurnMatching(session && session.session_id);
+  const createdAt = timestampToMilliseconds(latestTurn && latestTurn.created_at);
+  if (createdAt) {
+    return localChatTimeLabel(createdAt);
+  }
+  const rank = sessionSummaryTimeRank(session);
+  return rank > 1000000000000 ? localChatTimeLabel(rank) : "时间未知";
 }
 
 function renderSettingsDiagnostics() {
@@ -5517,24 +5767,24 @@ function renderSettingsDiagnostics() {
   setText(
     "settings-diagnostics-summary",
     state.diagnosticsError
-      ? "query failed"
+      ? "查询失败"
       : state.diagnostics
-        ? `${files.length} log file(s)`
-        : "loading",
+        ? `${files.length} 个日志文件`
+        : "加载中",
   );
-  setText("settings-diagnostics-runtime-home", state.diagnostics?.runtime_home || "loading");
+  setText("settings-diagnostics-runtime-home", state.diagnostics?.runtime_home || "加载中");
   if (settingsDiagnosticsStatus) {
     settingsDiagnosticsStatus.textContent = state.diagnosticsError
-      ? `Diagnostics query failed: ${state.diagnosticsError}`
+      ? `诊断查询失败：${state.diagnosticsError}`
       : state.diagnostics
-        ? `Redacted log metadata from ${state.diagnostics.logs_dir || "logs"} · generated ${formatUnixTime(state.diagnostics.generated_at)}`
-        : "Diagnostics show service-owned log metadata and redacted tail lines.";
+        ? `来自 ${state.diagnostics.logs_dir || "logs"} 的脱敏日志元数据 · 生成 ${formatUnixTime(state.diagnostics.generated_at)}`
+        : "诊断只显示服务拥有的日志元数据和脱敏尾部内容。";
   }
   if (settingsDiagnosticsRefreshButton) {
     settingsDiagnosticsRefreshButton.disabled = state.diagnosticsInFlight;
     settingsDiagnosticsRefreshButton.textContent = state.diagnosticsInFlight
-      ? "Refreshing diagnostics..."
-      : "Refresh diagnostics";
+      ? "正在刷新诊断..."
+      : "刷新诊断";
   }
   if (!settingsDiagnosticsList) {
     return;
@@ -5545,7 +5795,7 @@ function renderSettingsDiagnostics() {
     return;
   }
   if (files.length === 0) {
-    settingsDiagnosticsList.textContent = state.diagnostics ? "No log files projected." : "waiting for diagnostics projection";
+    settingsDiagnosticsList.textContent = state.diagnostics ? "没有投影日志文件。" : "等待诊断投影";
     return;
   }
   files.slice(0, 8).forEach((file) => {
@@ -5555,7 +5805,7 @@ function renderSettingsDiagnostics() {
 
 function renderDiagnosticLogRow(file) {
   const row = document.createElement("article");
-  row.className = "settings-review-row diagnostic-log-row";
+  row.className = "settings-diagnostic-row diagnostic-log-row";
   row.dataset.logName = file.name || "";
   row.dataset.relativePath = file.relative_path || "";
   const marker = document.createElement("span");
@@ -5563,14 +5813,14 @@ function renderDiagnosticLogRow(file) {
   marker.setAttribute("aria-hidden", "true");
   const copy = document.createElement("span");
   const label = document.createElement("strong");
-  label.textContent = file.name || file.relative_path || "log file";
+  label.textContent = file.name || file.relative_path || "日志文件";
   const meta = document.createElement("small");
   meta.textContent = compactSentence(
     `${file.relative_path || "logs"} · ${Number(file.size_bytes || 0)} bytes · ${formatUnixTime(file.modified_at)}`,
     150,
   );
   const tail = document.createElement("small");
-  tail.textContent = compactSentence((file.tail_lines || []).join(" / ") || "no tail lines", 180);
+  tail.textContent = compactSentence((file.tail_lines || []).join(" / ") || "没有尾部日志", 180);
   copy.append(label, meta, tail);
   row.append(marker, copy);
   return row;
@@ -5582,7 +5832,7 @@ function renderDraftSessionItem() {
   item.type = "button";
   item.dataset.sessionId = state.draftSessionId;
   item.dataset.sessionKind = state.selectedCwd ? "task" : "global";
-  appendSessionParts(item, "draft", state.draftSessionId, state.selectedCwd ? `cwd ${state.selectedCwd}` : "first send creates session");
+  appendSessionParts(item, "草稿", state.draftSessionId, state.selectedCwd ? `cwd ${state.selectedCwd}` : "首次发送会创建会话");
   item.addEventListener("click", () => {
     setSelectedSessionId(state.draftSessionId);
     state.sessionTurns = [];
@@ -5595,7 +5845,7 @@ function renderDraftSessionItem() {
 
 function renderDebug() {
   if (!state.debug) {
-    setText("debug-status", "waiting");
+    setText("debug-status", "等待中");
     setText("debug-lines", "-");
     return;
   }
@@ -5604,7 +5854,7 @@ function renderDebug() {
 }
 
 function renderCheckpoints() {
-  setText("checkpoint-status", `${state.checkpoints.length} checkpoint(s)`);
+  setText("checkpoint-status", `${state.checkpoints.length} 个检查点`);
   const list = document.getElementById("checkpoint-list");
   if (!list) {
     return;
@@ -5716,7 +5966,7 @@ function buildMobileAgentDashboardModel() {
   );
   const latestSelectedTurn = selectedTurns[selectedTurns.length - 1] || activeTurnForSelectedSession();
   const terminalStatus = `${latestSelectedTurn?.terminal_status || ""}`.toLowerCase();
-  let tone = "unavailable";
+  let tone = "不可用";
   if (liveObservation) {
     tone = "active";
   } else if (taskBoard) {
@@ -5737,8 +5987,8 @@ function buildMobileAgentDashboardModel() {
     taskBoardStatus: taskBoard
       ? currentSessionTaskStatusLabel(tasks)
       : state.phase2StatusError
-        ? `status unavailable: ${state.phase2StatusError}`
-        : "waiting",
+        ? `状态不可用：${state.phase2StatusError}`
+        : "等待中",
     counts,
     tasks,
     agents,
@@ -5762,8 +6012,8 @@ function renderMobileAgentSummaryStrip(model = buildMobileAgentDashboardModel())
   setText(
     "mobile-agent-summary-title",
     liveObservation
-      ? `${liveObservation.label} · ${liveObservation.turnId || "active turn"}`
-      : `${runningAgents.length} running · ${lifecycleSummary}${resourceSummary}`,
+      ? `${liveObservation.label} · ${liveObservation.turnId || "活动 turn"}`
+      : `${runningAgents.length} 运行中 · ${lifecycleSummary}${resourceSummary}`,
   );
   const activeTask =
     model.tasks.find((task) => taskLifecycleBucket(task.status) === "active") ||
@@ -5776,7 +6026,7 @@ function renderMobileAgentSummaryStrip(model = buildMobileAgentDashboardModel())
       ? compactSentence(`${liveObservation.scope}: ${liveObservation.title} · ${liveObservation.sessionId}`, 96)
       : activeTask
       ? compactSentence(`${statusLabel(activeTask.status)}: ${taskTitle(activeTask)}`, 72)
-      : "No Worker task in this session",
+      : "当前会话没有 工作器任务",
   );
   setText("mobile-agent-summary-dot", "");
   if (shell) {
@@ -5794,7 +6044,7 @@ function renderMobileAgentSheet(model = buildMobileAgentDashboardModel()) {
   setText(
     "mobile-agent-task-status",
     liveObservation
-      ? `${liveObservation.label} · ${liveObservation.turnId || "active turn"} · ${liveObservation.sessionId}`
+      ? `${liveObservation.label} · ${liveObservation.turnId || "活动 turn"} · ${liveObservation.sessionId}`
       : model.taskBoardStatus,
   );
   renderMobileAgentTaskList(model);
@@ -5806,14 +6056,14 @@ function renderSystemAgentResourceConfig() {
   const isMaster = status?.agent_mode === "master";
   const workerLimit = Number(state.agentResourceDraftCount ?? status?.agent_resource_count ?? 1);
   const systemMax = Number(status?.agent_resource_limit || 5);
-  const providerMode = status?.agent_resource_provider_mode || "unavailable";
-  const providerId = status?.agent_resource_provider_id || "unavailable";
+  const providerMode = status?.agent_resource_provider_mode || "不可用";
+  const providerId = status?.agent_resource_provider_id || "不可用";
   setText("settings-agent-resource-count", `${workerLimit}`);
   setText("settings-agent-resource-limit", `${systemMax}`);
-  setText("settings-agent-resource-summary", status ? `limit ${workerLimit} · max ${systemMax}` : "loading");
+  setText("settings-agent-resource-summary", status ? `上限 ${workerLimit} · 最大 ${systemMax}` : "加载中");
   setText(
     "settings-agent-resource-provider",
-    providerMode === "shared" ? `shared · ${providerId}` : providerMode.replaceAll("_", " "),
+    providerMode === "shared" ? `共享 · ${providerId}` : statusLabel(providerMode),
   );
   const disabled = !status || !isMaster || state.agentResourceSaveInFlight;
   if (settingsAgentResourceDecrement) {
@@ -5824,17 +6074,17 @@ function renderSystemAgentResourceConfig() {
   }
   if (settingsAgentResourceSave) {
     settingsAgentResourceSave.disabled = disabled || workerLimit === Number(status?.agent_resource_count);
-    settingsAgentResourceSave.textContent = state.agentResourceSaveInFlight ? "Saving..." : "Save Worker limit";
+    settingsAgentResourceSave.textContent = state.agentResourceSaveInFlight ? "保存中..." : "保存工作器上限";
   }
   const statusText = state.agentResourceSaveError
-    ? `Save failed: ${state.agentResourceSaveError}`
+    ? `保存失败：${state.agentResourceSaveError}`
     : state.agentResourceSaveMessage
       ? state.agentResourceSaveMessage
       : !status
-        ? "Waiting for config truth."
+        ? "等待配置真源。"
         : !isMaster
-          ? "Worker limit is configurable only from the active Master."
-          : "Worker limit 1-5 · restart and Worker process startup required.";
+          ? "工作器上限只能从活动 Master 配置。"
+          : "工作器上限 1-5 · 需要重启并启动 Worker 进程。";
   setText("settings-agent-resource-status", statusText);
 }
 
@@ -5854,7 +6104,7 @@ function adjustAgentResourceDraft(delta) {
 async function submitAgentResourceConfigUpdate() {
   const status = state.configStatus;
   if (!status || status.agent_mode !== "master") {
-    state.agentResourceSaveError = "active Master config is unavailable";
+    state.agentResourceSaveError = "活动 Master 配置不可用";
     renderSettingsShell();
     return;
   }
@@ -5874,7 +6124,7 @@ async function submitAgentResourceConfigUpdate() {
     });
     setCommandStatus(agentResourceConfigReceiptStatus(receipt, resourceCount), { stickyMs: 5000 });
     await refreshConfigStatus();
-    state.agentResourceSaveMessage = "Saved. Restart and start Worker processes up to this limit.";
+    state.agentResourceSaveMessage = "已保存。重启并启动 Worker 进程后生效。";
   } catch (error) {
     state.agentResourceSaveError = error.message;
   } finally {
@@ -5889,7 +6139,7 @@ function renderMobileAgentTaskList(model) {
   }
   mobileAgentTaskList.replaceChildren();
   if (model.tasks.length === 0) {
-    mobileAgentTaskList.appendChild(mobileAgentEmptyCard("No Worker tasks in the current projection."));
+    mobileAgentTaskList.appendChild(mobileAgentEmptyCard("当前投影中没有 工作器任务。"));
     return;
   }
   const total = model.tasks.length;
@@ -5899,7 +6149,7 @@ function renderMobileAgentTaskList(model) {
       meta: [`${index + 1}/${total}`, statusLabel(task.status), assigneeLabel(task.assignee_agent_id), freshnessLabel(task.last_progress_at || task.updated_at)]
         .filter(Boolean)
         .join(" · "),
-      copy: compactSentence(task.goal || "Task goal unavailable", 132),
+      copy: compactSentence(task.goal || "任务目标不可用", 132),
       tone: phase2StatusClass(task.status),
       interactive: true,
     });
@@ -5916,18 +6166,18 @@ function renderMobileAgentTaskList(model) {
 function mobileAgentLifecycleSummary(counts) {
   const pieces = [];
   if (counts.activeCount > 0) {
-    pieces.push(`${counts.activeCount} running task${counts.activeCount === 1 ? "" : "s"}`);
+    pieces.push(`${counts.activeCount} 个运行任务`);
   }
   if (counts.reviewCount > 0) {
-    pieces.push(`${counts.reviewCount} review task${counts.reviewCount === 1 ? "" : "s"}`);
+    pieces.push(`${counts.reviewCount} 个审核任务`);
   }
   if (counts.blockedCount > 0) {
-    pieces.push(`${counts.blockedCount} blocked task${counts.blockedCount === 1 ? "" : "s"}`);
+    pieces.push(`${counts.blockedCount} 个阻塞任务`);
   }
   if (pieces.length === 0 && counts.closedCount > 0) {
-    pieces.push(`${counts.closedCount} closed task${counts.closedCount === 1 ? "" : "s"}`);
+    pieces.push(`${counts.closedCount} 个关闭任务`);
   }
-  return pieces.length > 0 ? pieces.join(" · ") : "0 tasks";
+  return pieces.length > 0 ? pieces.join(" · ") : "0 个任务";
 }
 
 function mobileAgentCard({ title, meta, copy, tone = "phase2-muted", interactive = false }) {
@@ -5941,18 +6191,18 @@ function mobileAgentCard({ title, meta, copy, tone = "phase2-muted", interactive
   titleNode.textContent = title;
   const metaNode = document.createElement("div");
   metaNode.className = "mobile-agent-card-meta";
-  metaNode.textContent = meta || "status unavailable";
+  metaNode.textContent = meta || "状态不可用";
   const copyNode = document.createElement("div");
   copyNode.className = "mobile-agent-card-copy";
-  copyNode.textContent = copy || "detail unavailable";
+  copyNode.textContent = copy || "详情不可用";
   card.append(titleNode, metaNode, copyNode);
   return card;
 }
 
 function mobileAgentEmptyCard(copy) {
   return mobileAgentCard({
-    title: "Unavailable",
-    meta: "owner projection",
+    title: "不可用",
+    meta: "owner 投影",
     copy,
   });
 }
@@ -5975,12 +6225,12 @@ function renderTaskBoardProjection() {
   }
   const board = state.taskBoard;
   if (state.phase2StatusError && !board) {
-    taskBoardStatus.textContent = `status unavailable: ${state.phase2StatusError}`;
+    taskBoardStatus.textContent = `状态不可用：${state.phase2StatusError}`;
     taskBoardList.textContent = "-";
     return;
   }
   if (!board) {
-    taskBoardStatus.textContent = "waiting";
+    taskBoardStatus.textContent = "等待中";
     taskBoardList.textContent = "-";
     return;
   }
@@ -5988,7 +6238,7 @@ function renderTaskBoardProjection() {
   taskBoardStatus.textContent = currentSessionTaskStatusLabel(tasks);
   taskBoardList.replaceChildren();
   if (tasks.length === 0) {
-    taskBoardList.textContent = state.selectedSessionId ? "no tasks for selected session" : "no tasks yet";
+    taskBoardList.textContent = state.selectedSessionId ? "选中会话没有任务" : "暂无任务";
     return;
   }
   tasks.slice(0, 8).forEach((task) => taskBoardList.appendChild(taskBoardItem(task)));
@@ -6011,7 +6261,7 @@ function taskBoardItem(task) {
     .join(" · ");
   const goal = document.createElement("div");
   goal.className = "phase2-card-copy";
-  goal.textContent = compactSentence(task.goal || task.target_cwd || "task registered", 120);
+  goal.textContent = compactSentence(task.goal || task.target_cwd || "任务已注册", 120);
   item.append(title, meta, goal);
   return item;
 }
@@ -6022,21 +6272,21 @@ function renderAgentBoardProjection() {
   }
   const board = state.agentBoard;
   if (state.phase2StatusError && !board) {
-    agentBoardStatus.textContent = `status unavailable: ${state.phase2StatusError}`;
+    agentBoardStatus.textContent = `状态不可用：${state.phase2StatusError}`;
     agentBoardList.textContent = "-";
     return;
   }
   if (!board) {
-    agentBoardStatus.textContent = "waiting";
+    agentBoardStatus.textContent = "等待中";
     agentBoardList.textContent = "-";
     return;
   }
   const agents = currentSessionAgents();
   const activeCount = agents.filter((agent) => agent.alive).length;
-  agentBoardStatus.textContent = `${agents.length} current agent(s) · ${activeCount} active`;
+  agentBoardStatus.textContent = `${agents.length} 个当前 Agent · ${activeCount} 个活动`;
   agentBoardList.replaceChildren();
   if (agents.length === 0) {
-    agentBoardList.textContent = state.selectedSessionId ? "no workers for selected session" : "no workers yet";
+    agentBoardList.textContent = state.selectedSessionId ? "选中会话没有 Worker" : "暂无 Worker";
     return;
   }
   agents.slice(0, 8).forEach((agent, index) => agentBoardList.appendChild(agentBoardItem(agent, index)));
@@ -6059,12 +6309,12 @@ function agentBoardItem(agent, index) {
   title.textContent = phase2AgentLabel(agent.agent_id, index);
   const meta = document.createElement("div");
   meta.className = "phase2-card-meta";
-  meta.textContent = [statusLabel(agent.state), agent.role || "agent", agent.current_model ? `model ${agent.current_model}` : null]
+  meta.textContent = [statusLabel(agent.state), agent.role || "Agent", agent.current_model ? `模型 ${agent.current_model}` : null]
     .filter(Boolean)
     .join(" · ");
   const activity = document.createElement("div");
   activity.className = "phase2-card-copy";
-  activity.textContent = lifecycleActivityLabel(agent) || (boundTask ? taskTitle(boundTask) : "idle");
+  activity.textContent = lifecycleActivityLabel(agent) || (boundTask ? taskTitle(boundTask) : "空闲");
   item.append(title, meta, activity);
   return item;
 }
@@ -6075,20 +6325,20 @@ function renderEventInboxProjection() {
   }
   const inbox = state.eventInbox;
   if (state.phase2StatusError && !inbox) {
-    eventInboxStatus.textContent = `status unavailable: ${state.phase2StatusError}`;
+    eventInboxStatus.textContent = `状态不可用：${state.phase2StatusError}`;
     eventInboxList.textContent = "-";
     return;
   }
   if (!inbox) {
-    eventInboxStatus.textContent = "waiting";
+    eventInboxStatus.textContent = "等待中";
     eventInboxList.textContent = "-";
     return;
   }
   const events = currentSessionEvents();
-  eventInboxStatus.textContent = `${events.length} current event(s)${inbox.next_cursor ? " · updated" : ""}`;
+  eventInboxStatus.textContent = `${events.length} 个当前事件${inbox.next_cursor ? " · 已更新" : ""}`;
   eventInboxList.replaceChildren();
   if (events.length === 0) {
-    eventInboxList.textContent = state.selectedSessionId ? "no events for selected session" : "no pending task events";
+    eventInboxList.textContent = state.selectedSessionId ? "选中会话没有事件" : "暂无待处理任务事件";
     return;
   }
   events.slice(-10).reverse().forEach((event) => eventInboxList.appendChild(eventInboxItem(event)));
@@ -6118,25 +6368,25 @@ function renderTaskHistoryProjection() {
   }
   const history = state.taskHistory;
   if (state.phase2StatusError && !history) {
-    taskHistoryStatus.textContent = `history unavailable: ${state.phase2StatusError}`;
+    taskHistoryStatus.textContent = `历史不可用：${state.phase2StatusError}`;
     taskHistoryList.textContent = "-";
     return;
   }
   if (!history) {
     if (state.taskBoard) {
-      taskHistoryStatus.textContent = "no task history";
-      taskHistoryList.textContent = "no task selected";
+      taskHistoryStatus.textContent = "没有任务历史";
+      taskHistoryList.textContent = "未选择任务";
       return;
     }
-    taskHistoryStatus.textContent = "waiting";
+    taskHistoryStatus.textContent = "等待中";
     taskHistoryList.textContent = "-";
     return;
   }
   const events = history.events || [];
-  taskHistoryStatus.textContent = `${events.length} execution event(s)`;
+  taskHistoryStatus.textContent = `${events.length} 个执行事件`;
   taskHistoryList.replaceChildren();
   if (events.length === 0) {
-    taskHistoryList.textContent = "no execution events recorded";
+    taskHistoryList.textContent = "没有记录执行事件";
     return;
   }
   events.slice(-10).reverse().forEach((event) => taskHistoryList.appendChild(taskHistoryItem(event)));
@@ -6167,25 +6417,25 @@ function renderWorkerControlProjection() {
   const target = currentWorkerControlTarget();
   const control = state.workerControl;
   if (state.phase2StatusError && !control) {
-    workerControlStatus.textContent = `status unavailable: ${state.phase2StatusError}`;
+    workerControlStatus.textContent = `状态不可用：${state.phase2StatusError}`;
     workerControlList.textContent = "-";
     return;
   }
   if (!target && !control) {
-    workerControlStatus.textContent = "no active execution";
-    workerControlList.textContent = "worker control appears when a task has an execution";
+    workerControlStatus.textContent = "没有活动执行";
+    workerControlList.textContent = "任务进入执行后会显示 工作器控制";
     return;
   }
   const events = (control && control.events) || [];
   const currentTask = (control && control.task) || (target && target.task) || null;
-  workerControlStatus.textContent = `${statusLabel(currentTask && currentTask.status)} · ${events.length} control event(s)`;
+  workerControlStatus.textContent = `${statusLabel(currentTask && currentTask.status)} · ${events.length} 个控制事件`;
   workerControlList.replaceChildren();
   workerControlList.appendChild(workerControlSummaryCard(currentTask, target));
   workerControlList.appendChild(workerControlActionRow(currentTask, target));
   if (events.length === 0) {
     const empty = document.createElement("div");
     empty.className = "phase2-empty-note";
-    empty.textContent = "no control events recorded";
+    empty.textContent = "没有记录控制事件";
     workerControlList.appendChild(empty);
     return;
   }
@@ -6197,7 +6447,7 @@ function workerControlSummaryCard(task, target) {
   item.className = `phase2-card ${phase2StatusClass(task && task.status)}`;
   const title = document.createElement("div");
   title.className = "phase2-card-title";
-  title.textContent = task ? taskTitle(task) : "Worker execution";
+  title.textContent = task ? taskTitle(task) : "Worker 执行";
   const meta = document.createElement("div");
   meta.className = "phase2-card-meta";
   meta.textContent = [statusLabel(task && task.status), assigneeLabel((task && task.assignee_agent_id) || (target && target.agent_id))]
@@ -6205,7 +6455,7 @@ function workerControlSummaryCard(task, target) {
     .join(" · ");
   const copy = document.createElement("div");
   copy.className = "phase2-card-copy";
-  copy.textContent = task && task.active_execution_id ? "execution is tracked by the service" : "no active execution";
+  copy.textContent = task && task.active_execution_id ? "执行由服务跟踪" : "没有活动执行";
   item.append(title, meta, copy);
   return item;
 }
@@ -6215,12 +6465,12 @@ function workerControlActionRow(task, target) {
   row.className = "phase2-action-row";
   const disabled = !workerControlCanMutate(task, target) || state.workerControlInFlight;
   [
-    ["query_status", "Query status"],
-    ["request_checkpoint", "Checkpoint"],
-    ["request_submission_now", "Submit now"],
-    ["pause", "Pause"],
-    ["resume", "Resume"],
-    ["cancel", "Cancel"],
+    ["query_status", "查询状态"],
+    ["request_checkpoint", "请求检查点"],
+    ["request_submission_now", "立即提交"],
+    ["pause", "暂停"],
+    ["resume", "继续"],
+    ["cancel", "取消"],
   ].forEach(([op, label]) => {
     const button = document.createElement("button");
     button.type = "button";
@@ -6309,7 +6559,7 @@ function openWorkerTaskSession(task) {
   }
   const sessionId = workerSessionIdForTask(task);
   if (!sessionId) {
-    setCommandStatus("worker session unavailable in TaskBoard projection", { stickyMs: 8000 });
+    setCommandStatus("任务面板 投影中没有可用 工作器会话", { stickyMs: 8000 });
     return;
   }
   switchConversationSession(sessionId);
@@ -6340,7 +6590,7 @@ function returnToParentSession() {
   const selectedWorkerSession = workerChildSessionForSessionId(state.selectedSessionId);
   const parentSessionId = selectedWorkerSession && selectedWorkerSession.parent_session_id;
   if (!parentSessionId) {
-    setCommandStatus("parent Master session unavailable for selected Worker", { stickyMs: 8000 });
+    setCommandStatus("选中 Worker 的父 主控会话不可用", { stickyMs: 8000 });
     return;
   }
   switchConversationSession(parentSessionId);
@@ -6370,12 +6620,12 @@ function renderSessionRelationHeader(model = buildMobileAgentDashboardModel()) {
   const runningAgents = (model.agents || []).filter((agent) => agentIsActive(agent)).length;
   const liveObservation = model.liveObservation || globalLiveSessionObservation();
   const workerLimit = Number(state.configStatus?.agent_resource_count);
-  const workerLimitText = Number.isFinite(workerLimit) && workerLimit > 0 ? ` · limit ${workerLimit}` : "";
+  const workerLimitText = Number.isFinite(workerLimit) && workerLimit > 0 ? ` · 上限 ${workerLimit}` : "";
   const title = selectedWorkerSession
     ? selectedWorkerSession.title || selectedWorkerSession.session_id
     : parentSession
       ? parentSession.title || parentSession.session_id
-      : state.selectedSessionId || "No session selected";
+      : state.selectedSessionId || "未选择会话";
   const activeTask =
     (model.tasks || []).find((task) => taskLifecycleBucket(task.status) === "active") ||
     (model.tasks || []).find((task) => taskLifecycleBucket(task.status) === "review") ||
@@ -6384,24 +6634,24 @@ function renderSessionRelationHeader(model = buildMobileAgentDashboardModel()) {
   const copy = selectedWorkerSession
     ? liveObservation
       ? liveObservationLine(liveObservation)
-      : `Parent Master: ${parentSession ? parentSession.title || parentSession.session_id : selectedWorkerSession.parent_session_id || "unavailable"}`
+      : `父 Master：${parentSession ? parentSession.title || parentSession.session_id : selectedWorkerSession.parent_session_id || "不可用"}`
     : activeTask
       ? liveObservation
         ? liveObservationLine(liveObservation)
         : `${statusLabel(activeTask.status)}: ${taskTitle(activeTask)}`
-      : "Click to open session tree";
+      : "点开查看当前会话内容";
 
   sessionRelationHeader.dataset.open = state.sessionTreeOpen ? "true" : "false";
   sessionRelationHeader.dataset.selectedKind = selectedWorkerSession ? "worker" : "master";
   sessionRelationHeader.dataset.liveSessionId = liveObservation ? liveObservation.sessionId : "";
   sessionRelationHeader.dataset.liveTurnId = liveObservation ? liveObservation.turnId : "";
-  setText("session-relation-kicker", selectedWorkerSession ? "Worker session" : "Master session");
+  setText("session-relation-kicker", selectedWorkerSession ? "工作器会话" : "当前会话");
   setText("session-relation-title", compactSentence(title, 96));
   setText(
     "session-relation-metrics",
     liveObservation
-      ? `${liveObservation.label} · ${liveObservation.turnId || "active turn"} · ${runningAgents} agents${workerLimitText}`
-      : `${counts.activeCount} running · ${counts.reviewCount} review · ${counts.blockedCount} blocked · ${counts.closedCount} closed · ${runningAgents} agents${workerLimitText}`,
+      ? `${liveObservation.label} · ${liveObservation.turnId || "活动 turn"} · ${runningAgents} 个 Agent${workerLimitText}`
+      : `${counts.activeCount} 运行 · ${counts.reviewCount} 审核 · ${counts.blockedCount} 阻塞 · ${counts.closedCount} 关闭 · ${runningAgents} 个 Agent${workerLimitText}`,
   );
   setText("session-relation-copy", compactSentence(copy, 132));
   if (sessionRelationToggleButton) {
@@ -6424,8 +6674,8 @@ function renderSessionTree(parentSession, workerSessions, selectedWorkerSession)
     empty.className = "session-tree-node";
     empty.append(
       sessionTreeBranch(""),
-      sessionTreeText("No persisted Master session selected", "Create or select a session to inspect Worker relationships."),
-      sessionTreeStatus("waiting", "phase2-muted"),
+      sessionTreeText("未选择持久化 主控会话", "创建或选择一个会话来查看 Worker 关系。"),
+      sessionTreeStatus("等待中", "phase2-muted"),
     );
     sessionTree.appendChild(empty);
     return;
@@ -6436,7 +6686,7 @@ function renderSessionTree(parentSession, workerSessions, selectedWorkerSession)
       sessionId: parentSession.session_id,
       title: parentSession.title || parentSession.session_id,
       meta: [parentSession.session_id, normalizeCwd(parentSession.cwd)].filter(Boolean).join(" · "),
-      status: sessionLiveObservation(parentSession.session_id)?.label || (selectedWorkerSession ? "Back" : "Selected"),
+      status: sessionLiveObservation(parentSession.session_id)?.label || (selectedWorkerSession ? "返回" : "已选中"),
       statusClass: sessionLiveObservation(parentSession.session_id)?.tone || "phase2-muted",
       selected: state.selectedSessionId === parentSession.session_id,
       onClick: () => switchConversationSession(parentSession.session_id),
@@ -6447,8 +6697,8 @@ function renderSessionTree(parentSession, workerSessions, selectedWorkerSession)
     empty.className = "session-tree-node is-worker";
     empty.append(
       sessionTreeBranch("worker"),
-      sessionTreeText("No Worker child session", "TaskBoard has no current child tasks for this Master session."),
-      sessionTreeStatus("0 tasks", "phase2-muted"),
+      sessionTreeText("没有 Worker 子会话", "任务面板 中没有属于这个 主控会话的当前子任务。"),
+      sessionTreeStatus("0 个任务", "phase2-muted"),
     );
     sessionTree.appendChild(empty);
     return;
@@ -6509,10 +6759,10 @@ function sessionTreeText(title, meta) {
   copy.className = "session-tree-node-copy";
   const titleNode = document.createElement("span");
   titleNode.className = "session-tree-node-title";
-  titleNode.textContent = compactSentence(title || "Session", 110);
+  titleNode.textContent = compactSentence(title || "会话", 110);
   const metaNode = document.createElement("span");
   metaNode.className = "session-tree-node-meta";
-  metaNode.textContent = compactSentence(meta || "relationship truth unavailable", 150);
+  metaNode.textContent = compactSentence(meta || "关系真源不可用", 150);
   copy.append(titleNode, metaNode);
   return copy;
 }
@@ -6520,7 +6770,7 @@ function sessionTreeText(title, meta) {
 function sessionTreeStatus(status, statusClass) {
   const node = document.createElement("span");
   node.className = ["session-tree-node-status", statusClass || "phase2-muted"].join(" ");
-  node.textContent = status || "status";
+  node.textContent = status || "状态";
   return node;
 }
 
@@ -6557,15 +6807,48 @@ function workerControlCanMutate(task, target) {
 
 function taskTitle(task) {
   const title = `${(task && task.title) || ""}`.trim();
-  return compactSentence(title || "Task", 80);
+  return compactSentence(title || "任务", 80);
 }
 
 function statusLabel(status) {
   const normalized = `${status || ""}`.trim().toLowerCase();
   if (!normalized) {
-    return "unknown";
+    return "未知";
   }
-  return normalized.replace(/_/g, " ");
+  const labels = {
+    active: "活动",
+    assigned: "已分配",
+    available: "可用",
+    approved: "已批准",
+    blocked: "已阻塞",
+    cancelled: "已取消",
+    closed: "已关闭",
+    completed: "已完成",
+    created: "已创建",
+    failed: "失败",
+    idle: "空闲",
+    interrupted: "已中断",
+    paused: "已暂停",
+    pending: "等待中",
+    ready: "就绪",
+    recovering: "恢复中",
+    review: "审核中",
+    review_ready: "待审核",
+    review_submitted: "审核已提交",
+    running: "运行中",
+    session: "会话",
+    stale: "过期",
+    submitted: "已提交",
+    success: "成功",
+    task: "任务",
+    tool_pending: "等待中",
+    toolpending: "等待中",
+    waiting_user: "等待用户选择",
+    waiting: "等待中",
+    waiting_agent: "等待 Agent",
+    waiting_model: "等待模型",
+  };
+  return labels[normalized] || normalized.replace(/_/g, " ");
 }
 
 function phase2StatusClass(status) {
@@ -6668,7 +6951,7 @@ function lifecycleActivityLabel(agent) {
     return null;
   }
   const elapsed = activity.elapsed_ms ? formatDuration(activity.elapsed_ms) : "";
-  return [compactSentence(activity.semantic_summary || activity.kind || "activity", 90), elapsed]
+  return [compactSentence(activity.semantic_summary || activity.kind || "活动", 90), elapsed]
     .filter(Boolean)
     .join(" · ");
 }
@@ -6680,9 +6963,9 @@ function freshnessLabel(timestamp) {
   }
   const elapsed = Date.now() - ms;
   if (!Number.isFinite(elapsed) || elapsed < 0) {
-    return "just now";
+    return "刚刚";
   }
-  return `${formatDuration(elapsed)} ago`;
+  return `${formatDuration(elapsed)} 前`;
 }
 
 function eventKindLabel(kind) {
@@ -6692,7 +6975,7 @@ function eventKindLabel(kind) {
     .replace(/([a-z])([A-Z])/g, "$1 $2")
     .replace(/_/g, " ")
     .trim()
-    .toLowerCase() || "task event";
+    .toLowerCase() || "任务事件";
 }
 
 function eventPayloadStatus(event) {
@@ -6717,16 +7000,16 @@ function eventPayloadSummary(event) {
 function workerControlOpLabel(op) {
   const normalized = `${op || ""}`.toLowerCase();
   const labels = {
-    query_status: "Status queried",
-    ask_at_safe_point: "Question queued",
-    add_constraint: "Constraint queued",
-    request_checkpoint: "Checkpoint requested",
-    request_submission_now: "Submission requested",
-    pause: "Pause requested",
-    resume: "Resume requested",
-    cancel: "Cancel requested",
+    query_status: "已查询状态",
+    ask_at_safe_point: "问题已排队",
+    add_constraint: "约束已排队",
+    request_checkpoint: "已请求检查点",
+    request_submission_now: "已请求立即提交",
+    pause: "已请求暂停",
+    resume: "已请求继续",
+    cancel: "已请求取消",
   };
-  return labels[normalized] || statusLabel(normalized || "control event");
+  return labels[normalized] || statusLabel(normalized || "控制事件");
 }
 
 function workerControlPayloadSummary(event) {
@@ -6754,7 +7037,7 @@ function compactSentence(value, maxLength = 96) {
 function formatUnixTime(value) {
   const seconds = Number(value);
   if (!Number.isFinite(seconds) || seconds <= 0) {
-    return "no due time";
+    return "无到期时间";
   }
   return new Date(seconds * 1000).toLocaleString(undefined, {
     month: "2-digit",
@@ -6769,10 +7052,10 @@ function renderTimerDashboard() {
   renderTimerSourceOptions();
   if (timerDashboardStatus) {
     timerDashboardStatus.textContent = state.timerStatusError
-      ? `timer query failed: ${state.timerStatusError}`
+      ? `定时器查询失败：${state.timerStatusError}`
       : state.timerList
         ? timerDashboardSummary()
-        : "waiting for timer projection";
+        : "等待定时器投影";
   }
   renderTimerDashboardList();
   renderTimerDashboardHistory();
@@ -6786,7 +7069,7 @@ function renderTimerSourceOptions() {
   timerSourceSessionInput.replaceChildren();
   const internal = document.createElement("option");
   internal.value = "";
-  internal.textContent = "Internal wakeup";
+  internal.textContent = "内部唤醒";
   timerSourceSessionInput.appendChild(internal);
   state.sessions.forEach((session) => {
     if (!session || !session.session_id || internalRuntimeSessionId(session.session_id)) {
@@ -6824,7 +7107,7 @@ function renderTimerDashboardList() {
     .slice()
     .sort((left, right) => Number(left.next_due_at || 0) - Number(right.next_due_at || 0));
   if (timers.length === 0) {
-    timerDashboardList.textContent = state.timerList ? "No timer schedules." : "waiting for timer truth";
+    timerDashboardList.textContent = state.timerList ? "暂无定时计划。" : "等待定时器真源";
     return;
   }
   timers.forEach((timer) => {
@@ -6840,16 +7123,16 @@ function renderTimerDashboardList() {
     title.textContent = compactSentence(timer.reason || timer.timer_id, 96);
     const meta = document.createElement("small");
     const repeat = timer.repeat_summary ? ` · ${timer.repeat_summary}` : "";
-    meta.textContent = compactSentence(`${timer.status} · due ${formatUnixTime(timer.next_due_at)} · ${timer.fired_count}/${timer.max_runs}${repeat}`, 150);
+    meta.textContent = compactSentence(`${statusLabel(timer.status)} · 到期 ${formatUnixTime(timer.next_due_at)} · ${timer.fired_count}/${timer.max_runs}${repeat}`, 150);
     const prompt = document.createElement("p");
-    prompt.textContent = compactSentence(timer.prompt || "no wakeup prompt", 180);
+    prompt.textContent = compactSentence(timer.prompt || "没有唤醒提示词", 180);
     body.append(title, meta, prompt);
     row.append(marker, body);
     if (["active", "running"].includes(timer.status)) {
       const cancel = document.createElement("button");
       cancel.className = "session-bulk-button timer-cancel-button";
       cancel.type = "button";
-      cancel.textContent = "Cancel";
+      cancel.textContent = "取消";
       cancel.addEventListener("click", () => cancelTimer(timer.timer_id));
       row.appendChild(cancel);
     }
@@ -6864,7 +7147,7 @@ function renderTimerDashboardHistory() {
   timerDashboardHistory.replaceChildren();
   const events = ((state.timerList && state.timerList.events) || []).slice(-8).reverse();
   if (events.length === 0) {
-    timerDashboardHistory.textContent = state.timerList ? "No timer ledger events." : "waiting for timer ledger";
+    timerDashboardHistory.textContent = state.timerList ? "暂无定时账本事件。" : "等待定时账本";
     return;
   }
   events.forEach((event) => {
@@ -6892,10 +7175,10 @@ async function refreshTimerDashboard() {
   try {
     const result = await adpQuery({ QueryTimerList: { include_terminal: true } });
     applyPhase2QueryResult(result);
-    setCommandStatus("Timer projection refreshed.");
+    setCommandStatus("定时器投影已刷新。");
   } catch (error) {
     state.timerStatusError = error.message;
-    setCommandStatus(`timer refresh failed: ${error.message}`, { stickyMs: 9000 });
+    setCommandStatus(`定时器刷新失败：${error.message}`, { stickyMs: 9000 });
     renderTimerDashboard();
     renderMobileHomeDashboard();
   }
@@ -6991,7 +7274,7 @@ async function scheduleTimerFromForm() {
     await refreshTimerDashboard();
   } catch (error) {
     state.timerStatusError = error.message;
-    setCommandStatus(`timer schedule failed: ${error.message}`, { stickyMs: 9000 });
+    setCommandStatus(`定时创建失败：${error.message}`, { stickyMs: 9000 });
   } finally {
     state.timerCommandInFlight = false;
     renderTimerDashboard();
@@ -7012,7 +7295,7 @@ async function cancelTimer(timerId) {
     await refreshTimerDashboard();
   } catch (error) {
     state.timerStatusError = error.message;
-    setCommandStatus(`timer cancel failed: ${error.message}`, { stickyMs: 9000 });
+    setCommandStatus(`定时取消失败：${error.message}`, { stickyMs: 9000 });
   } finally {
     state.timerCommandInFlight = false;
     renderTimerDashboard();
@@ -7023,14 +7306,14 @@ async function cancelTimer(timerId) {
 function renderToolsDashboard() {
   if (toolsDashboardStatus) {
     toolsDashboardStatus.textContent = state.toolRegistryError
-      ? `tool registry query failed: ${state.toolRegistryError}`
+      ? `工具注册表查询失败: ${state.toolRegistryError}`
       : state.toolRegistry
         ? toolRegistrySummary()
-        : "waiting for tool registry projection";
+        : "等待工具注册表投影";
   }
   if (toolsDashboardRefreshButton) {
     toolsDashboardRefreshButton.disabled = state.toolRegistryInFlight;
-    toolsDashboardRefreshButton.textContent = state.toolRegistryInFlight ? "Refreshing..." : "Refresh tools";
+    toolsDashboardRefreshButton.textContent = state.toolRegistryInFlight ? "刷新中..." : "刷新工具";
   }
   renderToolRegistryGuidance();
   renderToolRegistryList();
@@ -7055,7 +7338,7 @@ function renderToolRegistryGuidance() {
   }
   const guidance = Array.isArray(state.toolRegistry?.guidance) ? state.toolRegistry.guidance : [];
   if (guidance.length === 0) {
-    toolsDashboardGuidance.textContent = state.toolRegistry ? "No registry guidance." : "waiting for registry guidance";
+    toolsDashboardGuidance.textContent = state.toolRegistry ? "没有注册表引导。" : "等待注册表引导";
     return;
   }
   guidance.forEach((line) => {
@@ -7076,7 +7359,7 @@ function renderToolRegistryList() {
   }
   const tools = toolRegistryTools();
   if (tools.length === 0) {
-    toolsDashboardList.textContent = state.toolRegistry ? "No tool registry rows." : "waiting for tool registry truth";
+    toolsDashboardList.textContent = state.toolRegistry ? "没有工具注册表行。" : "等待工具注册表真源";
     return;
   }
   tools.forEach((tool) => {
@@ -7123,17 +7406,17 @@ function renderToolRegistryCard(tool) {
 
   const description = document.createElement("p");
   description.className = "tool-registry-description";
-  description.textContent = tool.description || "No description projected.";
+  description.textContent = tool.description || "没有投影说明。";
   card.appendChild(description);
 
   const badges = document.createElement("div");
   badges.className = "tool-registry-badges";
   badges.append(
     toolRegistryBadge(tool.execution_scope || "unknown", "scope"),
-    toolRegistryBadge(tool.read_only ? "read only" : "mutating", "read_only"),
+    toolRegistryBadge(tool.read_only ? "只读" : "会修改", "read_only"),
     toolRegistryBadge(tool.implemented ? "implemented" : "unimplemented", "implemented"),
-    toolRegistryBadge(tool.exposed_to_master ? "Master visible" : "Master hidden", "master"),
-    toolRegistryBadge(tool.exposed_to_worker ? "Worker visible" : "Worker hidden", "worker"),
+    toolRegistryBadge(tool.exposed_to_master ? "主控可见" : "主控隐藏", "master"),
+    toolRegistryBadge(tool.exposed_to_worker ? "工作器可见" : "工作器隐藏", "worker"),
   );
   card.appendChild(badges);
 
@@ -7143,7 +7426,7 @@ function renderToolRegistryCard(tool) {
   const details = document.createElement("details");
   details.className = "tool-registry-schema";
   const summary = document.createElement("summary");
-  summary.textContent = "Input schema";
+  summary.textContent = "输入结构";
   const pre = document.createElement("pre");
   pre.textContent = schemaPreview(tool.input_schema);
   details.append(summary, pre);
@@ -7207,10 +7490,10 @@ async function refreshToolsDashboard() {
   try {
     const result = await adpQuery("QueryToolRegistry");
     applyPhase2QueryResult(result);
-    setCommandStatus("Tool registry projection refreshed.");
+    setCommandStatus("工具注册表投影已刷新。");
   } catch (error) {
     state.toolRegistryError = error.message;
-    setCommandStatus(`tool registry refresh failed: ${error.message}`, { stickyMs: 9000 });
+    setCommandStatus(`工具注册表刷新失败: ${error.message}`, { stickyMs: 9000 });
   } finally {
     state.toolRegistryInFlight = false;
     renderToolsDashboard();
@@ -7220,14 +7503,14 @@ async function refreshToolsDashboard() {
 function renderSessionSearchDashboard() {
   if (sessionSearchStatus) {
     sessionSearchStatus.textContent = state.sessionSearchError
-      ? `session search failed: ${state.sessionSearchError}`
+      ? `会话搜索失败: ${state.sessionSearchError}`
       : state.sessionSearch
-        ? `query "${state.sessionSearch.query || ""}" · ${sessionSearchResultsList().length} parent results`
-        : "Enter a query to search persisted sessions.";
+        ? `查询「${state.sessionSearch.query || ""}」· ${sessionSearchResultsList().length} 个父结果`
+        : "输入关键词搜索持久化会话。";
   }
   if (sessionSearchSubmitButton) {
     sessionSearchSubmitButton.disabled = state.sessionSearchInFlight;
-    sessionSearchSubmitButton.textContent = state.sessionSearchInFlight ? "Searching..." : "Search";
+    sessionSearchSubmitButton.textContent = state.sessionSearchInFlight ? "搜索中..." : "搜索";
   }
   if (!sessionSearchResults) {
     return;
@@ -7238,12 +7521,12 @@ function renderSessionSearchDashboard() {
     return;
   }
   if (state.sessionSearchInFlight) {
-    sessionSearchResults.textContent = "querying persisted session index...";
+    sessionSearchResults.textContent = "正在查询持久化会话索引...";
     return;
   }
   const results = sessionSearchResultsList();
   if (results.length === 0) {
-    sessionSearchResults.textContent = state.sessionSearch ? "No persisted session matches." : "No query yet.";
+    sessionSearchResults.textContent = state.sessionSearch ? "没有匹配的持久化会话。" : "尚未查询。";
     return;
   }
   results.forEach((result) => {
@@ -7282,12 +7565,12 @@ function renderSessionSearchResult(result) {
 
   const snippet = document.createElement("p");
   snippet.className = "session-search-snippet";
-  snippet.textContent = result.snippet || "Matched persisted session metadata.";
+  snippet.textContent = result.snippet || "匹配到持久化会话元数据。";
   card.appendChild(snippet);
 
   const fields = document.createElement("div");
   fields.className = "session-search-fields";
-  fields.textContent = `matched: ${(result.matched_fields || []).join(", ") || "session"}`;
+  fields.textContent = `匹配字段：${(result.matched_fields || []).join(", ") || "session"}`;
   card.appendChild(fields);
 
   const childMatches = Array.isArray(result.child_matches) ? result.child_matches : [];
@@ -7301,7 +7584,7 @@ function renderSessionSearchResult(result) {
       childRow.dataset.parentSessionId = result.session_id || "";
       childRow.dataset.childSessionId = child.session_id || "";
       childRow.textContent = compactSentence([
-        `Worker child: ${child.title || child.task_id || child.session_id}`,
+        `工作器子项: ${child.title || child.task_id || child.session_id}`,
         child.latest_status || "session",
         child.snippet || "",
       ].filter(Boolean).join(" · "), 180);
@@ -7334,7 +7617,7 @@ async function submitSessionSearch(event) {
   event?.preventDefault?.();
   const query = `${sessionSearchInput?.value || ""}`.trim();
   if (!query) {
-    state.sessionSearchError = "Enter a non-empty search query.";
+    state.sessionSearchError = "请输入非空搜索关键词。";
     renderSessionSearchDashboard();
     return;
   }
@@ -7344,10 +7627,10 @@ async function submitSessionSearch(event) {
   try {
     const result = await adpQuery({ QuerySessionSearch: { query, limit: 20 } });
     applyPhase2QueryResult(result);
-    setCommandStatus("Persisted session search refreshed.");
+    setCommandStatus("持久化会话搜索已刷新。");
   } catch (error) {
     state.sessionSearchError = error.message;
-    setCommandStatus(`session search failed: ${error.message}`, { stickyMs: 9000 });
+    setCommandStatus(`会话搜索失败: ${error.message}`, { stickyMs: 9000 });
   } finally {
     state.sessionSearchInFlight = false;
     renderSessionSearchDashboard();
@@ -7393,7 +7676,7 @@ async function sendWorkerControl(op) {
   const target = currentWorkerControlTarget();
   const task = target && target.task;
   if (!workerControlCanMutate(task, target)) {
-    setCommandStatus("worker control requires a non-terminal assigned execution", { stickyMs: 7000 });
+    setCommandStatus("工作器控制需要一个未终止且已分配的执行", { stickyMs: 7000 });
     return;
   }
   state.workerControlInFlight = true;
@@ -7408,10 +7691,10 @@ async function sendWorkerControl(op) {
     };
     const result = await adpCommand({ WorkerControl: { control } });
     const statusText = `${result.dispatch_status || "accepted"}`.toLowerCase().replace(/_/g, " ");
-    setCommandStatus(`worker control ${statusText}`, { stickyMs: 6000 });
+    setCommandStatus(`工作器控制 ${statusText}`, { stickyMs: 6000 });
     await refreshPhase2Status();
   } catch (error) {
-    setCommandStatus(`worker control failed: ${error.message}`, { stickyMs: 9000 });
+    setCommandStatus(`工作器控制失败: ${error.message}`, { stickyMs: 9000 });
   } finally {
     state.workerControlInFlight = false;
     renderWorkerControlProjection();
@@ -7428,15 +7711,15 @@ function showInspectorPanel(panel) {
     settingsShell.hidden = !showingSettings;
   }
   if (inspectorEyebrow) {
-    inspectorEyebrow.textContent = showingSettings ? "settings" : "lifecycle observer";
+    inspectorEyebrow.textContent = showingSettings ? "设置" : "生命周期观察";
   }
   if (inspectorTitle) {
-    inspectorTitle.textContent = showingSettings ? "System Settings" : "Task and Agent Lifecycle";
+    inspectorTitle.textContent = showingSettings ? "系统设置" : "任务与智能体生命周期";
   }
   if (inspectorCopy) {
     inspectorCopy.textContent = showingSettings
-      ? "Open separated settings pages for provider configuration, provider strategy, diagnostics, runtime, and Android shell controls."
-      : "观察 Master/Worker 生命周期、当前执行、事件和必要的调试摘要；活跃 Worker 会高亮并可点击查看对应任务进度。";
+      ? "打开拆分后的设置页：模型服务配置、模型服务策略、诊断、运行时和安卓外壳控制。"
+      : "观察 Master/工作器生命周期、当前执行、事件和必要的调试摘要；活跃 Worker 会高亮并可点击查看对应任务进度。";
   }
   if (settingsShellToggle) {
     settingsShellToggle.classList.toggle("is-active", showingSettings);
@@ -7449,27 +7732,26 @@ function renderSettingsShell() {
     state.configStatus?.default_model ||
     modelSelector?.selectedOptions?.[0]?.textContent ||
     modelSelector?.value ||
-    "Runtime config";
+    "运行时配置";
   const providerSummary = state.configStatus
     ? `${state.configStatus.provider_id} · ${state.configStatus.provider_protocol}`
     : state.configStatusError
-      ? "unavailable"
-      : "loading";
-  setText("settings-status-pill", state.adpStatus || "connecting");
+      ? "不可用"
+      : "加载中";
   setText("settings-model-value", modelLabel);
   setText("settings-provider-summary", providerSummary);
-  setText("settings-provider-id", state.configStatus?.provider_id || "loading");
-  setText("settings-provider-type", state.configStatus?.provider_type || "loading");
-  setText("settings-provider-protocol", state.configStatus?.provider_protocol || "loading");
-  setText("settings-provider-host", state.configStatus?.provider_base_url_host || "loading");
+  setText("settings-provider-id", state.configStatus?.provider_id || "加载中");
+  setText("settings-provider-type", state.configStatus?.provider_type || "加载中");
+  setText("settings-provider-protocol", state.configStatus?.provider_protocol || "加载中");
+  setText("settings-provider-host", state.configStatus?.provider_base_url_host || "加载中");
   setText("settings-provider-web-search", webSearchStatusLabel(state.configStatus));
   setTitle("settings-provider-web-search", [
     state.configStatus?.provider_web_search_reason,
     state.configStatus?.provider_web_search_route_summary,
   ].filter(Boolean).join("\n"));
-  setText("settings-provider-auth", state.configStatus ? `${settingsAuthTypeLabel(state.configStatus.provider_auth_type)} · ${state.configStatus.provider_auth_source}` : "loading");
-  setText("settings-restart-required", state.configStatus?.restart_required_on_change ? "restart required after changes" : "no restart flag");
-  setText("settings-config-error", state.configStatusError || "none");
+  setText("settings-provider-auth", state.configStatus ? `${settingsAuthTypeLabel(state.configStatus.provider_auth_type)} · ${state.configStatus.provider_auth_source}` : "加载中");
+  setText("settings-restart-required", state.configStatus?.restart_required_on_change ? "修改后需要重启" : "未标记需要重启");
+  setText("settings-config-error", state.configStatusError || "无");
   syncProviderSelectionControls();
   syncSettingsProviderForm();
   renderSettingsProviderRegistry();
@@ -7479,15 +7761,50 @@ function renderSettingsShell() {
   renderSystemAgentResourceConfig();
   renderAndroidApkUpdateSettings();
   renderSettingsDiagnostics();
-  renderSettingsReviewTree();
+  renderSettingsNavigation();
   showInspectorPanel(state.inspectorPanel);
+}
+
+function renderSettingsNavigation() {
+  const requestedPage = state.settingsPage || "root";
+  const panels = Array.from(document.querySelectorAll("[data-settings-page]"));
+  const activePage = panels.some((panel) => panel.dataset.settingsPage === requestedPage)
+    ? requestedPage
+    : "root";
+  state.settingsPage = activePage;
+  panels.forEach((panel) => {
+    const active = panel.dataset.settingsPage === activePage;
+    panel.hidden = !active;
+    panel.dataset.settingsActive = active ? "true" : "false";
+  });
+  document.querySelectorAll("[data-settings-target]").forEach((control) => {
+    control.classList.toggle("is-active", control.dataset.settingsTarget === activePage);
+  });
+  if (settingsShell) {
+    settingsShell.dataset.settingsCurrentPage = activePage;
+  }
+}
+
+function openSettingsPage(page) {
+  const target = `${page || ""}`.trim();
+  const exists = Array.from(document.querySelectorAll("[data-settings-page]"))
+    .some((panel) => panel.dataset.settingsPage === target);
+  if (!target || !exists) {
+    setCommandStatus(`设置页不可用: ${target || "unknown"}`, { stickyMs: 5000 });
+    return;
+  }
+  state.settingsPage = target;
+  renderSettingsNavigation();
+  if (settingsShell) {
+    settingsShell.scrollTop = 0;
+  }
 }
 
 function androidApkUpdateManifestUrlForDisplay() {
   try {
     return new URL("android/update.json", window.location.href).toString();
   } catch (_) {
-    return "daemon /android/update.json";
+    return "守护进程 /android/update.json";
   }
 }
 
@@ -7540,12 +7857,12 @@ function androidApkUpdateStatusText() {
   const status = state.androidApkUpdateStatus;
   if (!status) {
     if (layoutClient() !== "android-webview") {
-      return "Open this Settings page inside the Android app to check and download a newer APK.";
+      return "请在安卓 App 内打开此设置页检查并下载新版 APK。";
     }
     if (!androidApkUpdateBridge()) {
-      return "Android APK update bridge is unavailable; reload the Android app after installing the latest APK.";
+      return "安卓 APK 升级桥不可用；安装最新 APK 后请重新加载安卓 App。";
     }
-    return "Ready to check this daemon's Android update manifest.";
+    return "可以检查此守护进程的 Android 升级清单。";
   }
   const parts = [status.message];
   if (status.versionName) {
@@ -7566,18 +7883,18 @@ function renderAndroidApkUpdateSettings() {
   const summary = bridgeAvailable
     ? phase
       ? phase.replace(/_/g, " ")
-      : "ready"
+      : "就绪"
     : layoutClient() === "android-webview"
-      ? "bridge unavailable"
-      : "Android app only";
+      ? "bridge 不可用"
+      : "仅安卓 App";
   setText("settings-apk-update-summary", summary);
   setText("settings-apk-update-source", androidApkUpdateManifestUrlForDisplay());
   setText("settings-apk-update-status", androidApkUpdateStatusText());
   if (settingsApkUpdateCheckButton) {
     settingsApkUpdateCheckButton.disabled = !bridgeAvailable || state.androidApkUpdateInFlight;
     settingsApkUpdateCheckButton.textContent = state.androidApkUpdateInFlight
-      ? "Checking APK update..."
-      : "Check APK update";
+      ? "正在检查 APK 升级..."
+      : "检查 APK 升级";
   }
   if (settingsApkUpdateSummary) {
     settingsApkUpdateSummary.dataset.phase = phase || summary;
@@ -7592,14 +7909,14 @@ function requestAndroidApkUpdateCheck() {
   if (layoutClient() !== "android-webview" || !bridge) {
     receiveAndroidApkUpdateStatus({
       phase: "failed",
-      message: "APK update check is available only inside the Freehand Android app.",
+      message: "APK 升级检查仅在 Freehand 安卓 App 内可用。",
     });
     return;
   }
   state.androidApkUpdateInFlight = true;
   state.androidApkUpdateStatus = {
     phase: "checking",
-    message: "Checking update manifest...",
+    message: "正在检查升级清单...",
     versionCode: null,
     versionName: "",
     apkUrl: "",
@@ -7611,7 +7928,7 @@ function requestAndroidApkUpdateCheck() {
   } catch (error) {
     receiveAndroidApkUpdateStatus({
       phase: "failed",
-      message: error && error.message ? error.message : "Android APK update bridge call failed",
+      message: error && error.message ? error.message : "安卓 APK 升级桥调用失败",
     });
   }
 }
@@ -7715,8 +8032,8 @@ function syncProviderSelectionControls() {
     settingsProviderSwitchButton.disabled =
       state.providerSelectionInFlight || !status || !selectedPrimary || !selectionChanged;
     settingsProviderSwitchButton.textContent = state.providerSelectionInFlight
-      ? "Saving..."
-      : "Switch provider";
+      ? "保存中..."
+      : "切换模型服务";
   }
 }
 
@@ -7755,8 +8072,8 @@ function fillSettingsProviderFormFromProvider(provider) {
   setText(
     "settings-provider-save-status",
     provider.provider_auth_source === "inline"
-      ? "This provider uses inline auth in config. Saving from UI will rewrite it to env-var auth."
-      : "Loaded safe provider fields. Enter the credential env var before saving.",
+      ? "此模型服务在配置中使用内联鉴权。从界面保存会改写为环境变量鉴权。"
+      : "已加载安全的模型服务字段。保存前请输入凭证环境变量。",
   );
 }
 
@@ -7766,11 +8083,11 @@ function renderSettingsProviderRegistry() {
   }
   const providers = configProviderRegistry();
   if (!state.configStatus) {
-    settingsProviderRegistryList.textContent = state.configStatusError || "loading provider registry";
+    settingsProviderRegistryList.textContent = state.configStatusError || "正在加载模型服务注册表";
     return;
   }
   if (providers.length === 0) {
-    settingsProviderRegistryList.textContent = "No providers configured.";
+    settingsProviderRegistryList.textContent = "尚未配置模型服务。";
     return;
   }
   const cards = providers.map((provider) => {
@@ -7805,19 +8122,19 @@ function renderSettingsProviderRegistry() {
     const action = document.createElement("button");
     action.className = "settings-secondary-action";
     action.type = "button";
-    action.textContent = "Load into form";
+    action.textContent = "载入表单";
     action.addEventListener("click", () => fillSettingsProviderFormFromProvider(provider));
     const testAction = document.createElement("button");
     testAction.className = "settings-secondary-action";
     testAction.type = "button";
     testAction.disabled = provider.enabled === false || Boolean(state.providerWebSearchTestInFlight);
     testAction.textContent = state.providerWebSearchTestInFlight === provider.provider_id
-      ? "Testing web_search..."
-      : "Test web_search";
+      ? "正在测试联网搜索..."
+      : "测试联网搜索";
     testAction.addEventListener("click", () => {
       fillSettingsProviderFormFromProvider(provider);
       testProviderWebSearch(provider.provider_id).catch((error) => {
-        setText("settings-provider-web-search-test-status", `Provider web_search test failed: ${error.message}`);
+        setText("settings-provider-web-search-test-status", `模型服务联网搜索测试失败: ${error.message}`);
       });
     });
     card.append(title, meta, action, testAction);
@@ -7840,14 +8157,14 @@ function syncSettingsProviderForm() {
   }
   if (settingsProviderSaveButton) {
     settingsProviderSaveButton.disabled = state.configSaveInFlight;
-    settingsProviderSaveButton.textContent = state.configSaveInFlight ? "Saving..." : "Add/update provider";
+    settingsProviderSaveButton.textContent = state.configSaveInFlight ? "保存中..." : "新增/更新模型服务";
   }
   if (settingsProviderWebSearchTestButton) {
     const providerId = settingsProviderIdInput?.value.trim() || status?.provider_id || "";
     settingsProviderWebSearchTestButton.disabled = !state.configStatus || !providerId || Boolean(state.providerWebSearchTestInFlight);
     settingsProviderWebSearchTestButton.textContent = state.providerWebSearchTestInFlight === providerId
-      ? "Testing web_search..."
-      : "Test web_search";
+      ? "正在测试联网搜索..."
+      : "测试联网搜索";
   }
 }
 
@@ -7861,7 +8178,7 @@ function setInputValueIfNotFocused(input, value) {
 async function submitProviderConfigUpdate(event) {
   event.preventDefault();
   if (!state.configStatus) {
-    setText("settings-provider-save-status", "Config status is not loaded yet.");
+    setText("settings-provider-save-status", "配置状态尚未加载。");
     return;
   }
   const update = {
@@ -7875,16 +8192,16 @@ async function submitProviderConfigUpdate(event) {
     api_key_env: settingsProviderEnvInput?.value.trim() || "",
   };
   state.configSaveInFlight = true;
-  setText("settings-provider-save-status", "Saving config...");
+  setText("settings-provider-save-status", "正在保存配置...");
   renderSettingsShell();
   try {
     const receipt = await adpCommand({ UpsertProviderConfig: { update } });
     setCommandStatus(providerConfigUpsertReceiptStatus(receipt), { stickyMs: 5000 });
     await refreshConfigStatus();
-    setText("settings-provider-save-status", "Provider definition saved. Restart required before active runtime changes.");
+    setText("settings-provider-save-status", "模型服务定义已保存。重启后活动运行时才会生效。");
   } catch (error) {
     state.configStatusError = error.message;
-    setText("settings-provider-save-status", `Save failed: ${error.message}`);
+    setText("settings-provider-save-status", `保存失败: ${error.message}`);
     renderSettingsShell();
   } finally {
     state.configSaveInFlight = false;
@@ -7895,11 +8212,11 @@ async function submitProviderConfigUpdate(event) {
 async function testProviderWebSearch(providerId) {
   const targetProviderId = (providerId || settingsProviderIdInput?.value || "").trim();
   if (!targetProviderId) {
-    setText("settings-provider-web-search-test-status", "Choose a provider id before testing web_search.");
+    setText("settings-provider-web-search-test-status", "测试联网搜索前请选择模型服务 ID。");
     return;
   }
   state.providerWebSearchTestInFlight = targetProviderId;
-  setText("settings-provider-web-search-test-status", `Testing provider-hosted web_search for ${targetProviderId}...`);
+  setText("settings-provider-web-search-test-status", `正在测试 ${targetProviderId} 的模型服务托管联网搜索...`);
   renderSettingsShell();
   try {
     const receipt = await adpCommand({
@@ -7912,7 +8229,7 @@ async function testProviderWebSearch(providerId) {
     setText("settings-provider-web-search-test-status", status);
     setCommandStatus(status, { stickyMs: 8000 });
   } catch (error) {
-    const message = `Provider web_search test failed for ${targetProviderId}: ${error.message}`;
+    const message = `模型服务 ${targetProviderId} 联网搜索测试失败: ${error.message}`;
     setText("settings-provider-web-search-test-status", message);
     setCommandStatus(message, { stickyMs: 10000 });
   } finally {
@@ -7923,7 +8240,7 @@ async function testProviderWebSearch(providerId) {
 
 async function submitProviderSelectionUpdate() {
   if (!state.configStatus) {
-    setText("settings-provider-switch-status", "Config status is not loaded yet.");
+    setText("settings-provider-switch-status", "配置状态尚未加载。");
     return;
   }
   const providerId = settingsProviderCurrentSelect?.value.trim() || "";
@@ -7934,17 +8251,17 @@ async function submitProviderSelectionUpdate() {
     fallback_provider_id: fallbackProviderId || null,
   };
   state.providerSelectionInFlight = true;
-  setText("settings-provider-switch-status", "Saving provider selection...");
+  setText("settings-provider-switch-status", "正在保存模型服务选择...");
   renderSettingsShell();
   try {
     const receipt = await adpCommand({ UpdateAgentProviderSelection: { selection } });
     setCommandStatus(providerSelectionReceiptStatus(receipt), { stickyMs: 5000 });
     await refreshConfigStatus();
     state.providerSelectionDraft = null;
-    setText("settings-provider-switch-status", "Provider selection saved. Restart required before active runtime changes.");
+    setText("settings-provider-switch-status", "模型服务选择已保存。重启后活动运行时才会生效。");
   } catch (error) {
     state.configStatusError = error.message;
-    setText("settings-provider-switch-status", `Switch failed: ${error.message}`);
+    setText("settings-provider-switch-status", `切换失败: ${error.message}`);
     renderSettingsShell();
   } finally {
     state.providerSelectionInFlight = false;
@@ -7967,7 +8284,7 @@ function activeModelGroup() {
 }
 
 function modelRouteLabel(route) {
-  return route ? `${route.provider_id}:${route.model}` : "none";
+  return route ? `${route.provider_id}:${route.model}` : "无";
 }
 
 function modelGroupOptionLabel(group) {
@@ -7982,7 +8299,7 @@ function replaceModelGroupOptions(select, groups, value) {
   select.replaceChildren();
   const none = document.createElement("option");
   none.value = "";
-  none.textContent = "No active model group";
+  none.textContent = "没有启用模型组";
   select.append(none);
   groups.forEach((group) => {
     const option = document.createElement("option");
@@ -8008,15 +8325,15 @@ function syncModelGroupSelectionControls() {
   setText(
     "settings-model-group-summary",
     status
-      ? `${status.model_group_id || "none"} · ${groups.length} configured`
-      : state.configStatusError || "loading",
+      ? `${status.model_group_id || "无"} · ${groups.length} configured`
+      : state.configStatusError || "加载中",
   );
   if (settingsModelGroupSwitchButton) {
     settingsModelGroupSwitchButton.disabled =
       state.modelGroupSelectionInFlight || !status || !changed;
     settingsModelGroupSwitchButton.textContent = state.modelGroupSelectionInFlight
-      ? "Saving..."
-      : "Switch group";
+      ? "保存中..."
+      : "切换模型组";
   }
 }
 
@@ -8054,7 +8371,7 @@ function syncSettingsModelGroupForm() {
   const primaryProvider = group?.primary?.provider_id || status?.provider_id || "";
   const primaryModel = group?.primary?.model || status?.default_model || "";
   setInputValueIfNotFocused(settingsModelGroupIdInput, group?.group_id || "default");
-  setInputValueIfNotFocused(settingsModelGroupLabelInput, group?.label || "Default model group");
+  setInputValueIfNotFocused(settingsModelGroupLabelInput, group?.label || "默认模型组");
   if (settingsModelGroupEnabledInput && document.activeElement !== settingsModelGroupEnabledInput) {
     settingsModelGroupEnabledInput.checked = group ? group.enabled !== false : true;
   }
@@ -8079,8 +8396,8 @@ function syncSettingsModelGroupForm() {
   if (settingsModelGroupSaveButton) {
     settingsModelGroupSaveButton.disabled = state.modelGroupSaveInFlight || !status;
     settingsModelGroupSaveButton.textContent = state.modelGroupSaveInFlight
-      ? "Saving..."
-      : "Add/update model group";
+      ? "保存中..."
+      : "新增/更新模型组";
   }
 }
 
@@ -8089,12 +8406,12 @@ function renderSettingsModelGroupRegistry() {
     return;
   }
   if (!state.configStatus) {
-    settingsModelGroupRegistryList.textContent = state.configStatusError || "loading model groups";
+    settingsModelGroupRegistryList.textContent = state.configStatusError || "正在加载模型组";
     return;
   }
   const groups = configModelGroupRegistry();
   if (groups.length === 0) {
-    settingsModelGroupRegistryList.textContent = "No model groups configured. Add one below to bind primary/sub/search/title/fallback routes.";
+    settingsModelGroupRegistryList.textContent = "尚未配置模型组。可在下方新增并绑定主、子任务、搜索、标题和备用路由。";
     return;
   }
   const cards = groups.map((group) => {
@@ -8128,7 +8445,7 @@ function renderSettingsModelGroupRegistry() {
     const action = document.createElement("button");
     action.className = "settings-secondary-action";
     action.type = "button";
-    action.textContent = "Load into form";
+    action.textContent = "载入表单";
     action.addEventListener("click", () => fillSettingsModelGroupForm(group));
     card.append(title, meta, action);
     return card;
@@ -8229,7 +8546,7 @@ function parseLoadBalanceRoutes(text) {
 async function submitModelGroupConfigUpdate(event) {
   event.preventDefault();
   if (!state.configStatus) {
-    setText("settings-model-group-save-status", "Config status is not loaded yet.");
+    setText("settings-model-group-save-status", "配置状态尚未加载。");
     return;
   }
   let group;
@@ -8247,20 +8564,20 @@ async function submitModelGroupConfigUpdate(event) {
       load_balance: parseLoadBalanceRoutes(settingsModelGroupLoadBalanceInput?.value || ""),
     };
   } catch (error) {
-    setText("settings-model-group-save-status", `Model group invalid: ${error.message}`);
+    setText("settings-model-group-save-status", `模型组无效: ${error.message}`);
     return;
   }
   state.modelGroupSaveInFlight = true;
-  setText("settings-model-group-save-status", "Saving model group...");
+  setText("settings-model-group-save-status", "正在保存模型组...");
   renderSettingsShell();
   try {
     const receipt = await adpCommand({ UpsertModelGroupConfig: { group } });
     setCommandStatus(modelGroupUpsertReceiptStatus(receipt), { stickyMs: 5000 });
     await refreshConfigStatus();
-    setText("settings-model-group-save-status", "Model group saved. Restart required before active runtime changes.");
+    setText("settings-model-group-save-status", "模型组已保存。重启后活动运行时才会生效。");
   } catch (error) {
     state.configStatusError = error.message;
-    setText("settings-model-group-save-status", `Save failed: ${error.message}`);
+    setText("settings-model-group-save-status", `保存失败: ${error.message}`);
     renderSettingsShell();
   } finally {
     state.modelGroupSaveInFlight = false;
@@ -8270,7 +8587,7 @@ async function submitModelGroupConfigUpdate(event) {
 
 async function submitModelGroupSelectionUpdate() {
   if (!state.configStatus) {
-    setText("settings-model-group-switch-status", "Config status is not loaded yet.");
+    setText("settings-model-group-switch-status", "配置状态尚未加载。");
     return;
   }
   const selection = {
@@ -8278,17 +8595,17 @@ async function submitModelGroupSelectionUpdate() {
     model_group_id: settingsModelGroupCurrentSelect?.value.trim() || null,
   };
   state.modelGroupSelectionInFlight = true;
-  setText("settings-model-group-switch-status", "Saving model group selection...");
+  setText("settings-model-group-switch-status", "正在保存模型组选择...");
   renderSettingsShell();
   try {
     const receipt = await adpCommand({ UpdateAgentModelGroupSelection: { selection } });
     setCommandStatus(modelGroupSelectionReceiptStatus(receipt), { stickyMs: 5000 });
     await refreshConfigStatus();
     state.modelGroupSelectionDraft = null;
-    setText("settings-model-group-switch-status", "Model group selection saved. Restart required before active runtime changes.");
+    setText("settings-model-group-switch-status", "模型组选择已保存。重启后活动运行时才会生效。");
   } catch (error) {
     state.configStatusError = error.message;
-    setText("settings-model-group-switch-status", `Switch failed: ${error.message}`);
+    setText("settings-model-group-switch-status", `切换失败: ${error.message}`);
     renderSettingsShell();
   } finally {
     state.modelGroupSelectionInFlight = false;
@@ -8298,17 +8615,17 @@ async function submitModelGroupSelectionUpdate() {
 
 function renderTurnMeta() {
   if (state.pendingSubmitError) {
-    setText("turn-status", "checking service truth · submit receipt not verified");
+    setText("turn-status", "检查服务真源 · 提交回执未验证");
   }
   const turn = activeTurnForSelectedSession();
   if (!turn) {
-    setText("session-title", state.selectedSessionId || "waiting for service state");
-    setText("session-copy", state.selectedSessionId ? "no turns in selected session" : "no active turn yet");
+    setText("session-title", state.selectedSessionId || "等待服务状态");
+    setText("session-copy", state.selectedSessionId ? "选中会话暂无轮次" : "暂无活跃轮次");
     setShellDataset("selectedSession", state.selectedSessionId || "");
     setShellDataset("selectedTurn", "");
     setShellDataset("selectedCwd", state.selectedCwd || "");
     if (!state.pendingSubmitError) {
-      setText("turn-status", liveTurnStatus() || "waiting");
+      setText("turn-status", liveTurnStatus() || "等待中");
     }
     return;
   }
@@ -8320,14 +8637,14 @@ function renderTurnMeta() {
   setShellDataset("selectedCwd", turn.cwd || state.selectedCwd || "");
   const runningTools = (turn.tool_activities || []).filter((tool) => tool.status === "Waiting" || tool.status === "waiting");
   const turnStatus = turn.terminal_text || isTerminalStatus(turn.terminal_status) || isToolPendingStatus(turn.terminal_status)
-    ? terminalTurnStatusLabel(turn.terminal_status)
+    ? terminalTurnStatusLabelForTurn(turn, turn.terminal_status)
     : runningTools.length > 0
       ? waitingToolStatus(runningTools).replace("tool executing", "tool running")
       : turnIsWaitingForModelResponse(turn)
         ? liveTurnStatus()
         : state.submitInFlight
           ? liveTurnStatus()
-          : "waiting";
+          : "等待中";
   if (!state.pendingSubmitError) {
     setText("turn-status", turnStatus);
   }
@@ -8377,7 +8694,10 @@ function hasNonTerminalProtocolActivity() {
 }
 
 function turnRequiresLifecycleTruthRefresh(turn) {
-  return !!(turn && isToolPendingStatus(turn.terminal_status));
+  if (!turn || !isToolPendingStatus(turn.terminal_status)) {
+    return false;
+  }
+  return !lifecycleOwnerProjectionLoaded() || toolPendingRepresentsLifecycle(turn);
 }
 
 function renderAll() {
@@ -8470,7 +8790,7 @@ async function refreshDiagnosticsStatus() {
     applyPhase2QueryResult(result);
   } catch (error) {
     state.diagnosticsError = error.message;
-    setCommandStatus(`diagnostics refresh failed: ${error.message}`, { stickyMs: 9000 });
+    setCommandStatus(`诊断刷新失败: ${error.message}`, { stickyMs: 9000 });
   } finally {
     state.diagnosticsInFlight = false;
     renderSettingsDiagnostics();
@@ -8516,15 +8836,15 @@ function refreshProtocolStateAfterForeground(reason) {
     return;
   }
   state.foregroundRefreshInFlight = true;
-  setBackgroundCommandStatus(`checking service truth after ${reason}...`);
+  setBackgroundCommandStatus(`${reason} 后检查服务真源...`);
   refreshAllProtocolState()
     .then(() => {
       clearPendingUserInputIfMaterialized();
       renderAll();
-      setBackgroundCommandStatus(`service truth refreshed after ${reason}`);
+      setBackgroundCommandStatus(`${reason} 后已刷新服务真源`);
     })
     .catch((error) => {
-      setCommandStatus(`service refresh after ${reason} failed: ${error.message}`, { stickyMs: 8000 });
+      setCommandStatus(`${reason} 后刷新服务失败：${error.message}`, { stickyMs: 8000 });
       scheduleAdpReconnect(reason);
     })
     .finally(() => {
@@ -8553,7 +8873,7 @@ async function refreshAfterAmbiguousSubmitFailure(error) {
   return {
     materialized,
     message: refreshErrors.length > 0
-      ? `${baseMessage}; refresh also failed: ${refreshErrors.join("; ")}`
+      ? `${baseMessage}；刷新也失败：${refreshErrors.join("；")}`
       : baseMessage,
   };
 }
@@ -8576,12 +8896,12 @@ function startAmbiguousSubmitRecoveryPolling(startedAtMs) {
     }
     attempts += 1;
     try {
-      const recovery = await refreshAfterAmbiguousSubmitFailure(new Error("service truth refresh pending"));
+      const recovery = await refreshAfterAmbiguousSubmitFailure(new Error("服务真源刷新未完成"));
       if (recovery.materialized) {
         state.pendingSubmitError = null;
         state.pendingAttachments = [];
         renderAll();
-        setCommandStatus("request accepted by service truth; lifecycle is visible", { stickyMs: 5000 });
+        setCommandStatus("服务真源已接收请求；生命周期可见", { stickyMs: 5000 });
         stopAmbiguousSubmitRecoveryPolling();
       } else {
         renderAll();
@@ -8591,7 +8911,7 @@ function startAmbiguousSubmitRecoveryPolling(startedAtMs) {
       renderAll();
     }
     if (attempts >= 20) {
-      setCommandStatus("submit receipt still not verified after service checks; refresh before retry", { stickyMs: 8000 });
+      setCommandStatus("服务检查后提交回执仍未验证；重试前请先刷新", { stickyMs: 8000 });
       stopAmbiguousSubmitRecoveryPolling();
     }
   }, 2000);
@@ -8657,8 +8977,8 @@ function ensureDebugSubscription() {
   state.adpSubscriptions.add(key);
   if (!state.debug) {
       state.debug = {
-        status_text: "debug stream waiting",
-        detail_lines: ["waiting for debug subscription"],
+        status_text: "调试流等待中",
+        detail_lines: ["等待调试订阅"],
       };
       renderDebug();
   }
@@ -8667,7 +8987,7 @@ function ensureDebugSubscription() {
     "sub-debug",
   ).catch((error) => {
     state.debug = {
-      status_text: "debug stream failed",
+      status_text: "调试流失败",
       detail_lines: [error.message],
     };
     renderDebug();
@@ -8720,14 +9040,14 @@ async function cancelActiveTurn() {
     state.acceptedSubmitReceipt = null;
     state.lifecycleClocks.clear();
     state.submitStartedAt = null;
-    setCommandStatus("no active turn; input cleared", { stickyMs: 3000 });
+    setCommandStatus("没有活跃轮次；输入已清空", { stickyMs: 3000 });
     renderMessages();
     return;
   }
   const command = turnId
     ? { CancelTurn: { turn_id: turnId } }
     : { CancelLatestActiveTurn: {} };
-  setCommandStatus(`cancelling ${turnId || "latest active turn"}...`);
+  setCommandStatus(`正在取消 ${turnId || "最新活跃轮次"}...`);
   if (turnId) {
     state.pendingCancelTurnId = turnId;
   }
@@ -8738,7 +9058,7 @@ async function cancelActiveTurn() {
     if (turnId && state.pendingCancelTurnId === turnId) {
       state.pendingCancelTurnId = null;
     }
-    setCommandStatus(`cancel failed: ${error.message}`);
+    setCommandStatus(`取消失败: ${error.message}`);
     return;
   }
   if (turnId) {
@@ -8780,7 +9100,7 @@ async function runSlashCommand(rawText) {
     "/help",
     "/new",
     "/task",
-    "/settings",
+    "/设置",
     "/cwd",
     "/sessions",
     "/reload",
@@ -8788,7 +9108,7 @@ async function runSlashCommand(rawText) {
     "/failure",
     "/cancel",
     "/clear",
-    "/attachments",
+    "/附件",
     "/model",
   ]);
   if (command.startsWith("/") && !knownSlashCommands.has(firstLine)) {
@@ -8815,30 +9135,30 @@ async function runSlashCommand(rawText) {
     case "/task":
       openNewSessionDialog("task");
       return true;
-    case "/settings":
+    case "/设置":
       showInspectorPanel("settings");
       setMobileDrawer("settings");
       renderAll();
-      setCommandStatus("settings opened", { stickyMs: 4000 });
+      setCommandStatus("设置已打开", { stickyMs: 4000 });
       return true;
     case "/cwd": {
       const cwd = requireTaskCwd("task cwd selection");
       if (cwd) {
-        setCommandStatus(`task target directory selected: ${cwd}`, { stickyMs: 5000 });
+        setCommandStatus(`已选择任务目标目录: ${cwd}`, { stickyMs: 5000 });
         renderAll();
       }
       return true;
     }
     case "/sessions":
-      setCommandStatus("refreshing sessions...", { stickyMs: 3000 });
+      setCommandStatus("正在刷新会话...", { stickyMs: 3000 });
       await refreshSessions();
       await refreshSelectedSession();
-      setCommandStatus("sessions refreshed", { stickyMs: 5000 });
+      setCommandStatus("会话已刷新", { stickyMs: 5000 });
       return true;
     case "/reload":
-      setCommandStatus("refreshing service state...", { stickyMs: 3000 });
+      setCommandStatus("正在刷新服务状态...", { stickyMs: 3000 });
       await refreshAllProtocolState();
-      setCommandStatus("service state refreshed", { stickyMs: 5000 });
+      setCommandStatus("服务状态已刷新", { stickyMs: 5000 });
       return true;
     case "/success":
       loadSamplePrompt("success");
@@ -8860,16 +9180,16 @@ async function runSlashCommand(rawText) {
       state.lifecycleClocks.clear();
       state.submitStartedAt = null;
       state.submitInFlight = false;
-      setCommandStatus("local composer cleared", { stickyMs: 3000 });
+      setCommandStatus("本地输入框已清空", { stickyMs: 3000 });
       renderMessages();
       return true;
-    case "/attachments":
+    case "/附件":
       state.attachmentsPreviewOpen = !state.attachmentsPreviewOpen;
       renderAttachmentTray();
-      setCommandStatus(`attachments ${state.attachmentsPreviewOpen ? "preview visible" : "preview collapsed"}: ${attachmentSummary()}`, { stickyMs: 5000 });
+      setCommandStatus(`附件 ${state.attachmentsPreviewOpen ? "预览已显示" : "预览已收起"}: ${attachmentSummary()}`, { stickyMs: 5000 });
       return true;
     case "/model":
-      setCommandStatus("model selection is controlled by runtime config", { stickyMs: 6000 });
+      setCommandStatus("模型选择由运行时配置控制", { stickyMs: 6000 });
       return true;
     default:
       return false;
@@ -8920,11 +9240,11 @@ composerForm.addEventListener("submit", async (event) => {
   const text = composerInput.value.trim();
   const attachments = currentAttachments();
   if (!text && attachments.length === 0) {
-    setCommandStatus("empty input rejected", { stickyMs: 3000 });
+    setCommandStatus("已拒绝空输入", { stickyMs: 3000 });
     return;
   }
   if (attachments.some((attachment) => attachment.kind !== "image")) {
-    setCommandStatus("only image attachments can be submitted in this version", { stickyMs: 6000 });
+    setCommandStatus("当前版本只支持提交图片附件", { stickyMs: 6000 });
     return;
   }
   try {
@@ -8932,7 +9252,7 @@ composerForm.addEventListener("submit", async (event) => {
       return;
     }
   } catch (error) {
-    setCommandStatus(`slash command failed: ${error.message}`, { stickyMs: 8000 });
+    setCommandStatus(`斜杠命令失败: ${error.message}`, { stickyMs: 8000 });
     return;
   }
   let submitMetadata = { attachments: [] };
@@ -8941,11 +9261,11 @@ composerForm.addEventListener("submit", async (event) => {
       attachments: await attachmentsForSubmit(attachments),
     };
   } catch (error) {
-    setCommandStatus(`image submit failed before dispatch: ${error.message}`, { stickyMs: 8000 });
+    setCommandStatus(`图片派发前提交失败: ${error.message}`, { stickyMs: 8000 });
     return;
   }
-  const commandText = text || "Analyze the attached image.";
-  setCommandStatus("dispatching...");
+  const commandText = text || "分析附件图片。";
+  setCommandStatus("派发中...");
   if (!state.selectedSessionId) {
     const sessionId = newDraftSessionId();
     state.draftSessionId = sessionId;
@@ -8992,20 +9312,20 @@ composerForm.addEventListener("submit", async (event) => {
       state.pendingSubmitError = null;
       state.pendingAttachments = [];
       renderAll();
-      setCommandStatus("request is visible after service refresh; continue from current conversation state", { stickyMs: 5000 });
+      setCommandStatus("服务刷新后请求已可见；请从当前会话状态继续", { stickyMs: 5000 });
       return;
     }
     state.pendingSubmitError = recovery.message;
     startAmbiguousSubmitRecoveryPolling(submittedAt);
     renderMessages();
     renderTurnMeta();
-    setCommandStatus(`submit receipt not verified after service refresh; checking service truth before duplicate send. Use ↑ to recall input. Draft attachments retained: ${recovery.message}`);
+    setCommandStatus(`服务刷新后仍未验证提交回执；重复发送前正在检查服务真源。可用 ↑ 召回输入。附件草稿已保留：${recovery.message}`);
   }
 });
 
 cancelButton.addEventListener("click", () => {
   cancelActiveTurn().catch((error) => {
-    setCommandStatus(`cancel failed: ${error.message}`);
+    setCommandStatus(`取消失败: ${error.message}`);
   });
 });
 
@@ -9016,7 +9336,7 @@ function loadSamplePrompt(kind) {
   }
   composerInput.value = prompt;
   composerInput.focus();
-  setCommandStatus(`${kind} scenario loaded; press Send to run`, { stickyMs: 5000 });
+  setCommandStatus(`${kind} scenario loaded; press 发送 to run`, { stickyMs: 5000 });
 }
 
 function renderDebugDetailsToggle() {
@@ -9025,10 +9345,11 @@ function renderDebugDetailsToggle() {
   }
   debugDetailsToggle.classList.toggle("is-active", state.debugDetailsVisible);
   debugDetailsToggle.setAttribute("aria-pressed", state.debugDetailsVisible ? "true" : "false");
-  debugDetailsToggle.textContent = state.debugDetailsVisible ? "Debug on" : "Debug off";
+  debugDetailsToggle.textContent = state.debugDetailsVisible ? "调试开" : "调试关";
 }
 
 function openSettingsPanel() {
+  state.settingsPage = "root";
   showInspectorPanel("settings");
   setMobileDrawer("settings");
   renderAll();
@@ -9063,7 +9384,7 @@ if (openSessionDrawerButton) {
   openSessionDrawerButton.addEventListener("click", () => {
     openSessionSearchDashboard().catch((error) => {
       state.sessionSearchError = error.message;
-      setCommandStatus(`session search failed: ${error.message}`, { stickyMs: 9000 });
+      setCommandStatus(`会话搜索失败: ${error.message}`, { stickyMs: 9000 });
       renderSessionSearchDashboard();
     });
   });
@@ -9100,7 +9421,7 @@ if (openToolsDashboardButton) {
   openToolsDashboardButton.addEventListener("click", () => {
     openToolsDashboard().catch((error) => {
       state.toolRegistryError = error.message;
-      setCommandStatus(`tool registry dashboard failed: ${error.message}`, { stickyMs: 9000 });
+      setCommandStatus(`工具注册表面板打开失败: ${error.message}`, { stickyMs: 9000 });
       renderToolsDashboard();
     });
   });
@@ -9179,15 +9500,24 @@ if (openSettingsDrawerButton) {
 }
 if (settingsShellToggle) {
   settingsShellToggle.addEventListener("click", () => {
-    showInspectorPanel(state.inspectorPanel === "settings" ? "debug" : "settings");
+    const openingSettings = state.inspectorPanel !== "settings";
+    if (openingSettings) {
+      state.settingsPage = "root";
+    }
+    showInspectorPanel(openingSettings ? "settings" : "debug");
     renderAll();
   });
 }
+document.querySelectorAll("[data-settings-target]").forEach((control) => {
+  control.addEventListener("click", () => {
+    openSettingsPage(control.dataset.settingsTarget);
+  });
+});
 if (settingsProviderForm) {
   settingsProviderForm.addEventListener("submit", (event) => {
     submitProviderConfigUpdate(event).catch((error) => {
       state.configSaveInFlight = false;
-      setText("settings-provider-save-status", `Save failed: ${error.message}`);
+      setText("settings-provider-save-status", `保存失败: ${error.message}`);
       renderSettingsShell();
     });
   });
@@ -9208,7 +9538,7 @@ if (settingsProviderSwitchButton) {
   settingsProviderSwitchButton.addEventListener("click", () => {
     submitProviderSelectionUpdate().catch((error) => {
       state.providerSelectionInFlight = false;
-      setText("settings-provider-switch-status", `Switch failed: ${error.message}`);
+      setText("settings-provider-switch-status", `切换失败: ${error.message}`);
       renderSettingsShell();
     });
   });
@@ -9217,7 +9547,7 @@ if (settingsProviderWebSearchTestButton) {
   settingsProviderWebSearchTestButton.addEventListener("click", () => {
     testProviderWebSearch().catch((error) => {
       state.providerWebSearchTestInFlight = "";
-      setText("settings-provider-web-search-test-status", `Provider web_search test failed: ${error.message}`);
+      setText("settings-provider-web-search-test-status", `模型服务联网搜索测试失败: ${error.message}`);
       renderSettingsShell();
     });
   });
@@ -9226,7 +9556,7 @@ if (settingsModelGroupForm) {
   settingsModelGroupForm.addEventListener("submit", (event) => {
     submitModelGroupConfigUpdate(event).catch((error) => {
       state.modelGroupSaveInFlight = false;
-      setText("settings-model-group-save-status", `Save failed: ${error.message}`);
+      setText("settings-model-group-save-status", `保存失败: ${error.message}`);
       renderSettingsShell();
     });
   });
@@ -9241,7 +9571,7 @@ if (settingsModelGroupSwitchButton) {
   settingsModelGroupSwitchButton.addEventListener("click", () => {
     submitModelGroupSelectionUpdate().catch((error) => {
       state.modelGroupSelectionInFlight = false;
-      setText("settings-model-group-switch-status", `Switch failed: ${error.message}`);
+      setText("settings-model-group-switch-status", `切换失败: ${error.message}`);
       renderSettingsShell();
     });
   });
@@ -9275,7 +9605,7 @@ if (newSessionForm) {
   newSessionForm.addEventListener("submit", (event) => {
     event.preventDefault();
     submitNewSessionDialog().catch((error) => {
-      setCommandStatus(`new session failed: ${error.message}`, { stickyMs: 8000 });
+      setCommandStatus(`新建会话失败: ${error.message}`, { stickyMs: 8000 });
     });
   });
 }
@@ -9300,7 +9630,7 @@ if (newTaskPathPresets) {
     if (newSessionCwdInput) {
       newSessionCwdInput.value = cwd;
     }
-    setCommandStatus(`task target directory selected: ${cwd}`, { stickyMs: 5000 });
+    setCommandStatus(`已选择任务目标目录: ${cwd}`, { stickyMs: 5000 });
   });
 }
 composerInput.addEventListener("focus", () => {
@@ -9362,7 +9692,7 @@ bindAndroidAttachmentBridge(attachVideoButton, "video");
 previewAttachmentsButton.addEventListener("click", () => {
   state.attachmentsPreviewOpen = !state.attachmentsPreviewOpen;
   renderAttachmentTray();
-  setCommandStatus(`attachments ${state.attachmentsPreviewOpen ? "preview visible" : "preview collapsed"}: ${attachmentSummary()}`, { stickyMs: 5000 });
+  setCommandStatus(`附件 ${state.attachmentsPreviewOpen ? "预览已显示" : "预览已收起"}: ${attachmentSummary()}`, { stickyMs: 5000 });
 });
 refreshSessionButton.addEventListener("click", () => {
   setCommandStatus("refreshing selected session...", { stickyMs: 3000 });
@@ -9372,7 +9702,7 @@ refreshSessionButton.addEventListener("click", () => {
     .catch((error) => {
       renderSessionRefreshFailure(error, state.selectedSessionId);
       if (selectedWorkerTranscriptRefreshRetryable()) {
-        setCommandStatus("Worker transcript not ready; retrying selected session refresh", { stickyMs: 6000 });
+        setCommandStatus("工作器记录未就绪；正在重试刷新选中会话", { stickyMs: 6000 });
       } else {
         setCommandStatus(`selected session refresh failed: ${error.message}`, { stickyMs: 8000 });
       }
@@ -9386,24 +9716,24 @@ if (workerControlList) {
       return;
     }
     sendWorkerControl(button.dataset.workerControlOp).catch((error) => {
-      setCommandStatus(`worker control failed: ${error.message}`, { stickyMs: 9000 });
+      setCommandStatus(`工作器控制失败: ${error.message}`, { stickyMs: 9000 });
     });
   });
 }
 modelSelector.addEventListener("change", () => {
-  modelSelector.value = "runtime";
-  setCommandStatus("model selector is read-only; runtime config owns active model", { stickyMs: 6000 });
+  modelSelector.value = "运行时";
+  setCommandStatus("模型选择器只读；活动模型由运行时配置拥有", { stickyMs: 6000 });
 });
 cwdInput.value = state.selectedCwd;
 taskCwdInput.value = state.selectedCwd;
 cwdInput.addEventListener("change", () => {
   setSelectedCwd(cwdInput.value);
-  setCommandStatus(state.selectedCwd ? `session cwd selected: ${state.selectedCwd}` : "session cwd cleared; runtime default will be used", { stickyMs: 5000 });
+  setCommandStatus(state.selectedCwd ? `已选择会话工作目录: ${state.selectedCwd}` : "会话工作目录已清空；将使用运行时默认值", { stickyMs: 5000 });
   renderAll();
 });
 taskCwdInput.addEventListener("change", () => {
   setSelectedCwd(taskCwdInput.value);
-  setCommandStatus(state.selectedCwd ? `task target directory selected: ${state.selectedCwd}` : "task target directory cleared", { stickyMs: 5000 });
+  setCommandStatus(state.selectedCwd ? `已选择任务目标目录: ${state.selectedCwd}` : "已清空任务目标目录", { stickyMs: 5000 });
   renderAll();
 });
 
@@ -9440,17 +9770,17 @@ if (streamStageForScrollLock) {
 }
 window.addEventListener("scroll", syncUserScrollLock, { passive: true });
 window.addEventListener("pageshow", () => {
-  refreshProtocolStateAfterForeground("page restore");
+  refreshProtocolStateAfterForeground("页面恢复");
 });
 window.addEventListener("focus", () => {
-  refreshProtocolStateAfterForeground("app focus");
+  refreshProtocolStateAfterForeground("应用聚焦");
 });
 window.addEventListener("online", () => {
-  refreshProtocolStateAfterForeground("network restore");
+  refreshProtocolStateAfterForeground("网络恢复");
 });
 document.addEventListener("visibilitychange", () => {
   if (document.visibilityState === "visible") {
-    refreshProtocolStateAfterForeground("app resume");
+    refreshProtocolStateAfterForeground("应用恢复");
   }
 });
 if (window.ResizeObserver) {
@@ -9477,10 +9807,10 @@ document.addEventListener("keydown", (event) => {
     }
     if (usesModifier && event.key.toLowerCase() === "r") {
       event.preventDefault();
-      setCommandStatus("refreshing service state...", { stickyMs: 3000 });
+      setCommandStatus("正在刷新服务状态...", { stickyMs: 3000 });
       refreshAllProtocolState()
         .then(() => {
-          setCommandStatus("service state refreshed", { stickyMs: 5000 });
+          setCommandStatus("服务状态已刷新", { stickyMs: 5000 });
         })
         .catch((error) => {
           setCommandStatus(`refresh failed: ${error.message}`, { stickyMs: 8000 });
@@ -9490,7 +9820,7 @@ document.addEventListener("keydown", (event) => {
     if (usesModifier && event.key.toLowerCase() === "k") {
       event.preventDefault();
       composerInput.focus();
-      setCommandStatus("composer focused", { stickyMs: 3000 });
+      setCommandStatus("输入框已聚焦", { stickyMs: 3000 });
       return;
     }
     if (usesModifier && event.key === "1") {
@@ -9513,14 +9843,14 @@ document.addEventListener("keydown", (event) => {
   if (hasLiveTurn) {
     state.rollbackArmedAt = 0;
     cancelActiveTurn().catch((error) => {
-      setCommandStatus(`cancel failed: ${error.message}`);
+      setCommandStatus(`取消失败: ${error.message}`);
     });
     return;
   }
   if (composerInput.value.trim()) {
     state.rollbackArmedAt = 0;
     composerInput.value = "";
-    setCommandStatus("composer cleared", { stickyMs: 3000 });
+    setCommandStatus("输入框已清空", { stickyMs: 3000 });
     return;
   }
   const now = Date.now();
@@ -9530,7 +9860,7 @@ document.addEventListener("keydown", (event) => {
     return;
   }
   state.rollbackArmedAt = now;
-  setCommandStatus("press Esc again to rollback latest session turn", { stickyMs: 1200 });
+  setCommandStatus("再次按 Esc 回滚最新会话轮次", { stickyMs: 1200 });
 });
 
 function installWebUiTestHooks() {
@@ -9573,7 +9903,7 @@ function installWebUiTestHooks() {
       const id = sessionId || "webui-image-attachment-proof-fixed";
       state.sessions = [{
         session_id: id,
-        title: "Image attachment proof",
+        title: "图片附件验证",
         active_turn_id: null,
         archived: false,
       }];
@@ -9653,6 +9983,30 @@ function installWebUiTestHooks() {
       clearAdpReconnectTimer();
       return this.captureAttachmentState();
     },
+    simulateSessionRefreshFailureForTest(message, sessionId) {
+      const targetSessionId = sessionId || state.selectedSessionId || "webui-session-refresh-failure-test";
+      if (!state.selectedSessionId) {
+        setSelectedSessionId(targetSessionId);
+      }
+      renderSessionRefreshFailure(new Error(message || "模拟会话刷新失败"), targetSessionId);
+      return this.captureSessionRefreshExitState();
+    },
+    captureSessionRefreshExitState() {
+      const shell = document.querySelector('[data-webui-shell="true"]');
+      return {
+        selectedSession: shell?.dataset.selectedSession || "",
+        selectedTurn: shell?.dataset.selectedTurn || "",
+        commandStatus: document.getElementById("command-status")?.textContent?.trim() || "",
+        turnStatus: document.getElementById("turn-status")?.textContent?.trim() || "",
+        messageText: document.getElementById("message-list")?.innerText || "",
+        sessionRefreshError: state.sessionRefreshError,
+        adpFailure: state.adpFailure,
+        mobileDrawer: state.mobileDrawer,
+        actionLabels: Array.from(document.querySelectorAll(".session-refresh-action-bar button"))
+          .map((button) => button.textContent?.trim() || "")
+          .filter(Boolean),
+      };
+    },
     applyTurnProjectionForTest(turn) {
       setTurnProjection(turn || null);
       renderAll();
@@ -9664,7 +10018,7 @@ function installWebUiTestHooks() {
       persistAndroidNotifiedTurns();
     },
     refreshAfterAmbiguousSubmitFailure(message) {
-      return refreshAfterAmbiguousSubmitFailure(new Error(message || "simulated submit failure"));
+      return refreshAfterAmbiguousSubmitFailure(new Error(message || "模拟提交失败"));
     },
     receiveAndroidApkUpdateStatus(payload) {
       receiveAndroidApkUpdateStatus(payload || {});
@@ -9700,7 +10054,7 @@ function installWebUiTestHooks() {
       };
     },
     refreshProtocolStateAfterForeground(reason) {
-      refreshProtocolStateAfterForeground(reason || "test resume");
+      refreshProtocolStateAfterForeground(reason || "测试恢复");
     },
   };
 }
@@ -9714,7 +10068,7 @@ ensureAdpSocket()
     await refreshAllProtocolState();
   })
   .catch((error) => {
-    setCommandStatus(`startup connection failed: ${error.message}`);
+    setCommandStatus(`启动连接失败: ${error.message}`);
     renderAll();
     scheduleAdpReconnect("startup failure");
   });

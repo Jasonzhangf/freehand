@@ -28,7 +28,7 @@ const fixtureKeyName = 'FREEHAND_PROVIDER_WEB_SEARCH_UI_FIXTURE_KEY';
 const fixtureModel = 'gpt-5.5-web-search-ui';
 const runId = `provider-web-search-settings-ui-${Date.now()}`;
 const artifactDir = path.join(repo, 'artifacts', 'webui-online', runId);
-const assetVersion = '20260725-settings-layer-ui';
+const assetVersion = '20260725-session-panel-ui';
 
 let chrome = null;
 let cdp = null;
@@ -97,7 +97,7 @@ try {
       !!document.querySelector('[data-webui-shell="true"]') &&
       !!document.getElementById('settings-provider-web-search-test-button'),
     30_000,
-    'WebUI provider settings ready',
+    'WebUI provider settings 就绪',
   );
   await openSettings(cdp);
 
@@ -110,8 +110,8 @@ try {
 
   const minimaxStatus = await clickProviderCardTestAndWait('minimax');
   await writeJson('02-minimax-test-dom.json', minimaxStatus);
-  if (!/Provider web_search test passed: provider_web_search_test_passed:provider=minimax:protocol=messages:model=MiniMax-M3:hosted_tool=web_search:hosted_observed=true/.test(minimaxStatus.testStatus)) {
-    throw new Error(`Minimax Settings web_search test did not pass in DOM: ${minimaxStatus.testStatus}`);
+  if (!/模型服务联网搜索测试通过：provider_web_search_test_passed:provider=minimax:protocol=messages:model=MiniMax-M3:hosted_tool=web_search:hosted_observed=true/.test(minimaxStatus.testStatus)) {
+    throw new Error(`Minimax settings web_search test did not pass in DOM: ${minimaxStatus.testStatus}`);
   }
 
   await upsertFixtureProviderThroughUi();
@@ -127,8 +127,8 @@ try {
 
   const fixtureStatus = await clickProviderCardTestAndWait(fixtureProviderId);
   await writeJson('04-openai-responses-test-dom.json', fixtureStatus);
-  if (!new RegExp(`Provider web_search test passed: provider_web_search_test_passed:provider=${fixtureProviderId}:protocol=responses:model=${fixtureModel}:hosted_tool=web_search:hosted_observed=true`).test(fixtureStatus.testStatus)) {
-    throw new Error(`OpenAI/Responses Settings web_search test did not pass in DOM: ${fixtureStatus.testStatus}`);
+  if (!new RegExp(`模型服务联网搜索测试通过：provider_web_search_test_passed:provider=${fixtureProviderId}:protocol=responses:model=${fixtureModel}:hosted_tool=web_search:hosted_observed=true`).test(fixtureStatus.testStatus)) {
+    throw new Error(`OpenAI/Responses settings web_search test did not pass in DOM: ${fixtureStatus.testStatus}`);
   }
   if (requestCount !== 1) {
     throw new Error(`OpenAI/Responses fixture expected one request, got ${requestCount}`);
@@ -244,7 +244,7 @@ async function upsertFixtureProviderThroughUi() {
         : null;
     },
     30_000,
-    'fixture provider saved through Settings UI',
+    'fixture provider saved through settings UI',
     fixtureProviderId,
   );
 }
@@ -257,7 +257,7 @@ async function clickProviderCardTestAndWait(providerId) {
       throw new Error(`provider card not found: ${targetProviderId}`);
     }
     const button = Array.from(card.querySelectorAll('button'))
-      .find((candidate) => /Test web_search/i.test(candidate.textContent || ''));
+      .find((candidate) => /测试联网搜索/i.test(candidate.textContent || ''));
     if (!button) {
       throw new Error(`provider test button not found: ${targetProviderId}`);
     }
@@ -268,16 +268,16 @@ async function clickProviderCardTestAndWait(providerId) {
     (targetProviderId) => {
       const state = readProviderSettingsDom();
       if (state.testStatus.includes(`provider=${targetProviderId}:`) &&
-          /Provider web_search test passed/.test(state.testStatus)) {
+          /模型服务联网搜索测试通过/.test(state.testStatus)) {
         return state;
       }
-      if (/Provider web_search test failed/.test(state.testStatus)) {
+      if (/模型服务联网搜索测试失败/.test(state.testStatus)) {
         throw new Error(state.testStatus);
       }
       return null;
     },
     providerId === 'minimax' ? 180_000 : 45_000,
-    `provider web_search Settings test ${providerId}`,
+    `provider web_search settings test ${providerId}`,
     providerId,
   );
 }
@@ -374,7 +374,7 @@ function openaiResponsesHostedSearchBody() {
         status: 'completed',
         action: {
           type: 'search',
-          query: 'provider web_search Settings UI fixture',
+          query: 'provider web_search settings UI fixture',
         },
       },
       {
@@ -385,7 +385,7 @@ function openaiResponsesHostedSearchBody() {
         content: [
           {
             type: 'output_text',
-            text: 'Settings UI provider-hosted search fixture completed.',
+            text: '设置 UI provider-hosted search fixture completed.',
             annotations: [],
           },
         ],
@@ -447,7 +447,7 @@ async function openSettings(cdpClient) {
     cdpClient,
     () => document.getElementById('settings-shell')?.hidden === false,
     10_000,
-    'settings shell visible',
+    '设置 shell visible',
   );
 }
 

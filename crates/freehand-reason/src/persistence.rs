@@ -4,7 +4,10 @@ use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use freehand_blocks::CompletionSchemaRejection;
-use freehand_contracts::{AgentId, ContextSegment, SessionId, TraceId, TurnId};
+use freehand_contracts::{
+    AgentId, ContextSegment, ErrorClass, ErrorContract, ErrorErr01RuntimeClassified, FeatureId,
+    RecoveryPolicy, SessionId, TraceId, TurnId,
+};
 use freehand_provider_core::{ProviderFamily, ProviderSemanticOutput};
 use fs2::FileExt;
 use serde::{Deserialize, Serialize};
@@ -510,7 +513,9 @@ impl ReasonPersistence {
         session_id: &SessionId,
     ) -> Result<Vec<TurnRecord>, ReasonPersistenceError> {
         if let Some(restored) = self.load_authoritative_state(session_id)? {
-            let authoritative_turns = ui_turn_snapshots_from_restored(restored);
+            let has_active_authoritative_turn =
+                restored.cursor.active_turn_id.is_some() || restored.active_turn.is_some();
+            let mut authoritative_turns = ui_turn_snapshots_from_restored(restored);
             if ui_turn_snapshots_have_complete_rounds(&authoritative_turns) {
                 return Ok(authoritative_turns);
             }
@@ -518,6 +523,13 @@ impl ReasonPersistence {
             let ledger_turns =
                 ui_turn_snapshots_from_ledger_rows(self.load_reason_ledger(session_id)?);
             if ledger_turns.is_empty() {
+                if !has_active_authoritative_turn && !authoritative_turns.is_empty() {
+                    annotate_incomplete_authoritative_ui_restore(
+                        &mut authoritative_turns,
+                        &self.agent_id,
+                    );
+                    return Ok(authoritative_turns);
+                }
                 return Err(ReasonPersistenceError::InvalidCursorCoherence(
                     "authoritative UI snapshots are missing earlier round truth and reason ledger is empty"
                         .to_owned(),
@@ -1469,6 +1481,29 @@ fn ui_turn_snapshots_have_complete_rounds(turns: &[TurnRecord]) -> bool {
         .all(|(logical_key, expected)| {
             count_by_logical_key.get(&logical_key).copied().unwrap_or(0) >= expected
         })
+}
+
+fn annotate_incomplete_authoritative_ui_restore(turns: &mut [TurnRecord], agent_id: &AgentId) {
+    let Some(latest) = turns.last_mut() else {
+        return;
+    };
+    let session_id = latest.request.session_id.clone();
+    let turn_id = latest.request.turn_id.clone();
+    let trace_id = latest.request.trace_id.clone();
+    latest.error_events.push(ErrorErr01RuntimeClassified {
+        session_id: Some(session_id),
+        turn_id: Some(turn_id),
+        trace_id,
+        feature_id: FeatureId::new("reason.persistence"),
+        agent_id: Some(agent_id.clone()),
+        error: ErrorContract {
+            code: "reason_persistence_partial_ui_restore".to_owned(),
+            class: ErrorClass::Contract,
+            recovery: RecoveryPolicy::Unrecoverable,
+            message: "历史会话轮次不完整：权威 turn 快照缺少早期修复轮，reason ledger 为空；已显示仍存在的权威快照，但不能声明该 transcript 为完整轮次。"
+                .to_owned(),
+        },
+    });
 }
 
 fn upsert_ui_turn_snapshot_by_turn_id(
@@ -2773,6 +2808,108 @@ mod tests {
                 .as_ref()
                 .map(|event| &event.status),
             Some(&TerminalStatus::Success)
+        );
+
+        fs::remove_dir_all(runtime_home).expect("cleanup");
+    }
+
+    #[test]
+    fn ui_restore_returns_inactive_partial_authoritative_snapshots_with_integrity_warning() {
+        let runtime_home = temp_runtime_home();
+        let coordinator = ReasonPersistence::new(&runtime_home, AgentId::new("agent-1"));
+        let mut history = session_history();
+
+        let mut first = started_turn_with_id(&mut history, "runtime-turn-1", "trace-1");
+        first.semantic_events.push(ReasonResp01SemanticEvent {
+            session_id: SessionId::new("session-1"),
+            turn_id: TurnId::new("runtime-turn-1"),
+            trace_id: TraceId::new("trace-1"),
+            feature_id: FeatureId::new("reason.persistence"),
+            agent_id: AgentId::new("agent-1"),
+            kind: SemanticEventKind::Text,
+            content: "first round existed only in the missing ledger".to_owned(),
+        });
+        coordinator
+            .record_turn_started(&history, &first, 0)
+            .expect("persist first round active snapshot and ledger row");
+
+        let mut continuation =
+            started_turn_with_id(&mut history, "runtime-turn-1-r2", "trace-1-r2");
+        continuation.terminal_event = Some(freehand_contracts::ReasonResp03TerminalEvent {
+            session_id: SessionId::new("session-1"),
+            turn_id: TurnId::new("runtime-turn-1-r2"),
+            trace_id: TraceId::new("trace-1-r2"),
+            feature_id: FeatureId::new("reason.persistence"),
+            agent_id: AgentId::new("agent-1"),
+            status: TerminalStatus::ToolPending,
+            summary: "Waiting for user choice after continuation".to_owned(),
+        });
+        coordinator
+            .record_turn_started(&history, &continuation, 0)
+            .expect("persist continuation active snapshot");
+        coordinator
+            .record_turn_closed(&history, &continuation, 0)
+            .expect("persist only continuation as inactive authoritative closed truth");
+
+        fs::remove_file(coordinator.reason_ledger_path(history.session_id()))
+            .expect("simulate legacy session whose reason ledger is absent");
+
+        let ui_turns = coordinator
+            .restore_turn_snapshots_for_ui(history.session_id())
+            .expect("inactive partial authoritative restore remains viewable");
+        assert_eq!(
+            ui_turns
+                .iter()
+                .map(|turn| turn.request.turn_id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["runtime-turn-1-r2"]
+        );
+        let warning = ui_turns[0]
+            .error_events
+            .iter()
+            .find(|event| event.error.code == "reason_persistence_partial_ui_restore")
+            .expect("partial transcript integrity warning");
+        assert_eq!(warning.feature_id, FeatureId::new("reason.persistence"));
+        assert_eq!(warning.agent_id, Some(AgentId::new("agent-1")));
+        assert!(warning.error.message.contains("历史会话轮次不完整"));
+        assert_eq!(
+            ui_turns[0]
+                .terminal_event
+                .as_ref()
+                .map(|event| &event.status),
+            Some(&TerminalStatus::ToolPending)
+        );
+
+        fs::remove_dir_all(runtime_home).expect("cleanup");
+    }
+
+    #[test]
+    fn ui_restore_keeps_active_incomplete_authoritative_snapshot_as_hard_error_without_ledger() {
+        let runtime_home = temp_runtime_home();
+        let coordinator = ReasonPersistence::new(&runtime_home, AgentId::new("agent-1"));
+        let mut history = session_history();
+
+        let first = started_turn_with_id(&mut history, "runtime-turn-1", "trace-1");
+        coordinator
+            .record_turn_started(&history, &first, 0)
+            .expect("persist first round active snapshot");
+        let continuation = started_turn_with_id(&mut history, "runtime-turn-1-r2", "trace-1-r2");
+        coordinator
+            .record_turn_started(&history, &continuation, 0)
+            .expect("persist incomplete active continuation snapshot");
+
+        fs::remove_file(coordinator.reason_ledger_path(history.session_id()))
+            .expect("simulate missing ledger");
+
+        let err = coordinator
+            .restore_turn_snapshots_for_ui(history.session_id())
+            .expect_err("active incomplete restore without ledger must stay a hard error");
+        assert_eq!(
+            err,
+            ReasonPersistenceError::InvalidCursorCoherence(
+                "authoritative UI snapshots are missing earlier round truth and reason ledger is empty"
+                    .to_owned(),
+            )
         );
 
         fs::remove_dir_all(runtime_home).expect("cleanup");

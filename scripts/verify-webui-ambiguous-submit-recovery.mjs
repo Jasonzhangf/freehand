@@ -17,7 +17,7 @@ const fixedPrompt =
 const attachmentFailurePrompt =
   process.env.FREEHAND_WEBUI_ATTACHMENT_FAILURE_PROMPT || 'fixed attachment failure retain proof prompt';
 const taskCwd = process.env.FREEHAND_WEBUI_ATTACHMENT_FAILURE_CWD || process.cwd();
-const assetVersion = '20260725-settings-layer-ui';
+const assetVersion = '20260725-session-panel-ui';
 const artifactDir =
   process.env.FREEHAND_WEBUI_AMBIGUOUS_ARTIFACT_DIR ||
   path.join(process.cwd(), 'artifacts', 'webui-online', 'ambiguous-submit-recovery-fixed');
@@ -206,9 +206,9 @@ async function runAttachmentFailureRetentionProof(cdp, sessionId, prompt, cwd, i
           state.pendingAttachments === 1 &&
           state.messageText.includes(expectedPrompt) &&
           state.messageText.includes('Attachments') &&
-          state.messageText.includes('ready') &&
+          state.messageText.includes('就绪') &&
           state.turnStatus.includes('checking service truth') &&
-          state.messageText.includes('Draft attachments retained')
+          state.messageText.includes('Draft 附件 retained')
         ) {
           return state;
         }
@@ -252,8 +252,8 @@ async function runAttachmentFailureRetentionProof(cdp, sessionId, prompt, cwd, i
         retainedAfterFailure.attachmentCount === 1 &&
         retainedAfterFailure.pendingAttachments === 1 &&
         retainedAfterFailure.messageText.includes('Attachments') &&
-        retainedAfterFailure.messageText.includes('ready') &&
-        retainedAfterFailure.messageText.includes('Draft attachments retained'),
+        retainedAfterFailure.messageText.includes('就绪') &&
+        retainedAfterFailure.messageText.includes('Draft 附件 retained'),
       ownerSessionStillCwdBoundAfterFailure:
         !!ownerAfterFailure && ownerAfterFailure.session_id === sessionId && ownerAfterFailure.cwd === cwd,
     },
@@ -271,9 +271,9 @@ function runAmbiguousSubmitRecoveryProof(sessionId, prompt) {
     session_id: sessionId,
     turn_id: 'runtime-turn-ambiguous-fixed',
     user_text: prompt,
-    text: ['owner truth materialized after ambiguous submit failure'],
+    text: ['权威真源 materialized after ambiguous submit failure'],
     tool_activities: [],
-    terminal_text: 'owner truth materialized after service refresh',
+    terminal_text: '权威真源 materialized after service refresh',
     terminal_status: 'Success',
   });
   const makeAcceptedTask = () => ({
@@ -355,7 +355,7 @@ function runAmbiguousSubmitRecoveryProof(sessionId, prompt) {
     const taskTruthAfterRender = capture();
 
     resetPendingState();
-    const unverified = await runWithQuery('none');
+    const unverified = await runWithQuery('无');
     if (!unverified.recovery.materialized) {
       hook.markPendingSubmitError(unverified.recovery.message);
     }
@@ -392,9 +392,9 @@ function runAmbiguousSubmitRecoveryProof(sessionId, prompt) {
           taskTruthAfterRender.selectedSession === sessionId &&
           taskTruthAfterRender.pendingSubmitAcceptedByTaskTruth === false &&
           taskTruthAfterRender.acceptedSubmitReceipt?.taskId === 'task-ambiguous-submit-accepted' &&
-          taskTruthAfterRender.messageText.includes('Service accepted this request through TaskBoard truth') &&
+          taskTruthAfterRender.messageText.includes('服务已通过 任务面板 真源接收该请求') &&
           taskTruthAfterRender.messageText.includes('task-ambiguous-submit-accepted') &&
-          !taskTruthAfterRender.messageText.includes('New conversation') &&
+          !taskTruthAfterRender.messageText.includes('新会话') &&
           !taskTruthAfterRender.turnStatus.includes('unknown') &&
           !taskTruthAfterRender.messageText.includes('unknown'),
         unverifiedKeepsPendingSession:
@@ -406,7 +406,7 @@ function runAmbiguousSubmitRecoveryProof(sessionId, prompt) {
           unverifiedAfterRender.messageText.includes(prompt) &&
           unverifiedAfterRender.messageText.includes('Submit receipt is being verified') &&
           !unverifiedAfterRender.messageText.includes('unknown') &&
-          !unverifiedAfterRender.messageText.includes('New conversation'),
+          !unverifiedAfterRender.messageText.includes('新会话'),
       },
     };
   })();

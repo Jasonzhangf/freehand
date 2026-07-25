@@ -11,8 +11,8 @@ const chromePath = process.env.FREEHAND_SESSION_SEARCH_CHROME || defaultBrowserP
 const debugPort = Number.parseInt(process.env.FREEHAND_SESSION_SEARCH_DEBUG_PORT || '9277', 10);
 const fixedSessionId = process.env.FREEHAND_SESSION_SEARCH_SESSION_ID || 'webui-session-search-fixed';
 const queryToken = process.env.FREEHAND_SESSION_SEARCH_QUERY || `session-search-proof-${fixedSessionId}`;
-const fixedTitle = `Session Search Proof ${queryToken}`;
-const assetVersion = '20260725-settings-layer-ui';
+const fixedTitle = `Session 搜索 Proof ${queryToken}`;
+const assetVersion = '20260725-session-panel-ui';
 const runId = `webui-session-search-${Date.now()}`;
 const artifactDir = path.join(repo, 'artifacts', 'webui-online', runId);
 
@@ -62,7 +62,7 @@ try {
   await cdp.send('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 2, mobile: true });
   await cdp.send('Page.navigate', { url: baseUrl });
   await waitForLoad(cdp);
-  await waitForFunction(cdp, () => document.body.dataset.webuiJsReady === 'true' && !!document.getElementById('open-session-drawer-button') && !!document.getElementById('session-search-dialog'), 20_000, 'Search-capable WebUI shell ready');
+  await waitForFunction(cdp, () => document.body.dataset.webuiJsReady === 'true' && !!document.getElementById('open-session-drawer-button') && !!document.getElementById('session-search-dialog'), 20_000, '搜索-capable WebUI shell 就绪');
 
   await evalInPage(cdp, (query) => {
     window.dispatchEvent(new Event('resize'));
@@ -93,7 +93,7 @@ try {
       bodyText: document.body.innerText || '',
       noHorizontalOverflow: Math.max(document.body.scrollWidth, document.documentElement.scrollWidth) <= window.innerWidth + 2,
     };
-  }, 30_000, 'Search DOM result', fixedSessionId);
+  }, 30_000, '搜索 DOM result', fixedSessionId);
   await fs.writeFile(path.join(artifactDir, 'session-search-dom.json'), JSON.stringify(dom, null, 2));
   await captureScreenshot(cdp, 'session-search-results.png');
 
@@ -110,7 +110,7 @@ try {
       };
     }
     return null;
-  }, 20_000, 'Search result opens selected session', fixedSessionId);
+  }, 20_000, '搜索 result opens selected session', fixedSessionId);
   await fs.writeFile(path.join(artifactDir, 'selected-session-dom.json'), JSON.stringify(selected, null, 2));
   await captureScreenshot(cdp, 'session-search-selected-session.png');
 

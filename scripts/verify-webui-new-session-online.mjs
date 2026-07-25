@@ -12,7 +12,7 @@ const debugPort = Number.parseInt(process.env.FREEHAND_NEW_SESSION_DEBUG_PORT ||
 const conversationSessionId = process.env.FREEHAND_NEW_CONVERSATION_SESSION_ID || 'webui-new-conversation-fixed';
 const taskSessionId = process.env.FREEHAND_NEW_TASK_SESSION_ID || 'webui-new-task-fixed';
 const taskCwd = process.env.FREEHAND_NEW_TASK_CWD || repo;
-const assetVersion = '20260725-settings-layer-ui';
+const assetVersion = '20260725-session-panel-ui';
 const runId = `webui-new-session-${Date.now()}`;
 const artifactDir = path.join(repo, 'artifacts', 'webui-online', runId);
 
@@ -63,7 +63,7 @@ try {
     cdp,
     () => document.body.dataset.webuiJsReady === 'true' && !!document.getElementById('mobile-new-entry-button') && !!document.getElementById('new-session-dialog'),
     20_000,
-    'New-session-capable WebUI shell ready',
+    'New-session-capable WebUI shell 就绪',
   );
 
   await evalInPage(cdp, () => {
@@ -146,7 +146,7 @@ try {
       conversationDialogOpenedFromMobileEntry: conversationDialog.open === true && conversationDialog.kind === 'conversation',
       conversationCreatedThroughOwnerTruth: !!conversationOwnerRow && conversationOwnerRow.archived !== true && !conversationOwnerRow.cwd,
       conversationSelectedInUi: conversationDom.selectedSession === conversationSessionId,
-      conversationEmptyStateClean: conversationDom.messageText.includes('New conversation') && conversationDom.messageText.includes('Send a message to start this session.'),
+      conversationEmptyStateClean: conversationDom.messageText.includes('新会话') && conversationDom.messageText.includes('发送 a message to start this session.'),
       taskDialogOpenedAndCwdEntered: taskDialog.open === true && taskDialog.kind === 'task' && taskDialog.cwd === taskCwd,
       taskCreatedThroughOwnerTruth: !!taskOwnerRow && taskOwnerRow.archived !== true && taskOwnerRow.cwd === taskCwd,
       taskSelectedInUi: taskDom.selectedSession === taskSessionId,

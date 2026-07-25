@@ -628,7 +628,7 @@ async fn handle_adp_query(
     let runtime_result =
         tokio::task::spawn_blocking(move || runtime_query_port.query_runtime(&query_for_runtime))
             .await
-            .map_err(|err| format!("runtime query task failed: {err}"))?;
+            .map_err(|err| format!("运行时 query task failed: {err}"))?;
     match runtime_result {
         Ok(Some(result)) => {
             let _ = outbound_tx.send(UiAdpResponse::QueryResult { request_id, result });
@@ -1161,7 +1161,7 @@ mod tests {
             _envelope: UiCommandDispatchEnvelope,
         ) -> Result<UiCommandDispatchReceipt, UiCommandDispatchPortError> {
             Err(UiCommandDispatchPortError::DispatchFailed(
-                "runtime queue unavailable".to_owned(),
+                "运行时 queue 不可用".to_owned(),
             ))
         }
     }
@@ -1389,7 +1389,7 @@ mod tests {
         assert!(html.contains("/assets/webui.css"));
         assert!(html.contains("/assets/logo.png"));
         assert!(html.contains("/assets/webui.js"));
-        assert!(html.contains("20260725-settings-layer-ui"));
+        assert!(html.contains("20260725-session-panel-ui"));
         assert!(html.contains("data-adp-endpoint=\"/adp\""));
         assert!(html.contains("data-selected-session=\"\""));
         assert!(html.contains("data-selected-turn=\"\""));
@@ -1406,10 +1406,12 @@ mod tests {
         assert!(html.contains("id=\"mobile-home-dashboard\""));
         assert!(html.contains("id=\"mobile-home-active-marker\""));
         assert!(html.contains("id=\"mobile-home-active-list\""));
+        assert!(html.contains("mobile-running-session-list"));
+        assert!(html.contains("mobile-static-session-list"));
         assert!(html.contains("mobile-active-card"));
         assert!(html.contains("mobile-history-card"));
-        assert!(html.contains("active sessions monitor"));
-        assert!(html.contains("master session history"));
+        assert!(html.contains("正在运行"));
+        assert!(html.contains("历史会话"));
         assert!(!html.contains("id=\"mobile-home-timer-marker\""));
         assert!(!html.contains("id=\"mobile-home-timer-list\""));
         assert!(!html.contains("mobile-current-card"));
@@ -1422,14 +1424,15 @@ mod tests {
         assert!(html.contains("id=\"timer-dashboard-create-button\""));
         assert!(html.contains("id=\"timer-dashboard-list\""));
         assert!(html.contains("id=\"timer-dashboard-history\""));
-        assert!(html.contains("Timers are independent runtime truth"));
+        assert!(html.contains("定时器是独立的运行时真源"));
         assert!(html.contains("id=\"tools-dashboard-dialog\""));
         assert!(html.contains("id=\"tools-dashboard-refresh-button\""));
         assert!(html.contains("id=\"tools-dashboard-guidance\""));
         assert!(html.contains("id=\"tools-dashboard-list\""));
-        assert!(html.contains("Tools are owner-backed registry projections"));
+        assert!(html.contains("工具来自权威真源注册表投影"));
         assert!(html.contains("id=\"settings-shell\""));
-        assert!(html.contains("id=\"settings-review-tree\""));
+        assert!(!html.contains("id=\"settings-review-tree\""));
+        assert!(!html.contains("settings-hero"));
         assert!(html.contains("settings-nav-grid"));
         assert!(html.contains("data-settings-section=\"models\""));
         assert!(html.contains("data-settings-section=\"agent-runtime\""));
@@ -1439,7 +1442,7 @@ mod tests {
         assert!(html.contains("data-settings-section=\"about\""));
         assert!(html.contains("data-settings-state=\"partial\""));
         assert!(html.contains("settings-status-legend"));
-        assert!(html.contains("owner-backed"));
+        assert!(html.contains("权威真源"));
         assert!(html.contains("placeholder"));
         assert!(!html.contains("<strong>LLM Provider</strong>"));
         assert!(html.contains("id=\"settings-provider-config-page\""));
@@ -1454,11 +1457,11 @@ mod tests {
         assert!(html.contains("id=\"settings-provider-fallback-select\""));
         assert!(html.contains("id=\"settings-provider-switch-button\""));
         assert!(html.contains("id=\"settings-provider-registry-list\""));
-        assert!(html.contains("Add/update provider"));
-        assert!(html.contains("Android APK update"));
+        assert!(html.contains("新增/更新模型服务"));
+        assert!(html.contains("安卓 APK 升级"));
         assert!(html.contains("id=\"settings-apk-update-check-button\""));
         assert!(html.contains("id=\"settings-apk-update-status\""));
-        assert!(html.contains("Check APK update"));
+        assert!(html.contains("检查 APK 升级"));
         assert!(!html.contains("rootfs"));
         assert!(!html.contains("shared-folder"));
         assert!(!html.contains("mount-directory"));
@@ -1639,7 +1642,8 @@ mod tests {
         assert!(!root_body.contains("id=\"mobile-home-timer-list\""));
         assert!(!root_body.contains("mobile-current-card"));
         assert!(root_body.contains("id=\"settings-shell\""));
-        assert!(root_body.contains("id=\"settings-review-tree\""));
+        assert!(!root_body.contains("id=\"settings-review-tree\""));
+        assert!(!root_body.contains("settings-hero"));
         assert!(root_body.contains("id=\"settings-provider-config-page\""));
         assert!(root_body.contains("id=\"settings-provider-strategy-page\""));
         assert!(root_body.contains("settings-diagnostics-page"));
@@ -1655,7 +1659,7 @@ mod tests {
         assert!(root_body.contains("id=\"settings-provider-form\""));
         assert!(root_body.contains("id=\"tools-dashboard-dialog\""));
         assert!(root_body.contains("id=\"tools-dashboard-list\""));
-        assert!(root_body.contains("Tools are owner-backed registry projections"));
+        assert!(root_body.contains("工具来自权威真源注册表投影"));
         assert!(root_body.contains("id=\"task-board-status\""));
         assert!(root_body.contains("id=\"task-board-list\""));
         assert!(root_body.contains("id=\"agent-board-status\""));
@@ -1675,25 +1679,25 @@ mod tests {
         assert!(root_body.contains("id=\"session-tree-dropdown\""));
         assert!(root_body.contains("id=\"session-tree\""));
         assert!(root_body.contains("id=\"worker-session-nav\""));
-        assert!(root_body.contains("Back to Master"));
+        assert!(root_body.contains("返回主控"));
         assert!(root_body.contains("id=\"settings-agent-resource-count\""));
         assert!(root_body.contains("id=\"settings-agent-resource-increment\""));
         assert!(root_body.contains("id=\"settings-agent-resource-decrement\""));
         assert!(root_body.contains("id=\"settings-agent-resource-save\""));
-        assert!(root_body.contains("Worker limit"));
+        assert!(root_body.contains("工作器上限"));
         assert!(!root_body.contains("id=\"mobile-agent-resource-save\""));
         assert!(!root_body.contains("Agent resources"));
-        assert!(root_body.contains("Worker tasks"));
-        assert!(root_body.contains("Tap a task to open its Worker conversation"));
+        assert!(root_body.contains("工作器任务"));
+        assert!(root_body.contains("点击任务打开对应工作器会话"));
         assert!(!root_body.contains("id=\"mobile-agent-master-card\""));
         assert!(!root_body.contains("id=\"mobile-agent-agent-list\""));
         assert!(!root_body.contains("id=\"mobile-agent-history-list\""));
         assert!(!root_body.contains("id=\"mobile-agent-control-list\""));
         assert!(!root_body.contains("Master evaluation"));
         assert!(root_body.contains("aria-modal=\"true\""));
-        assert!(root_body.contains("Task and Agent Lifecycle"));
-        assert!(root_body.contains("lifecycle observer"));
-        assert!(root_body.contains("Add/update provider"));
+        assert!(root_body.contains("任务与智能体生命周期"));
+        assert!(root_body.contains("生命周期观察"));
+        assert!(root_body.contains("新增/更新模型服务"));
         assert!(!root_body.contains("id=\"settings-agent-value\""));
         assert!(!root_body.contains("Task settings pending"));
         assert!(!root_body.contains("Active agent"));
@@ -1799,14 +1803,15 @@ mod tests {
         assert!(webui_css_body.contains(".settings-nav-grid"));
         assert!(webui_css_body.contains(".settings-subpage-head"));
         assert!(webui_css_body.contains(".settings-provider-hierarchy"));
-        assert!(webui_css_body.contains(".settings-card"));
+        assert!(!webui_css_body.contains(".settings-card"));
         assert!(webui_css_body.contains(".settings-provider-switch"));
         assert!(webui_css_body.contains(".settings-provider-registry"));
         assert!(webui_css_body.contains(".settings-provider-card"));
         assert!(webui_css_body.contains(".mobile-corner-button svg"));
         assert!(webui_css_body.contains(".mobile-home-dashboard"));
         assert!(webui_css_body.contains(".mobile-bottom-entries"));
-        assert!(webui_css_body.contains(".settings-review-tree"));
+        assert!(!webui_css_body.contains(".settings-review-tree"));
+        assert!(webui_css_body.contains(".settings-diagnostic-row"));
         assert!(webui_css_body.contains(".settings-status-marker"));
         assert!(webui_css_body.contains(".settings-status-marker.partial"));
         assert!(webui_css_body.contains("border-color: var(--running)"));
@@ -1833,8 +1838,11 @@ mod tests {
         assert!(webui_css_body.contains(".session-relation-header"));
         assert!(webui_css_body.contains(".session-dashbar"));
         assert!(webui_css_body.contains(".session-tree-dropdown"));
-        assert!(webui_css_body.contains("max-height: min(50vh, 440px)"));
+        assert!(webui_css_body.contains("max-height: min(34vh, 320px)"));
+        assert!(!webui_css_body.contains("position: absolute;\n  top: calc(100% + 8px)"));
         assert!(webui_css_body.contains(".session-tree-node.is-worker"));
+        assert!(webui_css_body.contains(".mobile-running-session-list"));
+        assert!(webui_css_body.contains(".mobile-static-session-list"));
         assert!(webui_css_body.contains(".turn-action-bar"));
         assert!(webui_css_body.contains(".turn-action-button"));
         assert!(webui_css_body.contains(".tool-field-grid"));
@@ -1917,7 +1925,7 @@ mod tests {
         assert!(js_body.contains("function handleBackNavigationIntent"));
         assert!(js_body.contains("function turnTimingProjection"));
         assert!(js_body.contains("function turnTimingLine"));
-        assert!(js_body.contains("first response"));
+        assert!(js_body.contains("first_response_at_ms"));
         assert!(js_body.contains("total_elapsed_ms"));
         assert!(js_body.contains("turn-cycle-header-pill"));
         assert!(
@@ -1928,21 +1936,16 @@ mod tests {
         assert!(js_body.contains("function renderSettingsShell"));
         assert!(js_body.contains("function topLevelPersistedSessions"));
         assert!(js_body.contains("function renderMobileHomeDashboard"));
+        assert!(js_body.contains("function mobileHomeHistorySessions"));
+        assert!(js_body.contains("function mobileHomeSessionButton"));
         assert!(js_body.contains("function activeSessionsForHome"));
         assert!(js_body.contains("function renderMobileHomeActiveList"));
         assert!(js_body.contains("function renderMobileHomeSessionList"));
-        assert!(js_body.contains("phaseOneSettingsTree"));
-        assert!(js_body.contains("function renderSettingsReviewTree"));
-        assert!(js_body.contains("title: \"Models\""));
-        assert!(js_body.contains("title: \"Agent Runtime\""));
-        assert!(js_body.contains("title: \"Connectivity\""));
-        assert!(js_body.contains("title: \"Observability\""));
-        assert!(js_body.contains("title: \"Appearance\""));
-        assert!(js_body.contains("title: \"About\""));
-        assert!(js_body.contains("[\"ok\", \"partial\", \"attention\"]"));
-        assert!(js_body.contains("Provider configuration"));
-        assert!(js_body.contains("Provider switching and strategy"));
-        assert!(js_body.contains("Diagnostics logs"));
+        assert!(!js_body.contains("phaseOneSettingsTree"));
+        assert!(!js_body.contains("function renderSettingsReviewTree"));
+        assert!(root_body.contains("模型服务配置"));
+        assert!(root_body.contains("模型服务切换与策略"));
+        assert!(root_body.contains("诊断日志"));
         assert!(js_body.contains("QueryTimerList"));
         assert!(js_body.contains("ScheduleTimer"));
         assert!(js_body.contains("CancelTimer"));
@@ -1965,7 +1968,7 @@ mod tests {
         assert!(js_body.contains("QueryEventInbox"));
         assert!(js_body.contains("QueryTaskHistory"));
         assert!(js_body.contains("QueryWorkerControl"));
-        assert!(js_body.contains("WorkerControl"));
+        assert!(js_body.contains("工作器控制"));
         assert!(js_body.contains("function applyPhase2QueryResult"));
         assert!(js_body.contains("function refreshPhase2Status"));
         assert!(js_body.contains("function renderPhase2Dashboard"));
@@ -1983,18 +1986,33 @@ mod tests {
         assert!(js_body.contains("function workerTranscriptRetryContext"));
         assert!(js_body.contains("function selectedWorkerTranscriptRefreshRetryable"));
         assert!(js_body.contains("function scheduleSessionRefreshRetry"));
-        assert!(js_body.contains("Loading selected session transcript from runtime truth."));
-        assert!(js_body.contains("Worker transcript is not persisted yet; TaskBoard still shows this Worker task as active."));
-        assert!(js_body.contains("Refreshing the same owner-projected Worker session; this is not a task dispatch failure."));
+        assert!(js_body.contains("正在从运行时真源加载选中会话 transcript。"));
+        assert!(
+            js_body.contains("工作器记录 尚未持久化；任务面板 仍显示该 工作器任务处于活动状态。")
+        );
+        assert!(js_body.contains("正在刷新同一个 owner 投影的 工作器会话；这不是任务派发失败。"));
         assert!(js_body.contains("const workerTranscriptRefreshRetryDelayMs = 3000"));
         assert!(js_body.contains("function renderSessionRefreshFailure"));
         assert!(js_body.contains("clearConversationForSessionSwitch"));
         assert!(js_body.contains("const adpRequestTimeoutMs = 45000"));
-        assert!(js_body.contains("state.adpFailure = message"));
+        assert!(!js_body.contains("state.adpFailure = message"));
+        assert!(js_body.contains("这是选中 transcript 的刷新错误，不是全局连接失败。"));
+        assert!(js_body.contains("function sessionRefreshFailureBubble"));
+        assert!(js_body.contains("function exitSessionRefreshErrorToNewConversation"));
+        assert!(js_body.contains("function returnToSessionListFromRefreshError"));
+        assert!(js_body.contains("function dismissSessionRefreshError"));
+        assert!(js_body.contains("simulateSessionRefreshFailureForTest"));
+        assert!(js_body.contains("captureSessionRefreshExitState"));
+        assert!(js_body.contains("function toolPendingRepresentsLifecycle"));
+        assert!(js_body.contains("function toolPendingStatusLabelForTurn"));
+        assert!(js_body.contains("function normalizeWaitingUserToolPendingTerminalBody"));
+        assert!(js_body.contains("waitingUserToolPending"));
+        assert!(js_body.contains("等待用户选择"));
+        assert!(js_body.contains("sessionRefresh: true"));
         assert!(js_body.contains("const requestedSessionId = state.selectedSessionId"));
         assert!(js_body.contains("state.selectedSessionId !== requestedSessionId"));
         assert!(js_body.contains("projection.session_id !== state.selectedSessionId"));
-        assert!(js_body.contains("waiting lifecycle"));
+        assert!(js_body.contains("waiting_lifecycle"));
         assert!(js_body.contains("function renderEventInboxProjection"));
         assert!(js_body.contains("function renderTaskHistoryProjection"));
         assert!(js_body.contains("function renderWorkerControlProjection"));
@@ -2031,20 +2049,20 @@ mod tests {
         assert!(js_body.contains("state.mobileAgentSheetOpen"));
         assert!(js_body.contains("runningAgents.length"));
         assert!(js_body.contains("mobileAgentLifecycleSummary(counts)"));
-        assert!(js_body.contains("running task"));
-        assert!(js_body.contains("blocked task"));
+        assert!(js_body.contains("个运行任务"));
+        assert!(js_body.contains("个阻塞任务"));
         assert!(!js_body.contains("delegated task"));
         assert!(js_body.contains("limit ${workerLimit}"));
         assert!(js_body.contains("UpdateAgentResourceConfig"));
         assert!(js_body.contains("function submitAgentResourceConfigUpdate"));
         assert!(js_body.contains("function renderSystemAgentResourceConfig"));
-        assert!(js_body.contains("Save Worker limit"));
+        assert!(js_body.contains("保存工作器上限"));
         assert!(js_body.contains("agent_resource_config_saved_restart_required:count="));
-        assert!(js_body.contains("restart and Worker process startup required"));
+        assert!(js_body.contains("需要重启并启动 Worker 进程"));
         assert!(!js_body.contains("freehand-webui-agent-resource-count"));
         assert!(!js_body.contains("mobileAgentResourceSave"));
-        assert!(js_body.contains("No Worker task in this session"));
-        assert!(!js_body.contains("Awaiting Master evaluation"));
+        assert!(js_body.contains("当前投影中没有 工作器任务"));
+        assert!(!js_body.contains("A等待中 Master evaluation"));
         assert!(!js_body.contains("Master evaluating"));
         assert!(!js_body.contains("Rework required"));
         assert!(!js_body.contains("Goal complete"));
@@ -2056,7 +2074,7 @@ mod tests {
         assert!(js_body.contains("state.workerControl"));
         assert!(js_body.contains("function commandReceiptStatus(receipt)"));
         assert!(js_body.contains("function commandReceiptCode(dispatchStatus)"));
-        assert!(js_body.contains("unsupported command receipt"));
+        assert!(js_body.contains("不支持的命令回执"));
         assert!(!js_body.contains("function commandReceiptStatus(receipt, fallback"));
         assert!(!js_body.contains("return fallback"));
         assert!(!js_body.contains("request processed"));
@@ -2093,16 +2111,14 @@ mod tests {
         assert!(js_body.contains("bridge.check();"));
         assert!(js_body.contains("settings-apk-update-check-button"));
         assert!(js_body.contains("settings-apk-update-status"));
-        assert!(
-            js_body.contains("APK update check is available only inside the Freehand Android app.")
-        );
+        assert!(js_body.contains("APK 升级检查仅在 Freehand 安卓 App 内可用。"));
         assert!(js_body.contains("function providerConfigReceiptStatus"));
         assert!(js_body.contains("function providerConfigUpsertReceiptStatus"));
         assert!(js_body.contains("function providerSelectionReceiptStatus"));
         assert!(js_body.contains("provider_config_upserted_restart_required"));
         assert!(js_body.contains("agent_provider_selection_saved_restart_required"));
-        assert!(js_body.contains("Provider config saved. Restart required."));
-        assert!(js_body.contains("Config save returned an unexpected service status."));
+        assert!(js_body.contains("模型服务配置已保存，需要重启。"));
+        assert!(js_body.contains("配置保存返回了未预期的服务状态。"));
         assert!(!js_body.contains("return \"Provider config saved.\""));
         assert!(!js_body.contains("`${receipt.dispatch_status} -> ${receipt.target_feature_id}`"));
         assert!(js_body.contains("function settingsAuthTypeLabel"));
@@ -2116,7 +2132,7 @@ mod tests {
         );
         assert!(js_body.contains("const attachments = currentAttachments();"));
         assert!(!js_body.contains("currentDraftAttachments"));
-        assert!(js_body.contains("case \"/settings\""));
+        assert!(js_body.contains("case \"/设置\""));
         assert!(js_body.contains("function syncMobileDrawerForLayout"));
         assert!(js_body.contains("function installMobileSessionSwipeGesture"));
         assert!(js_body.contains("setMobileDrawer(\"sessions\")"));
@@ -2181,7 +2197,7 @@ mod tests {
             .expect("new task flow exists");
         let start_new_conversation_body = &js_body[start_new_conversation_pos..start_new_task_pos];
         assert!(start_new_conversation_body.contains("CreateSession"));
-        assert!(start_new_conversation_body.contains("title: \"New conversation\""));
+        assert!(start_new_conversation_body.contains("title: \"新会话\""));
         assert!(start_new_conversation_body.contains("await refreshSessions();"));
         assert!(start_new_conversation_body.contains("await refreshSelectedSession();"));
         assert!(js_body.contains("selectedSessionIds"));
@@ -2191,8 +2207,8 @@ mod tests {
         assert!(js_body.contains("card.dataset.taskId"));
         assert!(js_body.contains("card.dataset.workerSessionId"));
         assert!(!js_body.contains("model.tasks.slice(0, 8)"));
-        assert!(js_body.contains("worker session unavailable in TaskBoard projection"));
-        assert!(js_body.contains("session refresh failed"));
+        assert!(js_body.contains("任务面板 投影中没有可用 工作器会话"));
+        assert!(js_body.contains("选中会话刷新失败"));
         assert!(js_body.contains("function renderSessionWithWorkerChildren"));
         assert!(js_body.contains("function renderSessionAgentGroup"));
         assert!(js_body.contains("group.className = \"session-agent-group\""));
@@ -2206,7 +2222,7 @@ mod tests {
         assert!(js_body.contains("__freehandDraftSessionIdsForTest"));
         assert!(!js_body.contains("startsWith(\"webui-session-\")"));
         assert!(js_body.contains("if (state.draftSessionId)"));
-        assert!(js_body.contains("Send a message to start this session."));
+        assert!(js_body.contains("发送消息开始这个会话。"));
         assert!(js_body.contains("function pendingExecutionCard"));
         assert!(js_body.contains("function turnExecutionCard"));
         assert!(js_body.contains("function turnChatCards"));
@@ -2235,6 +2251,7 @@ mod tests {
         assert!(js_body.contains("function renderConversationFragments"));
         assert!(js_body.contains("function reconcileCycleCardFragments"));
         assert!(js_body.contains("function frozenCycleCardNeedsAuthoritativeMetadataRefresh"));
+        assert!(js_body.contains("function frozenCycleCardNeedsLifecycleClassificationRefresh"));
         assert!(js_body.contains("existing.dataset.frozen === \"true\""));
         assert!(
             js_body
@@ -2244,6 +2261,9 @@ mod tests {
             js_body
                 .contains("!existing.dataset.totalElapsedMs && !!nextCard.dataset.totalElapsedMs")
         );
+        assert!(js_body.contains("article.dataset.lifecyclePhase"));
+        assert!(js_body.contains("waiting_lifecycle"));
+        assert!(js_body.contains("waiting_user"));
         assert!(js_body.contains("function cycleCardFromChatCards"));
         assert!(js_body.contains("function cycleCardKey"));
         assert!(js_body.contains("function cycleCardKeyFromNode"));
@@ -2252,9 +2272,7 @@ mod tests {
         assert!(js_body.contains("closedTurnObsoletesSessionSummary(latestClosedTurn, summary)"));
         assert!(js_body.contains("function sessionLiveObservation"));
         assert!(js_body.contains("function globalLiveSessionObservation"));
-        assert!(
-            js_body.contains("return parent ? { ...parent, scope: \"parent Master\" } : null;")
-        );
+        assert!(js_body.contains("return parent ? { ...parent, scope: \"父 Master\" } : null;"));
         assert!(js_body.contains("function liveObservationLine"));
         assert!(js_body.contains("function cycleCardMetaForTimelineItem"));
         assert!(js_body.contains("function cycleCardIsTerminal"));
@@ -2278,25 +2296,27 @@ mod tests {
         assert!(
             js_body.contains("turnRequiresLifecycleTruthRefresh(activeTurnForSelectedSession())")
         );
-        assert!(js_body.contains("title: isToolPending ? \"Lifecycle\" : \"Final\""));
-        assert!(js_body.contains("? terminalTurnStatusLabel(turn.terminal_status)"));
+        assert!(js_body.contains(
+            "title: isToolPending ? (toolPendingIsLifecycle ? \"生命周期\" : \"等待用户\") : \"最终结果\""
+        ));
+        assert!(js_body.contains("? terminalTurnStatusLabelForTurn(turn, turn.terminal_status)"));
         assert!(!js_body.contains("turn.terminal_text\n    ? \"completed\""));
         assert!(js_body.contains("phase: \"tool_failed\""));
         assert!(js_body.contains("phase: \"tool_completed\""));
         assert!(
             js_body.contains("const inactiveToolLifecycle = inactiveToolLifecycleForRender(turn);")
         );
-        assert!(js_body.contains("request accepted; waiting for protocol-visible turn details"));
+        assert!(js_body.contains("请求已接收；等待协议可见的 turn 详情"));
         assert!(js_body.contains("function pendingUserInputIsMaterialized"));
         assert!(js_body.contains("function clearPendingUserInputIfMaterialized"));
         assert!(js_body.contains("function acceptedSubmitReceiptChatCards"));
         assert!(js_body.contains("function acceptedSubmitReceiptForRender"));
-        assert!(js_body.contains("Service accepted this request through TaskBoard truth."));
+        assert!(js_body.contains("服务已通过 任务面板 真源接收该请求。"));
         assert!(js_body.contains("clearPendingUserInputIfMaterialized();"));
         assert!(js_body.contains("async function refreshAfterAmbiguousSubmitFailure"));
         assert!(js_body.contains("await refreshAfterAmbiguousSubmitFailure(error)"));
-        assert!(js_body.contains("request is visible after service refresh"));
-        assert!(js_body.contains("submit receipt not verified after service refresh"));
+        assert!(js_body.contains("服务刷新后请求已可见"));
+        assert!(js_body.contains("服务刷新后仍未验证提交回执"));
         assert!(js_body.contains("function installWebUiTestHooks"));
         assert!(js_body.contains("__freehandEnableTestHooks"));
         assert!(js_body.contains("captureAmbiguousSubmitState"));
@@ -2338,7 +2358,7 @@ mod tests {
         assert!(js_body.contains("return `turn:${sessionId}:${turnId}`"));
         assert!(js_body.contains("sessionRelationHeader.dataset.liveSessionId"));
         assert!(js_body.contains("sessionRelationHeader.dataset.liveTurnId"));
-        assert!(js_body.contains("active · ${observation.label}"));
+        assert!(js_body.contains("活动 · ${observation.label}"));
         assert!(js_body.contains("existing.dataset.frozen === \"true\""));
         assert!(js_body.contains("return `submit:${sessionId}:${submitId}`"));
         assert!(js_body.contains("state.renderedCycleSessionId"));
@@ -2358,7 +2378,7 @@ mod tests {
         assert!(js_body.contains("renderSessionBulkToolbar"));
         assert!(js_body.contains("selectedWorkspaceCwd"));
         assert!(js_body.contains("requireTaskCwd"));
-        assert!(js_body.contains("requires a task target directory"));
+        assert!(js_body.contains("需要任务目标目录"));
         assert!(js_body.contains("CreateSession"));
         assert!(js_body.contains("SubmitUserInput.session_id"));
         assert!(js_body.contains("SubmitUserInput.cwd"));
@@ -2395,8 +2415,8 @@ mod tests {
         assert!(!js_body.contains("等待数据"));
         assert!(!root_body.contains("WebUI 正在查询最新 turn。"));
         assert!(!root_body.contains("等待数据"));
-        assert!(root_body.contains("New conversation"));
-        assert!(root_body.contains("Send a message to start this session."));
+        assert!(root_body.contains("新会话"));
+        assert!(js_body.contains("发送消息开始这个会话。"));
         assert!(js_body.contains("if (projection && projection.session_id)"));
         assert!(
             !js_body.contains(
@@ -2449,7 +2469,7 @@ mod tests {
         assert!(js_body.contains("stripDebugTerminalLines"));
         assert!(js_body.contains("debugDetailsVisible"));
         assert!(js_body.contains("debugDetailsToggle"));
-        assert!(js_body.contains("Debug off"));
+        assert!(js_body.contains("调试关"));
         assert!(js_body.contains("<freehand_completion>"));
         assert!(js_body.contains("toolSummaryBody"));
         assert!(js_body.contains("renderToolBody"));
@@ -2474,10 +2494,10 @@ mod tests {
         assert!(js_body.contains("function modelRequestTransportLabel"));
         assert!(!js_body.contains("function modelRequestKindIsLegacyTransport"));
         assert!(js_body.contains("turnIsWaitingForModelResponse"));
-        assert!(js_body.contains("schema polishing"));
-        assert!(js_body.contains("thinking after tool result"));
-        assert!(js_body.contains("transport retry"));
-        assert!(js_body.contains("transport switch"));
+        assert!(js_body.contains("Schema 修复"));
+        assert!(js_body.contains("工具结果后继续推理"));
+        assert!(js_body.contains("传输重试"));
+        assert!(js_body.contains("传输切换"));
         assert!(js_body.contains("return \"provider_retry\";"));
         assert!(js_body.contains("return \"provider_failover\";"));
         assert!(!js_body.contains("return \"provider retry\";"));
@@ -2491,7 +2511,7 @@ mod tests {
         assert!(js_body.contains("toolTimelineLine"));
         assert!(js_body.contains("running-tool-state"));
         assert!(js_body.contains("className: \"pending\""));
-        assert!(js_body.contains("label: \"waiting\""));
+        assert!(js_body.contains("label: \"等待中\""));
         assert!(js_body.contains("RenderLifecycle"));
         assert!(!js_body.contains("modelRequestBody"));
         assert!(!js_body.contains("modelWaitBody"));
@@ -2544,16 +2564,14 @@ mod tests {
         assert!(js_body.contains("data_base64"));
         assert!(js_body.contains("attachment-preview-overlay"));
         assert!(js_body.contains("clearCurrentAttachments"));
-        assert!(js_body.contains(
-            "submit receipt not verified after service refresh; checking service truth before duplicate send"
-        ));
-        assert!(js_body.contains("Submit receipt is being verified against service truth."));
-        assert!(js_body.contains("Do not send a duplicate until the service refresh finishes."));
+        assert!(js_body.contains("服务刷新后仍未验证提交回执；重复发送前正在检查服务真源"));
+        assert!(js_body.contains("正在根据服务真源验证提交收据。"));
+        assert!(js_body.contains("服务刷新完成前不要重复发送。"));
         assert!(js_body.contains("if (!state.selectedSessionId)"));
         assert!(js_body.contains("state.draftSessionId = sessionId"));
-        assert!(js_body.contains("case \"/attachments\""));
+        assert!(js_body.contains("case \"/附件\""));
         assert!(js_body.contains("case \"/model\""));
-        assert!(js_body.contains("model selector is read-only"));
+        assert!(js_body.contains("模型选择器只读"));
         assert!(js_body.contains("setCommandStatus"));
         assert!(js_body.contains("setBackgroundCommandStatus"));
         assert!(js_body.contains("adpRequestTimeoutMs"));
@@ -2570,8 +2588,8 @@ mod tests {
         assert!(js_body.contains("window.addEventListener(\"focus\""));
         assert!(js_body.contains("window.addEventListener(\"online\""));
         assert!(js_body.contains("document.addEventListener(\"visibilitychange\""));
-        assert!(js_body.contains("refreshProtocolStateAfterForeground(\"app resume\")"));
-        assert!(js_body.contains("checking service truth after"));
+        assert!(js_body.contains("refreshProtocolStateAfterForeground(\"应用恢复\")"));
+        assert!(js_body.contains("检查服务真源"));
         assert!(js_body.contains("foregroundRefreshInFlight"));
         assert!(js_body.contains("foregroundRefreshLastAt"));
         assert!(js_body.contains("if (command.startsWith(\"/\")"));
@@ -2608,6 +2626,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[allow(clippy::await_holding_lock)]
     async fn android_update_routes_return_manifest_and_explicit_missing_apk() {
         let _env_guard = android_update_env_lock().lock().expect("env lock");
         let _snapshot = EnvSnapshot::capture(&[
@@ -2658,6 +2677,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[allow(clippy::await_holding_lock)]
     async fn android_update_manifest_uses_compiled_sidecar_without_env_override() {
         let _env_guard = android_update_env_lock().lock().expect("env lock");
         let _snapshot = EnvSnapshot::capture(&[
@@ -2709,6 +2729,7 @@ mod tests {
     }
 
     #[tokio::test]
+    #[allow(clippy::await_holding_lock)]
     async fn android_update_manifest_missing_sidecar_does_not_report_false_current_version() {
         let _env_guard = android_update_env_lock().lock().expect("env lock");
         let _snapshot = EnvSnapshot::capture(&[
@@ -2751,7 +2772,7 @@ mod tests {
             "FREEHAND_DAEMON_WORKDIR",
         ]);
         let runtime_home = std::env::temp_dir().join(format!(
-            "freehand-android-update-runtime-home-{}",
+            "freehand-android-update-运行时-home-{}",
             std::process::id()
         ));
         unsafe {
@@ -3167,7 +3188,7 @@ mod tests {
         let failure: UiCommandDispatchFailure = failure.json().await.expect("failure json");
         assert_eq!(failure.code, "command_dispatch_port_failure");
         assert!(failure.retryable);
-        assert!(failure.message.contains("runtime queue unavailable"));
+        assert!(failure.message.contains("运行时 queue 不可用"));
 
         server.stop().await;
     }

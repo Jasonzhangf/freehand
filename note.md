@@ -1,5 +1,16 @@
 # note.md
 
+# 2026-07-25 Android daemon config legacy compatibility
+
+- owner resources: `android_apk_update`, `DaemonConnectionConfigStore`, compatibility projection for older APKs.
+- implementation:
+  - `daemon-connection.json` now stays as a legacy-compatible connection projection.
+  - new `daemon-connection-registry.json` sidecar stores remote_registry truth for current APKs.
+  - bootstrap import and remote_registry loads rewrite the legacy file so older APKs can still read a direct host/port projection.
+  - `DaemonConnectionConfigTest` now covers sidecar/legacy sync and load precedence.
+- verification:
+  - `cd apps/freehand-android && JAVA_HOME="/Applications/Android Studio.app/Contents/jbr/Contents/Home" ./gradlew testDebugUnitTest --tests com.freehand.android.data.DaemonConnectionConfigTest --tests com.freehand.android.data.HostConfigTest --tests com.freehand.android.data.ApkUpdateManifestTest --no-daemon`
+
 # 2026-07-24 image attachments and Android turn-finish notifications
 
 - owner resources: `input_attachment`, `ui_projection`, `android_notification`, provider adapter image wire rendering.
@@ -8332,3 +8343,90 @@ Current real root cause split:
 - restore proof:
   - Final config query returned `provider=minimax`, `fallback_provider=cc`, `provider_protocol=messages`, `base_url_host=api.minimaxi.com`, `default_model=MiniMax-M3`, `web_search_effective=hosted_declared`, and `auth_source=inline`.
   - Fixture env grep returned 0 matches for provider retry, master autonomy, provider registry, provider web_search, and model group verifier keys.
+
+# 2026-07-25 Chinese WebUI menu + Android APK rebuild
+
+- scope:
+  - User-facing WebUI/menu/settings/status labels were localized to Chinese while preserving internal symbols, DOM ids/data attributes, ADP variant strings, protocol field names, and verifier selectors in English.
+  - Production WebUI asset version is `20260725-zh-menu-ui`.
+  - Android remains a thin WebView/platform bridge; no native Android product menu was added.
+- implementation/truth sync:
+  - Updated daemon WebUI source (`apps/freehand-server/assets/webui.js`, `apps/freehand-server/src/page.rs`, `apps/freehand-server/assets/webui.css`) plus server assertions and online verifiers for Chinese visible labels.
+  - Synced `app.webui-smoke` function map, mainline call manifest, test design, generated wiki, and local `freehand-dev` skill.
+  - Rebuilt Android release APK `dist/android/freehand-android-release.apk`, versionCode `20260726`, versionName `0.2.4`, SHA-256 `3acf6e2ed9510fd3850b25c0abb042170bf7b95a0656e8d56aa15b68f77e0a8f`; `dist/android/update.json` and runtime-home staged APK match that hash.
+- online/browser proof:
+  - Served root after S-profile restart advertises only asset version `20260725-zh-menu-ui`.
+  - `FREEHAND_WEBUI_CHROME=$HOME/Library/Caches/ms-playwright/chromium_headless_shell-1194/chrome-mac/headless_shell node scripts/verify-webui-mobile-ui-tree-online.mjs` passed after restart with artifact `artifacts/webui-online/mobile-ui-tree-phase1-20260725T104042-44224`; checks include Chinese Settings root (`模型`, `智能体运行时`, `连接`, `可观测性`, `外观`, `关于`), split model subpages, Diagnostics under Observability, no horizontal overflow, and stable internal selectors.
+  - Local and relay update endpoints served `update.json` versionCode `20260726`; `/android/freehand-android.apk` SHA matched the rebuilt dist/runtime-home artifact and used no-store headers.
+- Android true-device proof:
+  - `FREEHAND_ANDROID_APK=dist/android/freehand-android-release.apk ANDROID_HOME=$HOME/Library/Android/sdk JAVA_HOME=/Applications/Android Studio.app/Contents/jbr/Contents/Home apps/freehand-android/scripts/verify-device-ui.sh 100.104.163.65:5555` passed with artifact `artifacts/android-device/20260725T104143Z-100.104.163.65_5555-44388`.
+  - `FreehandWebUiLayout` logged relay asset URLs with `?v=20260725-zh-menu-ui`, `layoutClient=android-webview`, `layoutShape=tall_phone`, `webuiShell=true`, `webuiCssApplied=true`, and `webuiJsReady=true`; `FreehandFileAccess` showed versionCode `20260726` and granted state.
+  - Manual device interaction proof under `.../settings-menu-proof/` captured Settings tap screenshot showing Chinese `系统设置` menu and physical Back returning to Chinese home; post-interaction logcat had no Freehand fatal/exception pattern.
+- validation:
+  - Passed: WebUI/verifier `node --check`, `git diff --check`, `cargo fmt --check`, `CARGO_TARGET_DIR=/tmp/freehand-target-zh-menu cargo test -p freehand-server -- --nocapture --test-threads=1` (19/19), Android `./gradlew testDebugUnitTest assembleRelease`, Android `./gradlew --rerun-tasks assembleRelease`, `apksigner verify --verbose --print-certs`, `xtask mainlines check`, and `xtask gates check`.
+- lesson:
+  - Chinese localization must be visible-text only; run a CJK-in-internal-identifier audit before build/gates, and prove the changed menu in both browser and Android WebView when phone-visible.
+
+# 2026-07-25T11:41:47Z session restore unlock continuation
+
+- run_id: 20260725T114147Z-Macstudio.local-90958-78230c
+- scope: continue handoff for WebUI deadlocked session restore, ToolPending lifecycle mislabel, session refresh exit path, and APK rebuild after Chinese menu closeout.
+- initial guard refresh: USER/profile read, freehand-dev skill read, worktree/collab claims inspected; existing claims for app.webui-smoke_session_restore_exit, reason.persistence_partial_ui_restore, and runtime.ui-command-dispatch_session_query_restore are same-task handoff claims.
+- continuation edit: fixed accidental visible-text localization leaking into internal mobile drawer state comparison (`drawer === "settings"` restored for Settings aria-expanded). Visible Chinese labels remain unchanged.
+- docs/verifier update: added `scripts/verify-webui-session-restore-error-exit-online.mjs` and synced reason.persistence/runtime.ui-command-dispatch/app.webui-smoke docs for inactive partial restore warning, active incomplete hard error, ToolPending owner-evidence classification, and session-local refresh-error exits.
+
+# 2026-07-25T12:08:34Z session unlock frozen-card continuation
+
+- run_id: `20260725T114147Z-Macstudio.local-90958-78230c`
+- refreshed USER/profile, freehand-dev, CACHE/MEMORY/note tail, resource/function/test maps, MemoryPalace, collab kill switch/claims.
+- observed focused verifier blocker: frozen terminal `.turn-cycle-card` reuse keeps old lifecycle label `等待生命周期` after owner projections classify the same ToolPending turn as `等待用户选择`; header/session summary already updates.
+- planned code owner path: `app.webui-smoke` WebUI cycle-card reconciliation only; reason/runtime restore code already locally verified by prior commands.
+
+# 2026-07-25T16:16:40Z mobile session home / APK 0.2.6 closeout
+
+- run_id: `20260725T141849Z-Macstudio.local-57457-8ca53856`
+- scope:
+  - Corrected mobile session home to be an in-flow page surface, not a floating session-list overlay.
+  - Mobile home now has `正在运行` above `历史会话`; running sessions are uncapped and removed from the history list by session id.
+  - Header session tree is an inline selected-session relationship panel only, not the main session list.
+  - Session refresh error exits remain session-local; `新建会话`, `返回会话列表`, Android Back, and `忽略错误` are covered.
+  - Rebuilt Android APK versionCode `20260728`, versionName `0.2.6`.
+- implementation/truth sync:
+  - Updated `apps/freehand-server/src/page.rs`, `apps/freehand-server/assets/webui.js`, `apps/freehand-server/assets/webui.css`, and server asset smoke assertions for `20260725-session-panel-ui`.
+  - Updated `scripts/verify-webui-mobile-ui-tree-online.mjs` to assert running/history session id disjointness and no floating session tree.
+  - Updated `scripts/verify-webui-session-restore-error-exit-online.mjs` to assert clean selected-session state instead of transient command-status text after refresh-error new-session exit.
+  - Synced `app.webui-smoke` function map, mainline call manifest, generated wiki, test design, and local `freehand-dev` skill.
+  - Updated Android `gradle.properties` and `dist/android/update.json`; staged runtime-home update manifest/APK.
+- online proof:
+  - `scripts/install-launchd.sh restartS` restarted S-profile and relay.
+  - Local and relay endpoints served `update.json` versionCode `20260728`; `/android/freehand-android.apk` hash matched `dist/android/freehand-android-release.apk`.
+  - `FREEHAND_WEBUI_CHROME=... node scripts/verify-webui-mobile-ui-tree-online.mjs` passed with artifact `artifacts/webui-online/mobile-ui-tree-phase1-20260725T160711-98388`; portrait snapshots show `mobileHomeRunningHistoryOverlap=[]`, `mobileHomeFloatingTree=false`, and home sections `正在运行` / `历史会话`.
+  - `FREEHAND_SESSION_RESTORE_CHROME=... node scripts/verify-webui-session-restore-error-exit-online.mjs` passed with artifact `artifacts/webui-online/webui-session-unlock-1784995916116`; all checks true, including `browserToolPendingWaitsForUserChoice`, `browserProblemTurnNotLifecycle`, Android Back exit, and clean new-session exit.
+- APK proof:
+  - Android `./gradlew testDebugUnitTest assembleRelease` passed.
+  - `apksigner verify --verbose --print-certs` passed with v2 signature.
+  - APK version inspected as `20260728 / 0.2.6`.
+  - APK SHA-256: `602875167d259d8d9eff21a04ecc2deef4653dd718dc090c3026641dc459bca8`.
+  - `dist/android/freehand-android-release.apk` and `~/.freehand/dist/android/freehand-android-release.apk` hashes match; manifest hashes match.
+- local validation:
+  - Passed: `node --check` for WebUI asset and touched verifier scripts, CJK-in-internal-selector audit, `cargo fmt --check`, `cargo test -p freehand-server --lib -- --nocapture --test-threads=1` 19/19, `cargo run -p xtask -- mainlines generate/check`, `cargo run -p xtask -- gates check`, and `git diff --check`.
+  - Full `cargo test -p freehand-server -- --nocapture --test-threads=1` and a later repeat `--lib` command both hit a harness/session hang after prior pass evidence; they were interrupted by Ctrl-C on the specific terminal session only.
+- blocked proof:
+  - True-device Android verifier is blocked: `apps/freehand-android/scripts/verify-device-ui.sh 100.104.163.65:5555` returned `adb_state_unavailable` at `artifacts/android-device/20260725T160731Z-100.104.163.65_5555-98443`, and `adb connect 100.104.163.65:5555` timed out.
+  - MemoryPalace `mine /Volumes/extension/code/freehand --wing freehand --agent codex` is blocked by existing lock holder PID `16461` (`mempalace mine /Users/fanzhang/Documents/github/routecodex ...`). Search still works, but the new note/MEMORY entries were not re-mined in this turn.
+
+# 2026-07-25T16:22:40Z post-handoff verification closeout
+
+- run_id: `20260725T162240Z-Macstudio.local-21776-25bc03ea`
+- MemoryPalace blocker cleared:
+  - `mempalace mine /Volumes/extension/code/freehand --wing freehand --agent codex` completed.
+  - Processed 75 files including `note.md`, `MEMORY.md`, `.agents/skills/freehand-dev/SKILL.md`, `webui.js`, `webui.css`, `page.rs`, `lib.rs`, and related mainline/function-map docs.
+  - `mempalace search --wing freehand --results 5 "Mobile session home redesign closeout running history disjoint"` returned current `note.md`, local `SKILL.md`, and `app.webui-smoke.md` records in top results.
+- ADB remains blocked:
+  - `adb devices -l` returned no attached devices.
+  - `adb connect 100.104.163.65:5555` timed out again.
+- Rechecked gates after handoff:
+  - `node --check` passed for WebUI asset and all touched WebUI verifier scripts.
+  - `cargo test -p freehand-reason ui_restore_ -- --nocapture --test-threads=1` passed 4/4.
+  - `cargo fmt --check`, `cargo run -p xtask -- mainlines check`, `cargo run -p xtask -- gates check`, and `git diff --check` passed.
+  - Local/relay Android update manifests still served versionCode `20260728`, versionName `0.2.6`; dist/runtime-home APK SHA-256 still match `602875167d259d8d9eff21a04ecc2deef4653dd718dc090c3026641dc459bca8`.

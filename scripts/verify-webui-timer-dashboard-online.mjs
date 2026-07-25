@@ -12,7 +12,7 @@ const adpUrl = process.env.FREEHAND_WEBUI_TIMER_ADP_URL || adpUrlFromBaseUrl(bas
 const runStamp = new Date().toISOString().replace(/[-:.]/g, '').slice(0, 15);
 const runId = `webui-timer-dashboard-${runStamp}-${process.pid}`;
 const artifactDir = path.join(repo, 'artifacts', 'webui-online', runId);
-const assetVersion = '20260725-settings-layer-ui';
+const assetVersion = '20260725-session-panel-ui';
 const marker = `timer-dashboard-online-proof-${runStamp}-${process.pid}`;
 const wakePrompt = `Inspect current framework truth for ${marker}, then decide the next Master action.`;
 const createdTimerIds = new Set();
@@ -71,7 +71,7 @@ try {
     return document.body.dataset.webuiJsReady === 'true' &&
       !!document.querySelector('[data-webui-shell="true"]') &&
       !!document.getElementById('open-timer-dashboard-button');
-  }, 20_000, 'Timer-capable WebUI shell ready');
+  }, 20_000, 'Timer-capable WebUI shell 就绪');
 
   await evalInPage(cdp, () => {
     window.dispatchEvent(new Event('resize'));

@@ -9,7 +9,7 @@ const debugPort = Number.parseInt(process.env.FREEHAND_WEBUI_DEBUG_PORT || '9247
 const baseUrl = normalizedBaseUrl(process.env.FREEHAND_WEBUI_BASE_URL || 'http://127.0.0.1:4042/');
 const runId = `mobile-ui-tree-phase1-${new Date().toISOString().replace(/[-:.]/g, '').slice(0, 15)}-${process.pid}`;
 const artifactDir = path.join(process.cwd(), 'artifacts', 'webui-online', runId);
-const assetVersion = '20260725-settings-layer-ui';
+const assetVersion = '20260725-session-panel-ui';
 const forbiddenUiTerms = [
   /rootfs/i,
   /shared-folder/i,
@@ -78,7 +78,7 @@ try {
     return document.body.dataset.webuiJsReady === 'true' &&
       !!document.querySelector('[data-webui-shell="true"]') &&
       !!document.getElementById('mobile-home-dashboard');
-  }, 20_000, 'production WebUI shell ready');
+  }, 20_000, 'production WebUI shell 就绪');
 
   const snapshots = [];
   for (const viewport of viewports) {
@@ -153,20 +153,100 @@ async function captureSettingsTree(cdp) {
     document.getElementById('open-settings-drawer-button')?.click();
   });
   await waitForFunction(cdp, () => {
-    const tree = document.getElementById('settings-review-tree');
-    return tree &&
-      tree.innerText.includes('Provider configuration') &&
-      tree.innerText.includes('Provider switching and strategy') &&
-      tree.innerText.includes('Diagnostics logs');
-  }, 10_000, 'settings review tree visible');
+    const shell = document.getElementById('settings-shell');
+    return shell?.dataset.settingsCurrentPage === 'root' &&
+      document.querySelector('[data-settings-page="root"]')?.dataset.settingsActive === 'true';
+  }, 10_000, '设置 root visible');
+  const root = await captureSettingsSnapshot(cdp, 'settings-01-root');
+
+  await navigateSettingsPage(cdp, 'root', 'models');
+  const models = await captureSettingsSnapshot(cdp, 'settings-02-models');
+
+  await navigateSettingsPage(cdp, 'models', 'models.provider-config');
+  await waitForFunction(cdp, () => {
+    const providerId = document.getElementById('settings-provider-id')?.textContent?.trim() || '';
+    return providerId && providerId !== '加载中';
+  }, 10_000, '模型服务配置 权威真源');
+  const providerConfiguration = await captureSettingsSnapshot(cdp, 'settings-03-provider-configuration');
+
+  await navigateSettingsPage(cdp, 'models.provider-config', 'models');
+  await navigateSettingsPage(cdp, 'models', 'models.strategy');
+  const providerStrategy = await captureSettingsSnapshot(cdp, 'settings-04-provider-strategy');
+
+  await navigateSettingsPage(cdp, 'models.strategy', 'models');
+  await navigateSettingsPage(cdp, 'models', 'models.model-groups');
+  const modelGroups = await captureSettingsSnapshot(cdp, 'settings-05-model-groups');
+
+  await navigateSettingsPage(cdp, 'models.model-groups', 'models');
+  await navigateSettingsPage(cdp, 'models', 'root');
+  const returnedRoot = await captureSettingsSnapshot(cdp, 'settings-06-returned-root');
+
+  const result = {
+    root,
+    models,
+    providerConfiguration,
+    providerStrategy,
+    modelGroups,
+    returnedRoot,
+  };
+  await fs.writeFile(path.join(artifactDir, 'settings-tree.json'), JSON.stringify(result, null, 2));
+  return result;
+}
+
+async function navigateSettingsPage(cdp, currentPage, targetPage) {
+  const clickResult = await evalInPage(cdp, ({ currentPage, targetPage }) => {
+    try {
+      const current = Array.from(document.querySelectorAll('[data-settings-page]'))
+        .find((panel) => panel.dataset.settingsPage === currentPage);
+      const control = Array.from(current?.querySelectorAll('[data-settings-target]') || [])
+        .find((candidate) => candidate.dataset.settingsTarget === targetPage);
+      if (!current) {
+        throw new Error(`missing current settings page ${currentPage}`);
+      }
+      if (!control) {
+        throw new Error(`missing settings route ${currentPage} -> ${targetPage}`);
+      }
+      control.click();
+    } catch (error) {
+      return {
+        ok: false,
+        message: error?.message || String(error),
+        currentPage,
+        targetPage,
+        settingsPage: document.getElementById('settings-shell')?.dataset.settingsCurrentPage || '',
+        routes: Array.from(document.querySelectorAll('[data-settings-page]')).map((panel) => ({
+          page: panel.dataset.settingsPage || '',
+          hidden: panel.hidden,
+          targets: Array.from(panel.querySelectorAll('[data-settings-target]')).map((control) => control.dataset.settingsTarget || ''),
+        })),
+      };
+    }
+    return { ok: true };
+  }, { currentPage, targetPage });
+  if (!clickResult?.ok) {
+    throw new Error(`settings_navigation_failed ${JSON.stringify(clickResult)}`);
+  }
+  await waitForFunction(cdp, (targetPage) => {
+    const shell = document.getElementById('settings-shell');
+    const activePages = Array.from(document.querySelectorAll('[data-settings-page]'))
+      .filter((panel) => !panel.hidden)
+      .map((panel) => panel.dataset.settingsPage);
+    return shell?.dataset.settingsCurrentPage === targetPage &&
+      activePages.length === 1 &&
+      activePages[0] === targetPage;
+  }, 10_000, `设置 page ${targetPage}`, targetPage);
+}
+
+async function captureSettingsSnapshot(cdp, fileBase) {
   const state = await evalInPage(cdp, collectPhaseOneState);
   const screenshot = await cdp.send('Page.captureScreenshot', {
     format: 'png',
     captureBeyondViewport: true,
   });
-  await fs.writeFile(path.join(artifactDir, 'settings-tree.png'), Buffer.from(screenshot.data, 'base64'));
-  const result = { screenshot: 'settings-tree.png', state };
-  await fs.writeFile(path.join(artifactDir, 'settings-tree.json'), JSON.stringify(result, null, 2));
+  const screenshotName = `${fileBase}.png`;
+  await fs.writeFile(path.join(artifactDir, screenshotName), Buffer.from(screenshot.data, 'base64'));
+  const result = { screenshot: screenshotName, state };
+  await fs.writeFile(path.join(artifactDir, `${fileBase}.json`), JSON.stringify(result, null, 2));
   return result;
 }
 
@@ -174,7 +254,13 @@ function buildSummary({ snapshots, settings }) {
   const portraitSnapshots = snapshots.filter((snapshot) =>
     ['phone_portrait', 'tall_phone', 'tablet_portrait'].includes(snapshot.state.layoutShape)
   );
-  const allTexts = [settings.state.bodyText, ...snapshots.map((snapshot) => snapshot.state.bodyText)].join('\n');
+  const rootSettings = settings.root.state;
+  const modelsSettings = settings.models.state;
+  const providerConfiguration = settings.providerConfiguration.state;
+  const providerStrategy = settings.providerStrategy.state;
+  const modelGroups = settings.modelGroups.state;
+  const returnedRoot = settings.returnedRoot.state;
+  const allTexts = [rootSettings.bodyText, ...snapshots.map((snapshot) => snapshot.state.bodyText)].join('\n');
   const globalSessionText = snapshots.map((snapshot) => snapshot.state.globalSessionText).join('\n');
   const portraitEntriesVisibleAndSeparated = portraitSnapshots.every((snapshot) =>
     snapshot.state.quickEntries.iconOnly &&
@@ -201,28 +287,74 @@ function buildSummary({ snapshots, settings }) {
       homeShowsOnlyActivityAndHistory: portraitSnapshots.every((snapshot) =>
         snapshot.state.mobileHomeActiveVisible &&
         snapshot.state.mobileHomeHistoryVisible &&
+        snapshot.state.mobileHomeRunningClass &&
+        snapshot.state.mobileHomeStaticClass &&
         snapshot.state.mobileHomeCardCount === 2 &&
+        snapshot.state.mobileHomeRunningHistoryOverlap.length === 0 &&
+        !snapshot.state.mobileHomeFloatingTree &&
+        snapshot.state.mobileHomeText.includes('正在运行') &&
+        snapshot.state.mobileHomeText.includes('历史会话') &&
         !snapshot.state.homeHasTimerList &&
         !snapshot.state.homeHasTimerMarker &&
         !snapshot.state.homeHasCurrentCard &&
         !snapshot.state.homeHasNewEntryButtonInsideHome &&
         !snapshot.state.mobileHomeText.includes('timer dashboard') &&
-        !snapshot.state.mobileHomeText.includes('Timer owner truth')
+        !snapshot.state.mobileHomeText.includes('Timer 权威真源')
       ),
-      settingsReviewTreeVisible: settings.state.settingsReviewTreeVisible,
-      settingsReviewTreeHasProviderConfig: settings.state.settingsReviewTreeText.includes('Provider configuration'),
-      settingsReviewTreeHasProviderStrategy: settings.state.settingsReviewTreeText.includes('Provider switching and strategy'),
-      settingsReviewTreeHasModelGroups: settings.state.settingsReviewTreeText.includes('Model groups'),
-      settingsReviewTreeHasDiagnosticsLogs: settings.state.settingsReviewTreeText.includes('Diagnostics logs'),
-      settingsReviewTreeHasAndroid: settings.state.settingsReviewTreeText.includes('Android update'),
-      settingsProviderPagesAreSplit: settings.state.providerConfigPageExists && settings.state.providerStrategyPageExists,
-      settingsTopLevelGrouped: ['Models', 'Agent Runtime', 'Connectivity', 'Observability', 'Appearance', 'About'].every((label) => settings.state.settingsNavText.includes(label)),
-      settingsNoFlatLlmProviderEntry: !settings.state.settingsNavTopTitles.includes('LLM Provider'),
-      settingsPartialMarkersPresent: settings.state.statusMarkerToneCounts.partial > 0 && settings.state.settingsReviewToneCounts.partial > 0,
-      settingsAttentionMarkersPresent: settings.state.statusMarkerToneCounts.attention > 0 && settings.state.settingsReviewToneCounts.attention > 0,
-      diagnosticsIsObservabilityDetail: settings.state.diagnosticsPageExists && settings.state.diagnosticsGroup === 'observability',
+      settingsRootOnlyTopLevel:
+        rootSettings.settingsPage === 'root' &&
+        rootSettings.visibleSettingsPages.join(',') === 'root' &&
+        rootSettings.settingsNavTopTitles.join(',') === '模型,智能体运行时,连接,可观测性,外观,关于',
+      settingsRootHidesAllDetailControls: rootSettings.visibleSettingsDetailControlIds.length === 0,
+      settingsRootHasNoImplementationMapNode:
+        !rootSettings.settingsReviewTreeExists &&
+        !rootSettings.settingsReviewTreeVisible &&
+        !rootSettings.settingsReviewTreeText,
+      settingsRootHasNoStatusHeroCard: !rootSettings.settingsHeroExists,
+      settingsRootHasNoDuplicateTopLevelLabels:
+        ['模型', '智能体运行时', '连接', '可观测性', '外观', '关于']
+          .every((label) => rootSettings.visibleSettingsTitleCounts[label] === 1),
+      settingsModelSecondLevelOnly:
+        modelsSettings.settingsPage === 'models' &&
+        modelsSettings.visibleSettingsPages.join(',') === 'models' &&
+        ['模型服务配置', '模型服务切换与策略', '模型组'].every(
+          (label) => modelsSettings.visibleSettingsNavTitles.includes(label),
+        ) &&
+        modelsSettings.visibleSettingsDetailControlIds.length === 0,
+      settingsProviderConfigurationDrilldown:
+        providerConfiguration.settingsPage === 'models.provider-config' &&
+        providerConfiguration.providerConfigPageVisible &&
+        providerConfiguration.visibleSettingsDetailControlIds.includes('settings-provider-form') &&
+        !providerConfiguration.providerStrategyPageVisible &&
+        !providerConfiguration.modelGroupsPageVisible,
+      settingsProviderStrategyDrilldown:
+        providerStrategy.settingsPage === 'models.strategy' &&
+        providerStrategy.providerStrategyPageVisible &&
+        providerStrategy.visibleSettingsDetailControlIds.includes('settings-provider-current-select') &&
+        providerStrategy.visibleSettingsDetailControlIds.includes('settings-provider-fallback-select') &&
+        !providerStrategy.providerConfigPageVisible &&
+        !providerStrategy.modelGroupsPageVisible,
+      settingsModelGroupsDrilldown:
+        modelGroups.settingsPage === 'models.model-groups' &&
+        modelGroups.modelGroupsPageVisible &&
+        modelGroups.visibleSettingsDetailControlIds.includes('settings-model-group-form') &&
+        !modelGroups.providerConfigPageVisible &&
+        !modelGroups.providerStrategyPageVisible,
+      settingsBackReturnsCleanRoot:
+        returnedRoot.settingsPage === 'root' &&
+        returnedRoot.visibleSettingsPages.join(',') === 'root' &&
+        returnedRoot.visibleSettingsDetailControlIds.length === 0,
+      settingsProviderPagesAreSplit:
+        rootSettings.providerConfigPageExists &&
+        rootSettings.providerStrategyPageExists &&
+        rootSettings.modelGroupsPageExists,
+      settingsTopLevelGrouped: ['模型', '智能体运行时', '连接', '可观测性', '外观', '关于'].every((label) => rootSettings.settingsNavText.includes(label)),
+      settingsNoFlatLlmProviderEntry: !rootSettings.settingsNavTopTitles.includes('LLM Provider'),
+      settingsPartialMarkersPresent: rootSettings.statusMarkerToneCounts.partial > 0,
+      settingsAttentionMarkersPresent: rootSettings.statusMarkerToneCounts.attention > 0,
+      diagnosticsIsObservabilityDetail: rootSettings.diagnosticsPageExists && rootSettings.diagnosticsGroup === 'observability',
       noForbiddenUiStorageTerms: !forbiddenUiTerms.some((pattern) => pattern.test(allTexts)),
-      statusMarkersAreHollow: settings.state.statusMarkerCount > 0 && settings.state.statusMarkerAllHollow,
+      statusMarkersAreHollow: rootSettings.statusMarkerCount > 0 && rootSettings.statusMarkerAllHollow,
     },
   };
   summary.ok = Object.values(summary.checks).every(Boolean);
@@ -306,10 +438,23 @@ function collectPhaseOneState() {
   }
   const visibleEntries = Object.values(quickEntries).filter((entry) => entry.visible);
   const markerNodes = Array.from(document.querySelectorAll('.settings-status-marker'));
+  const settingsShell = document.getElementById('settings-shell');
+  const settingsPages = Array.from(document.querySelectorAll('[data-settings-page]'));
+  const detailControlIds = [
+    'settings-provider-id',
+    'settings-provider-form',
+    'settings-provider-current-select',
+    'settings-provider-fallback-select',
+    'settings-model-group-current-select',
+    'settings-model-group-form',
+    'settings-agent-resource-count',
+    'settings-apk-update-check-button',
+    'settings-diagnostics-list',
+  ];
   return {
     layoutShape: document.body.dataset.layoutShape || '',
     shellLayoutShape: shell?.dataset.layoutShape || '',
-    assetVersionSeen: html.includes('20260725-settings-layer-ui'),
+    assetVersionSeen: html.includes('20260725-session-panel-ui'),
     bodyText,
     bodyWidth: document.body.scrollWidth,
     docWidth: document.documentElement.scrollWidth,
@@ -321,17 +466,55 @@ function collectPhaseOneState() {
     mobileHomeText: document.getElementById('mobile-home-dashboard')?.innerText || '',
     mobileHomeActiveVisible: localIsVisible(document.getElementById('mobile-home-active-list')),
     mobileHomeHistoryVisible: localIsVisible(document.getElementById('mobile-home-session-list')),
+    mobileHomeRunningClass: document.getElementById('mobile-home-active-list')?.classList.contains('mobile-running-session-list') || false,
+    mobileHomeStaticClass: document.getElementById('mobile-home-session-list')?.classList.contains('mobile-static-session-list') || false,
+    mobileHomeRunningIds: Array.from(document.querySelectorAll('#mobile-home-active-list [data-session-id]'))
+      .map((node) => node.dataset.sessionId || '')
+      .filter(Boolean),
+    mobileHomeHistoryIds: Array.from(document.querySelectorAll('#mobile-home-session-list [data-session-id]'))
+      .map((node) => node.dataset.sessionId || '')
+      .filter(Boolean),
+    mobileHomeRunningHistoryOverlap: (() => {
+      const running = new Set(Array.from(document.querySelectorAll('#mobile-home-active-list [data-session-id]'))
+        .map((node) => node.dataset.sessionId || '')
+        .filter(Boolean));
+      return Array.from(document.querySelectorAll('#mobile-home-session-list [data-session-id]'))
+        .map((node) => node.dataset.sessionId || '')
+        .filter((sessionId) => sessionId && running.has(sessionId));
+    })(),
     mobileHomeCardCount: document.querySelectorAll('#mobile-home-dashboard .mobile-home-card').length,
+    mobileHomeFloatingTree: (() => {
+      const dropdown = document.getElementById('session-tree-dropdown');
+      if (!dropdown) return false;
+      const style = getComputedStyle(dropdown);
+      return style.position === 'absolute' || style.position === 'fixed';
+    })(),
     homeHasTimerList: !!document.getElementById('mobile-home-timer-list'),
     homeHasTimerMarker: !!document.getElementById('mobile-home-timer-marker'),
     homeHasCurrentCard: !!document.querySelector('#mobile-home-dashboard .mobile-current-card'),
     homeHasNewEntryButtonInsideHome: !!document.querySelector('#mobile-home-dashboard #mobile-new-entry-button'),
+    settingsReviewTreeExists: !!document.getElementById('settings-review-tree'),
     settingsReviewTreeVisible: localIsVisible(document.getElementById('settings-review-tree')),
-    settingsReviewTreeText: document.getElementById('settings-review-tree')?.innerText || '',
-    settingsNavText: document.querySelector('.settings-nav-grid')?.innerText || '',
-    settingsNavTopTitles: Array.from(document.querySelectorAll('.settings-nav-card strong')).map((node) => node.textContent?.trim() || ''),
+    settingsReviewTreeText: document.getElementById('settings-review-tree')?.textContent || '',
+    settingsHeroExists: !!document.querySelector('.settings-hero, .settings-card'),
+    settingsPage: settingsShell?.dataset.settingsCurrentPage || '',
+    visibleSettingsPages: settingsPages.filter((panel) => !panel.hidden).map((panel) => panel.dataset.settingsPage || ''),
+    visibleSettingsText: settingsPages.find((panel) => !panel.hidden)?.innerText || '',
+    settingsNavText: document.querySelector('[data-settings-page="root"] .settings-nav-grid')?.innerText || '',
+    settingsNavTopTitles: Array.from(document.querySelectorAll('[data-settings-page="root"] .settings-nav-card strong')).map((node) => node.textContent?.trim() || ''),
+    visibleSettingsNavTitles: Array.from(document.querySelectorAll('[data-settings-page]:not([hidden]) .settings-nav-card strong')).map((node) => node.textContent?.trim() || ''),
+    visibleSettingsTitleCounts: ['模型', '智能体运行时', '连接', '可观测性', '外观', '关于'].reduce((counts, label) => {
+      const text = settingsPages.find((panel) => !panel.hidden)?.innerText || '';
+      counts[label] = (text.match(new RegExp(`(^|\\n)${label}(\\n|$)`, 'g')) || []).length;
+      return counts;
+    }, {}),
+    visibleSettingsDetailControlIds: detailControlIds.filter((id) => localIsVisible(document.getElementById(id))),
     providerConfigPageExists: !!document.getElementById('settings-provider-config-page'),
     providerStrategyPageExists: !!document.getElementById('settings-provider-strategy-page'),
+    modelGroupsPageExists: !!document.getElementById('settings-model-groups-page'),
+    providerConfigPageVisible: localIsVisible(document.getElementById('settings-provider-config-page')),
+    providerStrategyPageVisible: localIsVisible(document.getElementById('settings-provider-strategy-page')),
+    modelGroupsPageVisible: localIsVisible(document.getElementById('settings-model-groups-page')),
     diagnosticsPageExists: !!document.querySelector('.settings-diagnostics-page'),
     diagnosticsGroup: document.querySelector('.settings-diagnostics-page')?.dataset.settingsGroup || '',
     quickEntries: {
@@ -347,11 +530,6 @@ function collectPhaseOneState() {
           counts[tone] = (counts[tone] || 0) + 1;
         }
       });
-      return counts;
-    }, {}),
-    settingsReviewToneCounts: Array.from(document.querySelectorAll('#settings-review-tree .settings-review-row')).reduce((counts, node) => {
-      const tone = node.dataset.settingsState || 'unknown';
-      counts[tone] = (counts[tone] || 0) + 1;
       return counts;
     }, {}),
     statusMarkerAllHollow: markerNodes.every((node) => {
@@ -414,10 +592,10 @@ function isVisible(node) {
     rect.height > 0;
 }
 
-async function waitForFunction(cdp, fn, timeoutMs, label) {
+async function waitForFunction(cdp, fn, timeoutMs, label, arg) {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
-    const result = await evalInPage(cdp, fn);
+    const result = await evalInPage(cdp, fn, arg);
     if (result) {
       return;
     }
@@ -426,14 +604,17 @@ async function waitForFunction(cdp, fn, timeoutMs, label) {
   throw new Error(`timeout waiting for ${label}`);
 }
 
-async function evalInPage(cdp, fn) {
+async function evalInPage(cdp, fn, arg) {
+  const args = arg === undefined ? "" : JSON.stringify(arg);
   const response = await cdp.send('Runtime.evaluate', {
-    expression: `(${fn.toString()})()`,
+    expression: `(${fn.toString()})(${args})`,
     awaitPromise: true,
     returnByValue: true,
   });
   if (response.exceptionDetails) {
-    throw new Error(response.exceptionDetails.text || 'Runtime.evaluate failed');
+    const desc = response.exceptionDetails.exception?.description || '';
+    const text = response.exceptionDetails.text || 'Runtime.evaluate failed';
+    throw new Error(desc ? `${text}: ${desc}` : text);
   }
   return response.result.value;
 }

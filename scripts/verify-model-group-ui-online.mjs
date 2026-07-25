@@ -15,7 +15,7 @@ const debugPort = Number.parseInt(process.env.FREEHAND_MODEL_GROUP_UI_DEBUG_PORT
 const chromePath =
   process.env.FREEHAND_MODEL_GROUP_UI_CHROME ||
   '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
-const assetVersion = '20260725-settings-layer-ui';
+const assetVersion = '20260725-session-panel-ui';
 const runId = `model-group-ui-${Date.now()}`;
 const artifactDir = path.join(repo, 'artifacts', 'webui-online', runId);
 const testGroupId = process.env.FREEHAND_MODEL_GROUP_UI_GROUP_ID || `ui.verify.${Date.now()}`;
@@ -94,7 +94,7 @@ try {
       document.body.dataset.webuiJsReady === 'true' &&
       !!document.getElementById('settings-model-group-form'),
     30_000,
-    'model group capable WebUI shell ready',
+    '模型组 capable WebUI shell 就绪',
   );
 
   await openSettings(cdp);
@@ -104,12 +104,12 @@ try {
       const state = readModelGroupSettingsDom();
       return state.providerIds.includes('cc') &&
         state.providerIds.includes('minimax') &&
-        state.modelGroupSummary !== 'loading'
+        state.modelGroupSummary !== '加载中'
         ? state
         : null;
     },
     30_000,
-    'model group settings loaded',
+    '模型组 settings loaded',
   );
   await writeJson('01-initial-dom.json', initialDom);
 
@@ -129,7 +129,7 @@ try {
       enabled.dispatchEvent(new Event('change', { bubbles: true }));
     }
     setValue('settings-model-group-id-input', input.groupId);
-    setValue('settings-model-group-label-input', 'UI verifier model group');
+    setValue('settings-model-group-label-input', 'UI verifier 模型组');
     setValue('settings-model-group-primary-provider-input', input.primaryProviderId);
     setValue('settings-model-group-primary-model-input', input.primaryModel);
     setValue('settings-model-group-sub-provider-input', input.primaryProviderId);
@@ -159,12 +159,12 @@ try {
     (groupId) => {
       const state = readModelGroupSettingsDom();
       return state.modelGroupIds.includes(groupId) &&
-        /model group saved/i.test(state.saveStatus + ' ' + state.commandStatus)
+        /模型组 saved/i.test(state.saveStatus + ' ' + state.commandStatus)
         ? state
         : null;
     },
     30_000,
-    'model group upsert reflected in DOM',
+    '模型组 upsert reflected in DOM',
     testGroupId,
   );
   await writeJson('02-after-upsert-dom.json', afterUpsertDom);
@@ -172,7 +172,7 @@ try {
   await writeJson('03-after-upsert-adp.json', afterUpsertAdp);
   const upsertedGroup = findModelGroup(afterUpsertAdp, testGroupId);
   if (!upsertedGroup) {
-    throw new Error(`ADP config status missing model group ${testGroupId}`);
+    throw new Error(`ADP config status missing 模型组 ${testGroupId}`);
   }
   assertRoute(upsertedGroup.primary, primaryProviderId, primaryModel, 'upsert primary');
   assertRoute(upsertedGroup.sub, primaryProviderId, subModel, 'upsert sub');
@@ -180,14 +180,14 @@ try {
   assertRoute(upsertedGroup.title, primaryProviderId, titleModel, 'upsert title');
   assertRoute(upsertedGroup.fallback, fallbackProviderId, fallbackModel, 'upsert fallback');
   if (afterUpsertAdp.provider_id !== originalStatus.provider_id) {
-    throw new Error(`model group upsert changed active provider from ${originalStatus.provider_id} to ${afterUpsertAdp.provider_id}`);
+    throw new Error(`模型组 upsert changed active provider from ${originalStatus.provider_id} to ${afterUpsertAdp.provider_id}`);
   }
 
   await evalInPage(cdp, (groupId) => {
     const select = document.getElementById('settings-model-group-current-select');
     const button = document.getElementById('settings-model-group-switch-button');
     if (!select || !button) {
-      throw new Error('missing model group switch controls');
+      throw new Error('missing 模型组 switch controls');
     }
     select.value = groupId;
     select.dispatchEvent(new Event('change', { bubbles: true }));
@@ -199,28 +199,28 @@ try {
     (groupId) => {
       const state = readModelGroupSettingsDom();
       return state.currentModelGroup === groupId &&
-        /model group selection saved/i.test(state.switchStatus + ' ' + state.commandStatus)
+        /模型组 selection saved/i.test(state.switchStatus + ' ' + state.commandStatus)
         ? state
         : null;
     },
     30_000,
-    'model group switch reflected in DOM',
+    '模型组 switch reflected in DOM',
     testGroupId,
   );
   await writeJson('04-after-switch-dom.json', afterSwitchDom);
   const afterSwitchAdp = unwrapConfigStatus(await adpQuery('QueryConfigStatus'));
   await writeJson('05-after-switch-adp.json', afterSwitchAdp);
   if (afterSwitchAdp.model_group_id !== testGroupId) {
-    throw new Error(`active model group ${afterSwitchAdp.model_group_id || 'none'} != ${testGroupId}`);
+    throw new Error(`active 模型组 ${afterSwitchAdp.model_group_id || '无'} != ${testGroupId}`);
   }
   if (afterSwitchAdp.provider_id !== primaryProviderId) {
-    throw new Error(`model group did not project primary provider ${primaryProviderId}: ${afterSwitchAdp.provider_id}`);
+    throw new Error(`模型组 did not project primary provider ${primaryProviderId}: ${afterSwitchAdp.provider_id}`);
   }
   if (afterSwitchAdp.default_model !== primaryModel) {
-    throw new Error(`model group did not project primary model ${primaryModel}: ${afterSwitchAdp.default_model}`);
+    throw new Error(`模型组 did not project primary model ${primaryModel}: ${afterSwitchAdp.default_model}`);
   }
   if ((afterSwitchAdp.fallback_provider_id || null) !== fallbackProviderId) {
-    throw new Error(`model group did not project fallback provider ${fallbackProviderId}: ${afterSwitchAdp.fallback_provider_id || 'none'}`);
+    throw new Error(`模型组 did not project fallback provider ${fallbackProviderId}: ${afterSwitchAdp.fallback_provider_id || '无'}`);
   }
 
   await writeJson('summary.before-restore.json', {
@@ -281,7 +281,7 @@ if (!restored || restoreErrors.length > 0) {
   throw new Error(`restore failed: ${restoreErrors.join('; ')}`);
 }
 if (findModelGroup(finalAdp, testGroupId)) {
-  throw new Error(`test model group remained after restore: ${testGroupId}`);
+  throw new Error(`test 模型组 remained after restore: ${testGroupId}`);
 }
 if (finalEnvGrep.matchCount !== 0) {
   throw new Error(`fixture env remained in daemonS.env: ${finalEnvGrep.output}`);
@@ -301,7 +301,7 @@ console.log(
     `projected_fallback=${fallbackProviderId}`,
     `final_provider=${finalAdp.provider_id}`,
     `final_model=${finalAdp.default_model}`,
-    `final_group=${finalAdp.model_group_id || 'none'}`,
+    `final_group=${finalAdp.model_group_id || '无'}`,
     `artifact=${artifactDir}`,
   ].join(' '),
 );
@@ -339,7 +339,7 @@ async function openSettings(cdpClient) {
     cdpClient,
     () => document.getElementById('settings-shell')?.hidden === false,
     10_000,
-    'settings shell visible',
+    '设置 shell visible',
   );
 }
 
