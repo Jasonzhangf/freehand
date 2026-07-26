@@ -667,3 +667,10 @@ Tags: #lifecycle #bootstrap #session-waiting #taskboard-residual
 - provider-core owns ProviderLiveExecutor/ProviderExecutorFactory contracts
 - FORBIDDEN edges runtime->provider-openai/anthropic baseline_violation=false
 - remaining Gap5: node->ui-protocol
+
+## Gap5 node ui-protocol edge closed (2026-07-26T20:58:37Z)
+- freehand-node no longer depends on freehand-ui-protocol.
+- node stores status/progress/slave-turn projections as node-owned projection types.
+- runtime bridges node status into UI protocol.
+- FORBIDDEN_DEPENDENCY_EDGES node->ui-protocol baseline_violation=false; Gap 5 deleted.
+Tags: #architecture #gap5 #node #ui-protocol #dependency-edge

@@ -1660,7 +1660,7 @@ Non-violation pending items live in `docs/architecture/architecture-gaps.md`. Ea
 ### `node.master-slave`
 
 - owner: `crates/freehand-node`
-- allowed_paths: `crates/freehand-node/**`, `crates/freehand-contracts/**`, `crates/freehand-debug/**`, `crates/freehand-metadata/**`, `crates/freehand-ui-protocol/**`, `docs/architecture/**`, `docs/design/**`, `docs/function-maps/**`, `docs/testing/**`, `docs/mainline-calls/**`, `docs/wiki/**`
+- allowed_paths: `crates/freehand-node/**`, `crates/freehand-contracts/**`, `crates/freehand-debug/**`, `crates/freehand-metadata/**`, `crates/freehand-runtime/**` for UI bridge only, `docs/architecture/**`, `docs/design/**`, `docs/function-maps/**`, `docs/testing/**`, `docs/mainline-calls/**`, `docs/wiki/**`
 - forbidden_paths: `crates/freehand-provider-*/**`, `apps/**` except wiring-only entrypoint glue
 - required_checks:
   - `cargo test -p freehand-node`

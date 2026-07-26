@@ -29,8 +29,9 @@ Generated from `docs/mainline-calls/node.master-slave.json`. Do not edit by hand
 - remote daemon directory returns account summaries, daemon endpoint summaries, and selected-route diagnostics with direct routes preferred until direct health proves failure
 - accepted bootstrap, pairing, progress, and slave-turn publications may emit owner-tagged metadata before node truth mutates
 - bootstrap, pairing, pairing-loss, delegated-task, and slave-turn publication may emit read-only debug snapshots through `debug.core`
-- `UiProtocolState` stores node status, progress, and latest slave turn
-- master may subscribe to slave output while preserving node and source identity through protocol projections
+- node-owned projection store holds node status, progress, and latest slave turn projections
+- runtime bridges node-owned status snapshots into freehand-ui-protocol; delegated progress remains a node-owned query/projection until a UI surface consumes it
+- master may subscribe to slave output while preserving node and source identity through NodeProjection
 
 ## Error Mainline
 
@@ -44,18 +45,18 @@ Generated from `docs/mainline-calls/node.master-slave.json`. Do not edit by hand
 
 ## Shared Multi-Reference Functions
 
-- `UiProtocolState::set_node_status`
-  - owner: `crates/freehand-ui-protocol/src/lib.rs`
-  - purpose: store node status through the protocol owner instead of a duplicate node-local cache
+- `LocalNodeRuntime::store_node_status`
+  - owner: `crates/freehand-node/src/lib.rs`
+  - purpose: store node status through node-owned projection maps instead of UI protocol truth
   - allowed callers: freehand-node, tests
   - related tests: node status snapshot smoke
-  - why shared: keeps node-status query truth aligned with the UI protocol owner
-- `UiProtocolState::set_progress`
-  - owner: `crates/freehand-ui-protocol/src/lib.rs`
-  - purpose: store delegated task progress through the protocol owner
+  - why shared: keeps pairing bootstrap/accept/reject/loss status writes on one node-owned map
+- `LocalNodeRuntime::store_progress`
+  - owner: `crates/freehand-node/src/lib.rs`
+  - purpose: store delegated task progress through node-owned projection maps
   - allowed callers: freehand-node, tests
   - related tests: slave progress query smoke
-  - why shared: keeps progress snapshots aligned with the shared query surface
+  - why shared: keeps delegated progress materialization and query on one node-owned map
 - `MetadataCenter::write`
   - owner: `crates/freehand-metadata/src/lib.rs`
   - purpose: emit node control/provenance metadata through the shared metadata owner before node truth mutates
@@ -68,12 +69,6 @@ Generated from `docs/mainline-calls/node.master-slave.json`. Do not edit by hand
   - allowed callers: freehand-node, tests
   - related tests: node debug snapshot subscription smoke, debug sink failure observation-only tests
   - why shared: keeps node lifecycle observation aligned with `debug.core` instead of duplicating debug contracts in the node owner
-- `UiProtocolState::apply_turn_projection`
-  - owner: `crates/freehand-ui-protocol/src/lib.rs`
-  - purpose: publish slave turn projections through the shared UI truth
-  - allowed callers: freehand-node, tests
-  - related tests: slave turn publication smoke
-  - why shared: keeps slave turn subscription and latest-turn query on one stored projection truth
 
 ## Function Call Table
 
@@ -85,9 +80,9 @@ Generated from `docs/mainline-calls/node.master-slave.json`. Do not edit by hand
 | 04 | `LocalNodeRuntime::lose_slave_pairing` | `crates/freehand-node/src/lib.rs` | materialize pairing loss and return slave to listening state only after metadata admission | paired slave runtime | listening node status | health/runtime wiring | slave runtime state |  |  |  | bound |
 | 05 | `LocalNodeRuntime::delegate_task` | `crates/freehand-node/src/lib.rs` | accept master delegated task and materialize progress snapshot only after metadata admission | delegated task intent | progress projection | master runtime | slave progress truth |  |  |  | bound |
 | 06 | `LocalNodeRuntime::send_direct_message` | `crates/freehand-node/src/lib.rs` | accept authorized direct message from paired source and materialize paired conversation event | direct message intent | slave direct-message projection | master runtime | paired slave runtime |  |  |  | bound |
-| 07 | `LocalNodeRuntime::publish_slave_turn` | `crates/freehand-node/src/lib.rs` | accept authorized slave turn projection and publish to subscribers only after metadata admission | slave turn projection | UI turn projection stream | slave runtime | subscribed master or UI surfaces |  |  |  | bound |
-| 08 | `LocalNodeRuntime::query_node_status` | `crates/freehand-node/src/lib.rs` | expose latest slave node status snapshot | node id | node status snapshot | query surface | UiProtocolState | node_pairing | ui_projection | node_pairing.project_to_ui | bound |
-| 09 | `LocalNodeRuntime::query_task_progress` | `crates/freehand-node/src/lib.rs` | expose latest delegated task progress snapshot | turn id | progress snapshot | query surface | UiProtocolState |  |  |  | bound |
+| 07 | `LocalNodeRuntime::publish_slave_turn` | `crates/freehand-node/src/lib.rs` | accept authorized node-owned slave turn summary and publish to subscribers only after metadata admission | node turn projection | node projection stream | slave runtime | subscribed master surfaces |  |  |  | bound |
+| 08 | `LocalNodeRuntime::query_node_status` | `crates/freehand-node/src/lib.rs` | expose latest slave node status snapshot from node-owned store | node id | node status snapshot | runtime/UI bridge | node-owned projection store | node_pairing | ui_projection | node_pairing.project_to_ui | bound |
+| 09 | `LocalNodeRuntime::query_task_progress` | `crates/freehand-node/src/lib.rs` | expose latest delegated task progress snapshot from node-owned store | turn id | progress snapshot | runtime/UI bridge | node-owned projection store |  |  |  | bound |
 | 10 | `RemoteDaemonDirectory::publish_registry` | `crates/freehand-node/src/lib.rs` | publish account-scoped daemon directory snapshot from config-owned registry without credential leakage | compiled remote daemon registry | account and daemon directory snapshot | node runtime / tests | remote daemon directory | remote_daemon_registry | remote_daemon_directory | remote_daemon_registry.project_directory | bound |
 | 11 | `RemoteDaemonDirectory::resolve_route` | `crates/freehand-node/src/lib.rs` | resolve one daemon route using config-owned direct-first route selection and node-owned current health records | daemon id plus endpoint health records | selected endpoint plus diagnostics | node runtime / tests | config route selector and remote daemon directory |  |  |  | bound |
 
@@ -97,7 +92,7 @@ Generated from `docs/mainline-calls/node.master-slave.json`. Do not edit by hand
 - metadata producer wiring is now bound on `LocalNodeRuntime::with_metadata_center` and proves owner/write-node provenance before node truth mutation
 - debug producer wiring is now bound on `LocalNodeRuntime::with_debug_hub` and `LocalNodeRuntime::with_debug_hub_and_metadata_center` and proves bootstrap, pairing rejection, and slave-turn snapshots exclude pair-token, user-turn, reasoning-text, and terminal-text leakage
 - direct white-box locks now cover unauthorized pair source node, unauthorized pair source ip, empty delegated task status, pre-pair or intruder slave-turn publication, metadata write failure no-truth-materialization, debug sink failure observation-only delivery, and request-text-free metadata persistence
-- node runtime still writes status, progress, and slave turn through `freehand-ui-protocol` instead of duplicate storage
+- node runtime stores status, progress, and slave-turn projections in node-owned projection types; runtime bridges status into UI protocol
 - remote daemon directory and route-resolution core is code-bound for local account-scoped directory projection; it does not implement relay tunnel IO
 - real websocket IO adapter remains intentionally out of scope for this first runtime semantic layer
 - generated wiki must be regenerated from `docs/mainline-calls/node.master-slave.json` when this function-map truth changes

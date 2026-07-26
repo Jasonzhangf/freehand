@@ -73,6 +73,9 @@ Suggested state family is not final yet, but status must cover those concerns.
 
 ## Implemented Runtime Binding
 
+Node status/progress/slave-turn projections are stored as node-owned projection types. Runtime bridges them into `freehand-ui-protocol` for UI consumption; node does not depend on UI protocol types.
+
+
 - owner crate: `crates/freehand-node`
 - owner type: `LocalNodeRuntime`
 - bound symbols:

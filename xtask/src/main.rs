@@ -3358,7 +3358,7 @@ const FORBIDDEN_DEPENDENCY_EDGES: &[ForbiddenDependencyEdge] = &[
         from: "crates/freehand-node",
         to: "freehand-ui-protocol",
         reason: "node internal state must not use UI contract types as its truth source",
-        baseline_violation: true,
+        baseline_violation: false,
     },
     ForbiddenDependencyEdge {
         from: "apps/freehand-cli",

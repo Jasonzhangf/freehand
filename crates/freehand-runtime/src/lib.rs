@@ -11,6 +11,29 @@ mod worker_runner;
 pub use checkpoint_store::{
     RuntimeCheckpointError, RuntimeCheckpointSummary, list_checkpoints, rewind_checkpoint,
 };
+
+fn ui_node_source(source: NodeSource) -> UiSource {
+    UiSource {
+        source_agent_id: source.source_agent_id,
+        source_node_id: source.source_node_id,
+        source_turn_id: source.source_turn_id,
+        stream_kind: match source.stream_kind {
+            NodeStreamKind::Turn => UiStreamKind::Turn,
+            NodeStreamKind::Progress => UiStreamKind::Progress,
+            NodeStreamKind::NodeStatus => UiStreamKind::NodeStatus,
+        },
+    }
+}
+
+fn ui_node_status_snapshot(snapshot: NodeStatusSnapshot) -> UiNodeStatusSnapshot {
+    UiNodeStatusSnapshot {
+        source: ui_node_source(snapshot.source),
+        node_id: snapshot.node_id,
+        healthy: snapshot.healthy,
+        pairing_state: snapshot.pairing_state,
+    }
+}
+
 #[cfg(test)]
 pub(crate) use checkpoint_store::{RuntimeCheckpointLedgerEvent, RuntimeCheckpointLedgerRow};
 pub(crate) use checkpoint_store::{RuntimeCheckpointStore, checkpoint_summary_to_ui};
@@ -101,8 +124,8 @@ use freehand_metadata::{
     MetadataSubject, MetadataWriteNode, MetadataWriteOwner,
 };
 use freehand_node::{
-    LocalNodeRuntime, MasterNodeConfig, NodeRuntimeError, PairingRequest, PairingTransport,
-    SlaveNodeConfig,
+    LocalNodeRuntime, MasterNodeConfig, NodeRuntimeError, NodeSource, NodeStatusSnapshot,
+    NodeStreamKind, PairingRequest, PairingTransport, SlaveNodeConfig,
 };
 use freehand_provider_core::{
     ProviderCapabilities, ProviderDescriptor, ProviderEventContext, ProviderExecutorConfig,
@@ -135,6 +158,7 @@ use freehand_task::{
 use freehand_tools::{
     BuiltinToolExecutionScope, BuiltinToolRegistry, ToolRegistryError, with_workspace_root,
 };
+use freehand_ui_protocol::{NodeStatusSnapshot as UiNodeStatusSnapshot, UiSource, UiStreamKind};
 use freehand_ui_protocol::{
     TurnProjectionInput, UiAgentBoardProjection, UiAgentLifecycleActivityProjection,
     UiAgentLifecycleProjection, UiAgentModelGroupSelectionUpdate, UiAgentProcessProjection,
@@ -3219,7 +3243,7 @@ impl RuntimeCommandDispatcher {
             ui_state
                 .lock()
                 .expect("lock ui state")
-                .set_node_status(node_status);
+                .set_node_status(ui_node_status_snapshot(node_status));
         }
         if let Some(live) = &config.live {
             recover_stale_lifecycle_waits_on_bootstrap(&live.runtime_home, &config.reason_agent_id)

@@ -51,18 +51,6 @@ Non-violation pending items. Not regressions. Not false positives. Each gap has 
 | priority | high — compiled topology and isolated three-process evaluation closure are proven; next step is managed-service and real-provider lifecycle truth |
 | closure path | 1) prove real-provider blocked/reject/retry/crash/reassignment/takeover with same ids 2) close formal current-source research and browser-visible same-session evidence 3) upgrade cross-machine Worker transport from the remaining singular node transport model |
 
-## Gap 5: 依赖图基线违规 — node 仍反向依赖 UI 契约
-
-| Field | Value |
-|---|---|
-| feature_id | `node.master-slave` |
-| owner crate | `crates/freehand-node` |
-| gap kind | 2026-07-26 全仓审计确认剩余依赖边违反 workspace 分层意图：`node -> freehand-ui-protocol`（node 以 UI 契约类型作为内部状态查询通道）。`apps/freehand-cli -> freehand-testkit` 已清除：reason smoke 入口迁到 `crates/freehand-testkit` bin `freehand-reason-smoke`。`runtime -> freehand-provider-{openai,anthropic}` 已清除：provider-core 增 `ProviderLiveExecutor`/`ProviderExecutorFactory`，concrete adapters 实现 trait，`freehand-provider-executors` 做 production assembly，runtime 只依赖 provider-core trait 与 assembly crate。 |
-| why not violation | 剩余 node 边仍登记进 xtask `verify_dependency_graph` 的 `FORBIDDEN_DEPENDENCY_EDGES` 基线（`baseline_violation: true`），gate 冻结漂移：基线只许缩小不许新增；provider 边与 cli/testkit 边已翻转并锁定为禁止复活 |
-| risk | node 层被 UI 类型反向锚定，接入第二种 UI 需连带内核类型 |
-| gate | `cargo run -p xtask -- gates check` 的 `verify_dependency_graph`：基线内边消失时强制翻转 `baseline_violation` 为 false 锁死，新增禁边立即失败 |
-| closure path | 1) node 状态类型迁入 contracts 或 node 自有投影，翻转 node 边基线 |
-| priority | 高 — 是 ui-protocol 瘦身的前置护栏 |
 
 ## Gap 6: ADP 作为独立协议尚不成立 — 无版本化、无 schema 单一来源、Query 通道存在 mutation 旁路
 

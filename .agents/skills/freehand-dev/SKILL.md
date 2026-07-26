@@ -156,6 +156,7 @@ Use this skill for any non-trivial work in this repo.
 - slave pairing source is fixed by config and changing it requires restart.
 - if slave loses pairing, it keeps listening for later re-pairing.
 - master may send task, query progress, directly talk, and subscribe to slave turn stream.
+- Truth-owner crates must not depend on `crates/freehand-ui-protocol` for internal state. If a truth owner needs UI visibility, create owner-local projection types that preserve the real payload semantics, then bridge to `freehand-ui-protocol` in runtime/app wiring. Do not replace payloads with summary counts to satisfy a dependency gate.
 - UI code must consume `crates/freehand-ui-protocol`, never provider crates directly.
 - UI code must not classify tool calls from raw names, arguments, or result strings; tool display semantics belong in the `tool.display` pure parser owner and must flow through `freehand-ui-protocol`.
 - UI code must not implement session CRUD as local browser state. Session create/rename/archive/restore/delete must enter `ui.protocol`, route through `runtime.ui-command-dispatch`, and persist through `reason.persistence` session metadata truth.

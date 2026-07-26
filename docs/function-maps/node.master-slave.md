@@ -55,8 +55,9 @@
 - remote daemon directory returns account summaries, daemon endpoint summaries, and selected-route diagnostics with direct routes preferred until direct health proves failure
 - accepted bootstrap, pairing, progress, and slave-turn publications may emit owner-tagged metadata before node truth mutates
 - bootstrap, pairing, pairing-loss, delegated-task, and slave-turn publication may emit read-only debug snapshots through `debug.core`
-- `UiProtocolState` stores node status, progress, and latest slave turn
-- master may subscribe to slave output while preserving node/source identity through `UiProjection`
+- node-owned projection store holds node status, progress, and latest slave turn projections
+- master may subscribe to slave output while preserving node/source identity through `NodeProjection`
+- runtime bridges node-owned status snapshots into `freehand-ui-protocol`; delegated progress remains a node-owned query/projection until a UI surface consumes it
 
 ## Error Mainline
 
@@ -70,12 +71,10 @@
 
 ## Shared Multi-Reference Functions
 
-- `UiProtocolState::set_node_status`
-  - reused so node runtime writes status through UI protocol truth instead of duplicate caches
-- `UiProtocolState::set_progress`
-  - reused so progress query stays aligned with UI protocol query surface
-- `UiProtocolState::apply_turn_projection`
-  - reused so slave turn subscription and latest-turn query share one stored projection truth
+- `LocalNodeRuntime::store_node_status`
+  - reused so pairing bootstrap/accept/reject/loss write one node-owned status map
+- `LocalNodeRuntime::store_progress`
+  - reused so delegated progress materialization and progress query share one node-owned map
 - `MetadataCenter::write`
   - reused so node runtime emits control/provenance metadata through the shared owner instead of inventing node-local metadata stores
 - `DebugHub::emit`
@@ -91,9 +90,9 @@
 | 04 | `LocalNodeRuntime::lose_slave_pairing` | `crates/freehand-node/src/lib.rs` | materialize pairing loss and return slave to listening state only after metadata admission | paired slave runtime | listening node status | health/runtime wiring | slave runtime state | bound |
 | 05 | `LocalNodeRuntime::delegate_task` | `crates/freehand-node/src/lib.rs` | accept master delegated task and materialize progress snapshot only after metadata admission | delegated task intent | progress projection | master runtime | slave progress truth | bound |
 | 06 | `LocalNodeRuntime::send_direct_message` | `crates/freehand-node/src/lib.rs` | accept authorized direct message from paired source and materialize paired conversation event | direct message intent | slave direct-message projection | master runtime | paired slave runtime | bound |
-| 07 | `LocalNodeRuntime::publish_slave_turn` | `crates/freehand-node/src/lib.rs` | accept authorized slave turn projection and publish to subscribers only after metadata admission | slave turn projection | UI turn projection stream | slave runtime | subscribed master/UI surfaces | bound |
-| 08 | `LocalNodeRuntime::query_node_status` | `crates/freehand-node/src/lib.rs` | expose latest slave node status snapshot | node id | node status snapshot | query surface | `UiProtocolState` | bound |
-| 09 | `LocalNodeRuntime::query_task_progress` | `crates/freehand-node/src/lib.rs` | expose latest delegated task progress snapshot | turn id | progress snapshot | query surface | `UiProtocolState` | bound |
+| 07 | `LocalNodeRuntime::publish_slave_turn` | `crates/freehand-node/src/lib.rs` | accept authorized node-owned slave turn summary and publish to subscribers only after metadata admission | node turn projection | node projection stream | slave runtime | subscribed master surfaces | bound |
+| 08 | `LocalNodeRuntime::query_node_status` | `crates/freehand-node/src/lib.rs` | expose latest slave node status snapshot from node-owned store | node id | node status snapshot | runtime/UI bridge | node-owned projection store | bound |
+| 09 | `LocalNodeRuntime::query_task_progress` | `crates/freehand-node/src/lib.rs` | expose latest delegated task progress snapshot from node-owned store | turn id | progress snapshot | runtime/UI bridge | node-owned projection store | bound |
 | 10 | `RemoteDaemonDirectory::publish_registry` | `crates/freehand-node/src/lib.rs` | publish account-scoped daemon directory snapshot from config-owned registry without credential leakage | compiled remote daemon registry | account and daemon directory snapshot | node runtime / tests | remote daemon directory | bound |
 | 11 | `RemoteDaemonDirectory::resolve_route` | `crates/freehand-node/src/lib.rs` | resolve one daemon route using config-owned direct-first route selection and node-owned current health records | daemon id plus endpoint health records | selected endpoint plus diagnostics | node runtime / tests | config route selector + remote daemon directory | bound |
 

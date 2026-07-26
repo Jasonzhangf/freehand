@@ -8,7 +8,7 @@ use freehand_config::{
     RemoteDaemonEndpointConfig, RemoteDaemonEndpointKind, RemoteDaemonRegistryConfig,
     RemoteDaemonRouteHealthRecord,
 };
-use freehand_contracts::{AgentId, SessionId, TurnId};
+use freehand_contracts::{AgentId, SessionId, TerminalStatus, TurnId};
 use freehand_debug::{
     DebugEvent, DebugHub, DebugScenePosition, DebugSemanticPosition, DebugStateSnapshot,
     DebugTraceEnvelope,
@@ -16,10 +16,6 @@ use freehand_debug::{
 use freehand_metadata::{
     MetadataCenter, MetadataEntry, MetadataEnvelope, MetadataError, MetadataId, MetadataKind,
     MetadataSubject, MetadataWriteNode, MetadataWriteOwner,
-};
-use freehand_ui_protocol::{
-    NodeStatusSnapshot, TaskProgressSnapshot, UiProjection, UiProtocolState, UiSource,
-    UiStreamKind, UiTurnProjection,
 };
 use serde_json::json;
 use thiserror::Error;
@@ -260,6 +256,61 @@ impl PairingState {
     }
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum NodeStreamKind {
+    Turn,
+    Progress,
+    NodeStatus,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NodeSource {
+    pub source_agent_id: AgentId,
+    pub source_node_id: String,
+    pub source_turn_id: Option<TurnId>,
+    pub stream_kind: NodeStreamKind,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NodeStatusSnapshot {
+    pub source: NodeSource,
+    pub node_id: String,
+    pub healthy: bool,
+    pub pairing_state: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TaskProgressSnapshot {
+    pub source: NodeSource,
+    pub turn_id: TurnId,
+    pub status_text: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct NodeTurnProjection {
+    pub source: NodeSource,
+    pub session_id: SessionId,
+    pub turn_id: TurnId,
+    pub created_at: Option<u64>,
+    pub cwd: Option<String>,
+    pub user_text: Option<String>,
+    pub reasoning: Vec<String>,
+    pub text: Vec<String>,
+    pub tool_calls: Vec<String>,
+    pub usage: Vec<String>,
+    pub terminal_status: Option<TerminalStatus>,
+    pub terminal_text: Option<String>,
+    pub errors: Vec<String>,
+    pub slave_substream_card: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum NodeProjection {
+    Turn(Box<NodeTurnProjection>),
+    NodeStatus(NodeStatusSnapshot),
+    Progress(TaskProgressSnapshot),
+}
+
 #[derive(Debug, Error, PartialEq, Eq)]
 pub enum NodeRuntimeError {
     #[error("master node id must not be empty")]
@@ -297,8 +348,10 @@ pub struct LocalNodeRuntime {
     slave: SlaveNodeConfig,
     slave_pairing_state: PairingState,
     active_pair_source_node_id: Option<String>,
-    ui_state: UiProtocolState,
-    subscribers: Mutex<Vec<SyncSender<UiProjection>>>,
+    node_status: BTreeMap<String, NodeStatusSnapshot>,
+    progress: BTreeMap<TurnId, TaskProgressSnapshot>,
+    latest_slave_turn: Option<NodeTurnProjection>,
+    subscribers: Mutex<Vec<SyncSender<NodeProjection>>>,
     debug_hub: Option<std::sync::Arc<DebugHub>>,
     metadata_center: Option<std::sync::Arc<Mutex<MetadataCenter>>>,
 }
@@ -313,7 +366,9 @@ impl std::fmt::Debug for LocalNodeRuntime {
                 "active_pair_source_node_id",
                 &self.active_pair_source_node_id,
             )
-            .field("ui_state", &self.ui_state)
+            .field("node_status", &self.node_status)
+            .field("progress_count", &self.progress.len())
+            .field("latest_slave_turn", &self.latest_slave_turn)
             .field(
                 "subscriber_count",
                 &self.subscribers.lock().map(|v| v.len()).ok(),
@@ -387,7 +442,9 @@ impl LocalNodeRuntime {
             slave,
             slave_pairing_state: PairingState::Listening,
             active_pair_source_node_id: None,
-            ui_state: UiProtocolState::default(),
+            node_status: BTreeMap::new(),
+            progress: BTreeMap::new(),
+            latest_slave_turn: None,
             subscribers: Mutex::new(Vec::new()),
             debug_hub,
             metadata_center,
@@ -431,12 +488,12 @@ impl LocalNodeRuntime {
                 ),
             ],
         });
-        runtime.ui_state.set_node_status(listening_snapshot.clone());
-        runtime.publish(UiProjection::NodeStatus(listening_snapshot));
+        runtime.store_node_status(listening_snapshot.clone());
+        runtime.publish(NodeProjection::NodeStatus(listening_snapshot));
         Ok(runtime)
     }
 
-    pub fn subscribe(&self, capacity: usize) -> Receiver<UiProjection> {
+    pub fn subscribe(&self, capacity: usize) -> Receiver<NodeProjection> {
         let (sender, receiver) = mpsc::sync_channel(capacity.max(1));
         self.subscribers
             .lock()
@@ -526,8 +583,8 @@ impl LocalNodeRuntime {
         });
         self.slave_pairing_state = PairingState::Paired;
         self.active_pair_source_node_id = Some(request.source_node_id);
-        self.ui_state.set_node_status(snapshot.clone());
-        self.publish(UiProjection::NodeStatus(snapshot.clone()));
+        self.store_node_status(snapshot.clone());
+        self.publish(NodeProjection::NodeStatus(snapshot.clone()));
         Ok(snapshot)
     }
 
@@ -575,8 +632,8 @@ impl LocalNodeRuntime {
         });
         self.slave_pairing_state = PairingState::Listening;
         self.active_pair_source_node_id = None;
-        self.ui_state.set_node_status(snapshot.clone());
-        self.publish(UiProjection::NodeStatus(snapshot.clone()));
+        self.store_node_status(snapshot.clone());
+        self.publish(NodeProjection::NodeStatus(snapshot.clone()));
         Ok(snapshot)
     }
 
@@ -593,11 +650,11 @@ impl LocalNodeRuntime {
         let task_turn_id = task.turn_id.clone();
 
         let snapshot = TaskProgressSnapshot {
-            source: UiSource {
+            source: NodeSource {
                 source_agent_id: self.slave.agent_id.clone(),
                 source_node_id: self.slave.node_id.clone(),
                 source_turn_id: Some(task_turn_id.clone()),
-                stream_kind: UiStreamKind::Progress,
+                stream_kind: NodeStreamKind::Progress,
             },
             turn_id: task_turn_id.clone(),
             status_text: task.status_text,
@@ -650,8 +707,8 @@ impl LocalNodeRuntime {
                 "status_changed=true".to_owned(),
             ],
         });
-        self.ui_state.set_progress(snapshot.clone());
-        self.publish(UiProjection::Progress(snapshot.clone()));
+        self.store_progress(snapshot.clone());
+        self.publish(NodeProjection::Progress(snapshot.clone()));
         Ok(snapshot)
     }
 
@@ -675,7 +732,7 @@ impl LocalNodeRuntime {
     pub fn publish_slave_turn(
         &mut self,
         source_node_id: &str,
-        projection: UiTurnProjection,
+        projection: NodeTurnProjection,
     ) -> Result<(), NodeRuntimeError> {
         self.ensure_authorized_slave_source(source_node_id)?;
         self.write_metadata(NodeMetadataWriteSpec {
@@ -745,43 +802,21 @@ impl LocalNodeRuntime {
                 ),
             ],
         });
-        self.ui_state.apply_turn_projection(projection.clone());
-        self.publish(UiProjection::Turn(projection));
+        self.latest_slave_turn = Some(projection.clone());
+        self.publish(NodeProjection::Turn(Box::new(projection)));
         Ok(())
     }
 
     pub fn query_node_status(&self) -> Option<NodeStatusSnapshot> {
-        self.ui_state
-            .query(&freehand_ui_protocol::UiCommand::QueryNodeStatus {
-                node_id: self.slave.node_id.clone(),
-            })
-            .ok()
-            .and_then(|result| match result {
-                freehand_ui_protocol::UiQueryResult::NodeStatus(snapshot) => snapshot,
-                _ => None,
-            })
+        self.node_status.get(&self.slave.node_id).cloned()
     }
 
     pub fn query_task_progress(&self, turn_id: &TurnId) -> Option<TaskProgressSnapshot> {
-        self.ui_state
-            .query(&freehand_ui_protocol::UiCommand::QueryTaskProgress {
-                turn_id: turn_id.clone(),
-            })
-            .ok()
-            .and_then(|result| match result {
-                freehand_ui_protocol::UiQueryResult::Progress(snapshot) => snapshot,
-                _ => None,
-            })
+        self.progress.get(turn_id).cloned()
     }
 
-    pub fn latest_slave_turn(&self) -> Option<UiTurnProjection> {
-        self.ui_state
-            .query(&freehand_ui_protocol::UiCommand::QueryLatestActiveTurn)
-            .ok()
-            .and_then(|result| match result {
-                freehand_ui_protocol::UiQueryResult::Turn(snapshot) => snapshot,
-                _ => None,
-            })
+    pub fn latest_slave_turn(&self) -> Option<NodeTurnProjection> {
+        self.latest_slave_turn.clone()
     }
 
     fn ensure_authorized_slave_source(&self, source_node_id: &str) -> Result<(), NodeRuntimeError> {
@@ -796,11 +831,11 @@ impl LocalNodeRuntime {
 
     fn slave_status_snapshot(&self, pairing_state: PairingState) -> NodeStatusSnapshot {
         NodeStatusSnapshot {
-            source: UiSource {
+            source: NodeSource {
                 source_agent_id: self.slave.agent_id.clone(),
                 source_node_id: self.slave.node_id.clone(),
                 source_turn_id: None,
-                stream_kind: UiStreamKind::NodeStatus,
+                stream_kind: NodeStreamKind::NodeStatus,
             },
             node_id: self.slave.node_id.clone(),
             healthy: pairing_state.healthy(),
@@ -873,12 +908,20 @@ impl LocalNodeRuntime {
         });
         self.slave_pairing_state = PairingState::Rejected;
         self.active_pair_source_node_id = None;
-        self.ui_state.set_node_status(snapshot.clone());
-        self.publish(UiProjection::NodeStatus(snapshot));
+        self.store_node_status(snapshot.clone());
+        self.publish(NodeProjection::NodeStatus(snapshot));
         Ok(())
     }
 
-    fn publish(&self, projection: UiProjection) {
+    fn store_node_status(&mut self, snapshot: NodeStatusSnapshot) {
+        self.node_status.insert(snapshot.node_id.clone(), snapshot);
+    }
+
+    fn store_progress(&mut self, snapshot: TaskProgressSnapshot) {
+        self.progress.insert(snapshot.turn_id.clone(), snapshot);
+    }
+
+    fn publish(&self, projection: NodeProjection) {
         let mut subscribers = self.subscribers.lock().expect("lock subscribers");
         subscribers.retain(|sender| match sender.try_send(projection.clone()) {
             Ok(()) => true,
@@ -1015,13 +1058,8 @@ fn unix_timestamp_string() -> String {
 mod tests {
     use super::*;
     use freehand_config::{RemoteDaemonRouteHealthStatus, load_config_from_path};
-    use freehand_contracts::{
-        ErrorClass, ErrorContract, FeatureId, ReasonReq04ToolCall, ReasonResp01SemanticEvent,
-        ReasonResp02UsageEvent, ReasonResp03TerminalEvent, RecoveryPolicy, SemanticEventKind,
-        TerminalStatus, TokenUsage, TraceId,
-    };
+    use freehand_contracts::FeatureId;
     use freehand_debug::{DebugSink, DebugSinkError, DebugSinkKind};
-    use freehand_ui_protocol::{TurnProjectionInput, turn_projection_from_events};
     use serde_json::{Value, json};
     use std::fs;
     use std::sync::{Arc, Mutex};
@@ -1267,90 +1305,28 @@ port = 4041
         );
     }
 
-    fn sample_slave_turn() -> UiTurnProjection {
-        turn_projection_from_events(TurnProjectionInput {
-            source_agent_id: AgentId::new("slave-agent"),
-            source_node_id: "slave-node".to_owned(),
+    fn sample_slave_turn() -> NodeTurnProjection {
+        NodeTurnProjection {
+            source: NodeSource {
+                source_agent_id: AgentId::new("slave-agent"),
+                source_node_id: "slave-node".to_owned(),
+                source_turn_id: Some(TurnId::new("turn-1")),
+                stream_kind: NodeStreamKind::Turn,
+            },
             session_id: SessionId::new("session-1"),
             turn_id: TurnId::new("turn-1"),
             created_at: Some(10),
-            timing: None,
             cwd: None,
             user_text: Some("delegate to slave".to_owned()),
-            semantic_events: vec![
-                ReasonResp01SemanticEvent {
-                    session_id: SessionId::new("session-1"),
-                    turn_id: TurnId::new("turn-1"),
-                    trace_id: TraceId::new("trace-1"),
-                    feature_id: FeatureId::new("reason.turn"),
-                    agent_id: AgentId::new("slave-agent"),
-                    kind: SemanticEventKind::Reasoning,
-                    content: "thinking".to_owned(),
-                },
-                ReasonResp01SemanticEvent {
-                    session_id: SessionId::new("session-1"),
-                    turn_id: TurnId::new("turn-1"),
-                    trace_id: TraceId::new("trace-1"),
-                    feature_id: FeatureId::new("reason.turn"),
-                    agent_id: AgentId::new("slave-agent"),
-                    kind: SemanticEventKind::Text,
-                    content: "answer".to_owned(),
-                },
-            ],
-            tool_calls: vec![ReasonReq04ToolCall {
-                session_id: SessionId::new("session-1"),
-                turn_id: TurnId::new("turn-1"),
-                trace_id: TraceId::new("trace-1"),
-                feature_id: FeatureId::new("reason.turn"),
-                agent_id: AgentId::new("slave-agent"),
-                tool_call: freehand_contracts::ToolCallContract {
-                    tool_call_id: freehand_contracts::ToolCallId::new("tool-1"),
-                    tool_name: "search".to_owned(),
-                    arguments: vec![],
-                    arguments_complete: true,
-                },
-            }],
-            tool_results: Vec::new(),
-            usage_events: vec![ReasonResp02UsageEvent {
-                session_id: SessionId::new("session-1"),
-                turn_id: TurnId::new("turn-1"),
-                trace_id: TraceId::new("trace-1"),
-                feature_id: FeatureId::new("reason.turn"),
-                agent_id: AgentId::new("slave-agent"),
-                usage: TokenUsage {
-                    input_tokens: 10,
-                    output_tokens: 4,
-                    total_tokens: Some(14),
-                    reasoning_tokens: Some(2),
-                    cache_creation_tokens: 0,
-                    cache_read_tokens: 0,
-                    finish_reason: Some("stop".to_owned()),
-                },
-            }],
-            terminal_event: Some(ReasonResp03TerminalEvent {
-                session_id: SessionId::new("session-1"),
-                turn_id: TurnId::new("turn-1"),
-                trace_id: TraceId::new("trace-1"),
-                feature_id: FeatureId::new("reason.turn"),
-                agent_id: AgentId::new("slave-agent"),
-                status: TerminalStatus::Success,
-                summary: "final answer".to_owned(),
-            }),
-            error_events: vec![freehand_contracts::ErrorErr01RuntimeClassified {
-                session_id: Some(SessionId::new("session-1")),
-                turn_id: Some(TurnId::new("turn-1")),
-                trace_id: TraceId::new("trace-1"),
-                feature_id: FeatureId::new("reason.turn"),
-                agent_id: Some(AgentId::new("slave-agent")),
-                error: ErrorContract {
-                    code: "warn".to_owned(),
-                    class: ErrorClass::Protocol,
-                    recovery: RecoveryPolicy::Recoverable,
-                    message: "minor".to_owned(),
-                },
-            }],
+            reasoning: vec!["thinking".to_owned()],
+            text: vec!["answer".to_owned()],
+            tool_calls: vec!["search".to_owned()],
+            usage: vec!["input=10 output=4 total=14".to_owned()],
+            terminal_status: Some(TerminalStatus::Success),
+            terminal_text: Some("final answer".to_owned()),
+            errors: vec!["warn".to_owned()],
             slave_substream_card: true,
-        })
+        }
     }
 
     #[test]
@@ -1754,7 +1730,7 @@ port = 4041
         let mut saw_turn = false;
         for _ in 0..2 {
             let event = receiver.recv().expect("projection");
-            if let UiProjection::Turn(turn) = event {
+            if let NodeProjection::Turn(turn) = event {
                 saw_turn = true;
                 assert_eq!(turn.source.source_node_id, "slave-node");
                 assert!(turn.slave_substream_card);

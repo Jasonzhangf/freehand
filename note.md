@@ -8764,3 +8764,23 @@ Current real root cause split:
   - freehand-daemon 21 ok
   - mainlines generate/check + gates check ok
 - remaining Gap5: node -> freehand-ui-protocol
+
+# 2026-07-26T20:58:37Z Gap5 node->ui-protocol edge closeout
+
+- run_id: 20260726T203707Z-Macstudio.local-74720-aab997-node-ui-edge
+- freehand-node no longer depends on freehand-ui-protocol; owns node projection types.
+- runtime bridges node status into UI protocol; FORBIDDEN node edge baseline false; Gap 5 deleted.
+
+
+# Gap5 node edge final validation
+
+- Proofs after node-owned projection patch:
+  - cargo fmt --check ok
+  - git diff --check ok
+  - cargo test -p freehand-node -- --test-threads=1: 23 ok
+  - cargo clippy -p freehand-node -p freehand-runtime --all-targets -- -D warnings ok
+  - cargo test -p freehand-runtime -- --test-threads=1: 255 ok
+  - cargo test -p xtask --quiet: 50 ok
+  - xtask mainlines check ok
+  - xtask gates check ok
+  - cargo tree -p freehand-node has no freehand-ui-protocol/freehand-reason edge
