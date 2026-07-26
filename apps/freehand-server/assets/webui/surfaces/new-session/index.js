@@ -5,7 +5,7 @@ import {
   selectedNewSessionKind,
   submitNewSessionSurface,
   syncNewSessionDialogMode,
-} from './controls.js?v=20260726-mobile-route-one-row';
+} from './controls.js?v=20260726-session-select-rename';
 
 export const surfaceId = 'new_session';
 

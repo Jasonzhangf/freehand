@@ -12,7 +12,7 @@ const debugPort = Number.parseInt(process.env.FREEHAND_SESSION_SEARCH_DEBUG_PORT
 const fixedSessionId = process.env.FREEHAND_SESSION_SEARCH_SESSION_ID || 'webui-session-search-fixed';
 const queryToken = process.env.FREEHAND_SESSION_SEARCH_QUERY || `session-search-proof-${fixedSessionId}`;
 const fixedTitle = `Session 搜索 Proof ${queryToken}`;
-const assetVersion = '20260726-mobile-route-one-row';
+const assetVersion = '20260726-session-select-rename';
 const runId = `webui-session-search-${Date.now()}`;
 const artifactDir = path.join(repo, 'artifacts', 'webui-online', runId);
 

@@ -8611,3 +8611,27 @@ Current real root cause split:
   - Android true-device proof is blocked by lockscreen, not missing ADB: `adb connect 100.104.163.65:5555` succeeded, `verify-device-ui.sh` artifact `artifacts/android-device/20260726T062015Z-100.104.163.65_5555-9796` reports `device_locked_or_dreaming` with `mCurrentFocus=NotificationShade`, `mFocusedApp=com.freehand.android/.ui.MainActivity`, and `mDreamingLockscreen=true`. `node scripts/verify-mobile-ui-tree-goal-audit.mjs` now reports `mobile_ui_tree_goal_audit_blocked` with 18 passed and 1 blocked.
 - lesson:
   - When WebUI is split into module assets, server asset smoke is not enough. The online verifier must fetch all module assets and capture browser runtime exceptions; the first stale-daemon run and `toolRegistryTools` `ReferenceError` proved that syntax/asset checks alone do not prove live bootstrap execution.
+
+# 2026-07-26T08:27:09Z Home multi-select and SessionDetail rename closeout
+
+- run_id: `20260726T075538Z-Macstudio.local-50695-webui-session-select-rename-closeout`
+- scope: implement Jason's correction that Home is a session dashboard with multi-select management, while rename is not a list-row action and belongs only to the selected `SessionDetail(session_id)` header.
+- implementation:
+  - Home rows now render `.mobile-home-session-checkbox` selection controls and a compact batch bar with `全选`, `清空`, and `批量移除`.
+  - Home inline rename/remove row actions were removed; Home keeps owner-backed multi-select remove only.
+  - `home.rename_session` edge was removed; `session.rename_session` is scoped to `SessionDetail` with `rename_unselected_session` forbidden.
+  - The current-session header now owns `#selected-session-rename-button`; it is hidden/disabled until the route is `session_detail` and the selected session is persisted.
+  - `renameCurrentSession()` dispatches `session.rename_session`, calls ADP `RenameSession`, refreshes session list truth, and refreshes the selected session.
+  - The UI tree, manifest, function map, mainline call map, test design, wiki, goal doc, and local skill were updated to lock this ownership split.
+- local validation already passed in this slice:
+  - WebUI/verifier JS syntax checks.
+  - `CARGO_TARGET_DIR=/tmp/freehand-target-session-select-rename cargo fmt --check`.
+  - `CARGO_TARGET_DIR=/tmp/freehand-target-session-select-rename cargo test -p freehand-server webui -- --nocapture --test-threads=1` passed 3/3.
+  - `CARGO_TARGET_DIR=/tmp/freehand-target-session-select-rename cargo run -p xtask -- mainlines check` passed.
+  - `CARGO_TARGET_DIR=/tmp/freehand-target-session-select-rename cargo run -p xtask -- gates check` passed.
+  - `git diff --check` passed.
+- S-profile online proof:
+  - Mobile UI tree verifier passed with artifact `artifacts/webui-online/mobile-ui-tree-phase1-20260726T081741-71739`; checks included `homeMultiSelectWorks=true`, `homeRenameOnlyInSessionDetail=true`, `sessionDetailMutualExclusion=true`, `mobileRowsSingleLine=true`, `noHorizontalOverflow=true`, `modularWebuiAssets=true`, and `modularSurfaceAssets=true`.
+  - Provider web_search Settings verifier passed with artifact `artifacts/webui-online/provider-web-search-settings-ui-1785053748916`; pre-restore summary proved `minimaxTestOutcome=passed`, fixture `fixtureRequestCount=1`, hosted tools `["web_search"]`, and function tools `[]`; final restore returned S config to `minimax/MiniMax-M3` with fixture env grep 0.
+  - Model Group Settings verifier passed with artifact `artifacts/webui-online/model-group-ui-1785052967602`; it proved model-group upsert and selection UI paths, then restored provider/model/group truth to `minimax/MiniMax-M3` and no active model group.
+- Android true-device proof is not closed for this slice: `apps/freehand-android/scripts/verify-device-ui.sh 100.104.163.65:5555` artifact `artifacts/android-device/20260726T082041Z-100.104.163.65_5555-78309` is `blocked` with reason `device_locked_or_dreaming`.

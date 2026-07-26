@@ -11,7 +11,7 @@ const baseUrl = normalizedBaseUrl(process.env.FREEHAND_WEBUI_DIAGNOSTICS_BASE_UR
 const adpUrl = process.env.FREEHAND_WEBUI_DIAGNOSTICS_ADP_URL || adpUrlFromBaseUrl(baseUrl);
 const runId = `webui-诊断-${Date.now()}`;
 const artifactDir = path.join(repo, 'artifacts', 'webui-online', runId);
-const assetVersion = '20260726-mobile-route-one-row';
+const assetVersion = '20260726-session-select-rename';
 const forbiddenPattern = /\/Users\/|\/Volumes\/|authorization|api_key|apikey|x-api-key|bearer |pair_token|secret|provider request|provider payload/i;
 
 await fs.mkdir(artifactDir, { recursive: true });

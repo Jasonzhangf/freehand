@@ -1,5 +1,5 @@
-import { renderSettingsShellSurface, renderSettingsNavigationSurface } from './view.js?v=20260726-mobile-route-one-row';
-import { renderDiagnosticLogRow, renderSettingsDiagnosticsSurface } from './diagnostics.js?v=20260726-mobile-route-one-row';
+import { renderSettingsShellSurface, renderSettingsNavigationSurface } from './view.js?v=20260726-session-select-rename';
+import { renderDiagnosticLogRow, renderSettingsDiagnosticsSurface } from './diagnostics.js?v=20260726-session-select-rename';
 
 export const surfaceId = 'settings';
 

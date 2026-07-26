@@ -1,14 +1,14 @@
-import { createHomeDashboardModel } from "./surfaces/home-dashboard/model.js?v=20260726-mobile-route-one-row";
-import { createHomeSessionRow } from "./surfaces/home-dashboard/controls.js?v=20260726-mobile-route-one-row";
-import { renderSurface as renderHomeDashboardSurface } from "./surfaces/home-dashboard/index.js?v=20260726-mobile-route-one-row";
-import { renderRunningList as renderHomeRunningList, renderHistoryList as renderHomeHistoryList } from "./surfaces/home-dashboard/view.js?v=20260726-mobile-route-one-row";
-import { openToolsRegistrySurface, refreshToolsRegistrySurface, renderSurface as renderToolsRegistrySurface } from "./surfaces/tools-registry/index.js?v=20260726-mobile-route-one-row";
-import { cancelTimerFromSurface, openTimerDashboardSurface, refreshTimerDashboardSurface, renderSurface as renderTimerDashboardSurface, scheduleTimerFromSurface } from "./surfaces/timer-dashboard/index.js?v=20260726-mobile-route-one-row";
-import { renderSurface as renderSessionSearchSurface, renderSessionSearchResult as renderSessionSearchResultSurface } from "./surfaces/session-search/index.js?v=20260726-mobile-route-one-row";
-import { renderDiagnosticLogRow as renderDiagnosticLogRowSurface, renderSurface as renderSettingsShellSurface, renderNavigation as renderSettingsNavigationSurface, renderDiagnostics as renderSettingsDiagnosticsSurface } from "./surfaces/settings/index.js?v=20260726-mobile-route-one-row";
-import { chooseNewTaskDirectory as chooseNewTaskDirectoryFromSurface, openNewSessionSurface, closeNewSessionSurface, selectedNewSessionKind as selectedNewSessionKindFromSurface, submitNewSessionSurface, syncNewSessionDialogMode as syncNewSessionDialogModeFromSurface } from "./surfaces/new-session/index.js?v=20260726-mobile-route-one-row";
-import { setSelectedSessionId as setSelectedSessionIdInSurface, clearConversationForSessionSwitch as clearConversationForSessionSwitchInSurface, switchConversationSession as switchConversationSessionInSurface } from "./surfaces/session-detail/index.js?v=20260726-mobile-route-one-row";
-import { createAdpClient } from "./app-shell/adp-client.js?v=20260726-mobile-route-one-row";
+import { createHomeDashboardModel } from "./surfaces/home-dashboard/model.js?v=20260726-session-select-rename";
+import { createHomeSessionRow } from "./surfaces/home-dashboard/controls.js?v=20260726-session-select-rename";
+import { renderSurface as renderHomeDashboardSurface } from "./surfaces/home-dashboard/index.js?v=20260726-session-select-rename";
+import { renderRunningList as renderHomeRunningList, renderHistoryList as renderHomeHistoryList } from "./surfaces/home-dashboard/view.js?v=20260726-session-select-rename";
+import { openToolsRegistrySurface, refreshToolsRegistrySurface, renderSurface as renderToolsRegistrySurface } from "./surfaces/tools-registry/index.js?v=20260726-session-select-rename";
+import { cancelTimerFromSurface, openTimerDashboardSurface, refreshTimerDashboardSurface, renderSurface as renderTimerDashboardSurface, scheduleTimerFromSurface } from "./surfaces/timer-dashboard/index.js?v=20260726-session-select-rename";
+import { renderSurface as renderSessionSearchSurface, renderSessionSearchResult as renderSessionSearchResultSurface } from "./surfaces/session-search/index.js?v=20260726-session-select-rename";
+import { renderDiagnosticLogRow as renderDiagnosticLogRowSurface, renderSurface as renderSettingsShellSurface, renderNavigation as renderSettingsNavigationSurface, renderDiagnostics as renderSettingsDiagnosticsSurface } from "./surfaces/settings/index.js?v=20260726-session-select-rename";
+import { chooseNewTaskDirectory as chooseNewTaskDirectoryFromSurface, openNewSessionSurface, closeNewSessionSurface, selectedNewSessionKind as selectedNewSessionKindFromSurface, submitNewSessionSurface, syncNewSessionDialogMode as syncNewSessionDialogModeFromSurface } from "./surfaces/new-session/index.js?v=20260726-session-select-rename";
+import { setSelectedSessionId as setSelectedSessionIdInSurface, clearConversationForSessionSwitch as clearConversationForSessionSwitchInSurface, switchConversationSession as switchConversationSessionInSurface } from "./surfaces/session-detail/index.js?v=20260726-session-select-rename";
+import { createAdpClient } from "./app-shell/adp-client.js?v=20260726-session-select-rename";
 
 export const classifyLayoutShape = window.__freehandLayout.classifyLayoutShape;
 export const classifyLayoutShapeForClient = window.__freehandLayout.classifyLayoutShapeForClient;
@@ -121,7 +121,7 @@ const sessionBulkCount = document.getElementById("session-bulk-count");
 const sessionSelectAllButton = document.getElementById("session-select-all-button");
 const sessionClearSelectionButton = document.getElementById("session-clear-selection-button");
 const sessionDeleteSelectedButton = document.getElementById("session-delete-selected-button");
-const sessionRenameSelectedButton = document.getElementById("session-rename-selected-button");
+const selectedSessionRenameButton = document.getElementById("selected-session-rename-button");
 const newSessionDialog = document.getElementById("new-session-dialog");
 const newSessionForm = document.getElementById("new-session-form");
 const newSessionCwdInput = document.getElementById("new-session-cwd-input");
@@ -3891,11 +3891,13 @@ function toggleSessionSelection(sessionId, selected) {
     state.selectedSessionIds.delete(sessionId);
   }
   renderSessions();
+  renderMobileHomeDashboard();
 }
 
 function clearSessionSelection() {
   state.selectedSessionIds.clear();
   renderSessions();
+  renderMobileHomeDashboard();
 }
 
 function selectAllSessions() {
@@ -3906,12 +3908,25 @@ function selectAllSessions() {
     }
   });
   renderSessions();
+  renderMobileHomeDashboard();
 }
 
 async function deleteSelectedSessions() {
   const sessionIds = selectedManagedSessionIds();
   if (sessionIds.length === 0) {
     setCommandStatus("请选择要移除的会话", { stickyMs: 5000 });
+    return;
+  }
+  const labelPreview = sessionIds
+    .slice(0, 3)
+    .map((sessionId) => {
+      const session = state.sessions.find((candidate) => candidate.session_id === sessionId);
+      return session?.title || session?.session_id || sessionId;
+    })
+    .join("、");
+  const extraCount = Math.max(0, sessionIds.length - 3);
+  const suffix = extraCount > 0 ? ` 等 ${sessionIds.length} 个会话` : `${sessionIds.length} 个会话`;
+  if (!window.confirm(`批量移除「${labelPreview}」${suffix}？`)) {
     return;
   }
   setCommandStatus(`正在移除 ${sessionIds.length} 个会话...`, { stickyMs: 8000 });
@@ -3935,14 +3950,13 @@ async function deleteSelectedSessions() {
   }
 }
 
-async function renameSelectedSession() {
-  const sessionIds = selectedManagedSessionIds();
-  const sessionId = sessionIds.length === 1 ? sessionIds[0] : state.selectedSessionId;
-  if (!sessionId || isDraftSessionId(sessionId)) {
-    setCommandStatus("请选择一个持久化会话重命名", { stickyMs: 5000 });
+async function renameCurrentSession() {
+  const sessionId = state.selectedSessionId;
+  if (!selectedSessionDetailRouteActive() || !sessionId || isDraftSessionId(sessionId)) {
+    setCommandStatus("进入会话详情后才能重命名", { stickyMs: 5000 });
     return;
   }
-  const current = state.sessions.find((session) => session.session_id === sessionId);
+  const current = sessionSummaryForSelected();
   const nextTitle = window.prompt("重命名会话", current?.title || current?.session_id || sessionId);
   if (nextTitle === null) {
     return;
@@ -3954,7 +3968,7 @@ async function renameSelectedSession() {
   }
   setCommandStatus("正在重命名会话...", { stickyMs: 5000 });
   try {
-    dispatchWebUiEdge("home.rename_session", { session_id: sessionId, title });
+    dispatchWebUiEdge("session.rename_session", { session_id: sessionId, title });
     await adpCommand({ RenameSession: { session_id: sessionId, title } });
     await refreshSessions();
     await refreshSelectedSession();
@@ -5367,9 +5381,6 @@ function renderSessionBulkToolbar() {
   const selectableCount = state.sessions.filter((session) => !isDraftSessionId(session.session_id)).length;
   sessionBulkCount.textContent = `已选 ${selectedCount} 个`;
   sessionDeleteSelectedButton.disabled = selectedCount === 0;
-  if (sessionRenameSelectedButton) {
-    sessionRenameSelectedButton.disabled = selectedCount > 1;
-  }
   if (sessionSelectAllButton) {
     sessionSelectAllButton.disabled = selectableCount === 0 || selectedCount === selectableCount;
   }
@@ -5439,11 +5450,21 @@ function mobileHomeDashboardContext() {
     sessionKindLabel,
     compactSentence,
     isDraftSessionId,
+    isSessionSelected(sessionId) {
+      return state.selectedSessionIds.has(sessionId);
+    },
+    toggleSessionSelection,
+    selectedSessionCount() {
+      return selectedManagedSessionIds().length;
+    },
+    selectableSessionCount() {
+      return state.sessions.filter((session) => session && session.session_id && !isDraftSessionId(session.session_id)).length;
+    },
+    selectAllSessions,
+    clearSelection: clearSessionSelection,
+    deleteSelectedSessions,
     openSession(sessionId) {
       switchConversationSession(sessionId);
-    },
-    renameSession(sessionId) {
-      renameSessionFromHome(sessionId);
     },
     deleteSession(sessionId) {
       deleteSessionFromHome(sessionId);
@@ -5575,28 +5596,6 @@ function mobileHomeHistorySessionNode(session) {
 
 function mobileHomeSessionButton({ session, markerClass = "", primary, meta, status, turnId = "", live = false, child = false }) {
   return createHomeSessionRow({ session, markerClass, primary, meta, status, turnId, live, child }, mobileHomeDashboardContext());
-}
-
-async function renameSessionFromHome(sessionId) {
-  const current = state.sessions.find((session) => session.session_id === sessionId);
-  const nextTitle = window.prompt("重命名会话", current?.title || current?.session_id || sessionId);
-  if (nextTitle === null) {
-    return;
-  }
-  const title = nextTitle.trim();
-  if (!title) {
-    setCommandStatus("重命名需要非空标题", { stickyMs: 6000 });
-    return;
-  }
-  dispatchWebUiEdge("home.rename_session", { session_id: sessionId, title });
-  setCommandStatus("正在重命名会话...", { stickyMs: 5000 });
-  try {
-    await adpCommand({ RenameSession: { session_id: sessionId, title } });
-    await refreshSessions();
-    setCommandStatus(`会话已重命名 · ${title}`, { stickyMs: 5000 });
-  } catch (error) {
-    setCommandStatus(`重命名失败: ${error.message}`, { stickyMs: 9000 });
-  }
 }
 
 async function deleteSessionFromHome(sessionId) {
@@ -8083,18 +8082,21 @@ function renderTurnMeta() {
   }
   const turn = activeTurnForSelectedSession();
   if (!turn) {
-    setText("session-title", state.selectedSessionId || "等待服务状态");
-    setText("session-copy", state.selectedSessionId ? "选中会话暂无轮次" : "暂无活跃轮次");
+    const selectedSummary = sessionSummaryForSelected();
+    setText("session-title", selectedSummary?.title || state.selectedSessionId || "等待服务状态");
+    setText("session-copy", state.selectedSessionId ? `${selectedSummary?.session_id || state.selectedSessionId} · 选中会话暂无轮次` : "暂无活跃轮次");
     setShellDataset("selectedSession", state.selectedSessionId || "");
     setShellDataset("selectedTurn", "");
     setShellDataset("selectedCwd", state.selectedCwd || "");
     if (!state.pendingSubmitError) {
       setText("turn-status", liveTurnStatus() || "等待中");
     }
+    syncSelectedSessionActions();
     return;
   }
 
-  setText("session-title", turn.session_id);
+  const selectedSummary = sessionSummaryForSelected();
+  setText("session-title", selectedSummary?.title || turn.session_id);
   setText("session-copy", turn.cwd ? `${turn.turn_id} · ${turn.cwd}` : turn.turn_id);
   setShellDataset("selectedSession", turn.session_id || "");
   setShellDataset("selectedTurn", turn.turn_id || "");
@@ -8112,6 +8114,17 @@ function renderTurnMeta() {
   if (!state.pendingSubmitError) {
     setText("turn-status", turnStatus);
   }
+  syncSelectedSessionActions();
+}
+
+function syncSelectedSessionActions() {
+  if (!selectedSessionRenameButton) {
+    return;
+  }
+  const canRename = selectedSessionDetailRouteActive() && !isDraftSessionId(state.selectedSessionId) && !!sessionSummaryForSelected();
+  selectedSessionRenameButton.hidden = !canRename;
+  selectedSessionRenameButton.disabled = !canRename;
+  selectedSessionRenameButton.dataset.sessionId = canRename ? state.selectedSessionId : "";
 }
 
 setInterval(() => {
@@ -8831,14 +8844,14 @@ sessionSelectAllButton.addEventListener("click", () => {
 sessionClearSelectionButton.addEventListener("click", () => {
   clearSessionSelection();
 });
-if (sessionRenameSelectedButton) {
-  sessionRenameSelectedButton.addEventListener("click", () => {
-    renameSelectedSession();
-  });
-}
 sessionDeleteSelectedButton.addEventListener("click", () => {
   deleteSelectedSessions();
 });
+if (selectedSessionRenameButton) {
+  selectedSessionRenameButton.addEventListener("click", () => {
+    renameCurrentSession();
+  });
+}
 if (debugDetailsToggle) {
   debugDetailsToggle.addEventListener("click", () => {
     state.debugDetailsVisible = !state.debugDetailsVisible;

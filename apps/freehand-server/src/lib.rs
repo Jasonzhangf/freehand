@@ -1369,7 +1369,7 @@ mod tests {
         assert!(html.contains("/assets/webui.css"));
         assert!(html.contains("/assets/logo.png"));
         assert!(html.contains("/assets/webui.js"));
-        assert!(html.contains("20260726-mobile-route-one-row"));
+        assert!(html.contains("20260726-session-select-rename"));
         assert!(html.contains("data-adp-endpoint=\"/adp\""));
         assert!(html.contains("data-selected-session=\"\""));
         assert!(html.contains("data-selected-turn=\"\""));
@@ -1609,6 +1609,7 @@ mod tests {
         assert!(root_body.contains("id=\"session-select-all-button\""));
         assert!(root_body.contains("id=\"session-clear-selection-button\""));
         assert!(root_body.contains("id=\"session-delete-selected-button\""));
+        assert!(!root_body.contains("id=\"session-rename-selected-button\""));
         assert!(root_body.contains("id=\"settings-shell-toggle\""));
         assert!(root_body.contains("id=\"open-settings-drawer-button\""));
         assert!(root_body.contains("id=\"open-timer-dashboard-button\""));
@@ -1655,6 +1656,8 @@ mod tests {
         assert!(root_body.contains("id=\"mobile-agent-sheet\""));
         assert!(root_body.contains("id=\"close-mobile-agent-sheet-button\""));
         assert!(root_body.contains("id=\"session-relation-header\""));
+        assert!(root_body.contains("id=\"selected-session-rename-button\""));
+        assert!(root_body.contains("id=\"selected-session-rename-button\" type=\"button\" aria-label=\"重命名当前会话\" hidden disabled"));
         assert!(root_body.contains("id=\"session-relation-toggle-button\""));
         assert!(root_body.contains("id=\"session-tree-dropdown\""));
         assert!(root_body.contains("id=\"session-tree\""));
@@ -1880,7 +1883,7 @@ mod tests {
         );
         let js_body = js.text().await.expect("js body");
         assert!(js_body.contains("initializeMobileWebui"));
-        assert!(js_body.contains("/assets/webui/bootstrap.js?v=20260726-mobile-route-one-row"));
+        assert!(js_body.contains("/assets/webui/bootstrap.js?v=20260726-session-select-rename"));
         assert!(!js_body.contains("initializeThemeToggle"));
 
         let bootstrap = client
@@ -1942,7 +1945,7 @@ mod tests {
         let edge_registry_body = edge_registry.text().await.expect("edge-registry body");
         assert!(edge_registry_body.contains("root.open_home"));
         assert!(edge_registry_body.contains("session.open_parent_session"));
-        assert!(edge_registry_body.contains("home.rename_session"));
+        assert!(edge_registry_body.contains("session.rename_session"));
 
         let route_controller = client
             .get(format!(
@@ -1993,6 +1996,20 @@ mod tests {
                 .expect("home-view body")
                 .contains("renderHomeDashboard")
         );
+
+        let home_controls = client
+            .get(format!(
+                "{}/assets/webui/surfaces/home-dashboard/controls.js",
+                server.base_url
+            ))
+            .send()
+            .await
+            .expect("home-controls response");
+        assert_eq!(home_controls.status(), StatusCode::OK);
+        let home_controls_body = home_controls.text().await.expect("home-controls body");
+        assert!(home_controls_body.contains("mobile-home-session-checkbox"));
+        assert!(!home_controls_body.contains("data-session-action = 'rename'"));
+        assert!(!home_controls_body.contains("data-session-action=\"rename\""));
 
         let tools_view = client
             .get(format!(
@@ -2115,8 +2132,13 @@ mod tests {
         assert!(legacy_body.contains("function globalLiveSessionObservation"));
         assert!(legacy_body.contains("function mobileHomeHistoryBuckets"));
         assert!(legacy_body.contains("function mobileHomeHistoryBucketId"));
-        assert!(legacy_body.contains("function renameSessionFromHome"));
+        assert!(legacy_body.contains("function renameCurrentSession"));
+        assert!(legacy_body.contains("session.rename_session"));
         assert!(legacy_body.contains("function deleteSessionFromHome"));
+        assert!(!legacy_body.contains("function renameSelectedSession"));
+        assert!(!legacy_body.contains("function renameSessionFromHome"));
+        assert!(!legacy_body.contains("home.rename_session"));
+        assert!(!legacy_body.contains("session-rename-selected-button"));
         assert!(legacy_body.contains("dispatchWebUiEdge"));
         assert!(legacy_body.contains("session.open_parent_session"));
         assert!(legacy_body.contains("root.open_home"));

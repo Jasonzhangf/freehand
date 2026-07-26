@@ -75,7 +75,7 @@
       },
       "crud_actions": [
         "open",
-        "rename",
+        "multi_select",
         "archive_when_supported",
         "restore_when_supported",
         "delete_remove",
@@ -103,10 +103,14 @@
         "transcript",
         "composer"
       ],
+      "session_actions": [
+        "rename_current_session"
+      ],
       "forbidden": [
         "global Home running/history panels",
         "unrelated global active-session fallback",
-        "synthesized worker-task ids"
+        "synthesized worker-task ids",
+        "rename_unselected_session"
       ]
     },
     {
@@ -219,7 +223,8 @@
     "Home history rows are grouped only as 今天, 过去一周, and 所有更早的.",
     "Home renders exactly one visible row per session; rows do not wrap into multi-line cards.",
     "Every route adapts to portrait by viewport width plus height/width ratio and keeps no document-level horizontal overflow.",
-    "Home supports owner-backed session CRUD controls without browser-local session truth.",
+    "Home supports multi-select and owner-backed delete/remove controls without browser-local session truth.",
+    "Rename controls appear only in SessionDetail for the current selected session.",
     "SessionDetail route hides Home running/history sections.",
     "Waiting-user sessions are not classified as running.",
     "ToolsRegistry has no document-level horizontal overflow on phone.",

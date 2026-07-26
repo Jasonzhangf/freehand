@@ -1,5 +1,5 @@
-import { renderTimerDashboardSurface } from './view.js?v=20260726-mobile-route-one-row';
-import { cancelTimerFromSurface, openTimerDashboardSurface, refreshTimerDashboardSurface, scheduleTimerFromSurface } from './controls.js?v=20260726-mobile-route-one-row';
+import { renderTimerDashboardSurface } from './view.js?v=20260726-session-select-rename';
+import { cancelTimerFromSurface, openTimerDashboardSurface, refreshTimerDashboardSurface, scheduleTimerFromSurface } from './controls.js?v=20260726-session-select-rename';
 
 export const surfaceId = 'timer_dashboard';
 

@@ -1,6 +1,6 @@
-import { createHomeDashboardModel } from './model.js?v=20260726-mobile-route-one-row';
-import { createHomeSessionRow } from './controls.js?v=20260726-mobile-route-one-row';
-import { renderHomeDashboard } from './view.js?v=20260726-mobile-route-one-row';
+import { createHomeDashboardModel } from './model.js?v=20260726-session-select-rename';
+import { createHomeSessionRow } from './controls.js?v=20260726-session-select-rename';
+import { renderHomeDashboard } from './view.js?v=20260726-session-select-rename';
 
 export const surfaceId = 'home_dashboard';
 

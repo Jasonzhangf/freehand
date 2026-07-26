@@ -44,6 +44,7 @@ export function renderHistoryList(model, context) {
   const list = context.dom.mobileHomeSessionList;
   if (!list) return;
   list.replaceChildren();
+  list.appendChild(renderBulkActions(context));
   model.buckets.forEach((bucket) => {
     const header = document.createElement('div');
     header.className = 'mobile-home-history-bucket';
@@ -72,4 +73,39 @@ export function renderHistoryList(model, context) {
     empty.textContent = context.state.sessionListLoaded ? '暂无历史会话。' : '等待会话真源';
     list.appendChild(empty);
   }
+}
+
+function renderBulkActions(context) {
+  const selectedCount = context.selectedSessionCount();
+  const selectableCount = context.selectableSessionCount();
+  const row = document.createElement('div');
+  row.className = 'mobile-home-bulk-actions';
+  row.dataset.selectedCount = `${selectedCount}`;
+  row.dataset.selectableCount = `${selectableCount}`;
+  const label = document.createElement('span');
+  label.textContent = selectedCount > 0 ? `已选 ${selectedCount} 个会话` : '可多选会话';
+  const actions = document.createElement('span');
+  actions.className = 'mobile-home-bulk-buttons';
+  const selectAll = document.createElement('button');
+  selectAll.type = 'button';
+  selectAll.dataset.sessionAction = 'select-all';
+  selectAll.textContent = '全选';
+  selectAll.disabled = selectableCount === 0 || selectedCount === selectableCount;
+  selectAll.addEventListener('click', () => context.selectAllSessions());
+  const clear = document.createElement('button');
+  clear.type = 'button';
+  clear.dataset.sessionAction = 'clear-selection';
+  clear.textContent = '清空';
+  clear.disabled = selectedCount === 0;
+  clear.addEventListener('click', () => context.clearSelection());
+  const remove = document.createElement('button');
+  remove.type = 'button';
+  remove.className = 'danger';
+  remove.dataset.sessionAction = 'remove-selected';
+  remove.textContent = '批量移除';
+  remove.disabled = selectedCount === 0;
+  remove.addEventListener('click', () => context.deleteSelectedSessions());
+  actions.append(selectAll, clear, remove);
+  row.append(label, actions);
+  return row;
 }

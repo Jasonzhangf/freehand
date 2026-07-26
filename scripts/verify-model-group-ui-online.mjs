@@ -15,7 +15,7 @@ const debugPort = Number.parseInt(process.env.FREEHAND_MODEL_GROUP_UI_DEBUG_PORT
 const chromePath =
   process.env.FREEHAND_MODEL_GROUP_UI_CHROME ||
   '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
-const assetVersion = '20260726-mobile-route-one-row';
+const assetVersion = '20260726-session-select-rename';
 const runId = `model-group-ui-${Date.now()}`;
 const artifactDir = path.join(repo, 'artifacts', 'webui-online', runId);
 const testGroupId = process.env.FREEHAND_MODEL_GROUP_UI_GROUP_ID || `ui.verify.${Date.now()}`;
@@ -159,7 +159,7 @@ try {
     (groupId) => {
       const state = readModelGroupSettingsDom();
       return state.modelGroupIds.includes(groupId) &&
-        /模型组 saved/i.test(state.saveStatus + ' ' + state.commandStatus)
+        /模型组 saved|模型组已保存|已保存/i.test(state.saveStatus + ' ' + state.commandStatus)
         ? state
         : null;
     },
@@ -199,7 +199,7 @@ try {
     (groupId) => {
       const state = readModelGroupSettingsDom();
       return state.currentModelGroup === groupId &&
-        /模型组 selection saved/i.test(state.switchStatus + ' ' + state.commandStatus)
+        /模型组 selection saved|模型组选择已保存/i.test(state.switchStatus + ' ' + state.commandStatus)
         ? state
         : null;
     },

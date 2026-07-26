@@ -64,7 +64,7 @@
   - WebUI mobile session drawer can be opened by a right-swipe gesture from the main interface content area without 会修改 ADP/session truth, selected session, transcript state, composer draft, pending submit, scroll anchor, or lifecycle timers
   - WebUI mobile session/设置 drawers must keep a sticky visible header with close control while drawer content scrolls; Android/browser back intent must blur focused form controls first and then close the WebUI dialog/Header tree/Agent sheet/mobile drawer before app-level exit/navigation
   - WebUI session drawer renders persisted sessions as agent -> session hierarchy, with task/global labels derived from protocol cwd and CRUD still routed by protocol session id
-  - WebUI session rail exposes rename, remove via `DeleteSession`, and double-Esc rollback as protocol commands instead of local session truth; archive/restore affordances are intentionally absent from WebUI
+  - WebUI Home exposes multi-select and remove via `DeleteSession`, while SessionDetail exposes current-session rename and double-Esc rollback as protocol commands instead of local session truth; archive/restore affordances are intentionally absent from WebUI
   - WebUI image attachment lifecycle keeps drafts session-scoped, previews/removes multiple selected images, clears them only after successful send, and preserves them across send failure for retry
   - WebUI current-submit command carries image bytes only in neutral 元数据; transcript history renders persisted attachment 元数据 and never raw base64
   - HTTP query and POST command ingress remain compatibility transport routes; latest-turn SSE subscribe refreshes visible turn display without owning command dispatch
@@ -128,7 +128,7 @@
   - WebUI submit-success path refresh smoke
   - WebUI cancel button / Escape key command smoke
   - WebUI submit-in-flight latest-active cancel smoke
-  - WebUI rename/remove asset smoke and negative archive/restore affordance smoke
+  - WebUI current-session rename plus Home multi-select/remove asset smoke and negative archive/restore affordance smoke
   - WebUI double-Esc rollback asset smoke proving first Esc arms rollback and second Esc calls `RollbackLatestSessionTurn`
   - WebUI per-turn action asset smoke proving every rendered `.chat-message` has Copy, Edit from here, and 新建会话 actions; Edit from here uses repeated `RollbackLatestSessionTurn` command dispatch until the selected logical turn is removed, while 新建会话 creates a protocol-owned conversation before prefilling the composer
   - WebUI command ingress dispatch receipt smoke
@@ -183,6 +183,7 @@
 - WebUI online settings verifier locks opening the settings panel on desktop/mobile, sticky visible drawer close behavior after scrolling the long settings form, rendering all configured provider ids, adding a provider without auto-selecting it, switching current provider through the owner command, restoring the original selection, invalid update/selection failure, restart-required success, no secret inputs or DOM leakage, and conversation rendering still intact after closing the panel
 - Android WebView settings proof for APK update must open Config in the installed app, verify the `安卓 APK 升级` card is enabled, tap `检查 APK 升级`, and observe status evidence from the native bridge; desktop/browser proof may only verify the explicit 仅安卓 App 不可用 state.
 - WebUI online settings verifier locks that provider id, fallback provider id, provider host, provider auth source, and model values are not 加载中 placeholders and come from the 运行时 query path; it must prove provider definition upsert preserves current primary/fallback selection and that only `UpdateAgentProviderSelection` changes the selected provider
+- WebUI provider web_search Settings verifier must distinguish UI-owner status from real-provider capability success: the selected live provider may return an exact `TestProviderWebSearch` no-observation failure and still prove the UI surfaces owner failure state, but the verifier-owned OpenAI/Responses fixture must pass and must prove hosted `web_search` is declared without a local function tool named `web_search`.
 - WebUI JS asset smoke locks the render projection boundary: `buildConversationRenderModel`, `buildRenderTurn`, `buildRenderRows`, `buildToolActivityRenderRow`, `buildModelRequestRenderRow`, `turnIsCurrentLiveTurn`, and `renderModelHasLiveLifecycle` must exist, while old global model-request status helpers must not return.
 - WebUI JS asset smoke locks that visible turns come from one selector preserving transcript order and merging selected-session transcript with the latest same-session turn by replace-or-append, then render through `RenderConversation` / `RenderTurn` / `RenderRow`, so stale transcript state cannot hide an in-flight or newly completed continuation after submit, historical turns cannot inherit current live lifecycle animation, and restarted/运行时-reused turn ordinals do not move new cards above older transcript rows
 - WebUI online black-box coverage must assert every rendered chat message in the
@@ -275,7 +276,7 @@
   - WebUI JS asset smoke locks internal 运行时 continuation prompt hiding and raw completion-schema stripping while preserving Final card projection at the end of the round sequence
   - WebUI JS asset smoke locks that `/new` opens the New dialog, new conversation routes through `CreateSession` without cwd, new task requires a selected or typed cwd and routes through `CreateSession` with cwd, optional `SubmitUserInput.cwd` forwarding remains available, and the old selected-session/no-turns system chat card stays absent
   - `node scripts/verify-webui-new-session-online.mjs` clicks the mobile New entry, uses fixed test-hook draft session ids, proves 新会话 and 新建任务 both route through ADP `CreateSession`, verifies `QuerySessionList` 权威真源 for no-cwd vs cwd-bound sessions, and checks worker temporary sessions are not top-level results
-  - WebUI JS asset smoke locks that remove uses `DeleteSession`, archive/restore/query-archived paths are absent from the WebUI app, rename uses `RenameSession`, and double-Esc rollback uses `RollbackLatestSessionTurn`
+  - WebUI JS asset smoke locks that remove uses `DeleteSession`, archive/restore/query-archived paths are absent from the WebUI app, current-session rename uses `RenameSession`, and double-Esc rollback uses `RollbackLatestSessionTurn`
   - WebUI terminal status projection keeps cancelled/failed cards visually distinct from success
   - WebUI terminal/final summary rendering extracts the complete `Summary` block from terminal text before debug fields, then uses a dedicated final-summary renderer rather than generic paragraph rendering; it preserves source response formatting, renders plain single-line summaries as one readable block, renders explicit source newlines/line-start labels/numbering as multiple blocks, and keeps debug fields hidden unless debug details are enabled
   - WebUI slave-card render smoke
@@ -326,7 +327,7 @@
 - WebUI session creation and selection must remain input-layer affordances over ADP/query state, not local truth writers
 - WebUI selected empty-session rendering now shows only the clean empty-state prompt and does not leak prior session turns or generic system feedback into a new session
   - WebUI release online verifier now clears old sessions by ADP `DeleteSession` before proving `/new`, preventing stale persisted sessions from masking or reproducing clean-session failures
-  - WebUI session rename/remove/rollback controls remain ADP command affordances over protocol/运行时/persistence truth, not local transcript mutation
+  - WebUI session multi-select/remove plus current-session rename/rollback controls remain ADP command affordances over protocol/运行时/persistence truth, not local transcript mutation
   - command-ingress dispatch-port failure and join-failure projection coverage is landed
   - ADP query transport now accepts an injected 运行时 query port while the app dependency boundary remains protocol-only
 - ADP subscribe transport now uses the injected 运行时 query port for task list and error-center initial snapshots while keeping app dependency boundary protocol-only

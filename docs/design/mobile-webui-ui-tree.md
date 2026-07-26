@@ -262,10 +262,10 @@ child by default turns the dashboard into an unstructured list and is forbidden.
 Home owns session management controls for persisted top-level sessions through
 protocol owner paths.
 
-Allowed row actions:
+Allowed Home actions:
 
-- select/open session
-- rename session
+- select one or more sessions
+- open session
 - archive session when the protocol owner supports it
 - restore archived session when the protocol owner supports it
 - delete/remove session through `DeleteSession`
@@ -280,6 +280,10 @@ CRUD controls must be compact:
 
 Home must not keep browser-local session CRUD truth. It may keep only transient
 selection/menu/dialog state.
+
+Renaming is not a Home row action. A session can be renamed only after entering
+`SessionDetail(session_id)`, where the current-session header owns the rename
+control and routes it through `RenameSession`.
 
 ### Home Grouping And Sorting
 
@@ -320,6 +324,8 @@ SessionDetail answers: "What is happening inside this one session?"
 
 This is where the user continues the conversation, continues drawing/work,
 or inspects details. Home is only the dashboard that chooses this surface.
+Session-specific management such as renaming the current session also belongs
+here, not in the global Home list.
 
 ### Structure
 

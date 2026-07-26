@@ -7,9 +7,14 @@ const chromePath = process.env.FREEHAND_WEBUI_CHROME ||
   '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
 const debugPort = Number.parseInt(process.env.FREEHAND_WEBUI_DEBUG_PORT || '9247', 10);
 const baseUrl = normalizedBaseUrl(process.env.FREEHAND_WEBUI_BASE_URL || 'http://127.0.0.1:4042/');
+const adpUrl = process.env.FREEHAND_WEBUI_ADP_URL || adpUrlFromBaseUrl(baseUrl);
 const runId = `mobile-ui-tree-phase1-${new Date().toISOString().replace(/[-:.]/g, '').slice(0, 15)}-${process.pid}`;
 const artifactDir = path.join(process.cwd(), 'artifacts', 'webui-online', runId);
-const assetVersion = '20260726-mobile-route-one-row';
+const assetVersion = '20260726-session-select-rename';
+const multiSelectSessionIds = [
+  'webui-home-multiselect-fixed-a',
+  'webui-home-multiselect-fixed-b',
+];
 const forbiddenUiTerms = [
   /rootfs/i,
   /shared-folder/i,
@@ -44,6 +49,7 @@ let cdp = null;
 
 try {
   await assertProductionPageReachable();
+  await ensureMultiSelectSessions();
   chrome = spawn(
     chromePath,
     [
@@ -85,9 +91,10 @@ try {
   for (const viewport of viewports) {
     snapshots.push(await captureViewport(cdp, viewport));
   }
+  const homeMultiSelect = await captureHomeMultiSelect(cdp);
   const sessionDetail = await captureSessionDetailRoute(cdp);
   const settings = await captureSettingsTree(cdp);
-  const summary = buildSummary({ snapshots, sessionDetail, settings, moduleAssets });
+  const summary = buildSummary({ snapshots, homeMultiSelect, sessionDetail, settings, moduleAssets });
   await fs.writeFile(path.join(artifactDir, 'summary.json'), JSON.stringify(summary, null, 2));
 
   const failed = Object.entries(summary.checks)
@@ -139,6 +146,59 @@ async function captureViewport(cdp, viewport) {
   await fs.writeFile(path.join(artifactDir, fileName), Buffer.from(screenshot.data, 'base64'));
   const result = { viewport, screenshot: fileName, state };
   await fs.writeFile(path.join(artifactDir, `${viewport.label}.json`), JSON.stringify(result, null, 2));
+  return result;
+}
+
+async function captureHomeMultiSelect(cdp) {
+  await cdp.send('Emulation.setDeviceMetricsOverride', {
+    width: 390,
+    height: 844,
+    deviceScaleFactor: 2,
+    mobile: true,
+  });
+  await evalInPage(cdp, () => {
+    window.dispatchEvent(new Event('resize'));
+    window.__freehandLayout?.applyLayoutShape?.();
+  });
+  await waitForFunction(cdp, (sessionIds) => {
+    return document.body.dataset.webuiRoute === 'home_dashboard' &&
+      sessionIds.every((sessionId) => !!document.querySelector(`#mobile-home-session-list [data-session-id="${sessionId}"] .mobile-home-session-checkbox`));
+  }, 20_000, 'Home multi-select rows', multiSelectSessionIds);
+  const stateBefore = await evalInPage(cdp, collectPhaseOneState);
+  const selection = await evalInPage(cdp, (sessionIds) => {
+    sessionIds.forEach((sessionId) => {
+      const checkbox = document.querySelector(`#mobile-home-session-list [data-session-id="${sessionId}"] .mobile-home-session-checkbox`);
+      if (checkbox && !checkbox.checked) {
+        checkbox.click();
+      }
+    });
+    return {
+      selectedIds: Array.from(document.querySelectorAll('#mobile-home-session-list .mobile-home-session-checkbox:checked'))
+        .map((node) => node.closest('[data-session-id]')?.dataset.sessionId || '')
+        .filter(Boolean),
+      bulkText: document.querySelector('#mobile-home-session-list .mobile-home-bulk-actions')?.innerText || '',
+      bulkSelectedCount: document.querySelector('#mobile-home-session-list .mobile-home-bulk-actions')?.dataset.selectedCount || '',
+      rows: sessionIds.map((sessionId) => {
+        const row = document.querySelector(`#mobile-home-session-list [data-session-id="${sessionId}"]`);
+        return {
+          sessionId,
+          exists: !!row,
+          checked: !!row?.querySelector('.mobile-home-session-checkbox')?.checked,
+          selectedClass: !!row?.classList.contains('is-selected'),
+        };
+      }),
+    };
+  }, multiSelectSessionIds);
+  await delay(350);
+  const stateAfter = await evalInPage(cdp, collectPhaseOneState);
+  const screenshot = await cdp.send('Page.captureScreenshot', {
+    format: 'png',
+    captureBeyondViewport: true,
+  });
+  const screenshotName = 'home-multiselect.png';
+  await fs.writeFile(path.join(artifactDir, screenshotName), Buffer.from(screenshot.data, 'base64'));
+  const result = { screenshot: screenshotName, sessionIds: multiSelectSessionIds, stateBefore, selection, stateAfter };
+  await fs.writeFile(path.join(artifactDir, 'home-multiselect.json'), JSON.stringify(result, null, 2));
   return result;
 }
 
@@ -351,7 +411,7 @@ async function captureSettingsSnapshot(cdp, fileBase) {
   return result;
 }
 
-function buildSummary({ snapshots, sessionDetail, settings, moduleAssets }) {
+function buildSummary({ snapshots, homeMultiSelect, sessionDetail, settings, moduleAssets }) {
   const portraitSnapshots = snapshots.filter((snapshot) =>
     ['phone_portrait', 'tall_phone', 'tablet_portrait'].includes(snapshot.state.layoutShape)
   );
@@ -374,6 +434,7 @@ function buildSummary({ snapshots, sessionDetail, settings, moduleAssets }) {
     artifactDir,
     assetVersion,
     snapshots,
+    homeMultiSelect,
     sessionDetail,
     settings,
     moduleAssets,
@@ -401,13 +462,27 @@ function buildSummary({ snapshots, sessionDetail, settings, moduleAssets }) {
       mobileRowsSingleLine: portraitSnapshots.every((snapshot) =>
         snapshot.state.mobileHomeHistoryRows.every((row) =>
           row.height <= 42 &&
-          row.hasActions &&
-          row.hasRenameAction &&
-          row.hasRemoveAction &&
+          row.hasCheckbox &&
+          !row.hasActions &&
+          !row.hasRenameAction &&
+          !row.hasRemoveAction &&
           row.sessionKind !== 'worker' &&
           row.openButtonHeight <= 32
         )
       ),
+      homeMultiSelectWorks:
+        homeMultiSelect &&
+        homeMultiSelect.selection.rows.every((row) => row.exists && row.checked && row.selectedClass) &&
+        homeMultiSelect.selection.bulkSelectedCount === `${multiSelectSessionIds.length}` &&
+        homeMultiSelect.stateAfter.mobileHomeBulkActionsText.includes(`已选 ${multiSelectSessionIds.length} 个会话`),
+      homeRenameOnlyInSessionDetail:
+        portraitSnapshots.every((snapshot) =>
+          !snapshot.state.mobileHomeHistoryRows.some((row) => row.hasRenameAction) &&
+          snapshot.state.selectedSessionRenameVisible === false
+        ) &&
+        sessionDetail &&
+        !sessionDetail.skipped &&
+        sessionDetail.state.selectedSessionRenameVisible === true,
       globalSessionListExcludesInternalSessions: !internalSessionTerms.some((pattern) => pattern.test(globalSessionText)),
       homeShowsOnlyActivityAndHistory: portraitSnapshots.every((snapshot) =>
         snapshot.state.mobileHomeActiveVisible &&
@@ -586,7 +661,7 @@ function collectPhaseOneState() {
     shellRoute: shell?.dataset.webuiRoute || '',
     routeSession: shell?.dataset.routeSession || '',
     selectedSession: shell?.dataset.selectedSession || '',
-    assetVersionSeen: html.includes('20260726-mobile-route-one-row'),
+    assetVersionSeen: html.includes('20260726-session-select-rename'),
     bodyText,
     bodyWidth: document.body.scrollWidth,
     docWidth: document.documentElement.scrollWidth,
@@ -611,18 +686,26 @@ function collectPhaseOneState() {
     mobileHomeHistoryIds: Array.from(document.querySelectorAll('#mobile-home-session-list [data-session-id]'))
       .map((node) => node.dataset.sessionId || '')
       .filter(Boolean),
-    mobileHomeHistoryRows: Array.from(document.querySelectorAll('#mobile-home-session-list .mobile-home-session-item')).map((node) => ({
+      mobileHomeHistoryRows: Array.from(document.querySelectorAll('#mobile-home-session-list .mobile-home-session-item')).map((node) => ({
       sessionId: node.dataset.sessionId || '',
       sessionKind: node.dataset.sessionKind || '',
       height: localRectOf(node).height,
       width: localRectOf(node).width,
       openButtonHeight: localRectOf(node.querySelector('.mobile-home-session-open')).height,
       lineCount: (node.innerText || '').split('\n').length,
+      hasCheckbox: !!node.querySelector('.mobile-home-session-checkbox'),
+      checkboxChecked: !!node.querySelector('.mobile-home-session-checkbox')?.checked,
+      selectedClass: node.classList.contains('is-selected'),
       hasActions: !!node.querySelector('.mobile-home-session-actions'),
       hasRenameAction: !!node.querySelector('[data-session-action="rename"]'),
       hasRemoveAction: !!node.querySelector('[data-session-action="remove"]'),
       text: node.innerText || '',
     })),
+    mobileHomeBulkActionsText: document.querySelector('#mobile-home-session-list .mobile-home-bulk-actions')?.innerText || '',
+    mobileHomeBulkSelectedCount: document.querySelector('#mobile-home-session-list .mobile-home-bulk-actions')?.dataset.selectedCount || '',
+    mobileHomeBulkSelectableCount: document.querySelector('#mobile-home-session-list .mobile-home-bulk-actions')?.dataset.selectableCount || '',
+    selectedSessionRenameVisible: localIsVisible(document.getElementById('selected-session-rename-button')),
+    selectedSessionRenameDisabled: !!document.getElementById('selected-session-rename-button')?.disabled,
     mobileHomeRunningHistoryOverlap: (() => {
       const running = new Set(Array.from(document.querySelectorAll('#mobile-home-active-list [data-session-id]'))
         .map((node) => node.dataset.sessionId || '')
@@ -868,4 +951,56 @@ function normalizedBaseUrl(value) {
     url.pathname = `${url.pathname}/`;
   }
   return url.toString();
+}
+
+function adpUrlFromBaseUrl(url) {
+  const parsed = new URL(url);
+  parsed.protocol = parsed.protocol === 'https:' ? 'wss:' : 'ws:';
+  parsed.pathname = '/adp';
+  parsed.search = '';
+  parsed.hash = '';
+  return parsed.toString();
+}
+
+async function ensureMultiSelectSessions() {
+  for (const sessionId of multiSelectSessionIds) {
+    const title = `Home 多选验证 ${sessionId}`;
+    try {
+      await adpCommand({ CreateSession: { session_id: sessionId, title } }, 20_000);
+    } catch (error) {
+      await adpCommand({ RenameSession: { session_id: sessionId, title } }, 20_000);
+    }
+    await adpCommand({ RestoreSession: { session_id: sessionId } }, 20_000);
+  }
+}
+
+async function adpCommand(command, timeoutMs = 30_000) {
+  return await adpRequest('command', 'command', command, timeoutMs);
+}
+
+function adpRequest(kind, payloadKey, payload, timeoutMs) {
+  const socket = new WebSocket(adpUrl);
+  const requestId = `${kind}-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => {
+      socket.close();
+      reject(new Error(`ADP ${kind} timeout`));
+    }, timeoutMs);
+    socket.addEventListener('open', () => socket.send(JSON.stringify({ kind, request_id: requestId, [payloadKey]: payload })));
+    socket.addEventListener('message', (event) => {
+      const message = JSON.parse(event.data);
+      if (message.request_id !== requestId) return;
+      clearTimeout(timer);
+      socket.close();
+      if (message.kind === 'failure') {
+        reject(new Error(message.error?.message || JSON.stringify(message.error || message)));
+        return;
+      }
+      resolve(message.result || message.receipt || message);
+    });
+    socket.addEventListener('error', (event) => {
+      clearTimeout(timer);
+      reject(new Error(event.message || `ADP ${kind} socket error`));
+    });
+  });
 }

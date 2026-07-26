@@ -1,4 +1,4 @@
-import { renderSettingsDiagnosticsSurface } from './diagnostics.js?v=20260726-mobile-route-one-row';
+import { renderSettingsDiagnosticsSurface } from './diagnostics.js?v=20260726-session-select-rename';
 
 export function renderSettingsShellSurface(context) {
   const { state, dom } = context;

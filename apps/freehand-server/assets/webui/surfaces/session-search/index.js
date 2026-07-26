@@ -1,4 +1,4 @@
-import { renderSessionSearchResult, renderSessionSearchSurface } from './view.js?v=20260726-mobile-route-one-row';
+import { renderSessionSearchResult, renderSessionSearchSurface } from './view.js?v=20260726-session-select-rename';
 
 export const surfaceId = 'session_search';
 

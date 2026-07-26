@@ -1,5 +1,5 @@
-import { renderToolsRegistrySurface } from './view.js?v=20260726-mobile-route-one-row';
-import { openToolsRegistrySurface, refreshToolsRegistrySurface } from './controls.js?v=20260726-mobile-route-one-row';
+import { renderToolsRegistrySurface } from './view.js?v=20260726-session-select-rename';
+import { openToolsRegistrySurface, refreshToolsRegistrySurface } from './controls.js?v=20260726-session-select-rename';
 
 export const surfaceId = 'tools_registry';
 
