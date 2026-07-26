@@ -1,4 +1,4 @@
-import { WebUiSurface, requireEdge } from "./edge-registry.js?v=20260726-header-worker-rail";
+import { WebUiSurface, requireEdge } from "./edge-registry.js?v=__WEBUI_ASSET_VERSION__";
 
 export function createRouteController({ state, document }) {
   function setRoute(route, params = {}) {

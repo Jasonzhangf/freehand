@@ -643,3 +643,9 @@ If any line is not true, do not claim completion.
 - A parent repair round (`runtime-turn-N-rM`) may still carry the original user objective in the `freehand_runtime/original_task` context segment. Master parent evaluation must use that owner context instead of requiring `round == 1` only.
 - WebUI `ToolPending` is lifecycle-running only with waiting tool/model activity or owner-projected open task/timer truth. No waiting activity plus no open task must render as user-choice wait, not stale `等待生命周期`, and refresh-error exits must clear selected session state.
 - Live runtime bootstrap must close stale no-owner `ToolPending` before UI restore: use reason closed-turn truth plus `TaskRuntime::boot_read_only`, TimerStore, and live `master_work` owner truth; write `Blocked` for no-owner stale waits, but preserve `ToolPending` when an open child task, active/running source timer, or live Master work can wake it.
+
+## ADP Query Route Rule
+
+- ADP Query frames may only carry `UiCommandFrameClass::Query`. Server `handle_adp_query` must call `accept_query_ingress` before any runtime query port.
+- Master poll split is rigid: `RunMasterPoll` is Command-frame mutation (`run_master_poll`); `QueryMasterPoll` is Query-frame read-only (`preview_master_poll`). Never re-admit `RunMasterPoll` on Query.
+- WebUI asset cache-busting has one owner: `apps/freehand-server/src/assets.rs::WEBUI_ASSET_VERSION`. Authoring files use `__WEBUI_ASSET_VERSION__`; server stamps at serve time. Online verifiers must compare against the served stamp, not hardcode a second source of truth forever.

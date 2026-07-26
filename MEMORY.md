@@ -646,3 +646,9 @@
 - Bootstrap UI projection must use `restore_turn_snapshots_for_ui` (ledger backfill for incomplete multi-round), not authoritative-only.
 - Incomplete authoritative + poisoned/empty ledger: return partial authoritative with `reason_persistence_partial_ui_restore` warning; do not abort bootstrap.
 - Architecture Gap 7 removed after this package-level proof. Phase 2.1 worker pooling still blocked until remaining plan items/gaps allow.
+
+## ADP Query frame mutation ban + WebUI asset version stamp (2026-07-27)
+- `accept_query_ingress` is the only ADP Query-frame gate. Server must reject non-Query frames with `direct_task_mutation_forbidden` before runtime query ports.
+- Master poll split: Command=`RunMasterPoll`/`run_master_poll`; Query=`QueryMasterPoll`/`preview_master_poll`.
+- WebUI cache-busting owner is `WEBUI_ASSET_VERSION` in `apps/freehand-server/src/assets.rs`; authoring uses `__WEBUI_ASSET_VERSION__` token and server stamps responses.
+- Package-level proof for this slice: freehand-ui-protocol + freehand-server package tests, freehand-cli config_startup including master-poll foundation sample/verify.

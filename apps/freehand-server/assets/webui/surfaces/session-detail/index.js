@@ -3,7 +3,7 @@ import {
   clearConversationForSessionSwitch,
   setSelectedSessionId,
   switchConversationSession,
-} from './controls.js?v=20260726-header-worker-rail';
+} from './controls.js?v=__WEBUI_ASSET_VERSION__';
 
 export const surfaceId = 'session_detail';
 

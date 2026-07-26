@@ -70,11 +70,11 @@ Non-violation pending items. Not regressions. Not false positives. Each gap has 
 |---|---|
 | feature_id | `runtime.ui-command-dispatch`, `app.webui-smoke` |
 | owner crate | `crates/freehand-ui-protocol`, `apps/freehand-server` |
-| gap kind | 2026-07-26 审计确认：① `UiAdpRequest`/`UiAdpResponse` 无 protocol version/capability 协商字段，三端独立发布无兼容缓冲 ② WebUI 以约 40 处手写 PascalCase 字符串镜像 serde 编码，无 JSON Schema/TS 生成物 ③ 服务端 `handle_adp_query` 先走 `query_runtime`，`RunMasterPoll` 可经 Query 帧执行变更并持久化 watermark；`direct_task_mutation_forbidden` 仅存在于 CLI 测试 mock ④ `/adp` 无鉴权且暴露 `ApplyExecutionFact`/`ClaimNextTask` 等调度内部命令 ⑤ ui-protocol 混装服务端状态机 `UiProtocolState` 与投影引擎（单文件 6882 行、依赖 tokio/blocks/control）⑥ `target_owner_module` 把仓库内部路径序列化进线协议 |
-| why not violation | 单机单用户拓扑下 Query 旁路与无鉴权未构成线上事故；读写分类 gate 与 Query 白名单修复已排入当前修复计划（进行中） |
-| risk | 旧客户端对枚举变更只能收到反序列化失败；任意 WebSocket 客户端可驱动内部调度；协议 crate 无法被非 Rust 端做 schema 提取 |
-| gate | 进行中：ui-protocol 增 `UiCommand` 读写分类穷举 + 服务端 Query 白名单派生；版本化与 schema 生成物尚无 gate |
-| closure path | 1) 读写分类 + Query 通道白名单 + `direct_task_mutation_forbidden` 提升进 `UiProtocolError`（当前任务）2) 帧加 protocol_version 与首帧握手 3) schemars 导出 schema，WebUI 从生成物导入 4) `UiProtocolState`/投影引擎迁出至独立 crate，`target_owner_module` 降级 debug-only 5) `/adp` 鉴权并收缩命令面 |
+| gap kind | 2026-07-26 审计确认：① `UiAdpRequest`/`UiAdpResponse` 无 protocol version/capability 协商字段，三端独立发布无兼容缓冲 ② WebUI 以约 40 处手写 PascalCase 字符串镜像 serde 编码，无 JSON Schema/TS 生成物 ③ `/adp` 无鉴权且暴露 `ApplyExecutionFact`/`ClaimNextTask` 等调度内部命令 ④ ui-protocol 混装服务端状态机 `UiProtocolState` 与投影引擎（单文件 6882 行、依赖 tokio/blocks/control）⑤ `target_owner_module` 把仓库内部路径序列化进线协议 |
+| why not violation | Query 通道 mutation 旁路已收口：`UiCommandFrameClass` 穷举 + `accept_query_ingress` + 服务端 `handle_adp_query` 前置校验，`RunMasterPoll` 与只读 `QueryMasterPoll` 已拆分，且服务端 WebSocket 测试锁定 mutation 在 runtime query port 前被拒。剩余 gap 是协议版本/schema 生成物、crate 瘦身与鉴权收缩，不是当前线上事故。 |
+| risk | 旧客户端对枚举变更只能收到反序列化失败；任意 WebSocket 客户端仍可走 Command 帧驱动内部调度；协议 crate 仍无法被非 Rust 端做 schema 提取 |
+| gate | Query 读写分类与服务端白名单已有协议/服务端测试锁定；版本化与 schema 生成物尚无 gate |
+| closure path | 1) ~~读写分类 + Query 通道白名单 + `direct_task_mutation_forbidden` 提升进 `UiProtocolError`~~ 已落地 2) 帧加 protocol_version 与首帧握手 3) schemars 导出 schema，WebUI 从生成物导入 4) `UiProtocolState`/投影引擎迁出至独立 crate，`target_owner_module` 降级 debug-only 5) `/adp` 鉴权并收缩命令面 |
 | priority | 高 — 多端独立发布节奏已经存在（Android APK / CLI 二进制 / 内嵌 WebUI） |
 
 
@@ -84,11 +84,11 @@ Non-violation pending items. Not regressions. Not false positives. Each gap has 
 |---|---|
 | feature_id | `app.webui-smoke` |
 | owner crate | `apps/freehand-server` |
-| gap kind | 2026-07-26 审计确认：`legacy-monolith.js` 9811 行占前端 85.8%；session-detail surface 仅迁出 47 行，transcript/composer/worker-rail 仍在 monolith；surfaces 依赖 monolith 每帧现场构造的 context 注入，无独立可测性；缓存版本串 `?v=...` 硬编码 38 处；bootstrap→monolith 靠 window 全局 + 动态 import 隐式时序；SSE EventSource 创建后无 close；edge-registry 的 `allowedEffects`/`forbiddenEffects` 零运行时消费 |
-| why not violation | 模块化重构（0eb3890）方向与 `docs/goals/webui-render-architecture-closeout-plan.md` 一致，属进行中迁移而非声称完成 |
-| risk | 版本串漏改一处即模块双实例、state 分裂；迁移期临时物（window 传递、薄壳 surface）长期滞留会把过渡态固化 |
-| gate | 无。版本串单点化与 SSE close 在当前修复计划中 |
-| closure path | 1) 版本串服务端单点注入 + 删 window 传递（当前任务）2) 迁 session-detail 渲染主线，context 收敛为启动时构造一次的显式接口 3) edge-registry effects 装运行时断言或移回文档 |
+| gap kind | 2026-07-26 审计确认：`legacy-monolith.js` 仍占前端主体；session-detail surface 仅迁出薄壳，transcript/composer/worker-rail 仍在 monolith；surfaces 依赖 monolith 现场构造 context；bootstrap→monolith 仍靠 window 全局 + 动态 import 隐式时序；edge-registry 的 `allowedEffects`/`forbiddenEffects` 零运行时消费 |
+| why not violation | 模块化重构方向与 `docs/goals/webui-render-architecture-closeout-plan.md` 一致；版本串已收口到 `apps/freehand-server/src/assets.rs::WEBUI_ASSET_VERSION` + `__WEBUI_ASSET_VERSION__` 服务端 stamp，SSE turn stream 已有 `closeSseTurnSubscription` + `pagehide` close。剩余是 session-detail 迁移与 edge-registry 运行时断言，不是版本串/SSE 泄漏事故。 |
+| risk | session-detail 迁移期 thin shell 与 window 全局时序会继续把过渡态固化；edge-registry effects 无运行时消费时，surface edge 契约只能靠代码审查 |
+| gate | 服务端 root/asset smoke 锁定 stamp 后的版本串与 no-store；SSE close 仍依赖 WebUI 代码路径，无独立自动化 gate |
+| closure path | 1) ~~版本串服务端单点注入~~ 已落地；SSE close 已落地 2) 迁 session-detail 渲染主线，context 收敛为启动时构造一次的显式接口 3) edge-registry effects 装运行时断言或移回文档 |
 | priority | 中 — 先拆雷（版本串/时序）再迁肉（session-detail） |
 
 ## 管理规则

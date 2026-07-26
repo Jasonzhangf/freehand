@@ -1,4 +1,4 @@
-import { renderSessionSearchResult, renderSessionSearchSurface } from './view.js?v=20260726-header-worker-rail';
+import { renderSessionSearchResult, renderSessionSearchSurface } from './view.js?v=__WEBUI_ASSET_VERSION__';
 
 export const surfaceId = 'session_search';
 

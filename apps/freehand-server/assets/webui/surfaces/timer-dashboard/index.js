@@ -1,5 +1,5 @@
-import { renderTimerDashboardSurface } from './view.js?v=20260726-header-worker-rail';
-import { cancelTimerFromSurface, openTimerDashboardSurface, refreshTimerDashboardSurface, scheduleTimerFromSurface } from './controls.js?v=20260726-header-worker-rail';
+import { renderTimerDashboardSurface } from './view.js?v=__WEBUI_ASSET_VERSION__';
+import { cancelTimerFromSurface, openTimerDashboardSurface, refreshTimerDashboardSurface, scheduleTimerFromSurface } from './controls.js?v=__WEBUI_ASSET_VERSION__';
 
 export const surfaceId = 'timer_dashboard';
 

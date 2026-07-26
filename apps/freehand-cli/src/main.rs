@@ -4484,7 +4484,7 @@ async fn query_master_poll(
     let result = query_adp_once(
         url,
         request_id,
-        UiCommand::RunMasterPoll {
+        UiCommand::QueryMasterPoll {
             after_cursor,
             limit,
             include_terminal,

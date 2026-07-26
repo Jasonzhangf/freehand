@@ -1,5 +1,5 @@
-import { renderToolsRegistrySurface } from './view.js?v=20260726-header-worker-rail';
-import { openToolsRegistrySurface, refreshToolsRegistrySurface } from './controls.js?v=20260726-header-worker-rail';
+import { renderToolsRegistrySurface } from './view.js?v=__WEBUI_ASSET_VERSION__';
+import { openToolsRegistrySurface, refreshToolsRegistrySurface } from './controls.js?v=__WEBUI_ASSET_VERSION__';
 
 export const surfaceId = 'tools_registry';
 

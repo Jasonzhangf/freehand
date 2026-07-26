@@ -85,10 +85,11 @@
 - task mutation commands (`CreateTask`, `CreateTaskAgent`, `AssignTask`, `ClaimNextTask`, `SubmitTaskReview`, `RejectTaskReview`, `ApproveTaskReview`, `CloseTask`) are protocol-owned mutation intents that validate required fields and route to `task.orchestration` through runtime; protocol does not write task truth
 - `UiTaskDispatchCommand` lets a task create command explicitly choose self dispatch, agent dispatch, or no immediate dispatch so Phase 2A can create a waiting task before assignment
 - Phase 1 `ApplyExecutionFact` and `RunSchedulerTick` are protocol-owned mutation intents routed to `task.orchestration`; protocol does not update task state or make scheduler decisions
-- Phase 2B `QueryEventInbox` and `RunMasterPoll` are protocol-owned
+- Phase 2B `QueryEventInbox`, `RunMasterPoll`, and read-only `QueryMasterPoll` are protocol-owned
   query/mutation-intent shapes routed to `task.orchestration`; protocol does
   not store event cursor truth, classify board state, or apply master business
   actions
+- `RunMasterPoll` is Command-frame mutation intent; `QueryMasterPoll` is Query-frame read-only owner projection via `preview_master_poll`.
 - `RunMasterPoll.replay_from_start` is a protocol-owned cursor-mode field;
   protocol validates that it is not combined with `after_cursor`, while
   `task.orchestration` owns the actual replay and cursor persistence semantics
@@ -408,3 +409,5 @@
 - Search dashboard query/result DTOs are landed and locked by `cargo test -p freehand-ui-protocol session_search -- --nocapture --test-threads=1`; protocol-state local query rejection proves runtime/reason owners supply the search projection
 - Diagnostics query/result DTOs are landed and locked by `cargo test -p freehand-ui-protocol diagnostics_query -- --nocapture`; protocol-state local query rejection proves runtime/debug owners supply the diagnostics projection
 - the generated wiki must be regenerated from `docs/mainline-calls/ui.protocol.json` when this function-map truth changes
+
+- `accept_query_ingress` is the ADP Query-frame gate: only `UiCommandFrameClass::Query` may enter `handle_adp_query`; mutation frames return `direct_task_mutation_forbidden` before runtime query ports run.

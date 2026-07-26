@@ -1,6 +1,6 @@
-import { createHomeDashboardModel } from './model.js?v=20260726-header-worker-rail';
-import { createHomeSessionRow } from './controls.js?v=20260726-header-worker-rail';
-import { renderHomeDashboard } from './view.js?v=20260726-header-worker-rail';
+import { createHomeDashboardModel } from './model.js?v=__WEBUI_ASSET_VERSION__';
+import { createHomeSessionRow } from './controls.js?v=__WEBUI_ASSET_VERSION__';
+import { renderHomeDashboard } from './view.js?v=__WEBUI_ASSET_VERSION__';
 
 export const surfaceId = 'home_dashboard';
 

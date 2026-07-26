@@ -28,10 +28,10 @@ use freehand_ui_protocol::{
     TurnProjectionInput, UiAdpFailure, UiAdpRequest, UiAdpResponse, UiCheckpointSnapshot,
     UiClientKind, UiCommand, UiCommandDispatchFailure, UiCommandDispatchPort,
     UiCommandDispatchReceipt, UiProjection, UiProtocolState, UiPublicTurnProjection, UiQueryResult,
-    UiRuntimeQueryPort, UiSubscriptionEvent, UiTurnProjection, build_command_dispatch_envelope,
-    checkpoint_projection_from_runtime_summary, dispatch_port_failure, protocol_rejection,
-    public_turn_projection, subscription_matches, subscription_selector,
-    turn_projection_for_client, turn_projection_from_events,
+    UiRuntimeQueryPort, UiSubscriptionEvent, UiTurnProjection, accept_query_ingress,
+    build_command_dispatch_envelope, checkpoint_projection_from_runtime_summary,
+    dispatch_port_failure, protocol_rejection, public_turn_projection, subscription_matches,
+    subscription_selector, turn_projection_for_client, turn_projection_from_events,
 };
 use futures_util::stream;
 use futures_util::{SinkExt, StreamExt};
@@ -623,6 +623,18 @@ async fn handle_adp_query(
     request_id: String,
     query: UiCommand,
 ) -> Result<(), String> {
+    if let Err(err) = accept_query_ingress(&query) {
+        let rejection = protocol_rejection(err);
+        let _ = outbound_tx.send(UiAdpResponse::Failure {
+            request_id,
+            failure: UiAdpFailure {
+                code: rejection.code,
+                message: rejection.message,
+                retryable: false,
+            },
+        });
+        return Ok(());
+    }
     let runtime_query_port = Arc::clone(&state.runtime_query_port);
     let query_for_runtime = query.clone();
     let runtime_result =
@@ -988,8 +1000,9 @@ mod tests {
         ToolResultContract,
     };
     use freehand_ui_protocol::{
-        StaticUiCommandDispatchPort, UiAdpRequest, UiAdpResponse, UiCommand,
-        UiCommandDispatchEnvelope, UiCommandDispatchPortError, UiQueryResult,
+        StaticUiCommandDispatchPort, UiAdpRequest, UiAdpResponse, UiAgentBoardProjection,
+        UiCommand, UiCommandDispatchEnvelope, UiCommandDispatchPortError, UiMasterPollProjection,
+        UiQueryResult, UiRuntimeQueryPort, UiTaskBoardProjection, UiTaskEventInboxProjection,
     };
     use futures_util::{SinkExt, StreamExt};
     use reqwest::Client;
@@ -1042,12 +1055,26 @@ mod tests {
             initial_state: UiProtocolState,
             command_dispatch_port: Arc<dyn UiCommandDispatchPort>,
         ) -> Self {
+            Self::spawn_with_state_port_and_query(
+                initial_state,
+                command_dispatch_port,
+                Arc::new(freehand_ui_protocol::UiProtocolOnlyQueryPort),
+            )
+            .await
+        }
+
+        async fn spawn_with_state_port_and_query(
+            initial_state: UiProtocolState,
+            command_dispatch_port: Arc<dyn UiCommandDispatchPort>,
+            runtime_query_port: Arc<dyn UiRuntimeQueryPort>,
+        ) -> Self {
             let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind");
             let addr = listener.local_addr().expect("local addr");
             let protocol_state = Arc::new(Mutex::new(initial_state));
             let (shutdown_tx, shutdown_rx) = oneshot::channel();
             let protocol_state_for_task = Arc::clone(&protocol_state);
             let command_dispatch_port_for_task = Arc::clone(&command_dispatch_port);
+            let runtime_query_port_for_task = Arc::clone(&runtime_query_port);
             let task = tokio::spawn(async move {
                 let shutdown = async move {
                     let _ = shutdown_rx.await;
@@ -1056,7 +1083,7 @@ mod tests {
                     listener,
                     protocol_state_for_task,
                     command_dispatch_port_for_task,
-                    Arc::new(freehand_ui_protocol::UiProtocolOnlyQueryPort),
+                    runtime_query_port_for_task,
                     shutdown,
                 )
                 .await
@@ -1140,6 +1167,90 @@ mod tests {
         ) -> Result<UiCommandDispatchReceipt, UiCommandDispatchPortError> {
             panic!("dispatch worker panicked");
         }
+    }
+
+    #[derive(Default)]
+    struct CountingRuntimeQueryPort {
+        queries: Mutex<Vec<String>>,
+    }
+
+    impl UiRuntimeQueryPort for CountingRuntimeQueryPort {
+        fn query_runtime(
+            &self,
+            command: &UiCommand,
+        ) -> Result<Option<UiQueryResult>, UiCommandDispatchPortError> {
+            self.queries
+                .lock()
+                .expect("query log lock")
+                .push(format!("{command:?}"));
+            match command {
+                UiCommand::QueryMasterPoll { .. } => {
+                    Ok(Some(UiQueryResult::MasterPoll(UiMasterPollProjection {
+                        source_agent_id: AgentId::new("master"),
+                        generated_at: 10,
+                        source_cursor: None,
+                        next_cursor: None,
+                        persisted_cursor: None,
+                        event_inbox: UiTaskEventInboxProjection {
+                            source_agent_id: AgentId::new("master"),
+                            generated_at: 10,
+                            source_cursor: None,
+                            next_cursor: None,
+                            events: Vec::new(),
+                        },
+                        task_board: UiTaskBoardProjection {
+                            source_agent_id: AgentId::new("master"),
+                            status_filter: None,
+                            agent_filter: None,
+                            include_terminal: false,
+                            tasks: Vec::new(),
+                            agents: Vec::new(),
+                            blocked: Vec::new(),
+                            review_ready: Vec::new(),
+                            stale: Vec::new(),
+                        },
+                        agent_board: UiAgentBoardProjection {
+                            source_agent_id: AgentId::new("master"),
+                            agents: Vec::new(),
+                        },
+                        classifications: Vec::new(),
+                    })))
+                }
+                _ => Ok(None),
+            }
+        }
+    }
+
+    async fn next_adp_response(
+        socket: &mut tokio_tungstenite::WebSocketStream<
+            tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>,
+        >,
+    ) -> UiAdpResponse {
+        let message = timeout(Duration::from_secs(10), socket.next())
+            .await
+            .expect("adp response timeout")
+            .expect("adp response")
+            .expect("adp message");
+        let WsMessage::Text(text) = message else {
+            panic!("unexpected ADP message: {message:?}");
+        };
+        serde_json::from_str(&text).expect("adp response json")
+    }
+
+    async fn send_adp_request(
+        socket: &mut tokio_tungstenite::WebSocketStream<
+            tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>,
+        >,
+        request: UiAdpRequest,
+    ) {
+        socket
+            .send(WsMessage::Text(
+                serde_json::to_string(&request)
+                    .expect("adp request json")
+                    .into(),
+            ))
+            .await
+            .expect("send adp request");
     }
 
     async fn read_next_sse_event(response: &mut reqwest::Response, buffer: &mut String) -> String {
@@ -1359,6 +1470,107 @@ mod tests {
         relay.stop().await;
     }
 
+    #[tokio::test]
+    async fn adp_query_frame_rejects_mutations_before_runtime_query_port() {
+        let runtime_query_port = Arc::new(CountingRuntimeQueryPort::default());
+        let server = TestServer::spawn_with_state_port_and_query(
+            seed_webui_protocol_state(),
+            Arc::new(StaticUiCommandDispatchPort::default()),
+            runtime_query_port.clone(),
+        )
+        .await;
+        let ws_url = server.base_url.replacen("http://", "ws://", 1) + "/adp";
+        let (mut socket, _) = connect_async(ws_url).await.expect("adp connect");
+
+        send_adp_request(
+            &mut socket,
+            UiAdpRequest::Query {
+                request_id: "read-master-poll".to_owned(),
+                query: UiCommand::QueryMasterPoll {
+                    after_cursor: None,
+                    limit: Some(1),
+                    include_terminal: false,
+                    replay_from_start: false,
+                },
+            },
+        )
+        .await;
+        match next_adp_response(&mut socket).await {
+            UiAdpResponse::QueryResult { request_id, .. } => {
+                assert_eq!(request_id, "read-master-poll");
+            }
+            other => panic!("read-only query should pass ADP query route: {other:?}"),
+        }
+        assert_eq!(
+            runtime_query_port.queries.lock().expect("query log").len(),
+            1,
+            "read-only query reaches runtime query port"
+        );
+
+        send_adp_request(
+            &mut socket,
+            UiAdpRequest::Query {
+                request_id: "mutating-master-poll".to_owned(),
+                query: UiCommand::RunMasterPoll {
+                    after_cursor: None,
+                    limit: Some(1),
+                    include_terminal: false,
+                    replay_from_start: false,
+                },
+            },
+        )
+        .await;
+        match next_adp_response(&mut socket).await {
+            UiAdpResponse::Failure {
+                request_id,
+                failure,
+            } => {
+                assert_eq!(request_id, "mutating-master-poll");
+                assert_eq!(failure.code, "direct_task_mutation_forbidden");
+                assert!(!failure.retryable);
+            }
+            other => panic!("mutating query frame should be rejected: {other:?}"),
+        }
+
+        send_adp_request(
+            &mut socket,
+            UiAdpRequest::Query {
+                request_id: "execution-fact-query".to_owned(),
+                query: UiCommand::ApplyExecutionFact {
+                    fact: freehand_ui_protocol::UiExecutionFactCommand {
+                        execution_id: "exec-1".to_owned(),
+                        task_id: "task-1".to_owned(),
+                        agent_id: AgentId::new("worker-1"),
+                        turn_id: None,
+                        kind: freehand_ui_protocol::UiExecutionFactKind::Blocked {
+                            reason: "query frame must not mutate".to_owned(),
+                            evidence: Vec::new(),
+                        },
+                    },
+                },
+            },
+        )
+        .await;
+        match next_adp_response(&mut socket).await {
+            UiAdpResponse::Failure {
+                request_id,
+                failure,
+            } => {
+                assert_eq!(request_id, "execution-fact-query");
+                assert_eq!(failure.code, "direct_task_mutation_forbidden");
+            }
+            other => panic!("execution fact query frame should be rejected: {other:?}"),
+        }
+        assert_eq!(
+            runtime_query_port.queries.lock().expect("query log").len(),
+            1,
+            "mutating query frames must be rejected before runtime query port"
+        );
+
+        let _ = socket.close(None).await;
+        server.stop().await;
+    }
+
     #[test]
     fn webui_smoke_renders_shell_and_asset_routes() {
         let html = render_webui_smoke();
@@ -1369,7 +1581,8 @@ mod tests {
         assert!(html.contains("/assets/webui.css"));
         assert!(html.contains("/assets/logo.png"));
         assert!(html.contains("/assets/webui.js"));
-        assert!(html.contains("20260726-header-worker-rail"));
+        assert!(html.contains(crate::assets::WEBUI_ASSET_VERSION));
+        assert!(!html.contains("__WEBUI_ASSET_VERSION__"));
         assert!(html.contains("data-adp-endpoint=\"/adp\""));
         assert!(html.contains("data-selected-session=\"\""));
         assert!(html.contains("data-selected-turn=\"\""));
@@ -1887,7 +2100,14 @@ mod tests {
         );
         let js_body = js.text().await.expect("js body");
         assert!(js_body.contains("initializeMobileWebui"));
-        assert!(js_body.contains("/assets/webui/bootstrap.js?v=20260726-header-worker-rail"));
+        assert!(js_body.contains(&format!(
+            "/assets/webui/bootstrap.js?v={}",
+            crate::assets::WEBUI_ASSET_VERSION
+        )));
+        assert!(
+            !js_body.contains("__WEBUI_ASSET_VERSION__"),
+            "served assets must have the version token stamped"
+        );
         assert!(!js_body.contains("initializeThemeToggle"));
 
         let bootstrap = client

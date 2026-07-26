@@ -1,5 +1,5 @@
-import { renderSettingsShellSurface, renderSettingsNavigationSurface } from './view.js?v=20260726-header-worker-rail';
-import { renderDiagnosticLogRow, renderSettingsDiagnosticsSurface } from './diagnostics.js?v=20260726-header-worker-rail';
+import { renderSettingsShellSurface, renderSettingsNavigationSurface } from './view.js?v=__WEBUI_ASSET_VERSION__';
+import { renderDiagnosticLogRow, renderSettingsDiagnosticsSurface } from './diagnostics.js?v=__WEBUI_ASSET_VERSION__';
 
 export const surfaceId = 'settings';
 

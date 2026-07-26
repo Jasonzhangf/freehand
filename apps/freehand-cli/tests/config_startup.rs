@@ -1207,6 +1207,7 @@ fn spawn_adp_master_worker_foundation_mock_server_with_connections(
                                 UiExecutionFactKind::Recovering { .. } => "TaskExecutionRecovering",
                                 UiExecutionFactKind::Blocked { .. } => "TaskBlocked",
                                 UiExecutionFactKind::Interrupted { .. } => "TaskInterrupted",
+                                UiExecutionFactKind::Failed { .. } => "TaskFailed",
                                 UiExecutionFactKind::ReviewReady { .. } => "TaskReviewSubmitted",
                             };
                             events
@@ -1828,6 +1829,7 @@ fn spawn_adp_master_poll_foundation_mock_server_with_connections(
                                 UiExecutionFactKind::Recovering { .. } => "TaskExecutionRecovering",
                                 UiExecutionFactKind::Blocked { .. } => "TaskBlocked",
                                 UiExecutionFactKind::Interrupted { .. } => "TaskInterrupted",
+                                UiExecutionFactKind::Failed { .. } => "TaskFailed",
                                 UiExecutionFactKind::ReviewReady { .. } => "TaskReviewSubmitted",
                             };
                             events
@@ -1961,7 +1963,7 @@ fn spawn_adp_master_poll_foundation_mock_server_with_connections(
                         }
                         UiAdpRequest::Query {
                             request_id,
-                            query: UiCommand::RunMasterPoll { .. },
+                            query: UiCommand::QueryMasterPoll { .. },
                         } => {
                             let task = task_id.lock().expect("phase2b task lock").clone();
                             let execution =

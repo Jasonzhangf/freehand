@@ -2525,14 +2525,11 @@ fn apply_model_group_config_update(
     group.insert("enabled".to_owned(), toml::Value::Boolean(update.enabled));
     group.insert(
         "label".to_owned(),
-        toml::Value::String(
-            update
-                .label
-                .trim()
-                .is_empty()
-                .then(|| group_id.to_owned())
-                .unwrap_or_else(|| update.label.trim().to_owned()),
-        ),
+        toml::Value::String(if update.label.trim().is_empty() {
+            group_id.to_owned()
+        } else {
+            update.label.trim().to_owned()
+        }),
     );
     group.insert("primary".to_owned(), model_route_to_toml(&update.primary));
     if let Some(route) = &update.sub {

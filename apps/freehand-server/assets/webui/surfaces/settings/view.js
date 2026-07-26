@@ -1,4 +1,4 @@
-import { renderSettingsDiagnosticsSurface } from './diagnostics.js?v=20260726-header-worker-rail';
+import { renderSettingsDiagnosticsSurface } from './diagnostics.js?v=__WEBUI_ASSET_VERSION__';
 
 export function renderSettingsShellSurface(context) {
   const { state, dom } = context;

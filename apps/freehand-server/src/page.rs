@@ -9,7 +9,7 @@ pub fn render_webui_smoke() -> String {
 pub fn render_webui_smoke_for_client(client: Option<&str>) -> String {
     let initial_body_attrs = initial_layout_body_attrs(client);
     let initial_shell_attrs = initial_layout_shell_attrs(client);
-    format!(
+    crate::assets::stamp_asset_version(&format!(
         concat!(
             "<!DOCTYPE html>",
             "<html lang=\"zh-CN\">",
@@ -17,8 +17,8 @@ pub fn render_webui_smoke_for_client(client: Option<&str>) -> String {
             "<meta charset=\"UTF-8\" />",
             "<meta name=\"viewport\" content=\"width=device-width, initial-scale=1.0, viewport-fit=cover\" />",
             "<title>Freehand 网页界面</title>",
-            "<link rel=\"stylesheet\" href=\"/assets/theme.css?v=20260726-header-worker-rail\" />",
-            "<link rel=\"stylesheet\" href=\"/assets/webui.css?v=20260726-header-worker-rail\" />",
+            "<link rel=\"stylesheet\" href=\"/assets/theme.css?v=__WEBUI_ASSET_VERSION__\" />",
+            "<link rel=\"stylesheet\" href=\"/assets/webui.css?v=__WEBUI_ASSET_VERSION__\" />",
             "</head>",
             "<body class=\"theme-light\"{}>",
             "<main class=\"app-shell\" data-webui-shell=\"true\"{} ",
@@ -295,12 +295,12 @@ pub fn render_webui_smoke_for_client(client: Option<&str>) -> String {
             "</div>",
             "</section>",
             "</main>",
-            "<script type=\"module\" src=\"/assets/webui.js?v=20260726-header-worker-rail\"></script>",
+            "<script type=\"module\" src=\"/assets/webui.js?v=__WEBUI_ASSET_VERSION__\"></script>",
             "</body>",
             "</html>"
         ),
         initial_body_attrs, initial_shell_attrs
-    )
+    ))
 }
 
 fn initial_layout_body_attrs(client: Option<&str>) -> &'static str {

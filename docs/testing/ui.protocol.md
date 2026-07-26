@@ -31,7 +31,7 @@
   - Phase 1 TaskBoard/AgentBoard/AgentLifecycle ADP query frames use protocol-owned commands and UI-safe DTOs while runtime owner code supplies owner truth; task DTOs carry parent/observing session scope, canonical Worker session id, and task-owner `created_at`
   - task mutation ADP command frames use protocol-owned command DTOs while runtime/task owners perform create/create_agent/assign/claim/review/reject/approve/close mutation and persistence
   - Phase 1 ApplyExecutionFact/RunSchedulerTick ADP command frames use protocol-owned command DTOs while runtime/task owners perform execution-fact sync and scheduler fact emission
-  - Phase 2B QueryEventInbox/RunMasterPoll ADP frames use protocol-owned DTOs
+  - Phase 2B QueryEventInbox/RunMasterPoll/QueryMasterPoll ADP frames use protocol-owned DTOs
     while runtime/task owners supply event rows, cursor truth, and
     classifications
   - RunMasterPoll cursor mode is explicit: `replay_from_start=true` is allowed
@@ -272,3 +272,5 @@
     `cargo test -p freehand-ui-protocol tool_registry -- --nocapture`
   - Search dashboard query/result DTOs are landed and regression-locked by
     `cargo test -p freehand-ui-protocol session_search -- --nocapture --test-threads=1`
+
+  - `accept_query_ingress` accepts QueryMasterPoll and rejects RunMasterPoll/ApplyExecutionFact/SubmitUserInput on the ADP query route with `direct_task_mutation_forbidden`

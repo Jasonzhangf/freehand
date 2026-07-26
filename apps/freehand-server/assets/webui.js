@@ -1,3 +1,3 @@
-import { initializeMobileWebui } from "/assets/webui/bootstrap.js?v=20260726-header-worker-rail";
+import { initializeMobileWebui } from "/assets/webui/bootstrap.js?v=__WEBUI_ASSET_VERSION__";
 
 initializeMobileWebui();

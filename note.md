@@ -8720,3 +8720,11 @@ Current real root cause split:
 - Owner: incomplete authoritative + poisoned ledger falls back to partial authoritative with integrity warning.
 - Proof: `cargo test -p freehand-runtime -- --test-threads=1` => 255 ok; freehand-task 65 ok; xtask 50 ok; mainlines/gates ok; clippy reason+runtime -D warnings ok.
 - Removed architecture Gap 7 after package-level green. Gap 5/6/8 remain.
+
+## 2026-07-27 03:09 Phase 3 ADP query + asset version partial closeout
+- Wired server `handle_adp_query` to `accept_query_ingress`.
+- Added server WebSocket test `adp_query_frame_rejects_mutations_before_runtime_query_port`.
+- CLI QueryMasterPoll sample/verify path + Failed fact mock arm fixed.
+- Asset modules/page use `__WEBUI_ASSET_VERSION__` stamp; online scripts aligned to current WEBUI_ASSET_VERSION.
+- Gap 6/8 step-1 status updated; Gap 5 remains open.
+- Proof: freehand-ui-protocol 75 ok; freehand-server 16 ok; freehand-cli config_startup 27 ok.
