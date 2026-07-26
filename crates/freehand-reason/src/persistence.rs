@@ -336,7 +336,15 @@ impl ReasonPersistence {
         &self,
         session_id: &SessionId,
     ) -> Result<RestoredReasonSession, ReasonPersistenceError> {
-        let ledger_rows = self.load_reason_ledger(session_id)?;
+        let ledger_rows = match self.load_reason_ledger(session_id) {
+            Ok(rows) => rows,
+            Err(ReasonPersistenceError::LedgerSequenceGap { expected, actual }) => {
+                return self
+                    .load_authoritative_state(session_id)?
+                    .ok_or(ReasonPersistenceError::LedgerSequenceGap { expected, actual });
+            }
+            Err(error) => return Err(error),
+        };
         match self.load_authoritative_state(session_id) {
             Ok(Some(mut restored)) => {
                 let last_applied_seq = restored.cursor.last_applied_reason_seq;
@@ -383,7 +391,11 @@ impl ReasonPersistence {
                 .iter()
                 .any(|marker| marker.target_logical_turn_key == key)
         };
-        let ledger_rows = self.load_reason_ledger(session_id)?;
+        let ledger_rows = match self.load_reason_ledger(session_id) {
+            Ok(rows) => rows,
+            Err(ReasonPersistenceError::LedgerSequenceGap { .. }) => Vec::new(),
+            Err(error) => return Err(error),
+        };
         if !ledger_rows.is_empty() {
             return Ok(ledger_rows
                 .into_iter()
@@ -395,7 +407,13 @@ impl ReasonPersistence {
                 .collect());
         }
 
-        let restored = self.restore(session_id)?;
+        let restored = if self.reason_ledger_path(session_id).is_file() {
+            self.load_authoritative_state(session_id)?.ok_or_else(|| {
+                ReasonPersistenceError::MissingRecoveryTruth(session_id.as_str().to_owned())
+            })?
+        } else {
+            self.restore(session_id)?
+        };
         let mut turns = restored.closed_turns;
         if let Some(active) = restored.active_turn {
             turns.push(active.turn);
@@ -520,8 +538,21 @@ impl ReasonPersistence {
                 return Ok(authoritative_turns);
             }
 
-            let ledger_turns =
-                ui_turn_snapshots_from_ledger_rows(self.load_reason_ledger(session_id)?);
+            let ledger_rows = match self.load_reason_ledger(session_id) {
+                Ok(rows) => rows,
+                Err(ReasonPersistenceError::LedgerSequenceGap { expected, actual }) => {
+                    if !has_active_authoritative_turn && !authoritative_turns.is_empty() {
+                        annotate_incomplete_authoritative_ui_restore(
+                            &mut authoritative_turns,
+                            &self.agent_id,
+                        );
+                        return Ok(authoritative_turns);
+                    }
+                    return Err(ReasonPersistenceError::LedgerSequenceGap { expected, actual });
+                }
+                Err(error) => return Err(error),
+            };
+            let ledger_turns = ui_turn_snapshots_from_ledger_rows(ledger_rows);
             if ledger_turns.is_empty() {
                 if !has_active_authoritative_turn && !authoritative_turns.is_empty() {
                     annotate_incomplete_authoritative_ui_restore(
@@ -544,6 +575,71 @@ impl ReasonPersistence {
             turns = ui_turn_snapshots_from_restored(restored);
         }
         Ok(turns)
+    }
+
+    pub fn raw_authoritative_turn_snapshots(
+        &self,
+        session_id: &SessionId,
+    ) -> Result<Vec<TurnRecord>, ReasonPersistenceError> {
+        let history_exists = self.session_history_path(session_id).is_file();
+        let cursor_exists = self.cursor_path(session_id).is_file();
+        let active_exists = self.active_turn_path(session_id).is_file();
+        let turns_exist = self.turns_dir(session_id).is_dir();
+        if !history_exists && !cursor_exists && !active_exists && !turns_exist {
+            return Err(ReasonPersistenceError::MissingRecoveryTruth(
+                session_id.as_str().to_owned(),
+            ));
+        }
+        if !history_exists || !cursor_exists {
+            return Err(ReasonPersistenceError::InvalidCursorCoherence(
+                "authoritative snapshots require both session-history and cursor files".to_owned(),
+            ));
+        }
+        let mut turns = self.load_closed_turns(session_id)?;
+        if active_exists {
+            let path = self.active_turn_path(session_id);
+            let mut snapshot: ActiveTurnSnapshot = read_json_file(&path)?;
+            ensure_turn_created_at(&mut snapshot.turn, file_modified_unix_seconds(&path)?);
+            turns.push(snapshot.turn);
+        }
+        turns.sort_by(|left, right| left.request.turn_id.cmp(&right.request.turn_id));
+        Ok(turns)
+    }
+
+    pub fn reserved_authoritative_turn_ids(
+        &self,
+        session_id: &SessionId,
+    ) -> Result<Vec<TurnId>, ReasonPersistenceError> {
+        let history_exists = self.session_history_path(session_id).is_file();
+        let cursor_exists = self.cursor_path(session_id).is_file();
+        let active_exists = self.active_turn_path(session_id).is_file();
+        let turns_exist = self.turns_dir(session_id).is_dir();
+        if !history_exists && !cursor_exists && !active_exists && !turns_exist {
+            return Err(ReasonPersistenceError::MissingRecoveryTruth(
+                session_id.as_str().to_owned(),
+            ));
+        }
+        if !history_exists || !cursor_exists {
+            return Err(ReasonPersistenceError::InvalidCursorCoherence(
+                "authoritative snapshots require both session-history and cursor files".to_owned(),
+            ));
+        }
+        let mut turn_ids = BTreeSet::<TurnId>::new();
+        let cursor: ReasonPersistenceCursor = read_json_file(&self.cursor_path(session_id))?;
+        if let Some(turn_id) = cursor.latest_turn_id {
+            turn_ids.insert(turn_id);
+        }
+        if let Some(turn_id) = cursor.active_turn_id {
+            turn_ids.insert(turn_id);
+        }
+        if active_exists {
+            let snapshot: ActiveTurnSnapshot = read_json_file(&self.active_turn_path(session_id))?;
+            turn_ids.insert(snapshot.turn.request.turn_id);
+        }
+        for turn in self.load_closed_turns(session_id)? {
+            turn_ids.insert(turn.request.turn_id);
+        }
+        Ok(turn_ids.into_iter().collect())
     }
 
     pub fn restore_authoritative_turn_snapshots_for_ui(
@@ -708,11 +804,8 @@ impl ReasonPersistence {
         if let Some(turn) = closed_turn {
             upsert_closed_turn(&mut closed_turns, turn);
         }
-        if let Some(marker) = rollback_marker {
-            closed_turns.retain(|turn| {
-                logical_turn_key(&turn.request.turn_id) != marker.target_logical_turn_key
-            });
-        }
+        let rollback_markers = self.load_session_rollback_markers(history.session_id())?;
+        apply_rollback_markers_to_closed_turns(&mut closed_turns, &rollback_markers);
 
         let mut restored_history = history.clone();
         filter_history_context_to_effective_turns(
@@ -1500,7 +1593,7 @@ fn annotate_incomplete_authoritative_ui_restore(turns: &mut [TurnRecord], agent_
             code: "reason_persistence_partial_ui_restore".to_owned(),
             class: ErrorClass::Contract,
             recovery: RecoveryPolicy::Unrecoverable,
-            message: "历史会话轮次不完整：权威 turn 快照缺少早期修复轮，reason ledger 为空；已显示仍存在的权威快照，但不能声明该 transcript 为完整轮次。"
+            message: "历史会话轮次不完整：权威 turn 快照缺少早期修复轮，reason ledger 为空或保留段无法回填；已显示仍存在的权威快照，但不能声明该 transcript 为完整轮次。"
                 .to_owned(),
         },
     });
@@ -2061,6 +2154,64 @@ mod tests {
     }
 
     #[test]
+    fn restore_uses_authoritative_state_when_retained_ledger_starts_after_one() {
+        let runtime_home = temp_runtime_home();
+        let coordinator = ReasonPersistence::new(&runtime_home, AgentId::new("agent-1"));
+        let mut history = session_history();
+        let mut turn = started_turn_with_id(&mut history, "runtime-turn-1-r2", "trace-1-r2");
+        turn.terminal_event = Some(freehand_contracts::ReasonResp03TerminalEvent {
+            session_id: SessionId::new("session-1"),
+            turn_id: TurnId::new("runtime-turn-1-r2"),
+            trace_id: TraceId::new("trace-1-r2"),
+            feature_id: FeatureId::new("reason.persistence"),
+            agent_id: AgentId::new("agent-1"),
+            status: TerminalStatus::ToolPending,
+            summary: "authoritative retained-offset restore".to_owned(),
+        });
+        coordinator
+            .record_turn_started(&history, &turn, 0)
+            .expect("persist retained-offset authoritative start");
+        coordinator
+            .record_turn_closed(&history, &turn, 0)
+            .expect("persist retained-offset authoritative close");
+
+        let retained_row = ReasonLedgerRow {
+            schema_version: PERSISTENCE_SCHEMA_VERSION,
+            seq: 209,
+            created_at: 123,
+            session_id: history.session_id().clone(),
+            turn_id: Some(TurnId::new("runtime-turn-1-r2")),
+            cursor_after: ReasonPersistenceCursor {
+                schema_version: PERSISTENCE_SCHEMA_VERSION,
+                last_applied_reason_seq: 209,
+                latest_turn_id: Some(TurnId::new("runtime-turn-1-r2")),
+                active_turn_id: None,
+            },
+            session_history: history.clone(),
+            payload: ReasonLedgerPayload::RewriteStateUpdated,
+        };
+        fs::write(
+            coordinator.reason_ledger_path(history.session_id()),
+            format!(
+                "{}\n",
+                serde_json::to_string(&retained_row).expect("retained row json")
+            ),
+        )
+        .expect("replace ledger with retained offset row");
+
+        let restored = coordinator
+            .restore(history.session_id())
+            .expect("authoritative snapshot survives retained-offset ledger");
+        assert_eq!(restored.closed_turns.len(), 1);
+        assert_eq!(
+            restored.closed_turns[0].request.turn_id,
+            TurnId::new("runtime-turn-1-r2")
+        );
+
+        fs::remove_dir_all(runtime_home).expect("cleanup");
+    }
+
+    #[test]
     fn restore_rejects_duplicate_reason_ledger_sequence_explicitly() {
         let runtime_home = temp_runtime_home();
         let coordinator = ReasonPersistence::new(&runtime_home, AgentId::new("agent-1"));
@@ -2583,6 +2734,77 @@ mod tests {
     }
 
     #[test]
+    fn rollback_marker_does_not_resurrect_raw_turns_when_later_turn_is_persisted() {
+        let runtime_home = temp_runtime_home();
+        let coordinator = ReasonPersistence::new(&runtime_home, AgentId::new("agent-1"));
+        let mut history = session_history();
+        for (turn_id, trace_id, summary) in [
+            ("runtime-turn-1", "trace-1", "first done"),
+            ("runtime-turn-2", "trace-2", "second rolled back"),
+        ] {
+            let mut turn = started_turn_with_id(&mut history, turn_id, trace_id);
+            turn.terminal_event = Some(freehand_contracts::ReasonResp03TerminalEvent {
+                session_id: history.session_id().clone(),
+                turn_id: TurnId::new(turn_id),
+                trace_id: TraceId::new(trace_id),
+                feature_id: FeatureId::new("reason.persistence"),
+                agent_id: AgentId::new("agent-1"),
+                status: TerminalStatus::Success,
+                summary: summary.to_owned(),
+            });
+            coordinator
+                .record_turn_closed(&history, &turn, 0)
+                .expect("persist closed turn");
+        }
+        coordinator
+            .rollback_latest_session_turn(history.session_id())
+            .expect("rollback second turn");
+
+        let mut third = started_turn_with_id(&mut history, "runtime-turn-3", "trace-3");
+        third.terminal_event = Some(freehand_contracts::ReasonResp03TerminalEvent {
+            session_id: history.session_id().clone(),
+            turn_id: TurnId::new("runtime-turn-3"),
+            trace_id: TraceId::new("trace-3"),
+            feature_id: FeatureId::new("reason.persistence"),
+            agent_id: AgentId::new("agent-1"),
+            status: TerminalStatus::Success,
+            summary: "third after rollback".to_owned(),
+        });
+        coordinator
+            .record_turn_closed(&history, &third, 0)
+            .expect("persist third after rollback");
+
+        let sidecar: PersistedSessionView =
+            read_json_file(&coordinator.ui_sidecar_path(history.session_id()))
+                .expect("read sidecar");
+        assert_eq!(
+            sidecar
+                .projections
+                .iter()
+                .map(|projection| projection.turn_id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["runtime-turn-1", "runtime-turn-3"]
+        );
+        assert!(
+            coordinator
+                .closed_turn_path(history.session_id(), &TurnId::new("runtime-turn-2"))
+                .is_file(),
+            "raw rolled-back turn file remains available for audit"
+        );
+        assert_eq!(
+            coordinator
+                .reserved_authoritative_turn_ids(history.session_id())
+                .expect("reserved turn ids")
+                .into_iter()
+                .map(|turn_id| turn_id.as_str().to_owned())
+                .collect::<Vec<_>>(),
+            vec!["runtime-turn-1", "runtime-turn-2", "runtime-turn-3"]
+        );
+
+        fs::remove_dir_all(runtime_home).expect("cleanup");
+    }
+
+    #[test]
     fn rollback_filters_model_visible_history_to_effective_turn_truth() {
         let runtime_home = temp_runtime_home();
         let coordinator = ReasonPersistence::new(&runtime_home, AgentId::new("agent-1"));
@@ -2884,6 +3106,143 @@ mod tests {
     }
 
     #[test]
+    fn ui_restore_returns_inactive_partial_authoritative_snapshots_when_retained_ledger_starts_after_one()
+     {
+        let runtime_home = temp_runtime_home();
+        let coordinator = ReasonPersistence::new(&runtime_home, AgentId::new("agent-1"));
+        let mut history = session_history();
+
+        let first = started_turn_with_id(&mut history, "runtime-turn-1", "trace-1");
+        coordinator
+            .record_turn_started(&history, &first, 0)
+            .expect("persist missing first round active snapshot");
+
+        let mut continuation =
+            started_turn_with_id(&mut history, "runtime-turn-1-r2", "trace-1-r2");
+        continuation.terminal_event = Some(freehand_contracts::ReasonResp03TerminalEvent {
+            session_id: SessionId::new("session-1"),
+            turn_id: TurnId::new("runtime-turn-1-r2"),
+            trace_id: TraceId::new("trace-1-r2"),
+            feature_id: FeatureId::new("reason.persistence"),
+            agent_id: AgentId::new("agent-1"),
+            status: TerminalStatus::ToolPending,
+            summary: "Waiting for retained-offset ledger backfill".to_owned(),
+        });
+        coordinator
+            .record_turn_started(&history, &continuation, 0)
+            .expect("persist continuation active snapshot");
+        coordinator
+            .record_turn_closed(&history, &continuation, 0)
+            .expect("persist only continuation as inactive authoritative truth");
+
+        let retained_row = ReasonLedgerRow {
+            schema_version: PERSISTENCE_SCHEMA_VERSION,
+            seq: 209,
+            created_at: 123,
+            session_id: history.session_id().clone(),
+            turn_id: None,
+            cursor_after: ReasonPersistenceCursor {
+                schema_version: PERSISTENCE_SCHEMA_VERSION,
+                last_applied_reason_seq: 209,
+                latest_turn_id: Some(TurnId::new("runtime-turn-1-r2")),
+                active_turn_id: None,
+            },
+            session_history: history.clone(),
+            payload: ReasonLedgerPayload::RewriteStateUpdated,
+        };
+        fs::write(
+            coordinator.reason_ledger_path(history.session_id()),
+            format!(
+                "{}\n",
+                serde_json::to_string(&retained_row).expect("retained row json")
+            ),
+        )
+        .expect("replace ledger with retained offset row");
+
+        let ui_turns = coordinator
+            .restore_turn_snapshots_for_ui(history.session_id())
+            .expect("inactive partial authoritative restore survives retained-offset ledger");
+        assert_eq!(
+            ui_turns
+                .iter()
+                .map(|turn| turn.request.turn_id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["runtime-turn-1-r2"]
+        );
+        assert!(
+            ui_turns[0].error_events.iter().any(|event| {
+                event.error.code == "reason_persistence_partial_ui_restore"
+                    && event.error.message.contains("历史会话轮次不完整")
+            }),
+            "retained-offset restore must carry an explicit partial transcript warning"
+        );
+
+        fs::remove_dir_all(runtime_home).expect("cleanup");
+    }
+
+    #[test]
+    fn turn_start_restore_uses_authoritative_snapshots_when_retained_ledger_starts_after_one() {
+        let runtime_home = temp_runtime_home();
+        let coordinator = ReasonPersistence::new(&runtime_home, AgentId::new("agent-1"));
+        let mut history = session_history();
+
+        let mut continuation =
+            started_turn_with_id(&mut history, "runtime-turn-1-r2", "trace-1-r2");
+        continuation.terminal_event = Some(freehand_contracts::ReasonResp03TerminalEvent {
+            session_id: SessionId::new("session-1"),
+            turn_id: TurnId::new("runtime-turn-1-r2"),
+            trace_id: TraceId::new("trace-1-r2"),
+            feature_id: FeatureId::new("reason.persistence"),
+            agent_id: AgentId::new("agent-1"),
+            status: TerminalStatus::ToolPending,
+            summary: "retained offset parent lifecycle checkpoint".to_owned(),
+        });
+        coordinator
+            .record_turn_started(&history, &continuation, 0)
+            .expect("persist continuation start");
+        coordinator
+            .record_turn_closed(&history, &continuation, 0)
+            .expect("persist continuation close");
+
+        let retained_row = ReasonLedgerRow {
+            schema_version: PERSISTENCE_SCHEMA_VERSION,
+            seq: 209,
+            created_at: 123,
+            session_id: history.session_id().clone(),
+            turn_id: None,
+            cursor_after: ReasonPersistenceCursor {
+                schema_version: PERSISTENCE_SCHEMA_VERSION,
+                last_applied_reason_seq: 209,
+                latest_turn_id: Some(TurnId::new("runtime-turn-1-r2")),
+                active_turn_id: None,
+            },
+            session_history: history.clone(),
+            payload: ReasonLedgerPayload::RewriteStateUpdated,
+        };
+        fs::write(
+            coordinator.reason_ledger_path(history.session_id()),
+            format!(
+                "{}\n",
+                serde_json::to_string(&retained_row).expect("retained row json")
+            ),
+        )
+        .expect("replace ledger with retained offset row");
+
+        let turns = coordinator
+            .restore_turn_start_snapshots(history.session_id())
+            .expect("retained-offset turn-start restore uses authoritative snapshots");
+        assert_eq!(
+            turns
+                .iter()
+                .map(|turn| turn.request.turn_id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["runtime-turn-1-r2"]
+        );
+
+        fs::remove_dir_all(runtime_home).expect("cleanup");
+    }
+
+    #[test]
     fn ui_restore_keeps_active_incomplete_authoritative_snapshot_as_hard_error_without_ledger() {
         let runtime_home = temp_runtime_home();
         let coordinator = ReasonPersistence::new(&runtime_home, AgentId::new("agent-1"));
@@ -2910,6 +3269,60 @@ mod tests {
                 "authoritative UI snapshots are missing earlier round truth and reason ledger is empty"
                     .to_owned(),
             )
+        );
+
+        fs::remove_dir_all(runtime_home).expect("cleanup");
+    }
+
+    #[test]
+    fn ui_restore_keeps_active_incomplete_authoritative_snapshot_as_hard_error_with_retained_ledger()
+     {
+        let runtime_home = temp_runtime_home();
+        let coordinator = ReasonPersistence::new(&runtime_home, AgentId::new("agent-1"));
+        let mut history = session_history();
+
+        let first = started_turn_with_id(&mut history, "runtime-turn-1", "trace-1");
+        coordinator
+            .record_turn_started(&history, &first, 0)
+            .expect("persist first round active snapshot");
+        let continuation = started_turn_with_id(&mut history, "runtime-turn-1-r2", "trace-1-r2");
+        coordinator
+            .record_turn_started(&history, &continuation, 0)
+            .expect("persist incomplete active continuation snapshot");
+
+        let retained_row = ReasonLedgerRow {
+            schema_version: PERSISTENCE_SCHEMA_VERSION,
+            seq: 209,
+            created_at: 123,
+            session_id: history.session_id().clone(),
+            turn_id: None,
+            cursor_after: ReasonPersistenceCursor {
+                schema_version: PERSISTENCE_SCHEMA_VERSION,
+                last_applied_reason_seq: 209,
+                latest_turn_id: Some(TurnId::new("runtime-turn-1-r2")),
+                active_turn_id: Some(TurnId::new("runtime-turn-1-r2")),
+            },
+            session_history: history.clone(),
+            payload: ReasonLedgerPayload::RewriteStateUpdated,
+        };
+        fs::write(
+            coordinator.reason_ledger_path(history.session_id()),
+            format!(
+                "{}\n",
+                serde_json::to_string(&retained_row).expect("retained row json")
+            ),
+        )
+        .expect("replace ledger with retained offset row");
+
+        let err = coordinator
+            .restore_turn_snapshots_for_ui(history.session_id())
+            .expect_err("active incomplete retained-offset ledger must stay a hard error");
+        assert_eq!(
+            err,
+            ReasonPersistenceError::LedgerSequenceGap {
+                expected: 1,
+                actual: 209,
+            }
         );
 
         fs::remove_dir_all(runtime_home).expect("cleanup");

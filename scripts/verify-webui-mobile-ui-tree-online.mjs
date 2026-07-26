@@ -10,7 +10,7 @@ const baseUrl = normalizedBaseUrl(process.env.FREEHAND_WEBUI_BASE_URL || 'http:/
 const adpUrl = process.env.FREEHAND_WEBUI_ADP_URL || adpUrlFromBaseUrl(baseUrl);
 const runId = `mobile-ui-tree-phase1-${new Date().toISOString().replace(/[-:.]/g, '').slice(0, 15)}-${process.pid}`;
 const artifactDir = path.join(process.cwd(), 'artifacts', 'webui-online', runId);
-const assetVersion = '20260726-header-worker-rail';
+const assetVersion = '20260726-stale-lifecycle-reconcile';
 const multiSelectSessionIds = [
   'webui-home-multiselect-fixed-a',
   'webui-home-multiselect-fixed-b',
@@ -726,7 +726,7 @@ function collectPhaseOneState() {
     shellRoute: shell?.dataset.webuiRoute || '',
     routeSession: shell?.dataset.routeSession || '',
     selectedSession: shell?.dataset.selectedSession || '',
-    assetVersionSeen: html.includes('20260726-header-worker-rail'),
+    assetVersionSeen: html.includes('20260726-stale-lifecycle-reconcile'),
     bodyText,
     bodyWidth: document.body.scrollWidth,
     docWidth: document.documentElement.scrollWidth,

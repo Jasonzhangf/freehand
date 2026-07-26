@@ -628,3 +628,17 @@ Use this checklist for both new features and bug fixes:
 - runtime/debug evidence path still valid
 
 If any line is not true, do not claim completion.
+
+## Task Phase 1 Lifecycle Closeout Rule
+
+- For `task.orchestration` concurrency fixes, do not treat a query projection as an owner recovery point. Use `TaskRuntime::boot_read_only` for ADP/query/projection paths; keep `TaskRuntime::boot` for master/worker runner ownership recovery.
+- Task ledger writes must enter `TaskStore::append_event_and_snapshot`: ledger append, snapshot atomic write, index rewrite, and disk-based seq allocation stay inside the same task-ledger flock.
+- Lease-expiry recovery must carry the stale execution generation (`fencing_token` / `interrupted_execution_id`) on `TaskInterrupted`, clear active execution truth, and reject late ExecutionFacts from the stale generation.
+- Phase 1 closeout is not proven by focused task tests alone. Before removing Gap 7 or starting worker pooling, require full `cargo test -p freehand-runtime -- --test-threads=1` or an owner-documented separation of unrelated runtime failures.
+
+## Stale Lifecycle Recovery Rule
+
+- When a legacy session is stuck on `ToolPending` after restart, check three owner truths before UI claims: effective reason transcript, raw/rolled-back authoritative turn files, and TaskBoard/Timer owner state. Do not delete the session or trust a cached completed-parent marker by itself.
+- Retained-offset reason ledgers (`expected 1, got N`) are hard errors only when authoritative snapshot truth is absent. If authoritative turn snapshots plus rollback markers exist, lifecycle/bootstrap paths must use that owner truth and keep raw rolled-back turn ids reserved for non-colliding follow-up ids.
+- A parent repair round (`runtime-turn-N-rM`) may still carry the original user objective in the `freehand_runtime/original_task` context segment. Master parent evaluation must use that owner context instead of requiring `round == 1` only.
+- WebUI `ToolPending` is lifecycle-running only with waiting tool/model activity or owner-projected open task/timer truth. No waiting activity plus no open task must render as user-choice wait, not stale `等待生命周期`, and refresh-error exits must clear selected session state.

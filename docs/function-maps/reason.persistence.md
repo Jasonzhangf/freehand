@@ -64,7 +64,7 @@
   reason-ledger `TurnStarted` rows, respecting rollback markers, so owner
   workflows can recover first-round user intent even when effective UI
   snapshots have advanced to later continuation or repair rounds
-- reason persistence returns derived UI restore snapshots from authoritative closed/active turn files plus rollback-marker sidecar truth when those snapshots contain every observed round; old turn snapshots with missing `created_at` are backfilled from durable file metadata; incomplete multi-round authoritative snapshots are backfilled from reason-ledger rows only on selected transcript query paths; if a legacy selected transcript has surviving inactive authoritative snapshots but the reason ledger is empty, restore returns those surviving snapshots with an explicit `reason_persistence_partial_ui_restore` integrity warning on the latest turn instead of claiming a complete transcript
+- reason persistence returns derived UI restore snapshots from authoritative closed/active turn files plus rollback-marker sidecar truth when those snapshots contain every observed round; old turn snapshots with missing `created_at` are backfilled from durable file metadata; incomplete multi-round authoritative snapshots are backfilled from reason-ledger rows only on selected transcript query paths; if a legacy selected transcript has surviving inactive authoritative snapshots but the reason ledger is empty or retained at a later sequence offset that cannot backfill missing rounds, restore returns those surviving snapshots with an explicit `reason_persistence_partial_ui_restore` integrity warning on the latest turn instead of claiming a complete transcript
 - reason persistence also exposes an authoritative-only UI snapshot restore path for daemon bootstrap and background lifecycle polling, so global startup and Master parent-workset reconciliation do not replay every historical reason ledger
 - closed-turn authoritative restore consumes only `*.json` turn snapshots; leftover atomic temp files such as `*.tmp-*` are write artifacts, not session truth, and must not wedge daemon bootstrap
 - UI restore preserves one latest snapshot per exact turn id, so `runtime-turn-N` / `runtime-turn-N-rM` provider/tool/repair rounds remain chronological UI cards; only append-only rollback markers remove every round that belongs to the rolled-back logical turn key
@@ -72,7 +72,7 @@
 - derived UI and index sidecars are regenerated from authoritative reason truth after durable writes complete
 - persisted session index reads expose only derived index rows and session metadata sidecars for UI list/search projection; worker task transcripts are not promoted to top-level persisted user sessions by this owner operation
 - session display metadata (`title`, `archived`) is persisted as reason-owned sidecar truth for multi-UI session management; it is separate from provider-visible session history and turn transcript truth
-- session rollback is persisted as an append-only reason-ledger marker; effective transcript restore filters rolled-back logical turns while raw closed-turn files remain on disk for audit
+- session rollback is persisted as an append-only reason-ledger marker; effective transcript restore filters rolled-back logical turns while raw closed-turn files remain on disk for audit; later durable writes rebuild derived sidecars from rollback-filtered effective turns while raw rolled-back files remain reserved for audit and turn-id allocation
 
 ## Error Mainline
 
@@ -83,7 +83,7 @@
 - stale duplicate ledger rows are recoverable only when a later authoritative row with the expected next sequence exists; otherwise duplicate or regressed sequence numbers still fail explicitly
 - provider raw payload availability alone must not mask missing authoritative reason truth
 - UI sidecar presence alone must not be treated as session-truth recovery evidence
-- active incomplete authoritative UI snapshots with an empty reason ledger remain an explicit restore error; only inactive surviving snapshots may be displayed, and only with a visible partial-transcript warning
+- active incomplete authoritative UI snapshots with an empty or retained-offset reason ledger remain an explicit restore error; only inactive surviving snapshots may be displayed, and only with a visible partial-transcript warning
 - session metadata mutations for unknown sessions fail explicitly unless they are creating a new metadata-only session
 - deleting a session through UI protocol is a non-destructive archive operation until a physical deletion design is explicitly approved
 - rollback with no eligible closed turn or with an active turn fails explicitly; it must not delete turn files or silently mutate UI-local state
@@ -122,9 +122,9 @@
   - why shared: all persistence file writes must use one atomic replacement path instead of ad hoc writes
 - `annotate_incomplete_authoritative_ui_restore`
   - owner: `crates/freehand-reason/src/persistence.rs`
-  - purpose: add an explicit integrity warning to the latest inactive surviving authoritative UI snapshot when earlier round truth is missing and the reason ledger is empty
+  - purpose: add an explicit integrity warning to the latest inactive surviving authoritative UI snapshot when earlier round truth is missing and the reason ledger is empty or retained at an unusable sequence offset
   - allowed callers: selected-session UI restore path only
-  - related tests: `ui_restore_returns_inactive_partial_authoritative_snapshots_with_integrity_warning`, `ui_restore_keeps_active_incomplete_authoritative_snapshot_as_hard_error_without_ledger`
+  - related tests: `ui_restore_returns_inactive_partial_authoritative_snapshots_with_integrity_warning`, `ui_restore_returns_inactive_partial_authoritative_snapshots_when_retained_ledger_starts_after_one`, `ui_restore_keeps_active_incomplete_authoritative_snapshot_as_hard_error_without_ledger`, `ui_restore_keeps_active_incomplete_authoritative_snapshot_as_hard_error_with_retained_ledger`
   - why shared: partial transcript visibility must stay a reason-owned contract warning, not a WebUI/browser guess or provider-raw recovery path
 - `ReasonPersistence::create_session_metadata` / `rename_session` / `archive_session` / `restore_session`
   - owner: `crates/freehand-reason/src/persistence.rs`
@@ -136,14 +136,20 @@
   - owner: `crates/freehand-reason/src/persistence.rs`
   - purpose: append a rollback marker for the latest effective logical user turn and rebuild effective transcript without deleting raw turn truth
   - allowed callers: runtime UI command dispatch owner
-  - related tests: append-only rollback marker plus effective transcript filtering and raw file retention
+  - related tests: append-only rollback marker plus effective transcript filtering, raw file retention, and later sidecar non-resurrection
   - why shared: rollback truth must be durable and shared across WebUI/CLI/daemon instead of being a client-local transcript edit
 - `ReasonPersistence::restore_turn_start_snapshots`
   - owner: `crates/freehand-reason/src/persistence.rs`
   - purpose: expose authoritative turn-start request truth without UI/effective-round coalescing, while still honoring rollback markers
   - allowed callers: runtime parent-goal evaluation and owner-crate tests
-  - related tests: `restore_turn_start_snapshots_preserves_original_round_and_respects_rollback`, `production_master_runner_recovers_parent_goal_from_first_round_turn_start_ledger`
+  - related tests: `restore_turn_start_snapshots_preserves_original_round_and_respects_rollback`, `turn_start_restore_uses_authoritative_snapshots_when_retained_ledger_starts_after_one`, `production_master_runner_recovers_parent_goal_from_first_round_turn_start_ledger`
   - why shared: background lifecycle owners sometimes need first-round user intent, not the latest repaired UI row; parsing reason ledgers outside the persistence owner would duplicate recovery semantics
+- `ReasonPersistence::raw_authoritative_turn_snapshots` / `ReasonPersistence::reserved_authoritative_turn_ids`
+  - owner: `crates/freehand-reason/src/persistence.rs`
+  - purpose: expose raw authoritative turn files and reserved turn ids, including rolled-back audit files, without making them effective transcript truth
+  - allowed callers: runtime parent-workset turn allocator/idempotency repair and owner-crate tests
+  - related tests: `rollback_marker_does_not_resurrect_raw_turns_when_later_turn_is_persisted`, `production_master_runner_rechecks_stale_blocked_parent_marker_after_rollback`
+  - why shared: runtime must allocate a fresh follow-up turn after rollback without parsing reason-owner directories or resurrecting rolled-back transcript truth
 - `filter_history_context_to_effective_turns`
   - owner: `crates/freehand-reason/src/persistence.rs`
   - purpose: remove rolled-back or orphan `historical_turn:*`
@@ -178,7 +184,8 @@
 | 14 | `ReasonPersistence::restore_authoritative_turn_snapshots_for_ui` | `crates/freehand-reason/src/persistence.rs` | restore derived UI snapshots from authoritative closed/active `*.json` turn files plus rollback-marker sidecar truth without replaying reason ledgers, preserving exact round ids that are present on disk and ignoring leftover atomic temp files | authoritative turn snapshots + rollback markers | lightweight exact-per-file UI snapshots with created-time truth | runtime UI bootstrap + Master parent-workset reconciliation | persistence owner | bound |
 | 15 | `ReasonPersistence::create_session_metadata` / `rename_session` / `archive_session` / `restore_session` | `crates/freehand-reason/src/persistence.rs` | persist session display metadata sidecar mutations for shared UI CRUD | session id + title/archive intent | updated session metadata sidecar | runtime UI command dispatch | persistence owner | bound |
 | 16 | `ReasonPersistence::rollback_latest_session_turn` | `crates/freehand-reason/src/persistence.rs` | append latest-logical-turn rollback marker and update effective cursor/projection state without deleting raw turn files | session id | rollback marker with target turn, previous effective head, and restored user text | runtime UI command dispatch | persistence owner | bound |
-| 17 | `ReasonPersistence::restore_turn_snapshots_for_ui` | `crates/freehand-reason/src/persistence.rs` | restore selected transcript snapshots from authoritative turn files, rebuild exact per-round UI snapshots from reason ledger when authoritative snapshot truth is absent or missing earlier observed rounds, and allow inactive surviving authoritative snapshots only with an explicit partial-transcript warning when the ledger is empty | authoritative turn snapshots + reason ledger rows + rollback markers | exact per-round UI snapshots with rolled-back logical turns filtered, or inactive partial snapshots carrying `reason_persistence_partial_ui_restore`; active incomplete snapshots still fail | selected `QuerySessionTurns` / rollback refresh | persistence owner | bound |
+| 14r | `ReasonPersistence::raw_authoritative_turn_snapshots` / `ReasonPersistence::reserved_authoritative_turn_ids` | `crates/freehand-reason/src/persistence.rs` | read raw authoritative closed/active turn files and cursor-reserved ids, including rolled-back logical turns, for id reservation and stale-idempotency diagnosis without changing effective transcript truth | session id + authoritative turn files + active snapshot + cursor sidecar | raw turn snapshots or reserved turn ids; callers must not project them as effective UI transcript truth | runtime Master parent-workset reconciliation | persistence owner | bound |
+| 17 | `ReasonPersistence::restore_turn_snapshots_for_ui` | `crates/freehand-reason/src/persistence.rs` | restore selected transcript snapshots from authoritative turn files, rebuild exact per-round UI snapshots from reason ledger when authoritative snapshot truth is absent or missing earlier observed rounds, and allow inactive surviving authoritative snapshots only with an explicit partial-transcript warning when the ledger is empty or retained at an unusable sequence offset | authoritative turn snapshots + reason ledger rows + rollback markers | exact per-round UI snapshots with rolled-back logical turns filtered, or inactive partial snapshots carrying `reason_persistence_partial_ui_restore`; active incomplete snapshots still fail, including retained-offset ledgers | selected `QuerySessionTurns` / rollback refresh | persistence owner | bound |
 | 18 | `ReasonPersistence::list_persisted_sessions` | `crates/freehand-reason/src/persistence.rs` | expose derived persisted session index rows and session metadata sidecar truth for UI-safe list/search projection without reading provider raw ledgers or treating worker transcripts as global sessions | session index sidecar plus metadata sidecar | persisted session index/metadata rows for runtime UI projection | runtime.ui-command-dispatch `QuerySessionList` / `QuerySessionSearch` | persistence owner | bound |
 
 ## Metadata / Request Isolation Notes
@@ -196,10 +203,10 @@
   terminal turn materialization, created-time preservation, derived sidecar
   writes, snapshot-plus-tail / ledger-only recovery, effective historical-turn
   session-memory filtering, and rollback-aware restore
-- current code exposes exact-round UI restore so multi-round repair/tool activity survives selected transcript queries; complete authoritative snapshots avoid replaying huge reason ledgers during daemon bootstrap and Master parent-workset reconciliation, incomplete authoritative snapshots are backfilled from reason-ledger truth only when the selected transcript is explicitly queried, inactive legacy partial snapshots with empty ledgers return with a visible integrity warning, and active incomplete snapshots remain hard restore errors
+- current code exposes exact-round UI restore so multi-round repair/tool activity survives selected transcript queries; complete authoritative snapshots avoid replaying huge reason ledgers during daemon bootstrap, Master parent-workset reconciliation, and retained-offset restore; incomplete authoritative snapshots are backfilled from reason-ledger truth only when the selected transcript is explicitly queried, inactive legacy partial snapshots with empty or retained-offset ledgers return with a visible integrity warning, and active incomplete snapshots remain hard restore errors
 - current code exposes turn-start snapshot restore so parent-goal evaluation can recover the original first-round operator objective from reason-ledger truth even when the effective UI snapshot has advanced to a repaired round
 - session metadata sidecar CRUD is bound for create, rename, archive, restore, and delete-as-archive while staying separate from authoritative turn transcript truth
-- append-only latest-session-turn rollback is bound for durable marker write, effective transcript filtering, restart restore, and raw turn file retention
+- append-only latest-session-turn rollback is bound for durable marker write, effective transcript filtering, restart restore, raw turn file retention, reserved id allocation, and later sidecar non-resurrection
 - CLI and shared-harness smoke both bind to the persistence owner path without duplicating persistence semantics in the app layer
 - live Anthropic runtime path now records provider raw response/error/event bodies through `ReasonPersistence::record_provider_raw_event` while keeping those ledgers outside recovery truth
 - explicit owner-bound regression coverage now locks ledger sequence gaps plus provider-raw-only and UI-sidecar-only missing-recovery rejection

@@ -1,14 +1,14 @@
-import { createHomeDashboardModel } from "./surfaces/home-dashboard/model.js?v=20260726-header-worker-rail";
-import { createHomeSessionRow } from "./surfaces/home-dashboard/controls.js?v=20260726-header-worker-rail";
-import { renderSurface as renderHomeDashboardSurface } from "./surfaces/home-dashboard/index.js?v=20260726-header-worker-rail";
-import { renderRunningList as renderHomeRunningList, renderHistoryList as renderHomeHistoryList } from "./surfaces/home-dashboard/view.js?v=20260726-header-worker-rail";
-import { openToolsRegistrySurface, refreshToolsRegistrySurface, renderSurface as renderToolsRegistrySurface } from "./surfaces/tools-registry/index.js?v=20260726-header-worker-rail";
-import { cancelTimerFromSurface, openTimerDashboardSurface, refreshTimerDashboardSurface, renderSurface as renderTimerDashboardSurface, scheduleTimerFromSurface } from "./surfaces/timer-dashboard/index.js?v=20260726-header-worker-rail";
-import { renderSurface as renderSessionSearchSurface, renderSessionSearchResult as renderSessionSearchResultSurface } from "./surfaces/session-search/index.js?v=20260726-header-worker-rail";
-import { renderDiagnosticLogRow as renderDiagnosticLogRowSurface, renderSurface as renderSettingsShellSurface, renderNavigation as renderSettingsNavigationSurface, renderDiagnostics as renderSettingsDiagnosticsSurface } from "./surfaces/settings/index.js?v=20260726-header-worker-rail";
-import { chooseNewTaskDirectory as chooseNewTaskDirectoryFromSurface, openNewSessionSurface, closeNewSessionSurface, selectedNewSessionKind as selectedNewSessionKindFromSurface, submitNewSessionSurface, syncNewSessionDialogMode as syncNewSessionDialogModeFromSurface } from "./surfaces/new-session/index.js?v=20260726-header-worker-rail";
-import { setSelectedSessionId as setSelectedSessionIdInSurface, clearConversationForSessionSwitch as clearConversationForSessionSwitchInSurface, switchConversationSession as switchConversationSessionInSurface } from "./surfaces/session-detail/index.js?v=20260726-header-worker-rail";
-import { createAdpClient } from "./app-shell/adp-client.js?v=20260726-header-worker-rail";
+import { createHomeDashboardModel } from "./surfaces/home-dashboard/model.js?v=__WEBUI_ASSET_VERSION__";
+import { createHomeSessionRow } from "./surfaces/home-dashboard/controls.js?v=__WEBUI_ASSET_VERSION__";
+import { renderSurface as renderHomeDashboardSurface } from "./surfaces/home-dashboard/index.js?v=__WEBUI_ASSET_VERSION__";
+import { renderRunningList as renderHomeRunningList, renderHistoryList as renderHomeHistoryList } from "./surfaces/home-dashboard/view.js?v=__WEBUI_ASSET_VERSION__";
+import { openToolsRegistrySurface, refreshToolsRegistrySurface, renderSurface as renderToolsRegistrySurface } from "./surfaces/tools-registry/index.js?v=__WEBUI_ASSET_VERSION__";
+import { cancelTimerFromSurface, openTimerDashboardSurface, refreshTimerDashboardSurface, renderSurface as renderTimerDashboardSurface, scheduleTimerFromSurface } from "./surfaces/timer-dashboard/index.js?v=__WEBUI_ASSET_VERSION__";
+import { renderSurface as renderSessionSearchSurface, renderSessionSearchResult as renderSessionSearchResultSurface } from "./surfaces/session-search/index.js?v=__WEBUI_ASSET_VERSION__";
+import { renderDiagnosticLogRow as renderDiagnosticLogRowSurface, renderSurface as renderSettingsShellSurface, renderNavigation as renderSettingsNavigationSurface, renderDiagnostics as renderSettingsDiagnosticsSurface } from "./surfaces/settings/index.js?v=__WEBUI_ASSET_VERSION__";
+import { chooseNewTaskDirectory as chooseNewTaskDirectoryFromSurface, openNewSessionSurface, closeNewSessionSurface, selectedNewSessionKind as selectedNewSessionKindFromSurface, submitNewSessionSurface, syncNewSessionDialogMode as syncNewSessionDialogModeFromSurface } from "./surfaces/new-session/index.js?v=__WEBUI_ASSET_VERSION__";
+import { setSelectedSessionId as setSelectedSessionIdInSurface, clearConversationForSessionSwitch as clearConversationForSessionSwitchInSurface, switchConversationSession as switchConversationSessionInSurface } from "./surfaces/session-detail/index.js?v=__WEBUI_ASSET_VERSION__";
+import { createAdpClient } from "./app-shell/adp-client.js?v=__WEBUI_ASSET_VERSION__";
 
 export const classifyLayoutShape = window.__freehandLayout.classifyLayoutShape;
 export const classifyLayoutShapeForClient = window.__freehandLayout.classifyLayoutShapeForClient;
@@ -2721,8 +2721,16 @@ function isToolPendingStatus(status) {
   return normalized === "toolpending";
 }
 
+function lifecycleOwnerTaskProjectionLoaded() {
+  return state.taskBoard !== null;
+}
+
+function lifecycleOwnerTimerProjectionLoaded() {
+  return state.timerList !== null;
+}
+
 function lifecycleOwnerProjectionLoaded() {
-  return state.taskBoard !== null && state.timerList !== null;
+  return lifecycleOwnerTaskProjectionLoaded() && lifecycleOwnerTimerProjectionLoaded();
 }
 
 function turnHasWaitingToolActivity(turn) {
@@ -2731,13 +2739,27 @@ function turnHasWaitingToolActivity(turn) {
   );
 }
 
+function taskKeepsSessionLifecycleRunning(task) {
+  const normalized = `${(task && task.status) || ""}`.toLowerCase();
+  return [
+    "created",
+    "waiting_agent",
+    "assigned",
+    "running",
+    "interrupted",
+    "paused",
+    "review_submitted",
+    "rejected",
+  ].includes(normalized);
+}
+
 function sessionHasOpenTaskLifecycle(sessionId) {
   const id = `${sessionId || ""}`.trim();
   if (!id || !state.taskBoard) {
     return false;
   }
   return ((state.taskBoard && state.taskBoard.tasks) || []).some((task) =>
-    taskVisibleInSession(task, id) && !terminalTaskStatus(task.status)
+    taskVisibleInSession(task, id) && taskKeepsSessionLifecycleRunning(task)
   );
 }
 
@@ -2765,10 +2787,13 @@ function toolPendingRepresentsLifecycle(turn) {
     return true;
   }
   const sessionId = turn.session_id || state.selectedSessionId || "";
-  if (sessionHasOpenLifecycleOwner(sessionId)) {
+  if (sessionHasOpenTaskLifecycle(sessionId) || sessionHasOpenTimerLifecycle(sessionId)) {
     return true;
   }
-  return !lifecycleOwnerProjectionLoaded();
+  if (lifecycleOwnerTaskProjectionLoaded() && !sessionHasOpenTaskLifecycle(sessionId)) {
+    return false;
+  }
+  return false;
 }
 
 function toolPendingStatusLabelForTurn(turn) {
@@ -3510,7 +3535,7 @@ function taskStatusAllowsTranscriptRetry(task) {
   if (!task) {
     return false;
   }
-  return !terminalTaskStatus(task.status);
+  return taskKeepsSessionLifecycleRunning(task);
 }
 
 function workerTranscriptRetryContext(sessionId, message) {
@@ -3611,6 +3636,8 @@ function returnToSessionListFromRefreshError() {
   const failedSessionId = state.selectedSessionId;
   clearSessionRefreshState(failedSessionId);
   dispatchWebUiEdge("session.back_home");
+  setSelectedSessionId(null);
+  state.mobileDrawer = "sessions";
   state.sessionTurns = [];
   state.turn = null;
   state.publicConversation = [];
@@ -5166,18 +5193,16 @@ function activeTurnForSession(sessionId) {
 
 function sessionHasObservableActiveStatus(session) {
   const status = `${(session && session.latest_status) || ""}`.toLowerCase();
-  if (
-    session &&
-    isToolPendingStatus(status) &&
-    lifecycleOwnerProjectionLoaded() &&
-    !sessionHasOpenLifecycleOwner(session.session_id)
-  ) {
-    return false;
+  if (session && isToolPendingStatus(status)) {
+    if (sessionHasOpenTaskLifecycle(session.session_id) || sessionHasOpenTimerLifecycle(session.session_id)) {
+      return true;
+    }
+    return Boolean(session.active_turn_id);
   }
   return Boolean(
     session &&
       (session.active_turn_id ||
-        ["waiting_model", "waiting", "running", "toolpending", "tool_pending"].includes(status)),
+        ["waiting_model", "waiting", "running"].includes(status)),
   );
 }
 
@@ -5200,7 +5225,7 @@ function sessionLiveObservation(sessionId) {
     ? toolPendingStatusLabelForTurn(turn)
     : turn && turnIsWaitingForModelResponse(turn)
       ? modelRequestLabel(turn)
-      : isToolPendingStatus(status) && lifecycleOwnerProjectionLoaded() && !sessionHasOpenLifecycleOwner(sessionId)
+      : isToolPendingStatus(status) && lifecycleOwnerTaskProjectionLoaded() && !sessionHasOpenTaskLifecycle(sessionId) && !sessionHasOpenTimerLifecycle(sessionId)
         ? "等待用户选择"
         : statusLabel(status || "active");
   const detail = turn && turn.model_request && turn.model_request.detail
@@ -5812,7 +5837,7 @@ function buildMobileAgentDashboardModel() {
       tone = "blocked";
     } else if (tasks.some((task) => ["review_ready", "review_submitted"].includes(`${task.status || ""}`.toLowerCase()))) {
       tone = "evaluating";
-    } else if (tasks.some((task) => !terminalTaskStatus(task.status))) {
+    } else if (tasks.some((task) => taskKeepsSessionLifecycleRunning(task))) {
       tone = "active";
     } else {
       tone = "neutral";
@@ -6388,7 +6413,7 @@ function taskForAgent(agent, taskCandidates = null) {
     if (agent.current_execution_id && task.active_execution_id === agent.current_execution_id) {
       return true;
     }
-    return taskAgent === agentId && !terminalTaskStatus(task.status);
+    return taskAgent === agentId && taskKeepsSessionLifecycleRunning(task);
   }) || null;
 }
 
@@ -6518,7 +6543,7 @@ function renderSessionWorkerRail(parentSession, tasks = [], selectedWorkerSessio
   sessionWorkerRail.dataset.workerCount = `${scopedTasks.length}`;
   sessionWorkerRail.dataset.expandedTaskId = activeExpandedTaskId;
   sessionWorkerRail.dataset.parentSessionId = parentSession?.session_id || "";
-  sessionWorkerRail.dataset.hasLiveTask = scopedTasks.some((task) => !terminalTaskStatus(task.status)) ? "true" : "false";
+  sessionWorkerRail.dataset.hasLiveTask = scopedTasks.some((task) => taskKeepsSessionLifecycleRunning(task)) ? "true" : "false";
   if (!parentSession || scopedTasks.length === 0) {
     sessionWorkerRail.hidden = true;
     return;
@@ -6798,7 +6823,7 @@ function workerControlCanMutate(task, target) {
     target.task_id &&
     target.execution_id &&
     target.agent_id &&
-    !terminalTaskStatus(task.status)
+    taskKeepsSessionLifecycleRunning(task)
   );
 }
 
@@ -7022,7 +7047,7 @@ function headerWorkerRailHasOpenTasks() {
   if (!sessionWorkerRail || sessionWorkerRail.hidden) {
     return false;
   }
-  return currentSessionTasks().some((task) => task && !terminalTaskStatus(task.status));
+  return currentSessionTasks().some((task) => task && taskKeepsSessionLifecycleRunning(task));
 }
 
 function refreshHeaderWorkerRailStatusIfNeeded() {
@@ -8668,8 +8693,7 @@ function ensureSseTurnSubscription() {
     return;
   }
   const stream = new EventSource(endpoint);
-  state.sseTurnStream = stream;
-  stream.addEventListener("open", () => {
+  state.sseTurnStream = stream;  stream.addEventListener("open", () => {
     setBackgroundCommandStatus("SSE turn refresh connected");
   });
   stream.addEventListener("turn", (event) => {
@@ -8694,6 +8718,18 @@ function ensureSseTurnSubscription() {
     setBackgroundCommandStatus("SSE turn refresh reconnecting...");
   });
 }
+
+function closeSseTurnSubscription() {
+  if (!state.sseTurnStream) {
+    return;
+  }
+  state.sseTurnStream.close();
+  state.sseTurnStream = null;
+}
+
+window.addEventListener("pagehide", () => {
+  closeSseTurnSubscription();
+});
 
 function ensureDebugSubscription() {
   if (!state.turn) {

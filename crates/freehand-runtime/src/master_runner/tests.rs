@@ -9,8 +9,14 @@ use freehand_config::{
     AgentMode, ProviderAuthSourceKind, ProviderAuthType, ProviderProtocol, ProviderType,
     ProviderWebSearchMode, SelectedAgentConfig, SelectedPeerAgentConfig, SelectedProviderConfig,
 };
-use freehand_contracts::{AgentId, FeatureId, SessionId, TerminalStatus, TraceId, TurnId};
-use freehand_reason::{ReasonPersistence, ReasonTurnEngine, SessionHistory, TurnStartInput};
+use freehand_contracts::{
+    AgentId, ContextCachePolicy, ContextProvenance, ContextRole, ContextSegment, ContextSegmentId,
+    ContextSegmentKind, ContextStability, FeatureId, SessionId, TerminalStatus, TraceId, TurnId,
+};
+use freehand_reason::{
+    ReasonLedgerPayload, ReasonLedgerRow, ReasonPersistence, ReasonPersistenceCursor,
+    ReasonTurnEngine, SessionHistory, TurnStartInput,
+};
 use freehand_task::{
     AgentCreateRequest, ExecutionFact, ExecutionFactKind, TaskActor, TaskAppendRequest,
     TaskClaimRequest, TaskCreateRequest, TaskDispatchRequest, TaskExecutionProfile, TaskId,
@@ -679,6 +685,216 @@ fn production_master_runner_projects_decided_worker_block_to_parent_session() {
         ProductionMasterTickOutcome::Idle
     );
     assert_eq!(executor.calls.load(Ordering::Relaxed), 2);
+
+    fs::remove_dir_all(runtime_home).expect("cleanup");
+}
+
+#[test]
+fn production_master_runner_rechecks_stale_blocked_parent_marker_after_rollback() {
+    let runtime_home = temp_path("blocked-parent-follow-up-rollback-recheck");
+    bootstrap_runner(&runtime_home);
+    let parent_session_id = SessionId::new("parent-session-blocked-follow-up-rollback-recheck");
+    let parent_turn_id = TurnId::new("runtime-turn-520");
+    persist_parent_user_objective_with_turn_id(
+        &runtime_home,
+        &parent_session_id,
+        &parent_turn_id,
+        "Inspect the requested path and report whether the child task can proceed.",
+        TerminalStatus::ToolPending,
+        "Waiting for lifecycle: child path diagnostic task.",
+    );
+    let task_id = seed_parent_blocked_child_for_turn(
+        &runtime_home,
+        &parent_session_id,
+        &parent_turn_id,
+        "rollback-path-diagnostic",
+    );
+    let runtime = TaskRuntime::boot(&runtime_home, AgentId::new("master")).expect("runtime");
+    runtime
+        .append_task(TaskAppendRequest {
+            task_id: task_id.clone(),
+            note: "blocked_decision: child proved the requested path is missing; ask the user to provide the path before retrying".to_owned(),
+            actor: test_actor("master"),
+            watermark: test_watermark("blocked-rollback-decision"),
+        })
+        .expect("append blocked decision");
+    let task = runtime.query_task(&task_id).expect("blocked task");
+    let blocked_truth = parent_blocked_subtask_truth(&runtime, &AgentId::new("master"), &task)
+        .expect("blocked truth")
+        .expect("master blocked decision truth");
+    let evaluation_key = format!(
+        "blocked|{}|{}|{}:{}",
+        parent_session_id.as_str(),
+        parent_turn_group_key(Some(&parent_turn_id)),
+        task_id.as_str(),
+        blocked_truth.decision_seq
+    );
+    let evaluation_marker = parent_evaluation_marker(&evaluation_key);
+    persist_parent_blocked_follow_up_turn(
+        &runtime_home,
+        &parent_session_id,
+        &TurnId::new("runtime-turn-521"),
+        &evaluation_marker,
+        TerminalStatus::Blocked,
+        "persisted blocked follow-up that was later rolled back",
+    );
+    ReasonPersistence::new(runtime_home.clone(), AgentId::new("master"))
+        .rollback_latest_session_turn(&parent_session_id)
+        .expect("rollback invalidated blocked follow-up");
+    let inbox = runtime
+        .query_event_inbox(TaskEventInboxQuery {
+            after_cursor: None,
+            limit: usize::MAX,
+        })
+        .expect("event inbox");
+    let observed_parent_request = Arc::new(Mutex::new(None::<LiveReasonTurnRequest>));
+    let parent_request_out = Arc::clone(&observed_parent_request);
+    let executor = Arc::new(StubMasterExecutor::new(move |request| {
+        *parent_request_out.lock().expect("parent request") = Some(request.clone());
+        Ok("rechecked stale blocked follow-up after rollback".to_owned())
+    }));
+    let runner = test_runner(runtime_home.clone(), executor.clone());
+    let mut state = runner.load_state().expect("load state");
+    state.cursor = inbox.next_cursor;
+    state.pending_attention.clear();
+    state.completed_parent_evaluations.insert(evaluation_key);
+    runner
+        .write_state(&state)
+        .expect("write stale completed state");
+
+    assert!(matches!(
+        runner
+            .run_once()
+            .expect("stale completed marker must not skip rolled-back follow-up"),
+        ProductionMasterTickOutcome::ParentEvaluated {
+            parent_session_id: ref outcome_parent,
+            evaluated_child_task_ids: ref outcome_tasks,
+            ref summary,
+        } if outcome_parent == &parent_session_id
+            && outcome_tasks == &vec![task_id.clone()]
+            && summary == "rechecked stale blocked follow-up after rollback"
+    ));
+    let request = observed_parent_request
+        .lock()
+        .expect("parent request")
+        .clone()
+        .expect("parent follow-up request");
+    assert_eq!(request.session_id, parent_session_id);
+    assert_eq!(request.turn_id, TurnId::new("runtime-turn-522"));
+    assert!(
+        request
+            .prompt
+            .contains("<freehand_parent_blocked_follow_up")
+    );
+    assert!(request.prompt.contains("requested path is missing"));
+    assert_eq!(executor.calls.load(Ordering::Relaxed), 1);
+
+    fs::remove_dir_all(runtime_home).expect("cleanup");
+}
+
+#[test]
+fn production_master_runner_rechecks_retained_ledger_repair_round_blocked_parent_after_rollback() {
+    let runtime_home = temp_path("blocked-parent-follow-up-retained-repair-recheck");
+    bootstrap_runner(&runtime_home);
+    let parent_session_id =
+        SessionId::new("parent-session-blocked-follow-up-retained-repair-recheck");
+    let parent_turn_id = TurnId::new("runtime-turn-520-r3");
+    persist_parent_repair_round_with_original_task_context(
+        &runtime_home,
+        &parent_session_id,
+        &parent_turn_id,
+        "Inspect the requested path and report whether the child task can proceed.",
+        TerminalStatus::ToolPending,
+        "Waiting for lifecycle: child path diagnostic task.",
+    );
+    let task_id = seed_parent_blocked_child_for_turn(
+        &runtime_home,
+        &parent_session_id,
+        &parent_turn_id,
+        "retained-repair-path-diagnostic",
+    );
+    let runtime = TaskRuntime::boot(&runtime_home, AgentId::new("master")).expect("runtime");
+    runtime
+        .append_task(TaskAppendRequest {
+            task_id: task_id.clone(),
+            note: "blocked_decision: child proved the requested path is missing; ask the user to provide the path before retrying".to_owned(),
+            actor: test_actor("master"),
+            watermark: test_watermark("blocked-retained-repair-decision"),
+        })
+        .expect("append blocked decision");
+    let task = runtime.query_task(&task_id).expect("blocked task");
+    let blocked_truth = parent_blocked_subtask_truth(&runtime, &AgentId::new("master"), &task)
+        .expect("blocked truth")
+        .expect("master blocked decision truth");
+    let evaluation_key = format!(
+        "blocked|{}|{}|{}:{}",
+        parent_session_id.as_str(),
+        parent_turn_group_key(Some(&parent_turn_id)),
+        task_id.as_str(),
+        blocked_truth.decision_seq
+    );
+    let evaluation_marker = parent_evaluation_marker(&evaluation_key);
+    persist_parent_blocked_follow_up_turn(
+        &runtime_home,
+        &parent_session_id,
+        &TurnId::new("runtime-turn-521"),
+        &evaluation_marker,
+        TerminalStatus::Blocked,
+        "persisted blocked follow-up that was later rolled back",
+    );
+    ReasonPersistence::new(runtime_home.clone(), AgentId::new("master"))
+        .rollback_latest_session_turn(&parent_session_id)
+        .expect("rollback invalidated blocked follow-up");
+    retain_only_offset_reason_ledger(&runtime_home, &parent_session_id, &parent_turn_id, 209);
+
+    let inbox = runtime
+        .query_event_inbox(TaskEventInboxQuery {
+            after_cursor: None,
+            limit: usize::MAX,
+        })
+        .expect("event inbox");
+    let observed_parent_request = Arc::new(Mutex::new(None::<LiveReasonTurnRequest>));
+    let parent_request_out = Arc::clone(&observed_parent_request);
+    let executor = Arc::new(StubMasterExecutor::new(move |request| {
+        *parent_request_out.lock().expect("parent request") = Some(request.clone());
+        Ok("rechecked retained-offset repair-round blocked follow-up after rollback".to_owned())
+    }));
+    let runner = test_runner(runtime_home.clone(), executor.clone());
+    let mut state = runner.load_state().expect("load state");
+    state.cursor = inbox.next_cursor;
+    state.pending_attention.clear();
+    state.completed_parent_evaluations.insert(evaluation_key);
+    runner
+        .write_state(&state)
+        .expect("write stale completed state");
+
+    assert!(matches!(
+        runner
+            .run_once()
+            .expect("retained-offset repair-round parent must not stop lifecycle runner"),
+        ProductionMasterTickOutcome::ParentEvaluated {
+            parent_session_id: ref outcome_parent,
+            evaluated_child_task_ids: ref outcome_tasks,
+            ref summary,
+        } if outcome_parent == &parent_session_id
+            && outcome_tasks == &vec![task_id.clone()]
+            && summary == "rechecked retained-offset repair-round blocked follow-up after rollback"
+    ));
+    let request = observed_parent_request
+        .lock()
+        .expect("parent request")
+        .clone()
+        .expect("parent follow-up request");
+    assert_eq!(request.session_id, parent_session_id);
+    assert_eq!(request.turn_id, TurnId::new("runtime-turn-522"));
+    assert!(
+        request
+            .prompt
+            .contains("<freehand_parent_blocked_follow_up")
+    );
+    assert!(request.prompt.contains("Inspect the requested path"));
+    assert!(request.prompt.contains("requested path is missing"));
+    assert_eq!(executor.calls.load(Ordering::Relaxed), 1);
 
     fs::remove_dir_all(runtime_home).expect("cleanup");
 }
@@ -3847,6 +4063,53 @@ fn persist_parent_evaluation_turn(
         .expect("persist turn close");
 }
 
+fn persist_parent_blocked_follow_up_turn(
+    runtime_home: &Path,
+    parent_session_id: &SessionId,
+    turn_id: &TurnId,
+    evaluation_marker: &str,
+    terminal_status: TerminalStatus,
+    summary: &str,
+) {
+    let mut history =
+        SessionHistory::new(parent_session_id.clone(), Vec::new()).expect("session history");
+    let engine = ReasonTurnEngine::new();
+    let mut turn = engine
+        .start_turn(
+            &mut history,
+            TurnStartInput {
+                session_id: parent_session_id.clone(),
+                turn_id: turn_id.clone(),
+                trace_id: TraceId::new(format!("trace-{}", turn_id.as_str())),
+                feature_id: FeatureId::new("runtime.master-worker-loop"),
+                agent_id: AgentId::new("master"),
+                user_text: format!(
+                    "<freehand_parent_blocked_follow_up id=\"{evaluation_marker}\">\ninternal blocked follow-up"
+                ),
+                planned_context_segments: Vec::new(),
+                tool_schema_fingerprint: None,
+                model: "master-model".to_owned(),
+            },
+        )
+        .expect("start blocked follow-up turn");
+    let persistence = ReasonPersistence::new(runtime_home.to_path_buf(), AgentId::new("master"));
+    persistence
+        .record_turn_started(&history, &turn, 0)
+        .expect("persist blocked follow-up start");
+    turn.terminal_event = Some(freehand_contracts::ReasonResp03TerminalEvent {
+        session_id: parent_session_id.clone(),
+        turn_id: turn_id.clone(),
+        trace_id: turn.request.trace_id.clone(),
+        feature_id: FeatureId::new("runtime.master-worker-loop"),
+        agent_id: AgentId::new("master"),
+        status: terminal_status,
+        summary: summary.to_owned(),
+    });
+    persistence
+        .record_turn_closed(&history, &turn, 0)
+        .expect("persist blocked follow-up close");
+}
+
 fn poison_parent_reason_ledger(runtime_home: &Path, parent_session_id: &SessionId) {
     let path = runtime_home
         .join("ledgers")
@@ -3854,6 +4117,51 @@ fn poison_parent_reason_ledger(runtime_home: &Path, parent_session_id: &SessionI
         .join("master")
         .join(format!("{}.jsonl", parent_session_id.as_str()));
     fs::write(&path, "{not valid reason ledger json}\n").expect("poison ledger");
+}
+
+fn retain_only_offset_reason_ledger(
+    runtime_home: &Path,
+    parent_session_id: &SessionId,
+    latest_turn_id: &TurnId,
+    seq: u64,
+) {
+    let session_history_path = runtime_home
+        .join("state")
+        .join("turns")
+        .join("master")
+        .join(parent_session_id.as_str())
+        .join("session-history.json");
+    let history: SessionHistory =
+        serde_json::from_str(&fs::read_to_string(session_history_path).expect("read history"))
+            .expect("parse history");
+    let row = ReasonLedgerRow {
+        schema_version: 1,
+        seq,
+        created_at: now_unix_seconds(),
+        session_id: parent_session_id.clone(),
+        turn_id: Some(latest_turn_id.clone()),
+        cursor_after: ReasonPersistenceCursor {
+            schema_version: 1,
+            last_applied_reason_seq: seq,
+            latest_turn_id: Some(latest_turn_id.clone()),
+            active_turn_id: None,
+        },
+        session_history: history,
+        payload: ReasonLedgerPayload::RewriteStateUpdated,
+    };
+    let path = runtime_home
+        .join("ledgers")
+        .join("reason")
+        .join("master")
+        .join(format!("{}.jsonl", parent_session_id.as_str()));
+    fs::write(
+        path,
+        format!(
+            "{}\n",
+            serde_json::to_string(&row).expect("retained ledger row json")
+        ),
+    )
+    .expect("write retained-offset ledger row");
 }
 
 fn persist_parent_user_objective(
@@ -3914,6 +4222,66 @@ fn persist_parent_user_objective_with_turn_id(
     persistence
         .record_turn_closed(&history, &turn, 0)
         .expect("persist objective close");
+}
+
+fn persist_parent_repair_round_with_original_task_context(
+    runtime_home: &Path,
+    parent_session_id: &SessionId,
+    turn_id: &TurnId,
+    objective: &str,
+    terminal_status: TerminalStatus,
+    terminal_summary: &str,
+) {
+    let mut history =
+        SessionHistory::new(parent_session_id.clone(), Vec::new()).expect("session history");
+    let engine = ReasonTurnEngine::new();
+    let mut turn = engine
+        .start_turn(
+            &mut history,
+            TurnStartInput {
+                session_id: parent_session_id.clone(),
+                turn_id: turn_id.clone(),
+                trace_id: TraceId::new("parent-repair-round-trace"),
+                feature_id: FeatureId::new("reason.turn"),
+                agent_id: AgentId::new("master"),
+                user_text: "The tool result has been returned. Use it to continue the task, then provide the required Freehand completion schema when done.".to_owned(),
+                planned_context_segments: vec![ContextSegment {
+                    segment_id: ContextSegmentId::new(format!(
+                        "{}-original-task",
+                        turn_id.as_str()
+                    )),
+                    kind: ContextSegmentKind::TaskContract,
+                    stability: ContextStability::SessionStable,
+                    cache_policy: ContextCachePolicy::Cacheable,
+                    role: ContextRole::Developer,
+                    content: format!("Original operator task:\n{objective}"),
+                    token_budget: 256,
+                    provenance: ContextProvenance {
+                        source: "freehand_runtime".to_owned(),
+                        reference: Some("original_task".to_owned()),
+                    },
+                }],
+                tool_schema_fingerprint: None,
+                model: "master-model".to_owned(),
+            },
+        )
+        .expect("start repair round");
+    let persistence = ReasonPersistence::new(runtime_home.to_path_buf(), AgentId::new("master"));
+    persistence
+        .record_turn_started(&history, &turn, 0)
+        .expect("persist repair round start");
+    turn.terminal_event = Some(freehand_contracts::ReasonResp03TerminalEvent {
+        session_id: parent_session_id.clone(),
+        turn_id: turn.request.turn_id.clone(),
+        trace_id: turn.request.trace_id.clone(),
+        feature_id: FeatureId::new("reason.turn"),
+        agent_id: AgentId::new("master"),
+        status: terminal_status,
+        summary: terminal_summary.to_owned(),
+    });
+    persistence
+        .record_turn_closed(&history, &turn, 0)
+        .expect("persist repair round close");
 }
 
 fn persist_parent_user_objective_start_only(

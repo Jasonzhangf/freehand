@@ -2,6 +2,17 @@ use axum::body::Body;
 use axum::http::{HeaderValue, StatusCode, header};
 use axum::response::{IntoResponse, Response};
 
+/// Single source of truth for the WebUI cache-busting version. Asset files and
+/// the page template reference `__WEBUI_ASSET_VERSION__`; the server stamps
+/// this value at serve time, so bumping the version is a one-line change here.
+pub const WEBUI_ASSET_VERSION: &str = "20260726-stale-lifecycle-reconcile";
+
+const WEBUI_ASSET_VERSION_TOKEN: &str = "__WEBUI_ASSET_VERSION__";
+
+pub fn stamp_asset_version(body: &str) -> String {
+    body.replace(WEBUI_ASSET_VERSION_TOKEN, WEBUI_ASSET_VERSION)
+}
+
 struct Asset {
     content_type: &'static str,
     body: &'static str,
@@ -208,7 +219,7 @@ pub fn asset_response(path: &str) -> Result<Response, StatusCode> {
                 HeaderValue::from_static("no-store, max-age=0"),
             ),
         ],
-        asset.body,
+        stamp_asset_version(asset.body),
     )
         .into_response())
 }

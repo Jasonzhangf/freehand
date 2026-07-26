@@ -8,7 +8,7 @@ use std::time::Duration;
 
 use freehand_config::{AgentMode, SelectedAgentConfig};
 use freehand_contracts::{AgentId, SessionId, TerminalStatus, TraceId, TurnId};
-use freehand_reason::{ReasonPersistence, ReasonPersistenceError};
+use freehand_reason::{ReasonPersistence, ReasonPersistenceError, TurnRecord};
 use freehand_task::{
     TaskActor, TaskAppendRequest, TaskBoardQuery, TaskError, TaskEventInboxEntry,
     TaskEventInboxQuery, TaskId, TaskRuntime, TaskSnapshot, TaskStatus, TaskWatermark,
@@ -1495,9 +1495,6 @@ impl ProductionMasterRunner {
                 parent_turn_group_key(parent_turn_id.as_ref()),
                 decision_key
             );
-            if state.completed_parent_evaluations.contains(&evaluation_key) {
-                continue;
-            }
             let evaluation_marker = parent_evaluation_marker(&evaluation_key);
             if persisted_parent_blocked_follow_up_summary(
                 &self.runtime_home,
@@ -1509,6 +1506,20 @@ impl ProductionMasterRunner {
             {
                 state.completed_parent_evaluations.insert(evaluation_key);
                 continue;
+            }
+            if state.completed_parent_evaluations.contains(&evaluation_key) {
+                if raw_parent_blocked_follow_up_summary(
+                    &self.runtime_home,
+                    &self.master_agent_id,
+                    &parent_session_id,
+                    &evaluation_marker,
+                )?
+                .is_some()
+                {
+                    state.completed_parent_evaluations.remove(&evaluation_key);
+                } else {
+                    continue;
+                }
             }
             let Some(user_objectives) = parent_user_objectives(
                 &self.runtime_home,
@@ -1974,10 +1985,10 @@ fn parent_latest_external_objective_ordinal_at_or_before(
     Ok(turns
         .into_iter()
         .filter_map(|turn| {
-            let (ordinal, round, _) = runtime_turn_position(&turn.request.turn_id);
+            let (ordinal, _, _) = runtime_turn_position(&turn.request.turn_id);
             (ordinal != 0
                 && ordinal <= target_ordinal
-                && round == 1
+                && parent_turn_can_supply_external_objective(&turn)
                 && parent_user_objective_text_is_external(&ui_user_text_for_turn(&turn)))
             .then_some(ordinal)
         })
@@ -2085,6 +2096,30 @@ fn persisted_parent_blocked_follow_up_summary(
     }))
 }
 
+fn raw_parent_blocked_follow_up_summary(
+    runtime_home: &Path,
+    agent_id: &AgentId,
+    parent_session_id: &SessionId,
+    evaluation_marker: &str,
+) -> Result<Option<String>, ProductionMasterRunnerError> {
+    let persistence = ReasonPersistence::new(runtime_home.to_path_buf(), agent_id.clone());
+    let turns = match persistence.raw_authoritative_turn_snapshots(parent_session_id) {
+        Ok(turns) => turns,
+        Err(ReasonPersistenceError::MissingRecoveryTruth(_)) => return Ok(None),
+        Err(error) => return Err(ProductionMasterRunnerError::State(error.to_string())),
+    };
+    Ok(turns.into_iter().find_map(|turn| {
+        let terminal = turn.terminal_event?;
+        (turn.request.user_text.contains(&format!(
+            "<freehand_parent_blocked_follow_up id=\"{evaluation_marker}\">"
+        )) && matches!(
+            terminal.status,
+            TerminalStatus::Blocked | TerminalStatus::Failed | TerminalStatus::Cancelled
+        ))
+        .then_some(terminal.summary)
+    }))
+}
+
 fn parent_logical_turn_waits_for_lifecycle(
     runtime_home: &Path,
     agent_id: &AgentId,
@@ -2128,9 +2163,19 @@ fn next_parent_evaluation_turn_id(
         Err(ReasonPersistenceError::MissingRecoveryTruth(_)) => Vec::new(),
         Err(error) => return Err(ProductionMasterRunnerError::State(error.to_string())),
     };
+    let reserved_turn_ids = match persistence.reserved_authoritative_turn_ids(parent_session_id) {
+        Ok(turn_ids) => turn_ids,
+        Err(ReasonPersistenceError::MissingRecoveryTruth(_)) => Vec::new(),
+        Err(error) => return Err(ProductionMasterRunnerError::State(error.to_string())),
+    };
     let next = turns
         .iter()
         .map(|turn| runtime_turn_position(&turn.request.turn_id).0)
+        .chain(
+            reserved_turn_ids
+                .iter()
+                .map(|turn_id| runtime_turn_position(turn_id).0),
+        )
         .max()
         .unwrap_or(0)
         .saturating_add(1);
@@ -2237,10 +2282,7 @@ fn parent_user_objectives(
     let mut seen = BTreeSet::new();
     let objectives = turns
         .into_iter()
-        .filter(|turn| {
-            let (_, round, _) = runtime_turn_position(&turn.request.turn_id);
-            round == 1
-        })
+        .filter(parent_turn_can_supply_external_objective)
         .map(|turn| ui_user_text_for_turn(&turn))
         .filter(|text| parent_user_objective_text_is_external(text))
         .filter(|text| seen.insert(text.clone()))
@@ -2249,6 +2291,22 @@ fn parent_user_objectives(
         return Ok(None);
     }
     Ok(Some(objectives))
+}
+
+fn parent_turn_can_supply_external_objective(turn: &TurnRecord) -> bool {
+    let (_, round, _) = runtime_turn_position(&turn.request.turn_id);
+    round == 1 || turn_has_runtime_original_task_context(turn)
+}
+
+fn turn_has_runtime_original_task_context(turn: &TurnRecord) -> bool {
+    turn.request.context_segments.iter().any(|segment| {
+        segment.provenance.source == "freehand_runtime"
+            && segment.provenance.reference.as_deref() == Some("original_task")
+            && segment
+                .content
+                .strip_prefix("Original operator task:\n")
+                .is_some_and(parent_user_objective_text_is_external)
+    })
 }
 
 fn parent_user_objective_text_is_external(text: &str) -> bool {

@@ -8654,3 +8654,54 @@ Current real root cause split:
 - Root cause evidence: installed debug APK `versionCode=3` read only legacy `daemon-connection.json`, so it loaded `http://100.66.1.82:44042/?client=android-webview`; relay root returned HTTP 404 while canonical shell is at `/relay/daemon/studio-host/?client=android-webview`.
 - Built current debug APK with remote-registry sidecar preference and installed through `verify-device-ui.sh`.
 - True-device pass: `artifacts/android-device/20260726T110620Z-100.104.163.65_5555-46257`; `FreehandWebUiLayout` shows `layoutClient=android-webview`, `layoutShape=tall_phone`, relay CSS URLs, `webuiCssApplied=true`, `webuiJsReady=true`, `webuiShell=true`; installed package `versionCode=20260728`.
+
+# 2026-07-26T14:20:00Z audit remediation Phase 1 implementation slice
+
+- Active goal: execute `docs/goals/audit-remediation-phase1-3-plan.md` Phase 1-3; this slice only advanced Phase 1 and did not claim goal completion.
+- Implemented Phase 1 task-owner concurrency pieces:
+  - `TaskRuntime::boot_read_only` for query/projection paths without self-agent creation or lease/lifecycle reconcile writes.
+  - `TaskStore::append_event_and_snapshot` serializes ledger append + snapshot atomic write + task index rewrite under task-ledger flock and reallocates event seq from disk ledger truth.
+  - ExecutionFact `Failed` terminalizes `TaskStatus::Failed` and releases the Worker.
+  - `TaskInterrupted` lease recovery records stale `execution_id` as fencing token, clears active execution truth, and late stale ExecutionFacts are rejected.
+  - EventInbox v2 path reads per-task ledger rows above sequence watermark instead of full materialization for v2 cursors.
+  - Worker heartbeat thread now flips the live cancel token on heartbeat/lifecycle failure; provider blocking reqwest clients have explicit 120s timeout.
+- Local targeted evidence:
+  - `CARGO_TARGET_DIR=/tmp/freehand-target-phase1 cargo test -p freehand-task -- --test-threads=1` passed: 65 passed, 1 ignored child helper.
+  - `CARGO_TARGET_DIR=/tmp/freehand-target-phase1 cargo test -p freehand-runtime worker_runner::tests:: -- --test-threads=1` passed: 24/24.
+  - `CARGO_TARGET_DIR=/tmp/freehand-target-phase1 cargo test -p freehand-runtime runtime_dispatches_worker_control_to_task_owner -- --test-threads=1` passed.
+  - `CARGO_TARGET_DIR=/tmp/freehand-target-phase1 cargo test -p xtask --quiet`, `xtask gates check`, and `xtask mainlines check` passed.
+- Full `CARGO_TARGET_DIR=/tmp/freehand-target-phase1 cargo test -p freehand-runtime -- --test-threads=1` is still red with the adjacent pre-existing live-bridge/autonomy failures, so Gap 7 was reduced to a verification-closeout gap rather than removed. Do not start Phase 2.1 worker pooling until this is green or owner-separated.
+- Process note: an external stale Claude process was repeatedly spawning `cargo test -p freehand-task` and once stashed `crates/freehand-task/src/lib.rs`; stopped explicit PIDs only and restored/kept the task patch before continuing.
+
+# 2026-07-26T15:20:00Z stale ToolPending lifecycle trace
+
+- Jason reported two Home sessions still show waiting from old failures; this is startup cleanup/check scope, not manual data deletion.
+- Live ADP `QuerySessionList` shows two persisted `latest_status=toolpending` with `active_turn_id=null`: `webui-path-diagnostic-state-sync-fixed` and `webui-session-20260723001509-bd98e156`.
+- TaskBoard truth:
+  - `webui-session-20260723001509-bd98e156` has only related `task-1784765749:closed`; no timer owner. Its latest `runtime-turn-541-r3` has no model request/tool activity and is a user-choice wait, so Home must not classify it running.
+  - `webui-path-diagnostic-state-sync-fixed` has multiple related path diagnostic children in `blocked`; latest target `task-webui-path-diagnostic-1784732067073` has Worker `TaskBlocked` and Master `TaskProgressed` blocked_decision at seq 7.
+- `QuerySessionTurns(webui-path-diagnostic-state-sync-fixed)` fails with `reason ledger sequence is invalid: expected 1, got 209`. Runtime snapshot evidence shows raw `runtime-turn-521` Blocked follow-up exists, but rollback marker moved effective head back to `runtime-turn-520-r3 ToolPending`; master loop state already contains `blocked|webui-path-diagnostic-state-sync-fixed|runtime-turn-520|task-webui-path-diagnostic-1784732067073:7`, so startup reconcile currently treats the invalidated follow-up as completed and leaves the old waiting turn effective.
+- Initial root layers: reason selected UI restore must not hard-fail inactive authoritative transcript just because a retained reason ledger starts at an offset; WebUI active owner classification must not treat blocked child tasks as open lifecycle; runtime blocked-parent reconciliation needs to re-run if idempotency marker exists but no effective terminal blocked follow-up is visible after rollback.
+
+# 2026-07-26T17:12:00Z stale lifecycle retained-ledger live closeout
+
+- run_id: `20260726T164323Z-Macstudio.local-13608-4398eb`
+- Jason reported two old sessions still showed waiting/running after restart; this was treated as startup lifecycle cleanup, not manual session deletion.
+- Root live evidence before closeout:
+  - `webui-path-diagnostic-state-sync-fixed` had effective `runtime-turn-520-r3 ToolPending`, raw rolled-back `runtime-turn-521 Blocked`, retained reason ledger starting at seq 209, and stale `completed_parent_evaluations` marker.
+  - `webui-session-20260723001509-bd98e156` had `runtime-turn-541-r3 ToolPending`, no active turn, only closed child task truth, and was a user-choice wait.
+- Additional fixes:
+  - `ReasonPersistence::restore` and `restore_turn_start_snapshots` now use authoritative snapshot truth when a retained-offset reason ledger starts after seq 1, preserving explicit sequence-gap failure only when no authoritative truth exists.
+  - Master parent objective recovery accepts repair-round turns that carry `freehand_runtime/original_task` context, so retained `runtime-turn-N-rM` ToolPending parents can still close lifecycle after restart.
+  - WebUI `ToolPending` classification no longer keeps stale `等待生命周期` just because timer projection is still loading when there is no waiting tool/model/open-task evidence; Android Back from session-local refresh error clears selected session and opens the session drawer.
+- Live proof after S restart:
+  - `QuerySessionTurns(webui-path-diagnostic-state-sync-fixed)` returns successfully and includes fresh `runtime-turn-522 Blocked` instead of dispatch failure or stale wait.
+  - `QuerySessionList` shows `webui-path-diagnostic-state-sync-fixed latest_status=blocked latest_turn_id=runtime-turn-522` and `webui-session-20260723001509-bd98e156 latest_status=toolpending active_turn_id=null`.
+  - `node scripts/verify-webui-session-restore-error-exit-online.mjs` passed, artifact `artifacts/webui-online/webui-session-unlock-1785085716976`.
+  - `node scripts/verify-webui-mobile-ui-tree-online.mjs` passed, artifact `artifacts/webui-online/mobile-ui-tree-phase1-20260726T170901-2353`.
+
+# 2026-07-26T17:18:00Z stale lifecycle final verifier artifacts
+
+- Final WebUI proofs after tightening Home `ToolPending` classification:
+  - `node scripts/verify-webui-session-restore-error-exit-online.mjs` passed, artifact `artifacts/webui-online/webui-session-unlock-1785086148685`.
+  - `node scripts/verify-webui-mobile-ui-tree-online.mjs` passed, artifact `artifacts/webui-online/mobile-ui-tree-phase1-20260726T171436-19295`; Home `正在运行` ids are `[]`, while `webui-session-20260723001509-bd98e156` is in history with `等待中` and `webui-path-diagnostic-state-sync-fixed` is history `已阻塞`.

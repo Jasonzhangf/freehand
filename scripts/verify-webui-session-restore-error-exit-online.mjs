@@ -14,7 +14,7 @@ const debugPort = Number.parseInt(process.env.FREEHAND_SESSION_UNLOCK_DEBUG_PORT
 const problemSessionId = process.env.FREEHAND_SESSION_UNLOCK_SESSION_ID ||
   'webui-session-20260723001509-bd98e156';
 const problemTurnId = process.env.FREEHAND_SESSION_UNLOCK_TURN_ID || 'runtime-turn-541-r3';
-const assetVersion = '20260726-header-worker-rail';
+const assetVersion = '20260726-stale-lifecycle-reconcile';
 const runId = `webui-session-unlock-${Date.now()}`;
 const newSessionId = process.env.FREEHAND_SESSION_UNLOCK_NEW_SESSION_ID ||
   `${runId}-new`;

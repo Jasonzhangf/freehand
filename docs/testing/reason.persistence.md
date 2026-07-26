@@ -23,7 +23,7 @@
   - turn-created time is persisted in `TurnRecord.created_at` and projected
     from authoritative active/closed turn truth, not synthesized by UI clients
   - restart recovery restores from snapshot plus reason-ledger tail, or from reason-ledger-only rebuild when snapshots are missing or invalid
-  - selected-session UI restore reads complete authoritative closed/active snapshots plus rollback-marker sidecar truth when available, preserves exact `runtime-turn-N` / `runtime-turn-N-rM` rounds as separate UI snapshots, backfills from the reason ledger when authoritative snapshot truth is missing earlier observed rounds, displays inactive surviving authoritative snapshots only with an explicit partial-transcript integrity warning when the reason ledger is empty, and keeps active incomplete snapshots as hard errors
+  - selected-session UI restore reads complete authoritative closed/active snapshots plus rollback-marker sidecar truth when available, preserves exact `runtime-turn-N` / `runtime-turn-N-rM` rounds as separate UI snapshots, backfills from the reason ledger when authoritative snapshot truth is missing earlier observed rounds, displays inactive surviving authoritative snapshots only with an explicit partial-transcript integrity warning when the reason ledger is empty or retained at an unusable sequence offset, and keeps active incomplete snapshots as hard errors
   - daemon bootstrap and Master parent-workset reconciliation use the authoritative-only UI restore path and must not replay every historical reason ledger; incomplete old snapshots are expanded only when that session is explicitly queried
   - authoritative closed-turn restore reads only `*.json` turn snapshots; leftover `*.tmp-*` atomic write artifacts in the turns directory must not be parsed as turn truth or prevent daemon bootstrap
   - non-UI turn-start restore reads authoritative reason-ledger
@@ -32,7 +32,7 @@
   - derived UI and index sidecars rebuild from authoritative truth and are never recovery truth
   - persisted session list/search reads consume derived index and metadata sidecars only; worker/subagent transcript sessions remain child/debug truth unless task parent truth attaches them to a persisted Master session
   - reason-owned session display metadata stores `title` and `archived` state for shared UI CRUD without entering provider-visible session history
-  - append-only rollback markers filter effective transcript restore while preserving raw closed-turn files for audit
+  - append-only rollback markers filter effective transcript restore while preserving raw closed-turn files for audit and reserved turn-id allocation
   - authoritative restore and rollback persistence filter model-visible
     `historical_turn:*` session-memory segments against the same effective
     active/closed turn set used by transcript truth; stable memory without a
@@ -73,6 +73,7 @@
   - unknown-session metadata mutation rejection tests
   - non-destructive delete-as-archive session metadata test
   - append-only latest-turn rollback marker test
+  - rollback marker later-write sidecar non-resurrection test
   - effective transcript filtering test after rollback
   - effective session-history filtering test proving valid historical-turn
     memory and ordinary stable memory remain while rolled-back and orphan
@@ -109,8 +110,8 @@
 - sync status between design and implementation:
   - design is locked
 - session snapshot, active-turn snapshot, reason-ledger append, provider-raw debug-ledger append, terminal turn materialization, created-time preservation, sidecar rebuild, snapshot-plus-tail recovery, and ledger-only rebuild are implemented in `freehand-reason`
-  - exact-round selected-session UI restore with incomplete-authoritative ledger backfill, inactive partial warning projection, and active incomplete hard-error behavior is implemented through `ReasonPersistence::restore_turn_snapshots_for_ui`
-  - global daemon bootstrap and Master parent-workset reconciliation use `ReasonPersistence::restore_authoritative_turn_snapshots_for_ui` so historical ledger size does not determine startup or lifecycle-poll latency
+  - exact-round selected-session UI restore with incomplete-authoritative ledger backfill, inactive partial warning projection for empty or retained-offset ledgers, and active incomplete hard-error behavior is implemented through `ReasonPersistence::restore_turn_snapshots_for_ui`
+  - global daemon bootstrap and Master parent-workset reconciliation use authoritative snapshot restore plus reason-owned raw/reserved turn-id helpers so historical retained-offset ledgers do not determine startup or lifecycle-poll latency and post-rollback follow-up ids do not collide; `restore_uses_authoritative_state_when_retained_ledger_starts_after_one` and `turn_start_restore_uses_authoritative_snapshots_when_retained_ledger_starts_after_one` lock the retained-offset recovery path
   - turn-start snapshot restore is implemented through
     `ReasonPersistence::restore_turn_start_snapshots`
   - shared harness and CLI smoke are implemented
