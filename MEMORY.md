@@ -674,3 +674,5 @@ Tags: #lifecycle #bootstrap #session-waiting #taskboard-residual
 - runtime bridges node status into UI protocol.
 - FORBIDDEN_DEPENDENCY_EDGES node->ui-protocol baseline_violation=false; Gap 5 deleted.
 Tags: #architecture #gap5 #node #ui-protocol #dependency-edge
+
+- 2026-07-26: Incomplete multi-round authoritative history with empty reason ledger must not fail whole-daemon bootstrap. `restore_turn_snapshots_for_ui` annotates partial UI restore and returns remaining authoritative turns; `restore_all_persisted_sessions_into_ui` skips missing/poisoned/incomplete historical sessions. Production proof: after install/restart, ADP session list projects the two residual sessions as blocked rather than leaving the daemon dead or re-showing waiting.

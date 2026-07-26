@@ -485,7 +485,18 @@ pub(crate) fn restore_all_persisted_sessions_into_ui(
         // Prefer UI restore so incomplete multi-round sessions backfill earlier
         // rounds from the reason ledger when available. Poisoned/incomplete
         // ledgers fall back to authoritative snapshots inside owner restore.
-        let mut turns = persistence.restore_turn_snapshots_for_ui(&session.session_id)?;
+        // One historical session must not poison whole-daemon bootstrap.
+        let mut turns = match persistence.restore_turn_snapshots_for_ui(&session.session_id) {
+            Ok(turns) => turns,
+            Err(ReasonPersistenceError::MissingRecoveryTruth(_)) => continue,
+            Err(
+                ReasonPersistenceError::JsonParseFailed(_)
+                | ReasonPersistenceError::InvalidCursorCoherence(_)
+                | ReasonPersistenceError::InvalidLedgerCoherence(_)
+                | ReasonPersistenceError::LedgerSequenceGap { .. },
+            ) => continue,
+            Err(error) => return Err(error),
+        };
         turns.sort_by_key(|turn| runtime_turn_position(&turn.request.turn_id));
         for turn in turns {
             max_turn_ordinal = max_turn_ordinal.max(runtime_turn_position(&turn.request.turn_id).0);

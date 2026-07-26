@@ -8784,3 +8784,10 @@ Current real root cause split:
   - xtask mainlines check ok
   - xtask gates check ok
   - cargo tree -p freehand-node has no freehand-ui-protocol/freehand-reason edge
+
+# 2026-07-26T21:36:07Z bootstrap incomplete history no longer kills daemon
+
+- user feedback: two old sessions still showed waiting residual; production daemon also failed to restart because bootstrap treated incomplete multi-round authoritative history + empty ledger as hard failure.
+- root cause: `ReasonPersistence::restore_turn_snapshots_for_ui` returned `InvalidCursorCoherence` when only final-round authoritative snapshots remained and ledger was empty; `restore_all_persisted_sessions_into_ui` propagated any session restore error and poisoned whole daemon bootstrap.
+- fix: incomplete authoritative history with empty ledger now annotates partial UI restore and returns remaining turns; whole-daemon restore skips missing/poisoned/incomplete historical sessions instead of hard-failing.
+- verification: `CARGO_TARGET_DIR=/tmp/freehand-target-stale-cleanup cargo test -p freehand-runtime live_bootstrap -- --test-threads=1` => 8 ok; installed new freehand-daemon; service-scoped restart of `com.freehand.daemon`; `freehand-cli adp-session-query --url ws://100.66.1.82:4041/adp` shows `webui-path-diagnostic-state-sync-fixed:2:blocked` and `webui-session-20260723001509-bd98e156:8:blocked`.

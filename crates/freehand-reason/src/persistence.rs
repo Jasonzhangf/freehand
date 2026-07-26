@@ -564,7 +564,12 @@ impl ReasonPersistence {
             };
             let ledger_turns = ui_turn_snapshots_from_ledger_rows(ledger_rows);
             if ledger_turns.is_empty() {
-                if !has_active_authoritative_turn && !authoritative_turns.is_empty() {
+                // Incomplete multi-round authoritative snapshots with an empty or
+                // non-backfillable ledger are common historical residue. UI restore
+                // must surface the remaining authoritative turns instead of failing
+                // bootstrap for the whole daemon. Active-turn presence only means the
+                // session still has live work; it must not hard-fail partial history.
+                if !authoritative_turns.is_empty() {
                     annotate_incomplete_authoritative_ui_restore(
                         &mut authoritative_turns,
                         &self.agent_id,

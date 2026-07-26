@@ -4309,6 +4309,95 @@ fn live_bootstrap_does_not_replay_incomplete_historical_reason_ledgers() {
 }
 
 #[test]
+fn live_bootstrap_tolerates_incomplete_authoritative_history_with_empty_ledger() {
+    let runtime_home = temp_runtime_home();
+    let session_id = SessionId::new("runtime-session-incomplete-empty-ledger");
+    let turn_id = TurnId::new("runtime-turn-7-r3");
+    let agent_id = AgentId::new("agent-live");
+    let persistence = ReasonPersistence::new(&runtime_home, agent_id.clone());
+    persistence
+        .create_session_metadata(
+            session_id.clone(),
+            Some("Incomplete empty ledger session".to_owned()),
+            None,
+        )
+        .expect("persist session metadata");
+    let engine = ReasonTurnEngine::new();
+    let mut history = SessionHistory::new(session_id.clone(), Vec::new()).expect("history");
+    let mut turn = engine
+        .start_turn(
+            &mut history,
+            TurnStartInput {
+                session_id: session_id.clone(),
+                turn_id: turn_id.clone(),
+                trace_id: TraceId::new("runtime-trace-incomplete-empty"),
+                feature_id: FeatureId::new("provider.reason-live-bridge"),
+                agent_id: agent_id.clone(),
+                user_text: "historical incomplete residue".to_owned(),
+                planned_context_segments: Vec::new(),
+                tool_schema_fingerprint: None,
+                model: "model-a".to_owned(),
+            },
+        )
+        .expect("start turn");
+    turn.terminal_event = Some(freehand_contracts::ReasonResp03TerminalEvent {
+        session_id: session_id.clone(),
+        turn_id: turn_id.clone(),
+        trace_id: TraceId::new("runtime-trace-incomplete-empty"),
+        feature_id: FeatureId::new("provider.reason-live-bridge"),
+        agent_id: agent_id.clone(),
+        status: TerminalStatus::Success,
+        summary: "only final repair round remains".to_owned(),
+    });
+    persistence
+        .record_turn_closed(&history, &turn, 0)
+        .expect("persist incomplete final-round snapshot");
+
+    // Remove the only closed turn file? No: leave final -r3 snapshot and delete ledger to
+    // force incomplete-round + empty ledger path. First remove any ledger if present.
+    let ledger_path = runtime_home
+        .join("ledgers")
+        .join("reason")
+        .join(agent_id.as_str())
+        .join(format!("{}.jsonl", session_id.as_str()));
+    if ledger_path.is_file() {
+        fs::remove_file(&ledger_path).expect("remove ledger");
+    }
+
+    let runtime = RuntimeCommandDispatcher::from_selected_agent_with_live(
+        &live_selected_agent(
+            "http://127.0.0.1:1".to_owned(),
+            freehand_config::ProviderType::Anthropic,
+        ),
+        runtime_home.clone(),
+        false,
+    )
+    .expect("bootstrap must tolerate incomplete historical residue with empty ledger");
+
+    match runtime
+        .ui_state()
+        .lock()
+        .expect("lock ui")
+        .query(&UiCommand::QuerySessionTurns {
+            session_id: session_id.clone(),
+        })
+        .expect("query turns")
+    {
+        UiQueryResult::SessionTurns(turns) => {
+            assert_eq!(
+                turns.turns.len(),
+                1,
+                "authoritative final-round snapshot must still project"
+            );
+            assert_eq!(turns.turns[0].turn_id.as_str(), "runtime-turn-7-r3");
+        }
+        other => panic!("unexpected query result: {other:?}"),
+    }
+
+    fs::remove_dir_all(runtime_home).expect("cleanup runtime home");
+}
+
+#[test]
 fn provider_request_built_debug_projects_model_waiting_ui_state() {
     let ui_state = Arc::new(Mutex::new(UiProtocolState::default()));
     let session_id = SessionId::new("session-model-request");

@@ -164,7 +164,7 @@ Generated from `docs/mainline-calls/runtime.master-worker-loop.json`. Do not edi
   - owner: `crates/freehand-runtime/src/lib.rs`
   - purpose: close no-owner persisted ToolPending session turns during live runtime bootstrap while preserving owner-backed lifecycle waits
   - allowed callers: RuntimeCommandDispatcher::new live bootstrap
-  - related tests: live_bootstrap_closes_stale_toolpending_without_lifecycle_owner, live_bootstrap_keeps_toolpending_when_child_task_can_wake_parent
+  - related tests: live_bootstrap_closes_stale_toolpending_without_lifecycle_owner, live_bootstrap_tolerates_incomplete_authoritative_history_with_empty_ledger, live_bootstrap_keeps_toolpending_when_child_task_can_wake_parent
   - why shared: UI restore, TaskBoard, timers, and active Master work use one owner-truth classification for whether a wait can wake itself after restart
 
 ## Function Call Table
