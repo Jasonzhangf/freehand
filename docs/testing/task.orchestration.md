@@ -18,17 +18,24 @@
   - task owner validates task fields
   - task owner writes ledger and snapshot
   - task owner atomic JSON persistence uses unique temp paths so concurrent
+  - task ledger append, snapshot write, and task index rewrite are one
+    flock-protected critical section with event seq allocated from disk truth
     local Worker process boot/index writes cannot collide on the same temporary
     file
   - shared `leases.json` mutations serialize the complete read-modify-write
     transaction so independent Worker processes cannot lose another task's
     lease or reintroduce a concurrently removed lease
   - task runtime memory state is rebuilt on boot
+  - query/projection boot uses `TaskRuntime::boot_read_only` and must not run
+    lease/lifecycle reconcile writers
   - running state is lease-backed and heartbeat-refreshable
   - boot recovery preserves a freshly resumed running task during the bounded
     lease-acquisition window so a concurrent runtime cannot interrupt the task
     between `TaskResumed` persistence and lease persistence
   - boot recovery interrupts running tasks whose lease is still missing after
+  - lease recovery `TaskInterrupted` events carry the stale execution generation
+    as `fencing_token`, clear active execution truth, and late stale
+    ExecutionFacts are rejected
     the acquisition window or whose lease is expired
   - agent registry persists and recovers worker snapshots
   - blocked task truth releases the Worker resource back to `Available`;
@@ -147,6 +154,10 @@
 - ExecutionFact blocked creates a master-visible event:
   `execution_fact_blocked_and_review_ready_update_board_truth`
 - ExecutionFact interrupted creates retryable task truth:
+- ExecutionFact failed terminalizes task truth and releases the Worker:
+  `execution_fact_failed_marks_task_terminal_and_releases_agent`
+- stale execution generation after interruption is rejected:
+  `stale_execution_fact_after_interrupted_fencing_is_rejected`
   `execution_fact_interrupted_marks_task_retryable_without_blocked_truth`
 - ExecutionFact review_ready enters review queue:
   `execution_fact_blocked_and_review_ready_update_board_truth`
@@ -229,8 +240,10 @@ cargo test -p freehand-task
 cargo test -p freehand-task atomic_json_write_survives_parallel_same_path_writers -- --nocapture
 cargo test -p freehand-task lease_state_rmw_preserves_parallel_distinct_writers -- --nocapture
 cargo test -p freehand-task lease_state_rmw_removes_only_target_during_parallel_refresh -- --nocapture
+cargo test -p freehand-task task_ledger_writes_are_serialized_across_processes -- --nocapture
 cargo test -p freehand-task boot_preserves_fresh_running_task_during_lease_acquisition_grace -- --nocapture
 cargo test -p freehand-task boot_interrupts_running_task_with_missing_lease_after_acquisition_grace -- --nocapture
+cargo test -p freehand-task boot_read_only_does_not_reconcile_running_lease_truth -- --nocapture
 cargo test -p freehand-task task_space_snapshot_is_bounded_and_does_not_replay_scheduler_facts -- --nocapture
 cargo test -p freehand-tools
 cargo test -p freehand-runtime task_tool_create_persists_and_queries_task -- --nocapture
@@ -239,6 +252,8 @@ cargo test -p freehand-runtime task_tool_resume_and_heartbeat_persist_running_le
 cargo test -p freehand-runtime task_tool_agent_assign_cancel_close_lifecycle -- --nocapture
 cargo test -p freehand-task stale_runtime_heartbeat_after_cancel_is_rejected_without_terminal_overwrite -- --nocapture
 cargo test -p freehand-task stale_runtime_execution_fact_after_cancel_is_rejected_without_terminal_overwrite -- --nocapture
+cargo test -p freehand-task stale_execution_fact_after_interrupted_fencing_is_rejected -- --nocapture
+cargo test -p freehand-task execution_fact_failed_marks_task_terminal_and_releases_agent -- --nocapture
 cargo test -p freehand-runtime task_tool_claim_next_runs_highest_priority_task -- --nocapture
 cargo test -p freehand-runtime task_tool_record_execution_requires_running_task -- --nocapture
 cargo test -p freehand-runtime task_tool_history_returns_ordered_execution_timeline -- --nocapture
@@ -246,6 +261,7 @@ cargo test -p freehand-runtime task_tool_list_tasks_filters_queue_projection -- 
 cargo test -p freehand-runtime task_board_query_projects_owner_truth -- --nocapture
 cargo test -p freehand-runtime execution_fact_sync_updates_task_center -- --nocapture
 cargo test -p freehand-runtime scheduler_tick_emits_facts_without_decisions -- --nocapture
+cargo test -p freehand-runtime worker_runner::tests::production_worker_runner_heartbeat_failure_trips_live_cancel_token -- --nocapture
 cargo test -p freehand-task phase2a_worker_claim_reject_retry_approve_close_recovers_same_execution_id -- --nocapture
 cargo test -p freehand-task phase2a_close_requires_approved_review_for_blocked_and_rejected -- --nocapture
 cargo test -p freehand-task phase2b_event_inbox_projects_events_and_recovers_master_cursor -- --nocapture
@@ -275,3 +291,10 @@ cargo run -p xtask -- gates check
 - runtime/ADP ExecutionFact surface is implemented for Phase 1/2A headless proof
 - SchedulerTick owner-internal facts are implemented in `crates/freehand-task`
 - runtime/ADP SchedulerTick sample is implemented for Phase 1 headless proof
+
+## Phase 1 Local Evidence
+
+- `CARGO_TARGET_DIR=/tmp/freehand-target-phase1 cargo test -p freehand-task -- --test-threads=1` passed 65/65 plus 1 ignored child-entry helper.
+- `CARGO_TARGET_DIR=/tmp/freehand-target-phase1 cargo test -p freehand-runtime worker_runner::tests:: -- --test-threads=1` passed 24/24.
+- `CARGO_TARGET_DIR=/tmp/freehand-target-phase1 cargo test -p freehand-runtime runtime_dispatches_worker_control_to_task_owner -- --test-threads=1` passed.
+- Full `cargo test -p freehand-runtime -- --test-threads=1` is not yet a Phase 1 closeout proof because adjacent pre-existing live-bridge/autonomy tests still fail; keep Phase 1 closure unclaimed until that baseline is green or explicitly separated by owner docs.

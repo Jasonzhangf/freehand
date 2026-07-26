@@ -396,9 +396,7 @@ fn worker_execution_guidance() -> String {
             "- Do not create, assign, claim, approve, reject, close, or delegate tasks. Task lifecycle is owned by the framework and Master.\n",
             "- Do not invent task-management tools or attempt recursive subagent delegation.\n",
         ),
-        concat!(
-            "- Tool validation and execution failures are model-visible results. Correct the call and continue when possible; mark the completion blocked only when the assigned work cannot proceed.\n"
-        )
+        "- Tool validation and execution failures are model-visible results. Correct the call and continue when possible; mark the completion blocked only when the assigned work cannot proceed.\n"
     )
 }
 
@@ -500,6 +498,7 @@ pub(crate) fn original_task_segment(prompt: &str) -> ContextSegment {
     }
 }
 
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn base_live_context_segments(
     original_prompt: &str,
     role: LiveReasonExecutionRole,
@@ -523,6 +522,7 @@ pub(crate) fn base_live_context_segments(
     )
 }
 
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn base_live_context_segments_with_observer<F>(
     original_prompt: &str,
     role: LiveReasonExecutionRole,
@@ -645,6 +645,14 @@ where
     }
 }
 
+pub(crate) fn runtime_prompt_segment_token_budget(content: &str) -> u32 {
+    let estimated = content.chars().count().div_ceil(4);
+    u32::try_from(estimated)
+        .unwrap_or(u32::MAX)
+        .saturating_add(256)
+        .max(512)
+}
+
 #[cfg(test)]
 mod tests {
     use super::worker_execution_guidance;
@@ -686,12 +694,4 @@ mod tests {
             "worker guidance must not contradict locked workspace path tools"
         );
     }
-}
-
-pub(crate) fn runtime_prompt_segment_token_budget(content: &str) -> u32 {
-    let estimated = content.chars().count().div_ceil(4);
-    u32::try_from(estimated)
-        .unwrap_or(u32::MAX)
-        .saturating_add(256)
-        .max(512)
 }

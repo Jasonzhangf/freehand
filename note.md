@@ -8713,3 +8713,10 @@ Current real root cause split:
 - implementation: `RuntimeCommandDispatcher::new` live bootstrap now runs `recover_stale_lifecycle_waits_on_bootstrap` before `restore_all_persisted_sessions_into_ui`. The reconcile path uses `TaskRuntime::boot_read_only`, TimerStore schedules, and live non-recoverable `master_work` truth to decide whether a latest effective `ToolPending` turn has an owner that can wake it. No-owner stale waits are re-recorded through `ReasonPersistence::record_turn_closed` as terminal `Blocked`; open child-task/timer/live-master waits are preserved. `TaskRuntime::boot_read_only` was added so projection/reconcile reads do not create self-agent or lease side effects.
 - positive/negative tests: `live_bootstrap_closes_stale_toolpending_without_lifecycle_owner` proves stale wait becomes `Blocked` and SessionList `latest_status=blocked`; `live_bootstrap_keeps_toolpending_when_child_task_can_wake_parent` proves an open child task prevents premature cleanup.
 - S-profile proof already observed before this docs/commit closeout: `webui-path-diagnostic-state-sync-fixed:2:blocked`, `webui-session-20260723001509-bd98e156:8:blocked`; persisted turn `~/.freehand/state/turns/master/webui-session-20260723001509-bd98e156/turns/runtime-turn-541-r3.json` has `status=Blocked`; mobile UI artifact `artifacts/webui-online/mobile-ui-tree-phase1-20260726T180200-56388` has `phoneRunningIds=[]` and places the old session in history as `已阻塞`.
+
+## 2026-07-27 02:49 Phase 1 runtime package closeout
+- Fixed bootstrap poison-ledger hard-fail in `recover_stale_lifecycle_waits_on_bootstrap` (skip JsonParseFailed/coherence/gap).
+- UI bootstrap now uses `restore_turn_snapshots_for_ui` so multi-round intermediate turns backfill from ledger.
+- Owner: incomplete authoritative + poisoned ledger falls back to partial authoritative with integrity warning.
+- Proof: `cargo test -p freehand-runtime -- --test-threads=1` => 255 ok; freehand-task 65 ok; xtask 50 ok; mainlines/gates ok; clippy reason+runtime -D warnings ok.
+- Removed architecture Gap 7 after package-level green. Gap 5/6/8 remain.

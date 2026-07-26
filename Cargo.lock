@@ -400,7 +400,6 @@ dependencies = [
  "freehand-debug",
  "freehand-metadata",
  "freehand-provider-core",
- "freehand-ui-protocol",
  "fs2",
  "serde",
  "serde_json",
@@ -465,12 +464,9 @@ name = "freehand-testkit"
 version = "0.1.0"
 dependencies = [
  "freehand-blocks",
- "freehand-config",
  "freehand-contracts",
- "freehand-provider-anthropic",
  "freehand-provider-core",
  "freehand-reason",
- "freehand-runtime",
  "serde_json",
  "thiserror",
 ]

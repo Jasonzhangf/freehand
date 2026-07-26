@@ -1,3 +1,4 @@
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex, mpsc};
 use std::thread;
 use std::time::Duration;
@@ -26,6 +27,7 @@ impl WorkerHeartbeat {
         worker_agent_id: AgentId,
         execution_id: String,
         process_identity: WorkerProcessIdentity,
+        cancel_token: Arc<AtomicBool>,
     ) -> Self {
         let (stop, receiver) = mpsc::channel();
         let error = Arc::new(Mutex::new(None));
@@ -42,6 +44,7 @@ impl WorkerHeartbeat {
                     watermark: worker_watermark(&execution_id, "heartbeat"),
                 });
                 if let Err(error) = result {
+                    cancel_token.store(true, Ordering::SeqCst);
                     *thread_error.lock().expect("lock worker heartbeat error") =
                         Some(error.to_string());
                     break;
@@ -55,6 +58,7 @@ impl WorkerHeartbeat {
                     },
                 );
                 if let Err(error) = result {
+                    cancel_token.store(true, Ordering::SeqCst);
                     *thread_error.lock().expect("lock worker heartbeat error") =
                         Some(error.to_string());
                     break;

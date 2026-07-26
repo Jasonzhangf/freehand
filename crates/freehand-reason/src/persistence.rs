@@ -550,6 +550,16 @@ impl ReasonPersistence {
                     }
                     return Err(ReasonPersistenceError::LedgerSequenceGap { expected, actual });
                 }
+                Err(
+                    ReasonPersistenceError::JsonParseFailed(_)
+                    | ReasonPersistenceError::InvalidLedgerCoherence(_),
+                ) if !has_active_authoritative_turn && !authoritative_turns.is_empty() => {
+                    annotate_incomplete_authoritative_ui_restore(
+                        &mut authoritative_turns,
+                        &self.agent_id,
+                    );
+                    return Ok(authoritative_turns);
+                }
                 Err(error) => return Err(error),
             };
             let ledger_turns = ui_turn_snapshots_from_ledger_rows(ledger_rows);
@@ -3100,6 +3110,71 @@ mod tests {
                 .as_ref()
                 .map(|event| &event.status),
             Some(&TerminalStatus::ToolPending)
+        );
+
+        fs::remove_dir_all(runtime_home).expect("cleanup");
+    }
+
+    #[test]
+    fn ui_restore_returns_inactive_partial_authoritative_snapshots_when_ledger_is_poisoned() {
+        let runtime_home = temp_runtime_home();
+        let coordinator = ReasonPersistence::new(&runtime_home, AgentId::new("agent-1"));
+        let mut history = session_history();
+
+        let mut first = started_turn_with_id(&mut history, "runtime-turn-1", "trace-1");
+        first.semantic_events.push(ReasonResp01SemanticEvent {
+            session_id: SessionId::new("session-1"),
+            turn_id: TurnId::new("runtime-turn-1"),
+            trace_id: TraceId::new("trace-1"),
+            feature_id: FeatureId::new("reason.persistence"),
+            agent_id: AgentId::new("agent-1"),
+            kind: SemanticEventKind::Text,
+            content: "first round existed only in the missing ledger".to_owned(),
+        });
+        coordinator
+            .record_turn_started(&history, &first, 0)
+            .expect("persist first round active snapshot and ledger row");
+
+        let mut continuation =
+            started_turn_with_id(&mut history, "runtime-turn-1-r2", "trace-1-r2");
+        continuation.terminal_event = Some(freehand_contracts::ReasonResp03TerminalEvent {
+            session_id: SessionId::new("session-1"),
+            turn_id: TurnId::new("runtime-turn-1-r2"),
+            trace_id: TraceId::new("trace-1-r2"),
+            feature_id: FeatureId::new("reason.persistence"),
+            agent_id: AgentId::new("agent-1"),
+            status: TerminalStatus::ToolPending,
+            summary: "Waiting for user choice after continuation".to_owned(),
+        });
+        coordinator
+            .record_turn_started(&history, &continuation, 0)
+            .expect("persist continuation active snapshot");
+        coordinator
+            .record_turn_closed(&history, &continuation, 0)
+            .expect("persist only continuation as inactive authoritative closed truth");
+
+        fs::write(
+            coordinator.reason_ledger_path(history.session_id()),
+            "{poisoned historical ledger}\n",
+        )
+        .expect("poison ledger to prove incomplete UI restore does not hard-fail bootstrap");
+
+        let ui_turns = coordinator
+            .restore_turn_snapshots_for_ui(history.session_id())
+            .expect("inactive partial authoritative restore survives poisoned ledger");
+        assert_eq!(
+            ui_turns
+                .iter()
+                .map(|turn| turn.request.turn_id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["runtime-turn-1-r2"]
+        );
+        assert!(
+            ui_turns[0].error_events.iter().any(|event| {
+                event.error.code == "reason_persistence_partial_ui_restore"
+                    && event.error.message.contains("历史会话轮次不完整")
+            }),
+            "poisoned incomplete restore must carry an explicit partial transcript warning"
         );
 
         fs::remove_dir_all(runtime_home).expect("cleanup");

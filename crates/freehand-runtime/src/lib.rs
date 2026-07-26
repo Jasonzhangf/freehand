@@ -2945,6 +2945,15 @@ fn recover_stale_lifecycle_waits_on_bootstrap(
         let restored = match persistence.restore(&session.session_id) {
             Ok(restored) => restored,
             Err(ReasonPersistenceError::MissingRecoveryTruth(_)) => continue,
+            // Incomplete / poisoned historical ledgers must not abort bootstrap.
+            // Lifecycle recovery only acts on fully restorable sessions; UI uses
+            // authoritative + optional ledger backfill for display.
+            Err(
+                ReasonPersistenceError::JsonParseFailed(_)
+                | ReasonPersistenceError::InvalidCursorCoherence(_)
+                | ReasonPersistenceError::InvalidLedgerCoherence(_)
+                | ReasonPersistenceError::LedgerSequenceGap { .. },
+            ) => continue,
             Err(error) => return Err(error.to_string()),
         };
         if restored.active_turn.is_some() {
@@ -3395,9 +3404,11 @@ impl RuntimeCommandDispatcher {
                 let Some(live) = state.config.live.as_ref() else {
                     return Ok(None);
                 };
-                let task_runtime =
-                    TaskRuntime::boot(&live.runtime_home, state.config.reason_agent_id.clone())
-                        .map_err(map_task_query_error)?;
+                let task_runtime = TaskRuntime::boot_read_only(
+                    &live.runtime_home,
+                    state.config.reason_agent_id.clone(),
+                )
+                .map_err(map_task_query_error)?;
                 let status_filter = status
                     .as_deref()
                     .map(parse_task_status)
@@ -3424,9 +3435,11 @@ impl RuntimeCommandDispatcher {
                 let Some(live) = state.config.live.as_ref() else {
                     return Ok(None);
                 };
-                let task_runtime =
-                    TaskRuntime::boot(&live.runtime_home, state.config.reason_agent_id.clone())
-                        .map_err(map_task_query_error)?;
+                let task_runtime = TaskRuntime::boot_read_only(
+                    &live.runtime_home,
+                    state.config.reason_agent_id.clone(),
+                )
+                .map_err(map_task_query_error)?;
                 let status_filter = status
                     .as_deref()
                     .map(parse_task_status)
@@ -3451,9 +3464,11 @@ impl RuntimeCommandDispatcher {
                 let Some(live) = state.config.live.as_ref() else {
                     return Ok(None);
                 };
-                let task_runtime =
-                    TaskRuntime::boot(&live.runtime_home, state.config.reason_agent_id.clone())
-                        .map_err(map_task_query_error)?;
+                let task_runtime = TaskRuntime::boot_read_only(
+                    &live.runtime_home,
+                    state.config.reason_agent_id.clone(),
+                )
+                .map_err(map_task_query_error)?;
                 let board = task_runtime
                     .query_agent_board()
                     .map_err(map_task_query_error)?;
@@ -3466,9 +3481,11 @@ impl RuntimeCommandDispatcher {
                 let Some(live) = state.config.live.as_ref() else {
                     return Ok(None);
                 };
-                let task_runtime =
-                    TaskRuntime::boot(&live.runtime_home, state.config.reason_agent_id.clone())
-                        .map_err(map_task_query_error)?;
+                let task_runtime = TaskRuntime::boot_read_only(
+                    &live.runtime_home,
+                    state.config.reason_agent_id.clone(),
+                )
+                .map_err(map_task_query_error)?;
                 let lifecycle = task_runtime
                     .query_agent_lifecycle(agent_id)
                     .map_err(map_task_query_error)?;
@@ -3480,9 +3497,11 @@ impl RuntimeCommandDispatcher {
                 let Some(live) = state.config.live.as_ref() else {
                     return Ok(None);
                 };
-                let task_runtime =
-                    TaskRuntime::boot(&live.runtime_home, state.config.reason_agent_id.clone())
-                        .map_err(map_task_query_error)?;
+                let task_runtime = TaskRuntime::boot_read_only(
+                    &live.runtime_home,
+                    state.config.reason_agent_id.clone(),
+                )
+                .map_err(map_task_query_error)?;
                 let events = task_runtime
                     .task_history(&TaskId::new(task_id.clone()))
                     .map_err(map_task_query_error)?;
@@ -3501,9 +3520,11 @@ impl RuntimeCommandDispatcher {
                 let Some(live) = state.config.live.as_ref() else {
                     return Ok(None);
                 };
-                let task_runtime =
-                    TaskRuntime::boot(&live.runtime_home, state.config.reason_agent_id.clone())
-                        .map_err(map_task_query_error)?;
+                let task_runtime = TaskRuntime::boot_read_only(
+                    &live.runtime_home,
+                    state.config.reason_agent_id.clone(),
+                )
+                .map_err(map_task_query_error)?;
                 let events = task_runtime
                     .query_worker_control_events(&TaskId::new(task_id.clone()), execution_id)
                     .map_err(map_task_query_error)?;
@@ -3553,9 +3574,11 @@ impl RuntimeCommandDispatcher {
                 let Some(live) = state.config.live.as_ref() else {
                     return Ok(None);
                 };
-                let task_runtime =
-                    TaskRuntime::boot(&live.runtime_home, state.config.reason_agent_id.clone())
-                        .map_err(map_task_query_error)?;
+                let task_runtime = TaskRuntime::boot_read_only(
+                    &live.runtime_home,
+                    state.config.reason_agent_id.clone(),
+                )
+                .map_err(map_task_query_error)?;
                 let inbox = task_runtime
                     .query_event_inbox(TaskEventInboxQuery {
                         after_cursor: after_cursor.clone(),
@@ -3567,7 +3590,7 @@ impl RuntimeCommandDispatcher {
                     inbox,
                 ))))
             }
-            UiCommand::RunMasterPoll {
+            UiCommand::QueryMasterPoll {
                 after_cursor,
                 limit,
                 include_terminal,
@@ -3576,17 +3599,19 @@ impl RuntimeCommandDispatcher {
                 let Some(live) = state.config.live.as_ref() else {
                     return Ok(None);
                 };
-                let task_runtime =
-                    TaskRuntime::boot(&live.runtime_home, state.config.reason_agent_id.clone())
-                        .map_err(map_task_query_error)?;
+                let task_runtime = TaskRuntime::boot_read_only(
+                    &live.runtime_home,
+                    state.config.reason_agent_id.clone(),
+                )
+                .map_err(map_task_query_error)?;
                 let outcome = task_runtime
-                    .run_master_poll(MasterPollRequest {
+                    .preview_master_poll(MasterPollRequest {
                         after_cursor: after_cursor.clone(),
                         limit: limit.unwrap_or(0),
                         include_terminal: *include_terminal,
                         replay_from_start: *replay_from_start,
                         actor: ui_task_actor(&state.config.reason_agent_id, None, None),
-                        watermark: ui_task_watermark("run_master_poll"),
+                        watermark: ui_task_watermark("query_master_poll"),
                     })
                     .map_err(map_task_query_error)?;
                 Ok(Some(UiQueryResult::MasterPoll(project_master_poll_for_ui(
@@ -3941,7 +3966,7 @@ impl RuntimeCommandDispatcher {
         live: &RuntimeLiveDispatcherConfig,
     ) -> Result<(), UiCommandDispatchPortError> {
         let task_runtime =
-            TaskRuntime::boot(&live.runtime_home, state.config.reason_agent_id.clone())
+            TaskRuntime::boot_read_only(&live.runtime_home, state.config.reason_agent_id.clone())
                 .map_err(map_task_query_error)?;
         let Some(checkpoint) = master_runner::recoverable_stale_master_active_work(
             &live.runtime_home,
@@ -6197,12 +6222,14 @@ fn map_session_search_persistence_error(err: ReasonPersistenceError) -> UiComman
     ))
 }
 
+type WorkerParentSessionMap = BTreeMap<SessionId, (SessionId, String, Option<String>)>;
+
 fn worker_parent_session_map(
     runtime_home: &Path,
     source_agent_id: &AgentId,
-) -> Result<BTreeMap<SessionId, (SessionId, String, Option<String>)>, UiCommandDispatchPortError> {
-    let task_runtime =
-        TaskRuntime::boot(runtime_home, source_agent_id.clone()).map_err(map_task_query_error)?;
+) -> Result<WorkerParentSessionMap, UiCommandDispatchPortError> {
+    let task_runtime = TaskRuntime::boot_read_only(runtime_home, source_agent_id.clone())
+        .map_err(map_task_query_error)?;
     let board = task_runtime
         .query_task_board(TaskBoardQuery {
             status: None,
@@ -6434,7 +6461,7 @@ fn task_list_projection_from_runtime(
     status_filter: Option<String>,
     agent_filter: Option<AgentId>,
 ) -> Result<UiTaskListProjection, TaskError> {
-    let task_runtime = TaskRuntime::boot(runtime_home, source_agent_id.clone())?;
+    let task_runtime = TaskRuntime::boot_read_only(runtime_home, source_agent_id.clone())?;
     let parsed_status = status_filter
         .as_deref()
         .map(parse_task_status)
@@ -6618,6 +6645,9 @@ fn ui_execution_fact_to_task_fact(fact: UiExecutionFactCommand) -> ExecutionFact
             }
             UiExecutionFactKind::Interrupted { reason, evidence } => {
                 ExecutionFactKind::Interrupted { reason, evidence }
+            }
+            UiExecutionFactKind::Failed { reason, evidence } => {
+                ExecutionFactKind::Failed { reason, evidence }
             }
             UiExecutionFactKind::ReviewReady {
                 summary,
@@ -8417,6 +8447,7 @@ fn materialize_provider_executor_failure(
         .map_err(|err| RuntimeLiveBridgeError::ReasonPersistenceFailed(err.to_string()))
 }
 
+#[allow(clippy::too_many_arguments)]
 fn emit_provider_retry_debug(
     debug_hub: &DebugHub,
     agent_id: &AgentId,
@@ -10205,7 +10236,7 @@ fn task_decision_boundary_summary(
     agent_id: &AgentId,
     boundary: &LiveReasonTaskDecisionBoundary,
 ) -> Result<Option<String>, RuntimeLiveBridgeError> {
-    let runtime = TaskRuntime::boot(runtime_home, agent_id.clone())
+    let runtime = TaskRuntime::boot_read_only(runtime_home, agent_id.clone())
         .map_err(|err| RuntimeLiveBridgeError::TaskProjectionFailed(err.to_string()))?;
     let task = runtime
         .query_task(&boundary.task_id)
@@ -10307,7 +10338,7 @@ fn master_session_lifecycle_owner_truth(
     agent_id: &AgentId,
     session_id: &SessionId,
 ) -> Result<MasterSessionLifecycleOwnerTruth, RuntimeLiveBridgeError> {
-    let runtime = TaskRuntime::boot(runtime_home, agent_id.clone())
+    let runtime = TaskRuntime::boot_read_only(runtime_home, agent_id.clone())
         .map_err(|err| RuntimeLiveBridgeError::TaskProjectionFailed(err.to_string()))?;
     let board = runtime
         .query_task_board(TaskBoardQuery {

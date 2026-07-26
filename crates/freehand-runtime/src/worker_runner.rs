@@ -30,6 +30,8 @@ use heartbeat::WorkerHeartbeat;
 
 const DEFAULT_LEASE_TTL_SECONDS: u64 = 30;
 const DEFAULT_POLL_INTERVAL_MILLIS: u64 = 1_000;
+const WORKER_RETRY_INITIAL_BACKOFF_MILLIS: u64 = 1_000;
+const WORKER_RETRY_MAX_BACKOFF_MILLIS: u64 = 30_000;
 const WORKER_CONTROL_MONITOR_INTERVAL_MILLIS: u64 = 25;
 
 static EXECUTION_COUNTER: AtomicU64 = AtomicU64::new(0);
@@ -84,6 +86,19 @@ pub enum ProductionWorkerRunnerError {
     Heartbeat(String),
     #[error("worker execution failed and blocked fact could not be persisted: {0}")]
     BlockedFactPersistence(String),
+}
+
+impl ProductionWorkerRunnerError {
+    /// Transient persistence/IO failures the worker loop should ride out with
+    /// backoff instead of exiting the daemon; config/topology errors stay fatal.
+    fn is_retryable_loop_failure(&self) -> bool {
+        matches!(
+            self,
+            ProductionWorkerRunnerError::TaskCenter(_)
+                | ProductionWorkerRunnerError::Heartbeat(_)
+                | ProductionWorkerRunnerError::BlockedFactPersistence(_)
+        )
+    }
 }
 
 #[derive(Debug, Clone)]
@@ -253,14 +268,15 @@ impl ProductionWorkerRunner {
             }
         };
 
+        let pause_token = Arc::new(AtomicBool::new(false));
         let heartbeat = WorkerHeartbeat::start(
             Arc::clone(&task_runtime),
             task.task_id.clone(),
             self.worker_agent_id.clone(),
             execution_id.clone(),
             self.process_identity.clone(),
+            Arc::clone(&pause_token),
         );
-        let pause_token = Arc::new(AtomicBool::new(false));
         let pause_monitor = WorkerPauseMonitor::start(
             Arc::clone(&task_runtime),
             task.task_id.clone(),
@@ -356,10 +372,34 @@ impl ProductionWorkerRunner {
 
     pub fn run(&self) -> Result<(), ProductionWorkerRunnerError> {
         let interval = Duration::from_millis(DEFAULT_POLL_INTERVAL_MILLIS);
+        let initial_backoff = Duration::from_millis(WORKER_RETRY_INITIAL_BACKOFF_MILLIS);
+        let max_backoff = Duration::from_millis(WORKER_RETRY_MAX_BACKOFF_MILLIS);
+        let mut consecutive_retryable_failures = 0_u32;
         loop {
-            match self.run_once()? {
-                ProductionWorkerTickOutcome::Idle => {}
-                outcome => println!("worker runner outcome: {outcome:?}"),
+            match self.run_once() {
+                Ok(ProductionWorkerTickOutcome::Idle) => {
+                    consecutive_retryable_failures = 0;
+                }
+                Ok(outcome) => {
+                    consecutive_retryable_failures = 0;
+                    println!("worker runner outcome: {outcome:?}");
+                }
+                Err(error) if error.is_retryable_loop_failure() => {
+                    consecutive_retryable_failures =
+                        consecutive_retryable_failures.saturating_add(1);
+                    let exponent = consecutive_retryable_failures.saturating_sub(1).min(31);
+                    let delay = initial_backoff
+                        .saturating_mul(1_u32 << exponent)
+                        .min(max_backoff);
+                    eprintln!(
+                        "worker runner retry attempt={} retry_in_ms={} error={error}",
+                        consecutive_retryable_failures,
+                        delay.as_millis()
+                    );
+                    thread::sleep(delay);
+                    continue;
+                }
+                Err(error) => return Err(error),
             }
             thread::sleep(interval);
         }

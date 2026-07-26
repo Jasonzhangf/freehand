@@ -16,9 +16,12 @@
     "runtime receives a provider tool call named `task`",
     "runtime routes `task` tool calls to `execute_task_tool` instead of generic file/tool execution",
     "`TaskRuntime::boot` loads task snapshots, task leases, self-agent snapshot, and persisted agent lifecycle snapshots into memory",
-"`TaskRuntime::boot` preserves freshly resumed running tasks during the bounded lease-acquisition window, then interrupts running tasks whose lease remains missing, mismatched, inactive, or expired",
+    "`TaskRuntime::boot_read_only` loads the same persisted projection without creating a self-agent snapshot and without running lease/lifecycle reconcile writes; ADP query/projection paths use it so read routes cannot mutate Task Center truth",
+    "`TaskRuntime::boot` preserves freshly resumed running tasks during the bounded lease-acquisition window, then interrupts running tasks whose lease remains missing, mismatched, inactive, or expired",
+    "lease-expiry recovery writes `TaskInterrupted` with the old `execution_id` as a fencing token and clears active execution truth so late facts from the stale worker generation are rejected",
     "`TaskRuntime::create_task` validates required task content, goal, deliverables, and acceptance",
     "create action writes append-only ledger events and atomic snapshots; shared atomic JSON persistence uses per-process unique temp paths so concurrent TaskRuntime boots or index writes do not steal each other's temp file",
+    "task ledger append, task snapshot write, and task index rewrite run inside one `TaskStore::with_task_ledger_lock` critical section; event seq is reallocated from disk ledger truth while locked to prevent duplicate event ids across processes",
     "lease create, refresh, and removal serialize the complete leases.json read-modify-write transaction through one TaskStore advisory lock; boot recovery removes only invalid task ids instead of replacing concurrent lease truth",
     "dispatch mode can assign the self/available agent or leave the task in `WaitingAgent`",
     "`TaskRuntime::assign_task` binds waiting, created, or interrupted tasks to an available agent",
@@ -37,6 +40,7 @@
     "Phase 2A worker loop keeps execution_id attached to claim/start, progress, blocked, recovering, review, reject, retry, approve, and close evidence",
     "Phase 2A close requires approved review; blocked or rejected tasks cannot be closed as a shortcut around review acceptance",
     "Phase 2B EventInbox projects master-visible task, execution, review, and scheduler events from Task Center ledger truth with a globally unique cursor shaped as timestamp, task id, sequence, and event id",
+    "EventInbox v2 cursor reads only task ledger rows whose per-task seq is above the decoded watermark; legacy cursors still materialize history once for compatibility validation",
     "Phase 2B EventInbox accepts legacy three-part cursors by skipping all events with the matching legacy prefix, so duplicated historical cursor rows do not replay as new events",
     "Phase 2B replay_from_start=true makes MasterPoll ignore a stale persisted cursor for closeout and recovery proof; omitted EventInbox/MasterPoll limit drains all pending rows, while explicit finite limits remain pagination only",
     "Phase 2B master poll loads TaskBoard, AgentBoard, EventInbox cursor, and persisted processed cursor, then classifies states without applying business mutations",
@@ -57,7 +61,9 @@
     "task tool create result returns semantic task ids, status, event names, sequence numbers, and target_cwd path diagnostics when present; query/list/history still return JSON snapshots",
     "Phase 1 TaskBoard query returns board-level task, blocker, review, stale, and agent binding summaries",
     "TaskSpaceSnapshot query returns a bounded prompt projection with actionable tasks first, bounded blocked and review-ready ids, AgentLifecycle health, and newest recent events while leaving full TaskBoard/EventInbox semantics unchanged",
+    "read-only Task Center projections use `boot_read_only`, preserving stale running truth for display until an owner runner performs reconcile",
     "Phase 1 ExecutionFact sync returns event-backed Task Center updates while preserving recovering as non-terminal",
+    "ExecutionFact `failed` is a terminal producer for `TaskStatus::Failed`, releases the Worker, clears active execution truth, and remains master-visible as `task_failed`",
     "Phase 1 SchedulerTick returns durable/replayable fact events and recommendations only",
     "review rejection remains non-terminal task lifecycle truth; a later execution fact may resume the rejected task into running retry and submit review again",
     "EventInbox query returns ordered master-visible events after the requested or persisted cursor",
@@ -73,6 +79,7 @@
     "invalid lifecycle transitions return explicit invalid-transition errors",
     "heartbeat for non-running or unassigned tasks returns invalid-transition and writes no lease",
     "heartbeat or execution facts from a stale runtime after terminal task mutation return invalid-transition and write no ledger, lease, or snapshot truth",
+    "ExecutionFact payloads carrying an old or missing active execution generation after interruption/cancel/failure are rejected as invalid transitions and write no ledger, lease, or snapshot truth",
     "assigning to unavailable agents and closing busy agents return explicit errors without mutating task or agent truth",
     "claiming with an empty agent queue returns no-task without mutating truth",
     "claiming with an empty execution id returns explicit missing-field and writes no truth",
@@ -96,7 +103,7 @@
     {
       "symbol": "TaskRuntime::boot",
       "owner": "crates/freehand-task/src/lib.rs",
-      "purpose": "rebuild memory state from persisted task, agent, and lifecycle snapshots",
+      "purpose": "rebuild memory state from persisted task, agent, lifecycle, and lease snapshots, then run owner recovery reconciliation",
       "allowed_callers": [
         "runtime task tool bridge",
         "future daemon bootstrap"
@@ -106,7 +113,9 @@
         "boot_preserves_fresh_running_task_during_lease_acquisition_grace",
         "boot_interrupts_running_task_with_missing_lease_after_acquisition_grace",
         "boot_interrupts_running_task_with_expired_lease",
-        "task_tool_create_persists_and_queries_task"
+        "task_tool_create_persists_and_queries_task",
+        "boot_read_only_does_not_reconcile_running_lease_truth",
+        "stale_execution_fact_after_interrupted_fencing_is_rejected"
       ],
       "why_shared": "keeps startup recovery in task owner, not UI/runtime glue"
     },
@@ -332,6 +341,50 @@
         "phase2b_master_poll_classifies_board_and_does_not_mutate_tasks"
       ],
       "why_shared": "keeps framework sensing and cursor advancement centralized while leaving approve/reject/assign/close decisions to explicit task actions"
+    },
+    {
+      "symbol": "TaskRuntime::boot_read_only",
+      "owner": "crates/freehand-task/src/lib.rs",
+      "purpose": "rebuild persisted Task Center projections without self-agent creation, lease recovery, paused-agent repair, released-lifecycle repair, or cursor mutation side effects",
+      "allowed_callers": [
+        "runtime ADP query dispatch",
+        "TaskSpaceSnapshot/read-only projections",
+        "tests"
+      ],
+      "related_tests": [
+        "boot_read_only_does_not_reconcile_running_lease_truth"
+      ],
+      "why_shared": "keeps query/projection boot side-effect free while preserving boot recovery for master/worker runners"
+    },
+    {
+      "symbol": "TaskStore::append_event_and_snapshot",
+      "owner": "crates/freehand-task/src/lib.rs",
+      "purpose": "serialize ledger append, snapshot atomic write, and task index rewrite through one task-ledger advisory lock and allocate event seq from disk ledger truth while locked",
+      "allowed_callers": [
+        "TaskRuntime mutation methods",
+        "lease recovery",
+        "scheduler fact writer"
+      ],
+      "related_tests": [
+        "task_ledger_writes_are_serialized_across_processes",
+        "concurrent_runtimes_never_produce_duplicate_event_ids"
+      ],
+      "why_shared": "one writer boundary prevents cross-process seq collisions and partial ledger/snapshot/index updates"
+    },
+    {
+      "symbol": "TaskStore::load_master_visible_events_after_watermark",
+      "owner": "crates/freehand-task/src/lib.rs",
+      "purpose": "load only master-visible task ledger rows whose per-task sequence is newer than the v2 EventInbox watermark",
+      "allowed_callers": [
+        "TaskRuntime::query_event_inbox",
+        "TaskRuntime::preview_master_poll",
+        "TaskRuntime::run_master_poll"
+      ],
+      "related_tests": [
+        "phase2b_event_cursor_uses_task_sequence_watermark_and_legacy_skips_duplicates",
+        "phase2b_v2_cursor_delivers_new_lower_task_id_event_with_same_timestamp"
+      ],
+      "why_shared": "keeps EventInbox delivery truth incremental by per-task ledger sequence instead of reparsing all old events for v2 cursors"
     }
   ],
   "call_table": [
@@ -359,11 +412,11 @@
     },
     {
       "step": "03",
-      "symbol_path": "TaskRuntime::boot",
+      "symbol_path": "TaskRuntime::boot / TaskRuntime::boot_read_only",
       "file_path": "crates/freehand-task/src/lib.rs",
-      "responsibility": "load task, agent, and lifecycle snapshots into memory",
+      "responsibility": "load task and agent snapshots into memory; owner runners reconcile lease/lifecycle truth, read-only query callers do not write recovery truth",
       "input_semantic": "runtime home and owner agent",
-      "output_semantic": "ready task runtime",
+      "output_semantic": "ready task runtime, either reconciled owner state or side-effect-free projection state",
       "caller": "runtime task bridge",
       "callee": "task owner",
       "binding_status": "bound"
@@ -463,9 +516,9 @@
       "step": "12",
       "symbol_path": "reconcile_running_leases",
       "file_path": "crates/freehand-task/src/lib.rs",
-      "responsibility": "preserve fresh lease-acquisition windows, then interrupt running tasks with missing, mismatched, inactive, or expired leases during boot",
+      "responsibility": "preserve fresh lease-acquisition windows, then interrupt running tasks with missing, mismatched, inactive, or expired leases during owner boot and include the old execution_id as fencing token",
       "input_semantic": "persisted task snapshots plus lease snapshot",
-      "output_semantic": "recovered runtime state",
+      "output_semantic": "recovered runtime state + fenced TaskInterrupted event when stale execution is closed",
       "caller": "task boot",
       "callee": "task owner",
       "binding_status": "bound"
@@ -557,9 +610,9 @@
       "step": "19",
       "symbol_path": "TaskRuntime::apply_execution_fact",
       "file_path": "crates/freehand-task/src/lib.rs",
-      "responsibility": "admit typed ExecutionFact state into Task Center without raw prose parsing",
+      "responsibility": "admit typed ExecutionFact state into Task Center without raw prose parsing, including failed terminal truth and active-execution fencing rejection",
       "input_semantic": "ExecutionFact",
-      "output_semantic": "task snapshot plus event",
+      "output_semantic": "task snapshot + event or explicit stale-generation rejection",
       "caller": "Agent Lifecycle sync / runtime",
       "callee": "task owner",
       "binding_status": "bound"
@@ -601,8 +654,8 @@
       "step": "23",
       "symbol_path": "TaskRuntime::query_event_inbox",
       "file_path": "crates/freehand-task/src/lib.rs",
-      "responsibility": "project master-visible event inbox entries after a deterministic v2 per-task sequence watermark, with conservative legacy timestamp/task/seq cursor migration; omitted limit drains all pending rows",
-      "input_semantic": "task ledgers plus optional cursor",
+      "responsibility": "project master-visible event inbox entries from task ledger events after a v2 per-task sequence watermark, with legacy cursor compatibility validation",
+      "input_semantic": "task ledgers + optional v2/legacy cursor",
       "output_semantic": "EventInbox projection and next cursor",
       "caller": "runtime query dispatch / CLI sample",
       "callee": "task owner",
@@ -610,9 +663,9 @@
     },
     {
       "step": "24",
-      "symbol_path": "TaskRuntime::run_master_poll",
+      "symbol_path": "TaskRuntime::run_master_poll / TaskRuntime::preview_master_poll",
       "file_path": "crates/freehand-task/src/lib.rs",
-      "responsibility": "load TaskBoard, AgentBoard, EventInbox, classify master-visible states, and persist processed cursor without task business mutations; replay_from_start plus omitted limit drains all pending rows",
+      "responsibility": "load TaskBoard, AgentBoard, EventInbox, classify master-visible states, and either persist processed cursor for command mode or leave cursor truth untouched for query preview",
       "input_semantic": "master poll request plus explicit replay cursor mode or persisted cursor",
       "output_semantic": "master poll outcome with classifications and next cursor",
       "caller": "runtime ADP command dispatch / CLI sample",
@@ -656,6 +709,17 @@
       "binding_status": "bound"
     },
     {
+      "step": "27",
+      "symbol_path": "TaskStore::append_event_and_snapshot",
+      "file_path": "crates/freehand-task/src/lib.rs",
+      "responsibility": "lock ledger mutation, assign disk-based seq, append ledger row, atomically write task snapshot, and rewrite task index as one cross-process critical section",
+      "input_semantic": "task snapshot + pending ledger event",
+      "output_semantic": "durable unique-seq ledger/snapshot/index truth",
+      "caller": "TaskRuntime mutation and recovery writers",
+      "callee": "filesystem advisory lock + task store atomic writers",
+      "binding_status": "bound"
+    },
+    {
       "step": "28",
       "symbol_path": "TaskRuntime::query_task_space_snapshot",
       "file_path": "crates/freehand-task/src/lib.rs",
@@ -683,6 +747,9 @@
     "Phase 2C worker-control truth is implemented under worker.control and S-profile verified with same-id restart proof",
     "Phase 2D WebUI task/agent/control projection is implemented through app.webui-smoke; Android true-device proof is separate and not implied by task.orchestration",
     "remaining gap is production non-smoke master/worker orchestration: daemon-owned scheduler/worker runner activation, configured worker resource recycling, and non-fixture real-provider behavioral evaluation",
-    "Worker resource release semantics now distinguish blocked task truth from explicit task pause truth, with boot repair for legacy paused blocked snapshots"
+    "Worker resource release semantics now distinguish blocked task truth from explicit task pause truth, with boot repair for legacy paused blocked snapshots",
+    "Phase 1 read-only boot is implemented for runtime query/projection paths and locked by `boot_read_only_does_not_reconcile_running_lease_truth`.",
+    "Phase 1 task ledger writes are serialized across processes and locked by `task_ledger_writes_are_serialized_across_processes`.",
+    "Phase 1 execution fencing rejects stale facts after interruption and failed facts now terminalize `TaskStatus::Failed`."
   ]
 }

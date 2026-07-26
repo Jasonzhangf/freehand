@@ -639,3 +639,10 @@
 - WebUI must classify `ToolPending` as running lifecycle only with waiting tool/model activity or owner-projected open task/timer truth. Absence of timer projection alone is not evidence to keep `等待生命周期`; if no waiting tool/model/open-task evidence exists, render `等待用户选择` and keep the session exitable.
 
 - 2026-07-26: Runtime live bootstrap now closes stale no-owner lifecycle waits before UI projection restore. A persisted latest effective `ToolPending` user-session turn with no active turn, no waiting model/tool activity, no wakeable same-logical-turn TaskBoard child, no active/running source TimerStore schedule, and no live non-recoverable `master_work` owner is re-recorded as terminal `Blocked`; owner-backed waits remain `ToolPending`. This fixed S-profile residue where `webui-session-20260723001509-bd98e156` still appeared waiting after its child task was closed. Proof: focused runtime tests `live_bootstrap_closes_stale_toolpending_without_lifecycle_owner` and `live_bootstrap_keeps_toolpending_when_child_task_can_wake_parent`, S-profile `adp-session-query` showing both old stale sessions as `blocked`, and mobile UI artifact `artifacts/webui-online/mobile-ui-tree-phase1-20260726T180200-56388` with `phoneRunningIds=[]`.
+
+## Phase 1 concurrency verification closed (2026-07-27)
+- Full `cargo test -p freehand-runtime -- --test-threads=1` is green (255).
+- Bootstrap must not call full reason `restore` as a hard dependency for every session during stale lifecycle recovery; poison/incomplete ledger errors skip recovery for that session.
+- Bootstrap UI projection must use `restore_turn_snapshots_for_ui` (ledger backfill for incomplete multi-round), not authoritative-only.
+- Incomplete authoritative + poisoned/empty ledger: return partial authoritative with `reason_persistence_partial_ui_restore` warning; do not abort bootstrap.
+- Architecture Gap 7 removed after this package-level proof. Phase 2.1 worker pooling still blocked until remaining plan items/gaps allow.

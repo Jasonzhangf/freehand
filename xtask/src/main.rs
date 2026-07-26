@@ -225,6 +225,8 @@ fn run_gates_check() -> Result<(), String> {
     verify_data_control_boundaries(&root)?;
     verify_webui_app_boundary(&root)?;
     verify_runtime_daemon_boundary(&root)?;
+    verify_dependency_graph(&root)?;
+    verify_task_status_single_writer(&root)?;
     Ok(())
 }
 
@@ -3332,6 +3334,147 @@ fn verify_runtime_daemon_boundary(root: &Path) -> Result<(), String> {
         if cargo.contains(crate_name) {
             return Err(format!(
                 "freehand-daemon must depend on freehand-runtime, not directly on {crate_name}"
+            ));
+        }
+    }
+    Ok(())
+}
+
+struct ForbiddenDependencyEdge {
+    from: &'static str,
+    to: &'static str,
+    reason: &'static str,
+    baseline_violation: bool,
+}
+
+const FORBIDDEN_DEPENDENCY_EDGES: &[ForbiddenDependencyEdge] = &[
+    ForbiddenDependencyEdge {
+        from: "crates/freehand-reason",
+        to: "freehand-ui-protocol",
+        reason: "reason is a truth owner and must not build-depend on the UI contract surface",
+        baseline_violation: false,
+    },
+    ForbiddenDependencyEdge {
+        from: "crates/freehand-node",
+        to: "freehand-ui-protocol",
+        reason: "node internal state must not use UI contract types as its truth source",
+        baseline_violation: true,
+    },
+    ForbiddenDependencyEdge {
+        from: "apps/freehand-cli",
+        to: "freehand-testkit",
+        reason: "production binaries must not depend on test harness crates",
+        baseline_violation: true,
+    },
+    ForbiddenDependencyEdge {
+        from: "crates/freehand-runtime",
+        to: "freehand-provider-openai",
+        reason: "runtime must reach providers through freehand-provider-core, not concrete adapters",
+        baseline_violation: true,
+    },
+    ForbiddenDependencyEdge {
+        from: "crates/freehand-runtime",
+        to: "freehand-provider-anthropic",
+        reason: "runtime must reach providers through freehand-provider-core, not concrete adapters",
+        baseline_violation: true,
+    },
+    ForbiddenDependencyEdge {
+        from: "crates/freehand-testkit",
+        to: "freehand-runtime",
+        reason: "testkit harnesses build on reason/provider-core seams, not the runtime god crate",
+        baseline_violation: false,
+    },
+    ForbiddenDependencyEdge {
+        from: "crates/freehand-testkit",
+        to: "freehand-config",
+        reason: "declared but unused dependency edges must stay deleted",
+        baseline_violation: false,
+    },
+    ForbiddenDependencyEdge {
+        from: "crates/freehand-testkit",
+        to: "freehand-provider-anthropic",
+        reason: "declared but unused dependency edges must stay deleted",
+        baseline_violation: false,
+    },
+];
+
+fn cargo_dependencies_section(cargo: &str) -> String {
+    let mut in_deps = false;
+    let mut section = String::new();
+    for line in cargo.lines() {
+        let trimmed = line.trim();
+        if trimmed.starts_with('[') {
+            in_deps = trimmed == "[dependencies]";
+            continue;
+        }
+        if in_deps {
+            section.push_str(line);
+            section.push('\n');
+        }
+    }
+    section
+}
+
+fn verify_dependency_graph(root: &Path) -> Result<(), String> {
+    for edge in FORBIDDEN_DEPENDENCY_EDGES {
+        let cargo_path = root.join(edge.from).join("Cargo.toml");
+        let cargo = fs::read_to_string(&cargo_path)
+            .map_err(|err| format!("{}: {err}", cargo_path.display()))?;
+        let deps = cargo_dependencies_section(&cargo);
+        let has_edge = deps.lines().any(|line| {
+            line.trim_start().starts_with(&format!("{} ", edge.to))
+                || line.trim_start().starts_with(&format!("{}=", edge.to))
+        });
+        if has_edge && !edge.baseline_violation {
+            return Err(format!(
+                "forbidden dependency edge: {} -> {} ({})",
+                edge.from, edge.to, edge.reason
+            ));
+        }
+        if !has_edge && edge.baseline_violation {
+            return Err(format!(
+                "dependency baseline is stale: {} no longer depends on {}; flip baseline_violation to false in xtask FORBIDDEN_DEPENDENCY_EDGES so the edge stays locked",
+                edge.from, edge.to
+            ));
+        }
+    }
+    Ok(())
+}
+
+/// Baseline of functions in freehand-task allowed to assign `task.status`
+/// directly. The single-writer target is `mutate_task` (which routes through
+/// `validate_transition`); `create_task`/`assign_task` must not assign status
+/// directly. Any new direct assignment outside this list fails the gate.
+const TASK_STATUS_WRITER_BASELINE: &[&str] = &["mutate_task", "apply_event"];
+
+fn verify_task_status_single_writer(root: &Path) -> Result<(), String> {
+    let path = root.join("crates/freehand-task/src/lib.rs");
+    let source = fs::read_to_string(&path).map_err(|err| format!("{}: {err}", path.display()))?;
+    let mut current_fn = String::new();
+    let mut in_tests = false;
+    for (idx, line) in source.lines().enumerate() {
+        let trimmed = line.trim_start();
+        if trimmed.starts_with("mod tests") || trimmed.starts_with("#[cfg(test)]") {
+            in_tests = true;
+        }
+        if let Some(rest) = trimmed
+            .strip_prefix("pub fn ")
+            .or_else(|| trimmed.strip_prefix("fn "))
+            && let Some(name) = rest.split(['(', '<']).next()
+        {
+            current_fn = name.trim().to_owned();
+        }
+        if in_tests {
+            continue;
+        }
+        let is_status_write = (trimmed.contains(".status = TaskStatus::")
+            || trimmed.contains(".status = target"))
+            && !trimmed.starts_with("//");
+        if is_status_write && !TASK_STATUS_WRITER_BASELINE.contains(&current_fn.as_str()) {
+            return Err(format!(
+                "task status single-writer gate: `{}` at crates/freehand-task/src/lib.rs:{} assigns task.status directly; route the transition through mutate_task/validate_transition or extend TASK_STATUS_WRITER_BASELINE only with an architecture-gaps entry",
+                current_fn,
+                idx + 1
             ));
         }
     }

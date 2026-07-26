@@ -285,7 +285,14 @@ fn production_worker_runner_clean_search_runs_without_target_cwd_on_hosted_provi
 fn production_worker_runner_clean_search_blocks_when_provider_has_no_hosted_search() {
     let runtime_home = temp_path("clean-search-unsupported");
     let executor = Arc::new(StubExecutor::new(Err("must not execute".to_owned())));
-    let runner = test_runner(runtime_home.clone(), executor.clone());
+    let mut selected = selected_worker();
+    selected.provider.web_search = ProviderWebSearchMode::Disabled;
+    let runner = ProductionWorkerRunner::from_selected_agent_with_executor(
+        selected,
+        runtime_home.clone(),
+        executor.clone(),
+    )
+    .expect("worker runner");
     let expected_task_id = seed_assigned_clean_search_task(&runtime_home);
 
     let outcome = runner.run_once().expect("worker tick");
@@ -1026,6 +1033,99 @@ impl WorkerTurnExecutor for PauseAwareExecutor {
         }
         Err("pause token was not set before safe point timeout".to_owned())
     }
+}
+
+#[derive(Clone)]
+struct HeartbeatFailureAwareExecutor {
+    runtime_home: PathBuf,
+    task_id: Arc<Mutex<Option<TaskId>>>,
+    cancel_token_observed: Arc<std::sync::atomic::AtomicBool>,
+}
+
+impl HeartbeatFailureAwareExecutor {
+    fn new(runtime_home: PathBuf) -> Self {
+        Self {
+            runtime_home,
+            task_id: Arc::new(Mutex::new(None)),
+            cancel_token_observed: Arc::new(std::sync::atomic::AtomicBool::new(false)),
+        }
+    }
+
+    fn set_task_id(&self, task_id: TaskId) {
+        *self.task_id.lock().expect("lock task id") = Some(task_id);
+    }
+}
+
+impl WorkerTurnExecutor for HeartbeatFailureAwareExecutor {
+    fn execute(
+        &self,
+        _selected: &SelectedAgentConfig,
+        request: LiveReasonTurnRequest,
+    ) -> Result<WorkerTurnExecution, String> {
+        let task_id = self
+            .task_id
+            .lock()
+            .expect("lock task id")
+            .clone()
+            .expect("task id set");
+        let runtime =
+            TaskRuntime::boot(&self.runtime_home, AgentId::new("master")).expect("task runtime");
+        runtime
+            .cancel_task(TaskMutationRequest {
+                task_id,
+                actor: test_actor("master"),
+                watermark: test_watermark("heartbeat-failure-cancel"),
+            })
+            .expect("external cancellation makes next heartbeat fail");
+        let cancel_token = request
+            .cancel_token
+            .expect("Worker runner must pass a live cancel token");
+        for _ in 0..160 {
+            if cancel_token.load(Ordering::SeqCst) {
+                self.cancel_token_observed.store(true, Ordering::Relaxed);
+                return Err("live turn cancelled after heartbeat failure".to_owned());
+            }
+            thread::sleep(Duration::from_millis(25));
+        }
+        Err("heartbeat failure did not trip the live cancel token".to_owned())
+    }
+}
+
+#[test]
+fn production_worker_runner_heartbeat_failure_trips_live_cancel_token() {
+    let runtime_home = temp_path("heartbeat-failure-cancel-token");
+    let workspace = temp_path("heartbeat-failure-cancel-token-workspace");
+    fs::create_dir_all(&workspace).expect("workspace");
+    let executor = Arc::new(HeartbeatFailureAwareExecutor::new(runtime_home.clone()));
+    let runner = test_runner(runtime_home.clone(), executor.clone());
+    let task_id = seed_assigned_task(&runtime_home, Some(&workspace));
+    executor.set_task_id(task_id.clone());
+
+    let error = runner
+        .run_once()
+        .expect_err("heartbeat failure should stop the worker tick explicitly");
+
+    assert!(matches!(
+        error,
+        ProductionWorkerRunnerError::BlockedFactPersistence(_)
+            | ProductionWorkerRunnerError::Heartbeat(_)
+    ));
+    assert!(executor.cancel_token_observed.load(Ordering::Relaxed));
+    let runtime = TaskRuntime::boot(&runtime_home, AgentId::new("master")).expect("runtime");
+    let history = runtime.task_history(&task_id).expect("history");
+    assert!(
+        history
+            .iter()
+            .any(|event| event.event_type == "TaskCancelled")
+    );
+    assert!(
+        !history
+            .iter()
+            .any(|event| event.event_type == "TaskReviewSubmitted")
+    );
+
+    fs::remove_dir_all(runtime_home).expect("cleanup runtime");
+    fs::remove_dir_all(workspace).expect("cleanup workspace");
 }
 
 #[test]

@@ -51,6 +51,46 @@ Non-violation pending items. Not regressions. Not false positives. Each gap has 
 | priority | high — compiled topology and isolated three-process evaluation closure are proven; next step is managed-service and real-provider lifecycle truth |
 | closure path | 1) prove real-provider blocked/reject/retry/crash/reassignment/takeover with same ids 2) close formal current-source research and browser-visible same-session evidence 3) upgrade cross-machine Worker transport from the remaining singular node transport model |
 
+## Gap 5: 依赖图基线违规 — node/cli/runtime 三条锁定中的反向边
+
+| Field | Value |
+|---|---|
+| feature_id | `runtime.ui-command-dispatch`, `node.master-slave`, `app.cli-runtime-smoke` |
+| owner crate | `crates/freehand-node`, `apps/freehand-cli`, `crates/freehand-runtime` |
+| gap kind | 2026-07-26 全仓审计确认三条依赖边违反 workspace 分层意图但已在生产使用：`node -> freehand-ui-protocol`（node 以 UI 契约类型作为内部状态查询通道）、`freehand-cli -> freehand-testkit`（生产二进制引用 smoke harness）、`runtime -> freehand-provider-{openai,anthropic}`（runtime 绕过 provider-core 直连具体 executor，含 5 处 (ProviderType, Protocol) 双 match 与字符串错误分类） |
+| why not violation | 三条边已登记进 xtask `verify_dependency_graph` 的 `FORBIDDEN_DEPENDENCY_EDGES` 基线（`baseline_violation: true`），gate 冻结漂移：基线只许缩小不许新增；同任务已删除 `reason -> ui-protocol`、`testkit -> {config,provider-anthropic,runtime}` 四条零使用死边并锁定为禁止复活 |
+| risk | node 层被 UI 类型反向锚定，接入第二种 UI 需连带内核类型；testkit 进入发布依赖闭包；provider 可重试性判断靠 `"anthropic_http_status_5"` 类字符串 contains，provider 改码前缀即静默失效 |
+| gate | `cargo run -p xtask -- gates check` 的 `verify_dependency_graph`：基线内边消失时强制翻转 `baseline_violation` 为 false 锁死，新增禁边立即失败 |
+| closure path | 1) provider-core 增 executor trait，runtime 改依赖 trait 对象，翻转两条 provider 边基线 2) node 状态类型迁入 contracts 或 node 自有投影，翻转 node 边基线 3) CLI smoke 子命令迁至 testkit 独立 bin 或 feature-gate，翻转 cli 边基线 |
+| priority | 高 — 是 runtime 拆解与 ui-protocol 瘦身的前置护栏 |
+
+## Gap 6: ADP 作为独立协议尚不成立 — 无版本化、无 schema 单一来源、Query 通道存在 mutation 旁路
+
+| Field | Value |
+|---|---|
+| feature_id | `runtime.ui-command-dispatch`, `app.webui-smoke` |
+| owner crate | `crates/freehand-ui-protocol`, `apps/freehand-server` |
+| gap kind | 2026-07-26 审计确认：① `UiAdpRequest`/`UiAdpResponse` 无 protocol version/capability 协商字段，三端独立发布无兼容缓冲 ② WebUI 以约 40 处手写 PascalCase 字符串镜像 serde 编码，无 JSON Schema/TS 生成物 ③ 服务端 `handle_adp_query` 先走 `query_runtime`，`RunMasterPoll` 可经 Query 帧执行变更并持久化 watermark；`direct_task_mutation_forbidden` 仅存在于 CLI 测试 mock ④ `/adp` 无鉴权且暴露 `ApplyExecutionFact`/`ClaimNextTask` 等调度内部命令 ⑤ ui-protocol 混装服务端状态机 `UiProtocolState` 与投影引擎（单文件 6882 行、依赖 tokio/blocks/control）⑥ `target_owner_module` 把仓库内部路径序列化进线协议 |
+| why not violation | 单机单用户拓扑下 Query 旁路与无鉴权未构成线上事故；读写分类 gate 与 Query 白名单修复已排入当前修复计划（进行中） |
+| risk | 旧客户端对枚举变更只能收到反序列化失败；任意 WebSocket 客户端可驱动内部调度；协议 crate 无法被非 Rust 端做 schema 提取 |
+| gate | 进行中：ui-protocol 增 `UiCommand` 读写分类穷举 + 服务端 Query 白名单派生；版本化与 schema 生成物尚无 gate |
+| closure path | 1) 读写分类 + Query 通道白名单 + `direct_task_mutation_forbidden` 提升进 `UiProtocolError`（当前任务）2) 帧加 protocol_version 与首帧握手 3) schemars 导出 schema，WebUI 从生成物导入 4) `UiProtocolState`/投影引擎迁出至独立 crate，`target_owner_module` 降级 debug-only 5) `/adp` 鉴权并收缩命令面 |
+| priority | 高 — 多端独立发布节奏已经存在（Android APK / CLI 二进制 / 内嵌 WebUI） |
+
+
+## Gap 8: WebUI monolith 迁移完成度约 10-15%，版本串手工同步 38 处
+
+| Field | Value |
+|---|---|
+| feature_id | `app.webui-smoke` |
+| owner crate | `apps/freehand-server` |
+| gap kind | 2026-07-26 审计确认：`legacy-monolith.js` 9811 行占前端 85.8%；session-detail surface 仅迁出 47 行，transcript/composer/worker-rail 仍在 monolith；surfaces 依赖 monolith 每帧现场构造的 context 注入，无独立可测性；缓存版本串 `?v=...` 硬编码 38 处；bootstrap→monolith 靠 window 全局 + 动态 import 隐式时序；SSE EventSource 创建后无 close；edge-registry 的 `allowedEffects`/`forbiddenEffects` 零运行时消费 |
+| why not violation | 模块化重构（0eb3890）方向与 `docs/goals/webui-render-architecture-closeout-plan.md` 一致，属进行中迁移而非声称完成 |
+| risk | 版本串漏改一处即模块双实例、state 分裂；迁移期临时物（window 传递、薄壳 surface）长期滞留会把过渡态固化 |
+| gate | 无。版本串单点化与 SSE close 在当前修复计划中 |
+| closure path | 1) 版本串服务端单点注入 + 删 window 传递（当前任务）2) 迁 session-detail 渲染主线，context 收敛为启动时构造一次的显式接口 3) edge-registry effects 装运行时断言或移回文档 |
+| priority | 中 — 先拆雷（版本串/时序）再迁肉（session-detail） |
+
 ## 管理规则
 
 1. 本文件只记录 **非违规欠账**。违规必须改或删。

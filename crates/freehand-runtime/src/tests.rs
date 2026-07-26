@@ -412,7 +412,7 @@ fn master_create_gate_rejects_implicit_dispatch_without_task_mutation() {
                     "agent_id": "worker"
                 }),
             ),
-            complete_single_response("configured Worker task created and assigned"),
+            waiting_single_response("await configured Worker execution for the assigned task"),
         ],
     );
     let mut request = live_request(false);
@@ -6608,7 +6608,9 @@ fn assert_master_task_request_contract(
     assert!(raw_request.contains("configured_worker_capabilities"));
     assert!(raw_request.contains("network_tools"));
     assert!(raw_request.contains("If your own Master surface cannot complete a slice directly"));
-    assert!(raw_request.contains("Finish blocked only when neither Master nor any configured Worker has the required capability"));
+    assert!(raw_request.contains(
+        "Finish blocked only when neither Master nor any configured Worker/provider route has the required search capability"
+    ));
     assert!(!raw_request.contains("no web tool is exposed"));
     assert!(
         !raw_request.contains("Do not create a Worker task for pure web/current-news research")
@@ -10303,7 +10305,11 @@ fn live_dispatch_projects_failed_tool_result_without_command_failure() {
             .contains("reason_live_turn_completed")
     );
     assert!(first_reentry.contains("\"is_error\":true"));
-    assert!(first_reentry.contains("unknown tool `totally_unknown_tool`"));
+    assert!(
+        first_reentry
+            .contains("`totally_unknown_tool` is not available to the Master live tool surface"),
+        "first reentry missing Master capability boundary text: {first_reentry}"
+    );
     let second_receipt = runtime
         .dispatch(
             build_command_dispatch_envelope(&UiCommand::SubmitUserInput {
@@ -13679,7 +13685,7 @@ fn runtime_dispatches_phase2b_master_poll_and_event_inbox() {
     };
 
     let poll = runtime
-        .query_runtime(&UiCommand::RunMasterPoll {
+        .query_runtime(&UiCommand::QueryMasterPoll {
             after_cursor: None,
             limit: None,
             include_terminal: true,
@@ -13692,8 +13698,8 @@ fn runtime_dispatches_phase2b_master_poll_and_event_inbox() {
             assert!(poll.task_board.include_terminal);
             assert_eq!(poll.next_cursor.as_deref(), Some(inbox_cursor.as_str()));
             assert_eq!(
-                poll.persisted_cursor.as_deref(),
-                Some(inbox_cursor.as_str())
+                poll.persisted_cursor, None,
+                "query route must not advance the master cursor"
             );
             let kinds = poll
                 .classifications
@@ -13706,7 +13712,7 @@ fn runtime_dispatches_phase2b_master_poll_and_event_inbox() {
                 "missing review_ready: {kinds:?}"
             );
             assert!(kinds.contains(&"stale"), "missing stale: {kinds:?}");
-            poll.persisted_cursor.expect("persisted cursor")
+            poll.next_cursor.expect("next cursor")
         }
         other => panic!("unexpected master poll result: {other:?}"),
     };
@@ -13759,7 +13765,7 @@ fn runtime_dispatches_phase2b_master_poll_and_event_inbox() {
     )
     .expect("recovered runtime");
     let recovered_poll = recovered
-        .query_runtime(&UiCommand::RunMasterPoll {
+        .query_runtime(&UiCommand::QueryMasterPoll {
             after_cursor: None,
             limit: None,
             include_terminal: true,
@@ -13978,10 +13984,7 @@ fn runtime_dispatches_worker_control_to_task_owner() {
                 .find(|task| task.task_id == task_id)
                 .expect("phase2c task");
             assert_eq!(task.status, "cancelled");
-            assert_eq!(
-                task.active_execution_id.as_deref(),
-                Some(execution_id.as_str())
-            );
+            assert_eq!(task.active_execution_id.as_deref(), None);
         }
         other => panic!("unexpected phase2c board result: {other:?}"),
     }
@@ -14262,7 +14265,7 @@ fn runtime_task_tool_mutation_publishes_task_list_projection() {
                     "priority":77
                 }),
             ),
-            complete_single_response("task push done"),
+            waiting_single_response("await Worker pickup for runtime-push-task-1"),
         ],
     );
     let request = LiveReasonTurnRequest {

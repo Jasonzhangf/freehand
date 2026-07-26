@@ -237,6 +237,16 @@ pub enum UiCommand {
         #[serde(default)]
         replay_from_start: bool,
     },
+    QueryMasterPoll {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        after_cursor: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        limit: Option<usize>,
+        #[serde(default)]
+        include_terminal: bool,
+        #[serde(default)]
+        replay_from_start: bool,
+    },
     WorkerControl {
         control: UiWorkerControlCommand,
     },
@@ -1088,6 +1098,10 @@ pub enum UiExecutionFactKind {
         reason: String,
         evidence: Vec<String>,
     },
+    Failed {
+        reason: String,
+        evidence: Vec<String>,
+    },
     ReviewReady {
         summary: String,
         deliverables: Vec<String>,
@@ -1296,6 +1310,7 @@ pub struct UiWorkerControlProjection {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[allow(clippy::large_enum_variant)]
 pub enum UiProjection {
     Turn(UiTurnProjection),
     NodeStatus(NodeStatusSnapshot),
@@ -1618,6 +1633,8 @@ pub enum UiProtocolError {
     AgentResourceCountOutOfRange { resource_count: usize },
     #[error("command ingress route only accepts mutation-intent commands")]
     IngressCommandKindMismatch,
+    #[error("query route only accepts read-only commands; mutations must use the command frame")]
+    QueryCommandKindMismatch,
     #[error("stream kind mismatch for requested projection")]
     StreamKindMismatch,
 }
@@ -2119,6 +2136,7 @@ impl UiProtocolState {
             | UiCommand::QueryToolRegistry
             | UiCommand::QueryDiagnostics
             | UiCommand::RunMasterPoll { .. }
+            | UiCommand::QueryMasterPoll { .. }
             | UiCommand::WorkerControl { .. }
             | UiCommand::TestProviderWebSearch { .. }
             | UiCommand::ScheduleTimer { .. }
@@ -2250,7 +2268,7 @@ pub fn validate_command(command: &UiCommand) -> Result<(), UiProtocolError> {
         UiCommand::SubmitUserInput { metadata, .. }
             if submit_metadata_attachments(metadata)
                 .iter()
-                .any(|attachment| invalid_input_attachment(attachment)) =>
+                .any(invalid_input_attachment) =>
         {
             Err(UiProtocolError::InvalidInputAttachment)
         }
@@ -2286,8 +2304,17 @@ pub fn validate_command(command: &UiCommand) -> Result<(), UiProtocolError> {
         | UiCommand::RunMasterPoll {
             after_cursor: Some(after_cursor),
             ..
+        }
+        | UiCommand::QueryMasterPoll {
+            after_cursor: Some(after_cursor),
+            ..
         } if after_cursor.trim().is_empty() => Err(UiProtocolError::EmptyEventCursor),
         UiCommand::RunMasterPoll {
+            after_cursor: Some(_),
+            replay_from_start: true,
+            ..
+        }
+        | UiCommand::QueryMasterPoll {
             after_cursor: Some(_),
             replay_from_start: true,
             ..
@@ -2765,6 +2792,7 @@ pub fn protocol_rejection(err: UiProtocolError) -> UiProtocolRejection {
         UiProtocolError::EmptyModelRouteWeight => "empty_model_route_weight",
         UiProtocolError::AgentResourceCountOutOfRange { .. } => "agent_resource_count_out_of_range",
         UiProtocolError::IngressCommandKindMismatch => "ingress_command_kind_mismatch",
+        UiProtocolError::QueryCommandKindMismatch => "direct_task_mutation_forbidden",
         UiProtocolError::StreamKindMismatch => "stream_kind_mismatch",
     };
     UiProtocolRejection {
@@ -3448,6 +3476,7 @@ fn command_kind(command: &UiCommand) -> &'static str {
         UiCommand::ApplyExecutionFact { .. } => "apply_execution_fact",
         UiCommand::RunSchedulerTick { .. } => "run_scheduler_tick",
         UiCommand::RunMasterPoll { .. } => "run_master_poll",
+        UiCommand::QueryMasterPoll { .. } => "query_master_poll",
         UiCommand::WorkerControl { .. } => "worker_control",
         UiCommand::QueryNodeStatus { .. } => "query_node_status",
         UiCommand::QueryTaskProgress { .. } => "query_task_progress",
@@ -3462,42 +3491,98 @@ fn command_kind(command: &UiCommand) -> &'static str {
 }
 
 fn is_command_ingress_kind(command: &UiCommand) -> bool {
-    matches!(
-        command,
+    matches!(command_frame_class(command), UiCommandFrameClass::Mutation)
+}
+
+/// Frame-level read/write classification for every `UiCommand` variant.
+///
+/// Exhaustive on purpose: adding a variant without declaring its class is a
+/// compile error, so the query-route mutation guard can never silently miss
+/// a new command.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum UiCommandFrameClass {
+    Query,
+    Subscribe,
+    Mutation,
+}
+
+pub fn command_frame_class(command: &UiCommand) -> UiCommandFrameClass {
+    match command {
+        UiCommand::QueryLatestActiveTurn
+        | UiCommand::QueryTurn { .. }
+        | UiCommand::QuerySessionList
+        | UiCommand::QueryArchivedSessionList
+        | UiCommand::QuerySessionTurns { .. }
+        | UiCommand::QuerySessionSearch { .. }
+        | UiCommand::QueryConfigStatus
+        | UiCommand::QueryTaskList { .. }
+        | UiCommand::QueryTaskBoard { .. }
+        | UiCommand::QueryEventInbox { .. }
+        | UiCommand::QueryAgentBoard
+        | UiCommand::QueryAgentLifecycle { .. }
+        | UiCommand::QueryTaskHistory { .. }
+        | UiCommand::QueryWorkerControl { .. }
+        | UiCommand::QueryTimerList { .. }
+        | UiCommand::QueryToolRegistry
+        | UiCommand::QueryDiagnostics
+        | UiCommand::QueryErrorCenterEvents { .. }
+        | UiCommand::QueryMasterPoll { .. }
+        | UiCommand::QueryNodeStatus { .. }
+        | UiCommand::QueryTaskProgress { .. }
+        | UiCommand::QueryDebugState { .. }
+        | UiCommand::QueryCheckpoints => UiCommandFrameClass::Query,
+        UiCommand::SubscribeLatestActiveTurn { .. }
+        | UiCommand::SubscribeTurn { .. }
+        | UiCommand::SubscribeNodeStatus
+        | UiCommand::SubscribeProgress
+        | UiCommand::SubscribeTaskList { .. }
+        | UiCommand::SubscribeErrorCenterEvents { .. }
+        | UiCommand::SubscribeDebugState { .. } => UiCommandFrameClass::Subscribe,
         UiCommand::CreateSession { .. }
-            | UiCommand::RenameSession { .. }
-            | UiCommand::ArchiveSession { .. }
-            | UiCommand::RestoreSession { .. }
-            | UiCommand::DeleteSession { .. }
-            | UiCommand::RollbackLatestSessionTurn { .. }
-            | UiCommand::SubmitUserInput { .. }
-            | UiCommand::UpdateProviderConfig { .. }
-            | UiCommand::UpsertProviderConfig { .. }
-            | UiCommand::UpsertModelGroupConfig { .. }
-            | UiCommand::UpdateAgentModelGroupSelection { .. }
-            | UiCommand::TestProviderWebSearch { .. }
-            | UiCommand::ScheduleTimer { .. }
-            | UiCommand::CancelTimer { .. }
-            | UiCommand::UpdateAgentProviderSelection { .. }
-            | UiCommand::UpdateAgentResourceConfig { .. }
-            | UiCommand::CreateTask { .. }
-            | UiCommand::CreateTaskAgent { .. }
-            | UiCommand::AssignTask { .. }
-            | UiCommand::ClaimNextTask { .. }
-            | UiCommand::SubmitTaskReview { .. }
-            | UiCommand::RejectTaskReview { .. }
-            | UiCommand::ApproveTaskReview { .. }
-            | UiCommand::CloseTask { .. }
-            | UiCommand::ApplyExecutionFact { .. }
-            | UiCommand::RunSchedulerTick { .. }
-            | UiCommand::RunMasterPoll { .. }
-            | UiCommand::WorkerControl { .. }
-            | UiCommand::SendDirectMessageToSlave { .. }
-            | UiCommand::RewindCheckpoint { .. }
-            | UiCommand::CancelTurn { .. }
-            | UiCommand::CancelLatestActiveTurn { .. }
-            | UiCommand::ResumeTurn { .. }
-    )
+        | UiCommand::RenameSession { .. }
+        | UiCommand::ArchiveSession { .. }
+        | UiCommand::RestoreSession { .. }
+        | UiCommand::DeleteSession { .. }
+        | UiCommand::RollbackLatestSessionTurn { .. }
+        | UiCommand::SubmitUserInput { .. }
+        | UiCommand::UpdateProviderConfig { .. }
+        | UiCommand::UpsertProviderConfig { .. }
+        | UiCommand::UpsertModelGroupConfig { .. }
+        | UiCommand::UpdateAgentModelGroupSelection { .. }
+        | UiCommand::TestProviderWebSearch { .. }
+        | UiCommand::ScheduleTimer { .. }
+        | UiCommand::CancelTimer { .. }
+        | UiCommand::UpdateAgentProviderSelection { .. }
+        | UiCommand::UpdateAgentResourceConfig { .. }
+        | UiCommand::CreateTask { .. }
+        | UiCommand::CreateTaskAgent { .. }
+        | UiCommand::AssignTask { .. }
+        | UiCommand::ClaimNextTask { .. }
+        | UiCommand::SubmitTaskReview { .. }
+        | UiCommand::RejectTaskReview { .. }
+        | UiCommand::ApproveTaskReview { .. }
+        | UiCommand::CloseTask { .. }
+        | UiCommand::ApplyExecutionFact { .. }
+        | UiCommand::RunSchedulerTick { .. }
+        | UiCommand::RunMasterPoll { .. }
+        | UiCommand::WorkerControl { .. }
+        | UiCommand::SendDirectMessageToSlave { .. }
+        | UiCommand::RewindCheckpoint { .. }
+        | UiCommand::CancelTurn { .. }
+        | UiCommand::CancelLatestActiveTurn { .. }
+        | UiCommand::ResumeTurn { .. } => UiCommandFrameClass::Mutation,
+    }
+}
+
+/// Gate for the ADP query route: rejects any command whose frame class is not
+/// `Query` with `direct_task_mutation_forbidden`, so mutations cannot ride the
+/// query channel regardless of what downstream query ports accept.
+pub fn accept_query_ingress(command: &UiCommand) -> Result<(), UiProtocolError> {
+    validate_command(command)?;
+    if command_frame_class(command) != UiCommandFrameClass::Query {
+        return Err(UiProtocolError::QueryCommandKindMismatch);
+    }
+    Ok(())
 }
 
 fn command_dispatch_target(command: &UiCommand) -> (&'static str, &'static str) {
@@ -3539,7 +3624,8 @@ fn command_dispatch_target(command: &UiCommand) -> (&'static str, &'static str) 
         | UiCommand::CloseTask { .. }
         | UiCommand::ApplyExecutionFact { .. }
         | UiCommand::RunSchedulerTick { .. }
-        | UiCommand::RunMasterPoll { .. } => ("task.orchestration", "crates/freehand-task"),
+        | UiCommand::RunMasterPoll { .. }
+        | UiCommand::QueryMasterPoll { .. } => ("task.orchestration", "crates/freehand-task"),
         UiCommand::WorkerControl { .. } => ("worker.control", "crates/freehand-task"),
         UiCommand::SendDirectMessageToSlave { .. } => ("node.master-slave", "crates/freehand-node"),
         _ => ("ui.protocol", "crates/freehand-ui-protocol"),
@@ -4136,6 +4222,60 @@ mod tests {
         })
         .expect_err("conflicting master poll cursor mode rejected");
         assert_eq!(err, UiProtocolError::ConflictingMasterPollCursorMode);
+
+        accept_query_ingress(&UiCommand::QueryMasterPoll {
+            after_cursor: None,
+            limit: None,
+            include_terminal: true,
+            replay_from_start: false,
+        })
+        .expect("read-only master poll passes query ingress");
+        let err =
+            accept_query_ingress(&poll).expect_err("mutating master poll rejected on query route");
+        assert_eq!(err, UiProtocolError::QueryCommandKindMismatch);
+        assert_eq!(
+            protocol_rejection(err).code,
+            "direct_task_mutation_forbidden"
+        );
+        for mutation in [
+            UiCommand::ApplyExecutionFact {
+                fact: UiExecutionFactCommand {
+                    execution_id: "exec-1".to_owned(),
+                    task_id: "task-1".to_owned(),
+                    agent_id: AgentId::new("worker-1"),
+                    turn_id: None,
+                    kind: UiExecutionFactKind::Blocked {
+                        reason: "query-route probe".to_owned(),
+                        evidence: Vec::new(),
+                    },
+                },
+            },
+            UiCommand::CloseTask {
+                task_id: "task-1".to_owned(),
+            },
+            UiCommand::SubmitUserInput {
+                text: "hello".to_owned(),
+                session_id: None,
+                cwd: None,
+                metadata: None,
+            },
+        ] {
+            let err =
+                accept_query_ingress(&mutation).expect_err("mutation rejected on query route");
+            assert_eq!(err, UiProtocolError::QueryCommandKindMismatch);
+        }
+        assert_eq!(
+            command_frame_class(&UiCommand::QueryTaskBoard {
+                status: None,
+                agent_id: None,
+                include_terminal: false,
+            }),
+            UiCommandFrameClass::Query
+        );
+        assert_eq!(
+            command_frame_class(&UiCommand::SubscribeProgress),
+            UiCommandFrameClass::Subscribe
+        );
 
         let inbox = UiTaskEventInboxProjection {
             source_agent_id: AgentId::new("master"),

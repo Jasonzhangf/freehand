@@ -2,6 +2,7 @@
 
 use std::collections::BTreeMap;
 use std::io::{self, BufRead, BufReader};
+use std::time::Duration;
 
 use freehand_blocks::{
     parse_tool_arguments_json, render_context_segments_as_text, render_tool_arguments_json,
@@ -16,6 +17,8 @@ use freehand_provider_core::{
 };
 use serde_json::{Value, json};
 use thiserror::Error;
+
+const PROVIDER_BLOCKING_CLIENT_TIMEOUT: Duration = Duration::from_secs(120);
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct OpenAiRenderedRequest {
@@ -100,7 +103,9 @@ impl OpenAiExecutor {
         }
         Ok(Self {
             config,
-            client: reqwest::blocking::Client::new(),
+            client: reqwest::blocking::Client::builder()
+                .timeout(PROVIDER_BLOCKING_CLIENT_TIMEOUT)
+                .build()?,
             adapter: OpenAiAdapter::new(),
         })
     }

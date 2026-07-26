@@ -482,8 +482,10 @@ pub(crate) fn restore_all_persisted_sessions_into_ui(
     let mut ui = ui_state.lock().expect("lock ui state");
     let mut max_turn_ordinal = 0_u64;
     for session in sessions {
-        let mut turns =
-            persistence.restore_authoritative_turn_snapshots_for_ui(&session.session_id)?;
+        // Prefer UI restore so incomplete multi-round sessions backfill earlier
+        // rounds from the reason ledger when available. Poisoned/incomplete
+        // ledgers fall back to authoritative snapshots inside owner restore.
+        let mut turns = persistence.restore_turn_snapshots_for_ui(&session.session_id)?;
         turns.sort_by_key(|turn| runtime_turn_position(&turn.request.turn_id));
         for turn in turns {
             max_turn_ordinal = max_turn_ordinal.max(runtime_turn_position(&turn.request.turn_id).0);
