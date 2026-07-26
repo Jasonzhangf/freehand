@@ -23,7 +23,7 @@ Generated from `docs/mainline-calls/app.android-client.json`. Do not edit by han
 ## Request Mainline
 
 - MainActivity::onCreate loads app-owned daemon endpoint config
-- DaemonConnectionConfig accepts legacy active Tailscale profile identity plus host and port, or config-owned remote_registry bootstrap imported from a freehand://daemon/import deep link
+- DaemonConnectionConfig accepts legacy active Tailscale profile identity plus host and port, or config-owned remote_registry bootstrap imported from a freehand://daemon/import deep link; remote_registry truth is kept in a companion sidecar while the legacy daemon-connection.json remains a backward-compatible projection for older APKs
 - removed top-level transport, relay, and alternate endpoint fields are explicit errors; relay is valid only as a remote_registry daemon endpoint with account relayUrl
 - AndroidApkUpdater checks the selected daemon endpoint update manifest in the background and compares it with the installed package versionCode
 - MainActivity.AndroidApkUpdateBridge::check lets daemon WebUI Settings manually trigger the same AndroidApkUpdater path without moving version comparison, download, or install policy into JavaScript
@@ -39,7 +39,7 @@ Generated from `docs/mainline-calls/app.android-client.json`. Do not edit by han
 ## Response Mainline
 
 - daemon root returns the canonical WebUI shell and mobile layout attributes
-- remote_registry import persists scanned account, daemon, active endpoint, endpoint candidates, and one-time credential in app-owned config before WebView navigation
+- remote_registry import persists scanned account, daemon, active endpoint, endpoint candidates, and one-time credential in app-owned registry sidecar before WebView navigation, while also rewriting the legacy config file to a connection-compatible projection older APKs can still read
 - a positive higher-version daemon APK manifest with a relative or http(s) APK URL downloads the APK into app cache and opens Android's system package installer with a FileProvider URI
 - APK update status phases are pushed to window.__freehandAndroidApkUpdateStatus for the daemon WebUI Settings card
 - File-access startup permission status is logged as FreehandFileAccess rows for requested, settings handoff, granted, restricted, or settings-unavailable states
@@ -105,7 +105,7 @@ Generated from `docs/mainline-calls/app.android-client.json`. Do not edit by han
 
 - Android native conversation/settings/update fallback files are physically deleted.
 - bridge.html, Android ADP/SSE/HTTP UI transports, native projector, native controllers, and Android mock route/assets are removed.
-- Android app-owned config contains legacy active Tailscale host/port or config-owned remote_registry bootstrap truth; removed transport and top-level relay fields fail explicitly.
+- Android app-owned config contains legacy active Tailscale host/port plus a backward-compatible projection of config-owned remote_registry bootstrap truth; removed transport and top-level relay fields fail explicitly.
 - Android imports remote_registry bootstrap links and loads declared Tailscale/IPv4/IPv6/relay WebUI endpoints, but does not own account directory truth, route scoring, live health probing, Tailscale OS connection, or relay tunnel semantics.
 - Android APK update routes remain daemon-owned release distribution endpoints; Android owns only manifest check, cache download, status bridge, and system package-installer handoff, not a native update panel or silent package replacement.
 - Android file access startup prompting is package permission truth plus FreehandFileAccess logcat projection; it does not add a native product UI, silently grant permissions, or move daemon/Worker filesystem semantics into Android.

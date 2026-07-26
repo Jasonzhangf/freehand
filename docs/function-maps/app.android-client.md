@@ -21,7 +21,7 @@
 ## Request Mainline
 
 - `MainActivity` loads app-owned daemon endpoint config.
-- Config admits legacy active Tailscale profile identity plus host/port, or config-owned `remote_registry` bootstrap imported from a `freehand://daemon/import?payload=...` deep link.
+- Config admits legacy active Tailscale profile identity plus host/port, or config-owned `remote_registry` bootstrap imported from a `freehand://daemon/import?payload=...` deep link; remote_registry truth is kept in a companion sidecar while the legacy `daemon-connection.json` remains a backward-compatible projection for older APKs.
 - Removed top-level transport/relay/alternate-endpoint fields fail explicitly; relay is allowed only as a daemon endpoint inside `remote_registry` with an account relay URL.
 - `MainActivity` immediately loads the canonical daemon WebUI URL from `HostConfig.webUiUrl`: `http://<host>:<port>/?client=android-webview`; daemon HTML and no-store asset URLs own WebUI versioning, not a hardcoded Android query parameter.
 - If startup intent is `ACTION_VIEW` with a supported daemon import deep link, `MainActivity` imports the bootstrap bundle into app-owned config before WebView navigation.
@@ -38,7 +38,7 @@
 ## Response Mainline
 
 - Successful page load renders the same daemon WebUI shell as browser WebUI, with `client=android-webview` layout hints.
-- Remote registry import persists the scanned account, daemon, active endpoint, endpoint candidates, and one-time credential in the app-owned config file for subsequent launches.
+- Remote registry import persists the scanned account, daemon, active endpoint, endpoint candidates, and one-time credential in the app-owned registry sidecar for subsequent launches, while also rewriting the legacy config file to a connection-compatible projection older APKs can still read.
 - A daemon manifest with positive higher `versionCode` and a relative/http(s) APK URL downloads its APK into app cache and opens Android's system package installer through the app FileProvider URI; install remains Android/user-confirmed rather than silent.
 - APK update status phases (`checking`, `current`, `available`, `downloading`, `downloaded`, `installer_started`, `failed`, `already_checking`) are pushed into `window.__freehandAndroidApkUpdateStatus` for the WebUI Settings card.
 - Android logs `FreehandWebUiLayout` from canonical WebUI DOM selectors, applied stylesheet state, and WebUI module-JavaScript readiness for true-device validation.
@@ -52,6 +52,7 @@
 
 - Config parse/load errors are fatal Android startup errors.
 - Unknown or removed config fields are errors; Android does not ignore or migrate them.
+- A missing registry sidecar is not fatal when the legacy compatibility config is present; the active endpoint remains readable from the legacy projection.
 - APK update manifest route failures, parse errors, non-positive versions, non-http absolute APK URLs, HTTP failures, empty APK downloads, or installer handoff errors are explicit `FreehandApkUpdate` logcat failures and do not pretend the app upgraded or is current.
 - A concurrent Settings click while an update check is already running returns `already_checking` instead of launching a duplicate check; the last recorded status remains replayable to the WebUI.
 - Unsupported bootstrap kind/schema, malformed base64/JSON, expired bootstrap, missing credential, unknown daemon endpoint, relay endpoint without account relay URL, or unsupported endpoint kind is an explicit Android startup/import error.

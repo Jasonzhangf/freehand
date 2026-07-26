@@ -54,8 +54,30 @@ data class DaemonConnectionConfig(
         return endpoint.toHostConfig(daemon.id)
     }
 
+    fun toLegacyCompatibilityConfig(): DaemonConnectionConfig {
+        val hostConfig = activeHostConfig()
+        return DaemonConnectionConfig(
+            schemaVersion = 1,
+            connectionMode = "tailscale",
+            activeProfile = "compat-active",
+            profiles = listOf(
+                DaemonConnectionProfile(
+                    id = "compat-active",
+                    mode = "tailscale",
+                    host = hostConfig.host,
+                    port = hostConfig.port,
+                ),
+            ),
+            activeAccount = null,
+            activeDaemon = null,
+            accounts = emptyList(),
+            daemons = emptyList(),
+        ).normalizedAndValidated()
+    }
+
     companion object {
         const val DEFAULT_CONFIG_FILE = "daemon-connection.json"
+        const val REMOTE_REGISTRY_CONFIG_FILE = "daemon-connection-registry.json"
         private const val BOOTSTRAP_KIND = "freehand.remote-daemon-bootstrap"
         private const val BOOTSTRAP_SCHEMA_VERSION = 1
         private const val BOOTSTRAP_URL_PREFIX = "freehand://daemon/import?payload="
@@ -544,9 +566,21 @@ class DaemonConnectionConfigStore(
     private val configFile: File,
     private val bundledConfigReader: () -> String,
 ) {
+    private val registryConfigFile: File =
+        File(configFile.parentFile ?: configFile.absoluteFile.parentFile ?: File("."), DaemonConnectionConfig.REMOTE_REGISTRY_CONFIG_FILE)
+
     fun load(): DaemonConnectionConfig {
+        if (registryConfigFile.exists()) {
+            val config = DaemonConnectionConfig.parse(registryConfigFile.readText())
+            writeLegacyCompatibilityConfig(config)
+            return config
+        }
         if (configFile.exists()) {
-            return DaemonConnectionConfig.parse(configFile.readText())
+            val config = DaemonConnectionConfig.parse(configFile.readText())
+            if (config.connectionMode == "remote_registry") {
+                write(config)
+            }
+            return config
         }
         val bundledJson = try {
             bundledConfigReader()
@@ -565,10 +599,38 @@ class DaemonConnectionConfigStore(
     }
 
     fun write(config: DaemonConnectionConfig) {
-        val normalized = DaemonConnectionConfig.toJson(config)
+        if (config.connectionMode == "remote_registry") {
+            writeRemoteRegistryConfig(config)
+            writeLegacyCompatibilityConfig(config)
+            return
+        }
+        writeLegacyCompatibilityConfig(config)
+        clearRemoteRegistryConfig()
+    }
+
+    private fun writeRemoteRegistryConfig(config: DaemonConnectionConfig) {
+        writeText(registryConfigFile, DaemonConnectionConfig.toJson(config))
+    }
+
+    private fun writeLegacyCompatibilityConfig(config: DaemonConnectionConfig) {
+        val legacy = if (config.connectionMode == "remote_registry") {
+            config.toLegacyCompatibilityConfig()
+        } else {
+            config
+        }
+        writeText(configFile, DaemonConnectionConfig.toJson(legacy))
+    }
+
+    private fun clearRemoteRegistryConfig() {
+        if (registryConfigFile.exists() && !registryConfigFile.delete()) {
+            throw DaemonConnectionConfigException("app-owned remote registry config cannot be cleared")
+        }
+    }
+
+    private fun writeText(file: File, text: String) {
         try {
-            configFile.parentFile?.mkdirs()
-            configFile.writeText(normalized)
+            file.parentFile?.mkdirs()
+            file.writeText(text)
         } catch (e: Exception) {
             throw DaemonConnectionConfigException("app-owned daemon connection config cannot be written: ${e.message}", e)
         }

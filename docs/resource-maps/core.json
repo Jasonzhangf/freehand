@@ -1018,7 +1018,7 @@
       "target_resource": "android_notification",
       "mainline_call_doc": "docs/mainline-calls/app.webui-smoke.json",
       "call_table_step": "11g",
-      "file_path": "apps/freehand-server/assets/webui.js",
+      "file_path": "apps/freehand-server/assets/webui/legacy-monolith.js",
       "symbol_path": "maybeNotifyAndroidTurnFinished",
       "binding_status": "bound"
     },

@@ -8642,3 +8642,15 @@ Current real root cause split:
 - online verifier passed with artifact `artifacts/webui-online/mobile-ui-tree-phase1-20260726T100119-26232`.
 - verified Header Worker rail: duration/status/expand details, `worker_session_id` open action, and composer still usable while the rail is open.
 - recorded the dispatch-wait model in design/function-map/test-design/skill docs: isolated Worker transcript context, rigid parent-visible child outcomes, composer stays usable while waiting, timer checks stay owner-owned.
+
+# 2026-07-26T10:40:39Z Android true-device recheck
+
+- reran `apps/freehand-android/scripts/verify-device-ui.sh 100.104.163.65:5555` with the existing debug APK path.
+- result stayed blocked by `device_locked_or_dreaming`.
+- artifact: `artifacts/android-device/20260726T104039Z-100.104.163.65_5555-79306`.
+
+## 2026-07-26 Android remote-registry APK recheck
+- Jason corrected prior blocker: Tailscale `15t-1` / `100.104.163.65:5555` was reachable and foreground, not locked.
+- Root cause evidence: installed debug APK `versionCode=3` read only legacy `daemon-connection.json`, so it loaded `http://100.66.1.82:44042/?client=android-webview`; relay root returned HTTP 404 while canonical shell is at `/relay/daemon/studio-host/?client=android-webview`.
+- Built current debug APK with remote-registry sidecar preference and installed through `verify-device-ui.sh`.
+- True-device pass: `artifacts/android-device/20260726T110620Z-100.104.163.65_5555-46257`; `FreehandWebUiLayout` shows `layoutClient=android-webview`, `layoutShape=tall_phone`, relay CSS URLs, `webuiCssApplied=true`, `webuiJsReady=true`, `webuiShell=true`; installed package `versionCode=20260728`.

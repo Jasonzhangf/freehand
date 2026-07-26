@@ -354,9 +354,18 @@ class DaemonConnectionConfigTest {
         store.importBootstrapLink(buildBootstrapLink(expiresAtUnix = 200), nowUnix = 100)
 
         assertTrue(configFile.exists())
+        assertTrue(File(dir, DaemonConnectionConfig.REMOTE_REGISTRY_CONFIG_FILE).exists())
         val reloaded = store.load()
         assertEquals("remote_registry", reloaded.connectionMode)
         assertEquals("studio", reloaded.activeDaemon)
+        assertEquals(
+            "tailscale",
+            DaemonConnectionConfig.parse(configFile.readText()).connectionMode,
+        )
+        assertEquals(
+            "remote_registry",
+            DaemonConnectionConfig.parse(File(dir, DaemonConnectionConfig.REMOTE_REGISTRY_CONFIG_FILE).readText()).connectionMode,
+        )
     }
 
     @Test
@@ -366,6 +375,59 @@ class DaemonConnectionConfigTest {
         }
 
         assertTrue(error.message.orEmpty().contains("expired"))
+    }
+
+    @Test
+    fun `load prefers remote registry sidecar over legacy compatibility config`() {
+        val dir = Files.createTempDirectory("freehand-android-bootstrap-sidecar").toFile()
+        val configFile = File(dir, DaemonConnectionConfig.DEFAULT_CONFIG_FILE)
+        val registryFile = File(dir, DaemonConnectionConfig.REMOTE_REGISTRY_CONFIG_FILE)
+        val store = DaemonConnectionConfigStore(configFile) { readBundledConfig() }
+        val bootstrapConfig = DaemonConnectionConfig.parseBootstrapLink(buildBootstrapLink(expiresAtUnix = 200), nowUnix = 100)
+        store.write(bootstrapConfig)
+
+        registryFile.writeText(
+            """
+            {
+              "schemaVersion": 1,
+              "connectionMode": "remote_registry",
+              "activeProfile": "",
+              "profiles": [],
+              "activeAccount": "jason",
+              "activeDaemon": "studio",
+              "accounts": [
+                {
+                  "id": "jason",
+                  "label": "Jason",
+                  "relayUrl": "https://relay.freehand.local/relay/",
+                  "authToken": "updated-token"
+                }
+              ],
+              "daemons": [
+                {
+                  "id": "studio",
+                  "accountId": "jason",
+                  "label": "Mac Studio",
+                  "nodeId": "studio-node",
+                  "activeEndpoint": "tailscale-main",
+                  "endpoints": [
+                    {
+                      "id": "tailscale-main",
+                      "kind": "tailscale",
+                      "host": "100.66.1.83",
+                      "port": 4043
+                    }
+                  ]
+                }
+              ]
+            }
+            """.trimIndent(),
+        )
+
+        val reloaded = store.load().activeHostConfig()
+
+        assertEquals("100.66.1.83", reloaded.host)
+        assertEquals(4043, reloaded.port)
     }
 
     private fun readBundledConfig(): String {

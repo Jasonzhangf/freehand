@@ -8,9 +8,9 @@
 ## Lifecycle Path Under Test
 
 1. `ClientConfig::store` adapts Android `Context` to the app-owned config file and bundled first-run JSON reader.
-2. `DaemonConnectionConfigStore::load` bootstraps or reads app-owned daemon config.
+2. `DaemonConnectionConfigStore::load` bootstraps or reads app-owned daemon config, preferring the remote_registry sidecar when present and keeping the legacy compatibility projection in sync for older APKs.
 3. `DaemonConnectionConfig::parse` validates legacy Tailscale profile schema or config-owned `remote_registry` bootstrap schema and rejects unknown fields.
-4. `DaemonConnectionConfig::parseBootstrapLink` accepts only versioned `freehand://daemon/import?payload=...` daemon bootstrap payloads, checks expiry, and writes imported config through `DaemonConnectionConfigStore::importBootstrapLink`.
+4. `DaemonConnectionConfig::parseBootstrapLink` accepts only versioned `freehand://daemon/import?payload=...` daemon bootstrap payloads, checks expiry, and writes imported config through `DaemonConnectionConfigStore::importBootstrapLink`, which now writes both the remote_registry sidecar and the legacy compatibility config.
 5. `DaemonConnectionConfig::activeHostConfig` selects the already-declared active daemon endpoint; Android does not score routes.
 6. `MainActivity::onCreate` renders a native neutral startup overlay before WebView navigation and loads canonical `HostConfig.webUiUrl` immediately; daemon HTML and no-store asset URLs own WebUI versioning.
 7. Canonical daemon WebUI owns transcript, composer, settings, status, lifecycle dashboard, ADP, command dispatch, and WebUI errors.
@@ -60,7 +60,7 @@
 - `FileAccessPermissionPolicyTest` covers runtime permission selection, all-files settings eligibility, and once-per-install-marker prompt admission.
 - `NotificationPermissionPolicyTest` covers Android 13+ prompt eligibility and pre-Android 13 no-prompt behavior.
 - `WebUiStartupGateTest` positively accepts only `webuiShell=true` plus `layoutClient=android-webview` plus `webuiCssApplied=true` plus `webuiJsReady=true`, and negatively rejects false, malformed, null, wrong-client, missing-stylesheet, and missing-JavaScript probes.
-- `DaemonConnectionConfigTest` covers bundled config bootstrap, strict schema validation, app-owned persistence, rejection of removed transport/top-level relay fields, remote registry Tailscale/relay endpoint selection, bootstrap deep-link import, expiry rejection, and relay endpoint account binding.
+- `DaemonConnectionConfigTest` covers bundled config bootstrap, strict schema validation, app-owned persistence, rejection of removed transport/top-level relay fields, remote registry Tailscale/relay endpoint selection, bootstrap deep-link import, expiry rejection, relay endpoint account binding, and sidecar/legacy compatibility projection.
 - Server asset smoke locks that WebUI exposes `window.__freehandHandleAndroidBack`; Android compile verifies `MainActivity::handleAndroidBackPressed` calls that hook instead of owning native drawer/session/settings state.
 - Server asset smoke locks that WebUI exposes the Android-only APK update Settings card and `window.__freehandAndroidApkUpdateStatus`, while Android compile verifies `MainActivity.AndroidApkUpdateBridge::check` is packaged.
 - `verify-launcher-icons.sh` covers launcher dimensions and source-derived pixels.
@@ -79,7 +79,7 @@
 - File-access closure requires a fresh install/update marker not yet recorded in app preferences, launch evidence for `FreehandFileAccess` including that marker, runtime permission dialog/settings handoff when permissions are missing, and final granted/restricted status after returning to the app.
 - Full auto-upgrade closure requires installing an older APK, staging a signed higher-version APK plus matching compiled `dist/android/update.json` at the selected daemon endpoint, observing `FreehandApkUpdate` logcat update-plan/download/install-intent evidence, manually confirming Android's system installer if prompted, and reading back the upgraded package `versionCode` plus compatible signer evidence.
 - Manual Settings closure requires opening Config inside the Android WebView, tapping `Check APK update`, observing the status card move through check/download/install phases or current-version/no-update, and preserving the daemon WebUI as the only visible product UI.
-- Remote daemon bootstrap closure requires opening or scanning a `freehand://daemon/import?payload=...` link on the device, then reading back app-owned `files/daemon-connection.json` before WebUI acceptance.
+- Remote daemon bootstrap closure requires opening or scanning a `freehand://daemon/import?payload=...` link on the device, then reading back app-owned `files/daemon-connection.json` plus the remote_registry sidecar before WebUI acceptance.
 - Acceptance evidence must include a screenshot and logcat showing daemon WebUI selectors/layout/assets (`data-webui-shell=true`, `layoutClient=android-webview`, stylesheet applied, WebUI JavaScript ready), not native Android chrome or unstyled HTML.
 - True-device settings/back proof must open Config, scroll to the long provider form, verify the sticky WebUI drawer header/close path remains accessible, press Android Back to blur the focused field, press Back again to close the drawer rather than exit the app, and capture screenshot/logcat evidence.
 - A blocker summary from `verify-device-ui.sh` is evidence of non-closure, not success.
