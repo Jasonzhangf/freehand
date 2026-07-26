@@ -38,6 +38,10 @@
   - `admit_master_attention_resolution_for_next_round`
   - `pair_master_attention_invalidated_tool_calls`
   - `enter_master_terminal_persistence`
+  - `recover_stale_lifecycle_waits_on_bootstrap`
+  - `session_has_lifecycle_owner_for_turn`
+  - `task_can_wake_parent_lifecycle`
+  - `owner_turn_matches_target`
 
 ## Resource Map Binding
 
@@ -133,6 +137,13 @@
   bootstrap recovers only from the `master_work` checkpoint plus matching
   reason active-turn truth: it interrupts/closes the stale active turn or
   clears invalid checkpoint-only state before accepting new UI/ADP work
+- live runtime bootstrap also reconciles persisted user-session
+  `ToolPending` turns before restoring UI projection. It reads TaskBoard through
+  `TaskRuntime::boot_read_only`, TimerStore schedules, and non-recoverable live
+  `master_work` truth; if the latest effective turn has no active turn and no
+  open same-logical-turn task, active/running source timer, or live Master work
+  owner, the same turn is durably re-closed as `Blocked`. Owner-backed waits
+  remain `ToolPending`.
 - Master supervision is a Task Center plus AgentBoard decision loop. A Worker
   process restart or stale heartbeat is never treated as task success; it is
   only resource truth that the Master combines with TaskHistory to reassign the
@@ -290,6 +301,10 @@ continue other ready work rather than dead-waiting in the current turn
   and next evaluation turn ordinals from authoritative closed/active turn
   snapshots only; it must not call selected-transcript UI restore or parse
   historical reason ledgers while the background Master loop is polling
+- bootstrap stale-wait reconciliation uses the same reason-owner closed-turn
+  truth and writes a `Blocked` terminal event only for no-owner `ToolPending`
+  turns. A waiting turn with a wakeable child task, active/running source
+  timer, or live non-recoverable `master_work` checkpoint remains waiting.
 - parent evaluation reads the original first-round user objective from
   authoritative reason `TurnStarted` ledger truth via
   `ReasonPersistence::restore_turn_start_snapshots`; UI-coalesced
@@ -389,6 +404,11 @@ continue other ready work rather than dead-waiting in the current turn
 - stale historical EventInbox cursor or missing-task attention is repaired or
   dropped explicitly; other Task Center owner-truth failures still stop the
   Master loop because current owner truth is unavailable
+- bootstrap stale-wait reconciliation failures from TaskBoard, TimerStore,
+  active-work, or reason persistence are explicit bootstrap errors. Missing
+  recovery truth for a deleted/incomplete session is skipped, but a restorable
+  no-owner `ToolPending` latest turn is not hidden in UI; it is durably closed
+  as `Blocked`.
 - Task Center and lifecycle-state failures are fatal owner-truth failures;
   lifecycle executor and missing/incomplete decision failures are retryable
 - missing paired Master identity or invalid provider config blocks runner bootstrap
@@ -427,6 +447,12 @@ continue other ready work rather than dead-waiting in the current turn
   - allowed callers: live Master safe-point continuation paths and runtime tests
   - related tests: `live_master_attention_invalidates_stale_tool_without_side_effect`, `live_master_attention_rejects_stale_terminal_persistence`, and `production_master_resume_consumes_resolution_once`
   - why shared: stale tool invalidation, stale terminal invalidation, and before-provider continuation must use the same typed context admission semantics
+- `recover_stale_lifecycle_waits_on_bootstrap` / `session_has_lifecycle_owner_for_turn`
+  - owner: `crates/freehand-runtime/src/lib.rs`
+  - purpose: close no-owner persisted `ToolPending` session turns during live runtime bootstrap while preserving owner-backed lifecycle waits
+  - allowed callers: `RuntimeCommandDispatcher::new` live bootstrap only
+  - related tests: `live_bootstrap_closes_stale_toolpending_without_lifecycle_owner`, `live_bootstrap_keeps_toolpending_when_child_task_can_wake_parent`
+  - why shared: UI restore, TaskBoard, timers, and active Master work must use one owner-truth classification for whether a wait can wake itself after restart
 - `path_resolution_diagnostic_text` / `expand_leading_tilde_path`
   - owner: `crates/freehand-runtime/src/path_diagnostics.rs`
   - purpose: render one shared target-cwd diagnostic with requested, expanded, nearest-existing, canonical parent, missing suffix, and symlink ancestor evidence
@@ -466,6 +492,7 @@ continue other ready work rather than dead-waiting in the current turn
 | 17 | `execute_registry_tool_call_with_workspace` | `crates/freehand-runtime/src/lib.rs` | enforce configured Worker-set routing before task-tool mutation and route Master timer tool calls to independent timer truth | Master task/timer tool call + ordered configured Worker id set | paired failed result or owner-routed task/timer mutation | provider/reason live bridge | topology validator + task tool/timer owners | bound |
 | 18 | `run_master_mode` / `master_lifecycle_runner_disabled_for_test` | `apps/freehand-daemon/src/main.rs` | run WebUI/ADP host and Master lifecycle runner under one daemon lifetime, except explicit fixture verifier runs may set `FREEHAND_TEST_DISABLE_MASTER_LIFECYCLE_RUNNER=1` to keep ADP/WebUI live submit active while preventing background Task Center lifecycle decisions from sharing a temporary provider fixture | Master bootstrap + bind + explicit test-only lifecycle-disable env | supervised Master daemon with lifecycle runner, or verifier-isolated WebUI/ADP host without background lifecycle runner | daemon CLI | server host + optional `ProductionMasterRunner::run_until` | bound |
 | 19 | `ProductionWorkerRunner::record_process_started` / `ProductionWorkerRunner::record_process_heartbeat_in` | `crates/freehand-runtime/src/worker_runner.rs` | emit one unique process instance at runner construction and refresh it on every poll tick | configured Worker identity + PID + process-instance id | persisted agent.lifecycle process health | Worker construction / `run_once` | `TaskRuntime::apply_agent_lifecycle_event` | bound |
+| 20 | `RuntimeCommandDispatcher::new` / `recover_stale_lifecycle_waits_on_bootstrap` / `session_has_lifecycle_owner_for_turn` / `task_can_wake_parent_lifecycle` / `owner_turn_matches_target` | `crates/freehand-runtime/src/lib.rs` | reconcile live-bootstrap persisted `ToolPending` user-session turns before UI projection restore; distinguish wakeable task/timer/live-master owners from stale no-owner waits | runtime home + Master agent id + reason closed-turn truth + TaskBoard + TimerStore + master_work checkpoint | owner-backed waits preserved as `ToolPending`, stale no-owner waits durably re-closed as `Blocked`, or explicit bootstrap error | `RuntimeCommandDispatcher::new` live bootstrap | `ReasonPersistence` + `TaskRuntime::boot_read_only` + `TimerStore` + `master_runner` active-work owner truth | bound |
 
 ## Sync Status Against Code
 
@@ -493,4 +520,5 @@ continue other ready work rather than dead-waiting in the current turn
 - online daemon/WebUI/Android proof for busy-Master live preemption remains a
   separate verification gap; do not treat focused runtime tests as full product
   closure
+- live bootstrap stale `ToolPending` recovery is code-bound before UI projection restore and focused-test bound for both no-owner close and wakeable-child preservation
 - generated wiki must be regenerated whenever this mainline changes

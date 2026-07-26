@@ -2919,6 +2919,147 @@ fn runtime_dispatcher_bootstrap_error(
     }
 }
 
+fn recover_stale_lifecycle_waits_on_bootstrap(
+    runtime_home: &Path,
+    agent_id: &AgentId,
+) -> Result<(), String> {
+    let task_runtime = TaskRuntime::boot_read_only(runtime_home, agent_id.clone())
+        .map_err(|err| err.to_string())?;
+    let task_board = task_runtime
+        .query_task_board(TaskBoardQuery {
+            status: None,
+            assignee: None,
+            include_terminal: true,
+        })
+        .map_err(|err| err.to_string())?;
+    let timer_schedules = TimerStore::new(runtime_home, agent_id)
+        .load_schedules()
+        .map_err(|err| err.to_string())?;
+    let active_master_work = live_master_active_work_owner(runtime_home, agent_id, &task_runtime)?;
+
+    let persistence = ReasonPersistence::new(runtime_home.to_path_buf(), agent_id.clone());
+    for session in persistence
+        .list_persisted_sessions()
+        .map_err(|err| err.to_string())?
+    {
+        let restored = match persistence.restore(&session.session_id) {
+            Ok(restored) => restored,
+            Err(ReasonPersistenceError::MissingRecoveryTruth(_)) => continue,
+            Err(error) => return Err(error.to_string()),
+        };
+        if restored.active_turn.is_some() {
+            continue;
+        }
+        let Some(latest_turn) = latest_effective_turn(&restored.closed_turns) else {
+            continue;
+        };
+        if !turn_is_stale_lifecycle_wait_candidate(latest_turn) {
+            continue;
+        }
+        if session_has_lifecycle_owner_for_turn(
+            &session.session_id,
+            &latest_turn.request.turn_id,
+            &task_board.tasks,
+            &timer_schedules,
+            active_master_work.as_ref(),
+        ) {
+            continue;
+        }
+
+        let previous_summary = latest_turn
+            .terminal_event
+            .as_ref()
+            .map(|terminal| terminal.summary.clone())
+            .unwrap_or_else(|| "missing previous lifecycle summary".to_owned());
+        let mut recovered_turn = latest_turn.clone();
+        ReasonTurnEngine::new().block_turn(
+            &mut recovered_turn,
+            format!(
+                "Startup lifecycle reconciliation closed stale waiting state: no active Task Center task, timer, model/tool request, or live Master work owner can resume this turn without user input. Previous wait: {previous_summary}"
+            ),
+        );
+        persistence
+            .record_turn_closed(&restored.history, &recovered_turn, 0)
+            .map_err(|err| err.to_string())?;
+    }
+    Ok(())
+}
+
+fn latest_effective_turn(turns: &[TurnRecord]) -> Option<&TurnRecord> {
+    turns
+        .iter()
+        .max_by_key(|turn| runtime_turn_position(&turn.request.turn_id))
+}
+
+fn turn_is_stale_lifecycle_wait_candidate(turn: &TurnRecord) -> bool {
+    turn.terminal_event
+        .as_ref()
+        .is_some_and(|terminal| terminal.status == freehand_contracts::TerminalStatus::ToolPending)
+}
+
+fn live_master_active_work_owner(
+    runtime_home: &Path,
+    agent_id: &AgentId,
+    task_runtime: &TaskRuntime,
+) -> Result<Option<master_runner::MasterActiveWorkCheckpoint>, String> {
+    let active = master_runner::load_master_active_work(runtime_home, agent_id)?;
+    let recoverable =
+        master_runner::recoverable_stale_master_active_work(runtime_home, agent_id, task_runtime)?;
+    Ok(active.filter(|checkpoint| {
+        recoverable
+            .as_ref()
+            .is_none_or(|stale| stale.work_id != checkpoint.work_id)
+    }))
+}
+
+fn session_has_lifecycle_owner_for_turn(
+    session_id: &SessionId,
+    turn_id: &TurnId,
+    tasks: &[TaskSnapshot],
+    timers: &[TimerSchedule],
+    active_master_work: Option<&master_runner::MasterActiveWorkCheckpoint>,
+) -> bool {
+    active_master_work.is_some_and(|checkpoint| {
+        checkpoint.session_id == *session_id
+            && owner_turn_matches_target(Some(&checkpoint.logical_turn_id), turn_id)
+    }) || tasks.iter().any(|task| {
+        task.parent.session_id.as_ref() == Some(session_id)
+            && owner_turn_matches_target(task.parent.turn_id.as_ref(), turn_id)
+            && task_can_wake_parent_lifecycle(task)
+    }) || timers.iter().any(|timer| {
+        timer.source_session_id.as_ref() == Some(session_id)
+            && owner_turn_matches_target(timer.source_turn_id.as_ref(), turn_id)
+            && matches!(timer.status.as_str(), "active" | "running")
+    })
+}
+
+fn task_can_wake_parent_lifecycle(task: &TaskSnapshot) -> bool {
+    matches!(
+        task.status,
+        TaskStatus::Created
+            | TaskStatus::WaitingAgent
+            | TaskStatus::Assigned
+            | TaskStatus::Running
+            | TaskStatus::Interrupted
+            | TaskStatus::Paused
+            | TaskStatus::ReviewSubmitted
+            | TaskStatus::Rejected
+    )
+}
+
+fn owner_turn_matches_target(owner_turn_id: Option<&TurnId>, target_turn_id: &TurnId) -> bool {
+    let Some(owner_turn_id) = owner_turn_id else {
+        return true;
+    };
+    let (owner_ordinal, _, owner_raw) = runtime_turn_position(owner_turn_id);
+    let (target_ordinal, _, target_raw) = runtime_turn_position(target_turn_id);
+    if owner_ordinal == 0 || target_ordinal == 0 {
+        owner_raw == target_raw
+    } else {
+        owner_ordinal == target_ordinal
+    }
+}
+
 struct RuntimeCommandDispatcherState {
     config: RuntimeCommandDispatcherConfig,
     reason_engine: ReasonTurnEngine,
@@ -3090,6 +3231,8 @@ impl RuntimeCommandDispatcher {
                 .set_node_status(node_status);
         }
         if let Some(live) = &config.live {
+            recover_stale_lifecycle_waits_on_bootstrap(&live.runtime_home, &config.reason_agent_id)
+                .map_err(RuntimeCommandDispatcherError::ReasonPersistenceBootstrap)?;
             let persistence =
                 ReasonPersistence::new(live.runtime_home.clone(), config.reason_agent_id.clone());
             next_turn_ordinal = restore_all_persisted_sessions_into_ui(

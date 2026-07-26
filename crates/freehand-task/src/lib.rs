@@ -831,14 +831,38 @@ struct TaskRuntimeState {
     scheduler_facts: BTreeMap<TaskId, Vec<SchedulerFact>>,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum TaskBootMode {
+    Reconcile,
+    ReadOnly,
+}
+
 impl TaskRuntime {
     pub fn boot(
         runtime_home: impl Into<PathBuf>,
         owner_agent_id: AgentId,
     ) -> Result<Self, TaskError> {
+        Self::boot_with_mode(runtime_home, owner_agent_id, TaskBootMode::Reconcile)
+    }
+
+    pub fn boot_read_only(
+        runtime_home: impl Into<PathBuf>,
+        owner_agent_id: AgentId,
+    ) -> Result<Self, TaskError> {
+        Self::boot_with_mode(runtime_home, owner_agent_id, TaskBootMode::ReadOnly)
+    }
+
+    fn boot_with_mode(
+        runtime_home: impl Into<PathBuf>,
+        owner_agent_id: AgentId,
+        mode: TaskBootMode,
+    ) -> Result<Self, TaskError> {
         let store = TaskStore::new(runtime_home, owner_agent_id.clone());
         let mut state = TaskRuntimeState::default();
-        let self_agent = store.load_or_create_self_agent(&owner_agent_id)?;
+        let self_agent = match mode {
+            TaskBootMode::Reconcile => store.load_or_create_self_agent(&owner_agent_id)?,
+            TaskBootMode::ReadOnly => store.load_or_default_self_agent(&owner_agent_id)?,
+        };
         for agent in store.load_agent_snapshots()? {
             state.lifecycle.insert(
                 agent.agent_id.clone(),
@@ -865,9 +889,11 @@ impl TaskRuntime {
             state.tasks.insert(task.task_id.clone(), task);
         }
         state.leases = store.load_leases()?;
-        reconcile_running_leases(&store, &mut state, now_unix_seconds())?;
-        reconcile_paused_agents(&store, &mut state, now_unix_seconds())?;
-        reconcile_released_lifecycle_bindings(&store, &mut state, now_unix_seconds())?;
+        if mode == TaskBootMode::Reconcile {
+            reconcile_running_leases(&store, &mut state, now_unix_seconds())?;
+            reconcile_paused_agents(&store, &mut state, now_unix_seconds())?;
+            reconcile_released_lifecycle_bindings(&store, &mut state, now_unix_seconds())?;
+        }
         state.scheduler_facts = store.load_scheduler_facts(state.tasks.keys())?;
         Ok(Self {
             store,

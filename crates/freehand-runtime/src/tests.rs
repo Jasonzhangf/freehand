@@ -3779,6 +3779,198 @@ fn live_bootstrap_clears_dead_owner_master_active_work_without_session_truth() {
 }
 
 #[test]
+fn live_bootstrap_closes_stale_toolpending_without_lifecycle_owner() {
+    let runtime_home = temp_runtime_home();
+    let session_id = SessionId::new("runtime-session-stale-toolpending");
+    let turn_id = TurnId::new("runtime-turn-1");
+    let agent_id = AgentId::new("agent-live");
+    let persistence = ReasonPersistence::new(&runtime_home, agent_id.clone());
+    persistence
+        .create_session_metadata(
+            session_id.clone(),
+            Some("Stale toolpending session".to_owned()),
+            None,
+        )
+        .expect("persist session metadata");
+    let engine = ReasonTurnEngine::new();
+    let mut history = SessionHistory::new(session_id.clone(), Vec::new()).expect("history");
+    let mut turn = engine
+        .start_turn(
+            &mut history,
+            TurnStartInput {
+                session_id: session_id.clone(),
+                turn_id: turn_id.clone(),
+                trace_id: TraceId::new("runtime-trace-1"),
+                feature_id: FeatureId::new("provider.reason-live-bridge"),
+                agent_id: agent_id.clone(),
+                user_text: "choose a path".to_owned(),
+                planned_context_segments: Vec::new(),
+                tool_schema_fingerprint: None,
+                model: "model-a".to_owned(),
+            },
+        )
+        .expect("start turn");
+    turn.terminal_event = Some(freehand_contracts::ReasonResp03TerminalEvent {
+        session_id: session_id.clone(),
+        turn_id: turn_id.clone(),
+        trace_id: TraceId::new("runtime-trace-1"),
+        feature_id: FeatureId::new("provider.reason-live-bridge"),
+        agent_id: agent_id.clone(),
+        status: TerminalStatus::ToolPending,
+        summary: "Waiting for lifecycle: user must pick option 1 or 2".to_owned(),
+    });
+    persistence
+        .record_turn_closed(&history, &turn, 0)
+        .expect("persist stale toolpending");
+
+    let runtime = RuntimeCommandDispatcher::from_selected_agent_with_live(
+        &live_selected_agent(
+            "http://127.0.0.1:1".to_owned(),
+            freehand_config::ProviderType::Anthropic,
+        ),
+        runtime_home.clone(),
+        false,
+    )
+    .expect("bootstrap must close stale waiting truth");
+
+    let restored = persistence
+        .restore(&session_id)
+        .expect("restore recovered session");
+    assert!(restored.active_turn.is_none());
+    assert_eq!(restored.closed_turns.len(), 1);
+    let recovered = restored.closed_turns.last().expect("closed turn");
+    assert_eq!(
+        recovered
+            .terminal_event
+            .as_ref()
+            .map(|terminal| terminal.status.clone()),
+        Some(TerminalStatus::Blocked)
+    );
+    assert!(
+        recovered
+            .terminal_event
+            .as_ref()
+            .expect("terminal")
+            .summary
+            .contains("Startup lifecycle reconciliation closed stale waiting state")
+    );
+
+    match runtime
+        .ui_state()
+        .lock()
+        .expect("lock ui")
+        .query(&UiCommand::QuerySessionList)
+        .expect("session list")
+    {
+        UiQueryResult::SessionList(list) => {
+            let summary = list
+                .sessions
+                .iter()
+                .find(|summary| summary.session_id == session_id)
+                .expect("session summary");
+            assert_eq!(summary.active_turn_id, None);
+            assert_eq!(summary.latest_status, "blocked");
+        }
+        other => panic!("unexpected session list: {other:?}"),
+    }
+
+    fs::remove_dir_all(runtime_home).expect("cleanup runtime home");
+}
+
+#[test]
+fn live_bootstrap_keeps_toolpending_when_child_task_can_wake_parent() {
+    let runtime_home = temp_runtime_home();
+    let session_id = SessionId::new("runtime-session-owner-open-toolpending");
+    let turn_id = TurnId::new("runtime-turn-7");
+    let agent_id = AgentId::new("agent-live");
+    let persistence = ReasonPersistence::new(&runtime_home, agent_id.clone());
+    persistence
+        .create_session_metadata(
+            session_id.clone(),
+            Some("Owner open toolpending session".to_owned()),
+            None,
+        )
+        .expect("persist session metadata");
+    let engine = ReasonTurnEngine::new();
+    let mut history = SessionHistory::new(session_id.clone(), Vec::new()).expect("history");
+    let mut turn = engine
+        .start_turn(
+            &mut history,
+            TurnStartInput {
+                session_id: session_id.clone(),
+                turn_id: turn_id.clone(),
+                trace_id: TraceId::new("runtime-trace-7"),
+                feature_id: FeatureId::new("provider.reason-live-bridge"),
+                agent_id: agent_id.clone(),
+                user_text: "waiting for child".to_owned(),
+                planned_context_segments: Vec::new(),
+                tool_schema_fingerprint: None,
+                model: "model-a".to_owned(),
+            },
+        )
+        .expect("start turn");
+    turn.terminal_event = Some(freehand_contracts::ReasonResp03TerminalEvent {
+        session_id: session_id.clone(),
+        turn_id: turn_id.clone(),
+        trace_id: TraceId::new("runtime-trace-7"),
+        feature_id: FeatureId::new("provider.reason-live-bridge"),
+        agent_id: agent_id.clone(),
+        status: TerminalStatus::ToolPending,
+        summary: "Waiting for lifecycle: child task still open".to_owned(),
+    });
+    persistence
+        .record_turn_closed(&history, &turn, 0)
+        .expect("persist owner-backed toolpending");
+
+    let task_runtime = TaskRuntime::boot(&runtime_home, agent_id.clone()).expect("task runtime");
+    task_runtime
+        .create_task(TaskCreateRequest {
+            task_id: Some(TaskId::new("task-owner-open-1")),
+            title: "open child".to_owned(),
+            content: "owner wake fixture".to_owned(),
+            goal: "keep parent waiting".to_owned(),
+            deliverables: vec!["child progress".to_owned()],
+            acceptance: vec!["child remains open".to_owned()],
+            priority: 50,
+            target_cwd: Some(std::env::temp_dir().display().to_string()),
+            execution_profile: TaskExecutionProfile::Workspace,
+            dispatch: TaskDispatchRequest::None,
+            parent: TaskParentRef {
+                session_id: Some(session_id.clone()),
+                turn_id: Some(turn_id.clone()),
+                trace_id: Some(TraceId::new("runtime-trace-7")),
+            },
+            actor: lifecycle_test_actor(),
+            watermark: lifecycle_test_watermark("create-open-child"),
+        })
+        .expect("create open child");
+
+    let _runtime = RuntimeCommandDispatcher::from_selected_agent_with_live(
+        &live_selected_agent(
+            "http://127.0.0.1:1".to_owned(),
+            freehand_config::ProviderType::Anthropic,
+        ),
+        runtime_home.clone(),
+        false,
+    )
+    .expect("bootstrap must keep owner-backed waiting truth");
+
+    let restored = persistence
+        .restore(&session_id)
+        .expect("restore owner session");
+    assert_eq!(restored.closed_turns.len(), 1);
+    assert_eq!(
+        restored.closed_turns[0]
+            .terminal_event
+            .as_ref()
+            .map(|terminal| terminal.status.clone()),
+        Some(TerminalStatus::ToolPending)
+    );
+
+    fs::remove_dir_all(runtime_home).expect("cleanup runtime home");
+}
+
+#[test]
 fn runtime_dispatches_session_rollback_into_effective_ui_projection() {
     let runtime_home = temp_runtime_home();
     let session_id = SessionId::new("session-rollback-runtime");

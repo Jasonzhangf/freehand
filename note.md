@@ -8705,3 +8705,11 @@ Current real root cause split:
 - Final WebUI proofs after tightening Home `ToolPending` classification:
   - `node scripts/verify-webui-session-restore-error-exit-online.mjs` passed, artifact `artifacts/webui-online/webui-session-unlock-1785086148685`.
   - `node scripts/verify-webui-mobile-ui-tree-online.mjs` passed, artifact `artifacts/webui-online/mobile-ui-tree-phase1-20260726T171436-19295`; Home `正在运行` ids are `[]`, while `webui-session-20260723001509-bd98e156` is in history with `等待中` and `webui-path-diagnostic-state-sync-fixed` is history `已阻塞`.
+
+# 2026-07-26T17:50:47Z stale ToolPending bootstrap cleanup closeout
+
+- run_id: `20260726T175357Z-Macstudio.local-26089-019a92-stale-lifecycle-bootstrap-closeout`
+- scope: old user-session `ToolPending` residuals must be cleaned by startup lifecycle reconciliation, not manual session deletion or UI hiding.
+- implementation: `RuntimeCommandDispatcher::new` live bootstrap now runs `recover_stale_lifecycle_waits_on_bootstrap` before `restore_all_persisted_sessions_into_ui`. The reconcile path uses `TaskRuntime::boot_read_only`, TimerStore schedules, and live non-recoverable `master_work` truth to decide whether a latest effective `ToolPending` turn has an owner that can wake it. No-owner stale waits are re-recorded through `ReasonPersistence::record_turn_closed` as terminal `Blocked`; open child-task/timer/live-master waits are preserved. `TaskRuntime::boot_read_only` was added so projection/reconcile reads do not create self-agent or lease side effects.
+- positive/negative tests: `live_bootstrap_closes_stale_toolpending_without_lifecycle_owner` proves stale wait becomes `Blocked` and SessionList `latest_status=blocked`; `live_bootstrap_keeps_toolpending_when_child_task_can_wake_parent` proves an open child task prevents premature cleanup.
+- S-profile proof already observed before this docs/commit closeout: `webui-path-diagnostic-state-sync-fixed:2:blocked`, `webui-session-20260723001509-bd98e156:8:blocked`; persisted turn `~/.freehand/state/turns/master/webui-session-20260723001509-bd98e156/turns/runtime-turn-541-r3.json` has `status=Blocked`; mobile UI artifact `artifacts/webui-online/mobile-ui-tree-phase1-20260726T180200-56388` has `phoneRunningIds=[]` and places the old session in history as `已阻塞`.
