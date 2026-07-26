@@ -41,6 +41,7 @@
     "while Worker execution is active, the runner monitors same-task/same-execution WorkerControl pause truth and wires applied pause into LiveReasonCancelToken so the live bridge stops only at existing safe points",
     "Worker provider requests expose governed workspace tools but exclude recursive `task` and unrestricted shell tools",
     "Master provider guidance binds dispatch to the ordered configured Worker id set, excludes historical AgentBoard entries as production targets, forbids task lifecycle calls in Worker task content, and requires path/symlink/canonical evidence for external cwd delegation",
+    "Runtime rejects a Master user-session claim=waiting unless current owner truth has an open same-session child task or an active/running source timer; terminal child history plus no source timer is not a self-waking lifecycle and user-choice waits must close as blocked/user-needed instead of ToolPending",
     "Master task-tool execution independently rejects assignment to any non-configured Worker before Task Center mutation",
     "Master task creation rejects omitted, auto, self, or non-configured-agent dispatch before persisted historical agents can be selected"
   ],
@@ -66,6 +67,7 @@
     "parent evaluation reads only the first-round persisted user objective from authoritative reason TurnStarted ledger truth; UI-coalesced repair/control rounds and latest repaired snapshots cannot replace the goal",
     "if a historical all-children-closed parent set has no persisted original user objective truth, the runner records that exact child set as ParentEvaluationSkipped without finalizing and continues current lifecycle processing",
     "QuerySessionTurns hides internal timer or parent-evaluation follow-up prompts from both raw request text and original-task-context-derived display text while preserving terminal status, tool truth, and final summaries",
+    "provider-visible rebuilt SessionHistory hides internal timer and parent-evaluation prompt text while preserving terminal summaries as historical assistant context, so future Master turns do not consume framework prompts as user memory",
     "blocked truth remains retryable until Master reassigns it or persists a blocked-decision note through task(op=append)",
     "after repeated provider/executor failures while deciding an already blocked task, the runner appends an explicit Master-owned blocked_decision and continues other pending lifecycle events without marking the task successful",
     "interrupted truth remains retryable until it leaves Interrupted",
@@ -91,6 +93,7 @@
     "nullable unused response-status fields remain valid and non-null response-status type mismatches are polished without killing the lifecycle runner",
     "Master blocked prose without a persisted task(op=append) TaskProgressed decision returns MissingBlockedDecision and leaves the event retryable",
     "Master interrupted prose without reassignment returns MissingInterruptedDecision and leaves the event retryable",
+    "a Master claim=waiting without open same-session child-task truth or active/running source-timer truth is schema-rejected; closed child worksets and user-choice waits must not persist as lifecycle ToolPending",
     "interrupted Master decisions receive current AgentBoard resource truth and may replace the same task assignment from one configured Worker to another without changing task_id or parent_session_id",
     "Agent is a reusable execution resource independent of Session; current session attachment is derived only through task parent plus assignment, lease, and execution truth",
     "unrelated task mutation cannot satisfy the current event decision boundary",
@@ -479,6 +482,17 @@
       "output_semantic": "closed Master turn, target Task Center mutation, and live retry/tool/terminal projection when hooks are supplied",
       "caller": "ProductionMasterRunner::handle_event / LiveMasterTurnExecutor",
       "callee": "provider and reason live bridge plus runtime UI hook callbacks",
+      "binding_status": "bound"
+    },
+    {
+      "step": "15a",
+      "symbol_path": "master_session_completion_rejection / master_session_lifecycle_owner_truth",
+      "file_path": "crates/freehand-runtime/src/lib.rs",
+      "responsibility": "validate Master completion schema against current same-session Task Center child truth and source timer truth before terminal persistence; reject stale claim=waiting when no owner resource can wake the lifecycle without another user message",
+      "input_semantic": "parsed CompletionSubmission, parent session id, TaskBoard child statuses, and timer schedules",
+      "output_semantic": "accepted terminal/waiting decision or schema rejection forcing blocked/user-choice or complete/evidence semantics",
+      "caller": "run_live_reason_turn_with_policy",
+      "callee": "TaskRuntime, TimerStore, and completion schema retry loop",
       "binding_status": "bound"
     },
     {

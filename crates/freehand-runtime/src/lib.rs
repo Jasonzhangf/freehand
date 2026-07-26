@@ -2399,7 +2399,7 @@ where
         let visible_text = public_provider_text;
         let completion_submission = match parse_completion_submission_block(&provider_text) {
             Ok(submission) => {
-                match master_parent_session_completion_rejection(
+                match master_session_completion_rejection(
                     &request.runtime_home,
                     &agent_id,
                     &request.session_id,
@@ -10102,7 +10102,7 @@ fn task_decision_round_budget_reason(
     })
 }
 
-fn master_parent_session_completion_rejection(
+fn master_session_completion_rejection(
     runtime_home: &Path,
     agent_id: &AgentId,
     session_id: &SessionId,
@@ -10110,13 +10110,60 @@ fn master_parent_session_completion_rejection(
     task_decision_boundary: Option<&LiveReasonTaskDecisionBoundary>,
     submission: &CompletionSubmission,
 ) -> Result<Option<CompletionSchemaRejection>, RuntimeLiveBridgeError> {
-    if role != LiveReasonExecutionRole::Master
-        || task_decision_boundary.is_some()
-        || submission.claim != CompletionClaim::Complete
-    {
+    if role != LiveReasonExecutionRole::Master || task_decision_boundary.is_some() {
         return Ok(None);
     }
 
+    let lifecycle = master_session_lifecycle_owner_truth(runtime_home, agent_id, session_id)?;
+    match submission.claim {
+        CompletionClaim::Complete => {
+            if lifecycle.open_child_tasks.is_empty() {
+                return Ok(None);
+            }
+
+            Ok(Some(CompletionSchemaRejection {
+                issues: vec![CompletionSchemaIssue {
+                    field: "claim".to_owned(),
+                    message: format!(
+                        "cannot be `complete` while child Worker tasks for this Master session are still open: {}. Inspect Task Center truth, wait with `claim=\"waiting\"`, or continue only if you can approve/close all required child work in this turn.",
+                        lifecycle.open_child_tasks.join(", ")
+                    ),
+                }],
+            }))
+        }
+        CompletionClaim::Waiting => {
+            if lifecycle.has_open_owner_truth() {
+                return Ok(None);
+            }
+
+            Ok(Some(CompletionSchemaRejection {
+                issues: vec![CompletionSchemaIssue {
+                    field: "claim".to_owned(),
+                    message: "claim=`waiting` requires open Task Center or timer owner truth for this Master session so the lifecycle can resume without another user message. Current child tasks are terminal and no active/running source timer exists. If the next action requires a user choice, use `claim=\"blocked\"` with a precise `blocked_reason`; if the user objective is actually complete, use `claim=\"complete\"` with evidence."
+                        .to_owned(),
+                }],
+            }))
+        }
+        CompletionClaim::Continue | CompletionClaim::Blocked => Ok(None),
+    }
+}
+
+struct MasterSessionLifecycleOwnerTruth {
+    open_child_tasks: Vec<String>,
+    open_timers: Vec<String>,
+}
+
+impl MasterSessionLifecycleOwnerTruth {
+    fn has_open_owner_truth(&self) -> bool {
+        !self.open_child_tasks.is_empty() || !self.open_timers.is_empty()
+    }
+}
+
+fn master_session_lifecycle_owner_truth(
+    runtime_home: &Path,
+    agent_id: &AgentId,
+    session_id: &SessionId,
+) -> Result<MasterSessionLifecycleOwnerTruth, RuntimeLiveBridgeError> {
     let runtime = TaskRuntime::boot(runtime_home, agent_id.clone())
         .map_err(|err| RuntimeLiveBridgeError::TaskProjectionFailed(err.to_string()))?;
     let board = runtime
@@ -10133,19 +10180,19 @@ fn master_parent_session_completion_rejection(
         .filter(|task| task_status_blocks_parent_completion(&task.status))
         .map(|task| format!("{}:{:?}", task.task_id.as_str(), task.status))
         .collect::<Vec<_>>();
-    if open_children.is_empty() {
-        return Ok(None);
-    }
-
-    Ok(Some(CompletionSchemaRejection {
-        issues: vec![CompletionSchemaIssue {
-            field: "claim".to_owned(),
-            message: format!(
-                "cannot be `complete` while child Worker tasks for this Master session are still open: {}. Inspect Task Center truth, wait with `claim=\"waiting\"`, or continue only if you can approve/close all required child work in this turn.",
-                open_children.join(", ")
-            ),
-        }],
-    }))
+    let timer_store = TimerStore::new(runtime_home, agent_id);
+    let open_timers = timer_store
+        .load_schedules()
+        .map_err(|err| RuntimeLiveBridgeError::TaskProjectionFailed(err.to_string()))?
+        .into_iter()
+        .filter(|schedule| schedule.source_session_id.as_ref() == Some(session_id))
+        .filter(|schedule| matches!(schedule.status.as_str(), "active" | "running"))
+        .map(|schedule| format!("{}:{}", schedule.timer_id, schedule.status))
+        .collect::<Vec<_>>();
+    Ok(MasterSessionLifecycleOwnerTruth {
+        open_child_tasks: open_children,
+        open_timers,
+    })
 }
 
 fn task_status_blocks_parent_completion(status: &TaskStatus) -> bool {

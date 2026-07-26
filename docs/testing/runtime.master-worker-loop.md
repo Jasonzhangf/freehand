@@ -172,6 +172,10 @@ Task Center truth before another execution starts.
   with the same `parent_session_id` remains open; the provider gets repair
   feedback and may continue or return `claim="waiting"`, but the parent session
   must not project `TerminalStatus::Success`.
+- Runtime rejects a Master user-session `claim="waiting"` when all same-session
+  child tasks are terminal and no active/running source timer exists; a state
+  that needs another user choice must close as blocked/user-needed, not as
+  lifecycle `ToolPending`.
 - A child `task_closed` event whose parent has all same-logical-parent-turn
   children closed triggers exactly one parent-session evaluation turn in the
   original persisted parent session. Child tasks created by
@@ -367,6 +371,9 @@ Task Center truth before another execution starts.
 - A Master user-session completion with open child tasks is rejected before
   terminal success, even if the model emits a syntactically valid
   `claim="complete"` schema.
+- A Master user-session `claim="waiting"` with only terminal child tasks and no
+  source timer is rejected before `ToolPending` can persist; covered by
+  `cargo test -p freehand-runtime live_master_rejects_waiting_when_child_tasks_are_terminal_and_no_owner_will_wake -- --nocapture --test-threads=1`.
 - A closed child task with an open sibling must not trigger parent evaluation.
 - A Worker `TaskBlocked` without a Master-owned `blocked_decision` must not
   project a user-visible parent blocked follow-up.
@@ -489,6 +496,10 @@ Task Center truth before another execution starts.
   `ReasonPersistence` owner truth into UI projection, and hides internal
   timer/parent-evaluation prompts from both raw request text and original-task
   context-derived display candidates while preserving terminal truth.
+- effective provider-history coverage proves rebuilt
+  `SessionHistory.base_context_segments` hides internal parent-evaluation
+  prompts while preserving the terminal summary:
+  `cargo test -p freehand-runtime effective_context_hides_internal_parent_evaluation_prompt -- --nocapture --test-threads=1`.
 - due timer wakeup without task truth
 - recurring timer reschedule up to `max_runs`
 - timer wakeup failure release back to active retryable state

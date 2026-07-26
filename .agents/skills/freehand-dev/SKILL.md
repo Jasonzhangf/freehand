@@ -338,6 +338,13 @@ Use this skill for any non-trivial work in this repo.
   live S-profile on fixture/provider settings. After restore, query
   `freehand-cliS adp-config-query`, grep fixture env markers, and check no
   verifier-owned cargo/rustc chain remains.
+- ADP `SubmitUserInput` online verifiers that are not testing instruction
+  capability should pass a minimal verifier cwd such as
+  `/tmp/freehand-<feature>-cwd`, not the Freehand repo root. Repo-root cwd loads
+  local `AGENTS.md` and `.agents/skills` into the provider request and can hit
+  the 30s instruction-capability guard before the behavior under test reaches
+  the provider. If the verifier intentionally tests instruction capability, make
+  that the explicit feature gate and assert the manifest/request segment.
 - Android WebView proof is not closed by local `127.0.0.1:4042` served hashes. For phone-visible changes, verify the relay HTML asset version, relay-served JS contains the changed marker after path rewriting, relay ADP smoke passes, and true-device CDP/screenshot shows the current DOM. A terminal backend session with stale `[data-live="true"]` on the phone is a WebUI projection/cache/connection bug until the relay-loaded DOM proves `liveCount=0`.
 - If Jason reports that the phone still looks hung after a WebUI/relay fix, manual CDP reload evidence is not enough. Run an app-level true-device relaunch proof such as `FREEHAND_ANDROID_SKIP_INSTALL=1 apps/freehand-android/scripts/verify-device-ui.sh <adb-serial>`, reconnect CDP to the new Freehand PID, and prove the post-relaunch DOM has the relay asset version, terminal selected turn, `liveCount=0`, and no stale provider-retry text before claiming the mobile path is recovered.
 - Use the global `scripts/install-global.sh` plus `scripts/install-launchd.sh restart` path only for release/promotion closeout or when explicitly validating the installed release surface.
@@ -506,6 +513,13 @@ Use this skill for any non-trivial work in this repo.
   history inside the same foreground turn until a fixture poll budget fails;
   lifecycle progress is observed afterward through ADP TaskBoard/TaskHistory
   and parent-evaluation SessionTurns truth.
+- Master `claim="waiting"` must be backed by owner truth that can wake the
+  lifecycle without another user message: an open same-session child task or
+  active/running source timer. Terminal child history with no source timer must
+  not persist as lifecycle `ToolPending`; user-choice waits close as
+  blocked/user-needed or complete with evidence. Also inspect rebuilt
+  `SessionHistory.base_context_segments`, not only UI projection, so internal
+  parent-evaluation/timer prompts never become provider-visible user memory.
 - For WebUI multi-round rendering, never collapse `runtime-turn-N` / `runtime-turn-N-rM`, same-text assistant rows, same `tool_call_id` updates, tool requests, or tool results into one all-in summary card. Render every protocol-projected request, response, tool activity, and terminal row as its own chronological visible card/section. Do not hide continuation/user rows or raw tool result lines in the browser; internal framework prompts may be hidden only by the protocol/runtime projection owner by emitting empty `user_text`. Keep raw completion schema/debug-only lines out of the public stream through the existing protocol/debug boundary, not through DOM compression.
 - For WebUI submit/history regressions, composer clearing is not proof of success. Verify the submitted text is immediately visible in the conversation stream, historical cards remain present, the latest card is appended in session order, a live turn with no public rows renders an explicit observable waiting row instead of a blank transcript, and at least two consecutive submits remain visible after later ADP refresh/timer updates.
 - For WebUI ambiguous submit recovery, never render user-facing `unknown` or "任务未知" once owner truth can verify acceptance. Refresh session list, selected transcript, latest turn, and TaskBoard; if same-parent TaskBoard task truth created after the submit window exists, clear pending state and render an accepted service receipt card until transcript truth materializes. Do not fall back to the clean "New conversation" empty state, and do not use `updated_at` because historical heartbeat/review updates can mis-correlate old tasks.

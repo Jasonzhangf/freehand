@@ -610,7 +610,7 @@ pub(crate) fn effective_turn_context_segments(turns: &[TurnRecord]) -> Vec<Conte
 }
 
 fn turn_context_segment(turn: &TurnRecord) -> Option<ContextSegment> {
-    let user_text = ui_user_text_for_turn(turn);
+    let user_text = model_history_user_text_for_turn(turn);
     let assistant_text = history_visible_assistant_text(turn);
     if user_text.trim().is_empty() && assistant_text.trim().is_empty() {
         return None;
@@ -645,6 +645,17 @@ fn turn_context_segment(turn: &TurnRecord) -> Option<ContextSegment> {
             reference: Some(format!("historical_turn:{raw_turn_id}")),
         },
     })
+}
+
+fn model_history_user_text_for_turn(turn: &TurnRecord) -> String {
+    let user_text = ui_user_text_for_turn(turn);
+    if ui_should_hide_user_text(&turn.request.session_id, &turn.request.user_text)
+        || ui_should_hide_user_text(&turn.request.session_id, &user_text)
+    {
+        String::new()
+    } else {
+        user_text
+    }
 }
 
 fn history_visible_assistant_text(turn: &TurnRecord) -> String {

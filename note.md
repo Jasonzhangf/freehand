@@ -8430,3 +8430,50 @@ Current real root cause split:
   - `cargo test -p freehand-reason ui_restore_ -- --nocapture --test-threads=1` passed 4/4.
   - `cargo fmt --check`, `cargo run -p xtask -- mainlines check`, `cargo run -p xtask -- gates check`, and `git diff --check` passed.
   - Local/relay Android update manifests still served versionCode `20260728`, versionName `0.2.6`; dist/runtime-home APK SHA-256 still match `602875167d259d8d9eff21a04ecc2deef4653dd718dc090c3026641dc459bca8`.
+
+# 2026-07-25T23:58:00Z Master parent/child stale waiting closeout
+
+- run_id: `20260725T231358Z-Macstudio.local-42087-d961b27d`
+- scope:
+  - Investigated Jason's report that Master parent state waited forever while a child Agent/task had already closed.
+  - Target owner: `runtime.master-worker-loop`; touched runtime completion-schema gating, provider-visible session-history projection, maps/tests/skill.
+- live diagnosis:
+  - S-profile ADP was reachable: `freehand-cliS adp-smoke --url ws://127.0.0.1:4042/adp` passed.
+  - Concrete stuck sample `webui-session-20260723001509-bd98e156` / child `task-1784765749` proved the child notification path itself had fired: task snapshot status was `closed`, history ended in `TaskReviewSubmitted -> TaskReviewApproved -> TaskClosed`, and `~/.freehand/state/master-loop/master.json` contained `completed_parent_evaluations` entry `webui-session-20260723001509-bd98e156|task-1784765749:385` with no pending attention.
+  - The same session history contained parent evaluation turn `runtime-turn-523` as `Success`, so the specific child close was not lost.
+  - Remaining visible stuck state was later turn `runtime-turn-541-r3`, persisted as `TerminalStatus::ToolPending` from a user-choice wait (`Waiting for the user to pick option ...`) despite no same-session child/timer owner truth that could wake it.
+  - Provider-visible `SessionHistory.base_context_segments` also leaked the internal `<freehand_parent_evaluation ...>` user prompt from `runtime-turn-523` into later Master requests through `historical_turn:runtime-turn-523`.
+- root cause:
+  - Runtime rejected premature Master `claim="complete"` while child tasks were open, but accepted Master `claim="waiting"` even when all same-session child tasks were terminal and no source timer was active/running. That created lifecycle `ToolPending` with no owner that could resume it.
+  - UI projection hid internal parent/timer prompts, but rebuilt provider-visible session memory used the UI-derived/original-task candidate without reapplying internal-prompt hiding against raw `request.user_text` and effective user text.
+- implementation:
+  - `master_session_completion_rejection` now gates Master user-session `claim="waiting"` by owner truth: open same-session child task or active/running source timer. Without that owner truth, schema repair forces `claim="blocked"` for user choice or `claim="complete"` only with evidence.
+  - `master_session_lifecycle_owner_truth` reads `TaskRuntime` TaskBoard plus `TimerStore` schedules and treats terminal children as non-waking.
+  - `turn_projection::turn_context_segment` now uses `model_history_user_text_for_turn`, hiding internal parent/timer/framework prompts from provider-visible `SessionHistory.base_context_segments` while retaining terminal assistant summaries.
+  - Synced `docs/function-maps/runtime.master-worker-loop.md`, `docs/testing/runtime.master-worker-loop.md`, `docs/mainline-calls/runtime.master-worker-loop.json`, generated wiki, and local `freehand-dev` skill.
+- red/green proof:
+  - `effective_context_hides_internal_parent_evaluation_prompt` failed before the projection fix because `<freehand_parent_evaluation>` leaked into provider-visible context; passed after the fix.
+  - `live_master_rejects_waiting_when_child_tasks_are_terminal_and_no_owner_will_wake` failed before the runtime gate because stale waiting persisted as `ToolPending` and no schema repair request was sent; passed after the fix.
+- local validation:
+  - `CARGO_TARGET_DIR=/tmp/freehand-target-parent-closure cargo test -p freehand-runtime effective_context_ -- --nocapture --test-threads=1` passed 2/2.
+  - `CARGO_TARGET_DIR=/tmp/freehand-target-parent-closure cargo test -p freehand-runtime live_master_ -- --nocapture --test-threads=1` passed 6/6.
+  - `CARGO_TARGET_DIR=/tmp/freehand-target-parent-closure cargo test -p freehand-runtime runtime_query_session_turns_restores_background_parent_evaluation -- --nocapture --test-threads=1` passed.
+  - `cargo fmt --check` passed.
+  - `CARGO_TARGET_DIR=/tmp/freehand-target-parent-closure cargo run -p xtask -- mainlines check` passed.
+  - `CARGO_TARGET_DIR=/tmp/freehand-target-parent-closure cargo run -p xtask -- gates check` passed.
+  - `git diff --check` passed.
+- online proof:
+  - Rebuilt current workspace binaries with `CARGO_INCREMENTAL=0 CARGO_TARGET_DIR=/tmp/freehand-target-parent-closure cargo build -p freehand-cli -p freehand-server -p freehand-daemon` and restarted the S daemon with that binary copy.
+  - First online verifier attempt used repo root cwd and failed before provider IO with `instruction capability build timed out after 30s while reading AGENTS.md/skills`; no fixture provider requests were made and config/env restore succeeded. This confirmed the verifier setup was wrong, not runtime waiting logic.
+  - Retried with minimal cwd `/tmp/freehand-parent-closure-cwd` and temporary fixture provider. The first fixture response returned `claim="waiting"` with no child/timer owner truth; the runtime sent a second provider request containing schema-repair feedback `claim=\`waiting\` requires open Task Center or timer owner truth`, and the second response closed as blocked.
+  - Online artifact: `artifacts/runtime-online/parent-child-closure-20260725T235515-32394/result.json`.
+  - Checks: `inScopeRequestCount=2`, `firstRequestHadToken=true`, `secondRequestHadWaitingRejection=true`, `secondRequestHadRepairLanguage=true`, `terminalStatus=Blocked`, `noTerminalToolPending=true`, `outOfScopeRequestCount=0`. Transcript turns: `runtime-turn-550` non-terminal repair round, `runtime-turn-550-r2` terminal `Blocked`.
+  - Post-restore: fixture env grep for `FREEHAND_PARENT_CLOSURE_FIXTURE_KEY` / `FREEHAND_TEST_DISABLE_MASTER_LIFECYCLE_RUNNER` returned no matches, config had no `parent-closure-fixture`, health was `ok`, and `freehand-cliS adp-smoke --url ws://127.0.0.1:4042/adp` passed.
+- lesson:
+  - Parent/child closure must be checked at owner truth, not from UI state. A terminal child plus no timer cannot justify lifecycle `ToolPending`; user-choice waits are blocked/user-needed terminal states.
+  - Runtime online verifiers that are not testing instruction-capability should use a minimal cwd to avoid loading the full repo local AGENTS/skills before the behavior under test.
+
+# 2026-07-26T00:04:00Z staged-index verification
+
+- Applied `git diff --cached` to clean detached worktree `/tmp/freehand-parent-closure-staged.vmp91B` from HEAD to prove the commit scope independently of unrelated dirty files.
+- Passed there: `effective_context_`, `live_master_`, `runtime_query_session_turns_restores_background_parent_evaluation`, `cargo fmt --check`, `xtask mainlines check`, `xtask gates check`, and `git diff --check`.

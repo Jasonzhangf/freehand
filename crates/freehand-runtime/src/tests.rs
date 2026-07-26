@@ -767,6 +767,38 @@ fn effective_context_uses_last_repaired_round_without_raw_failed_attempt() {
 }
 
 #[test]
+fn effective_context_hides_internal_parent_evaluation_prompt() {
+    let session_id = SessionId::new("runtime-session-parent-eval-context");
+    let mut history = SessionHistory::new(session_id.clone(), Vec::new()).expect("history");
+    let turn = closed_turn_for_context(
+        &mut history,
+        &session_id,
+        "runtime-turn-23",
+        "master-parent-evaluate-trace-23",
+        "<freehand_parent_evaluation id=\"internal-parent-eval\">\ninternal framework prompt",
+        TerminalStatus::Success,
+        "parent evaluation final answer",
+    );
+
+    let segments = effective_turn_context_segments(&[turn]);
+    let rendered = freehand_blocks::render_context_segments_as_text(&segments);
+
+    assert_eq!(segments.len(), 1);
+    assert!(
+        !rendered.contains("<freehand_parent_evaluation"),
+        "internal parent-evaluation prompt leaked into future provider context: {rendered}"
+    );
+    assert!(
+        !rendered.contains("internal framework prompt"),
+        "internal parent-evaluation prompt body leaked into future provider context: {rendered}"
+    );
+    assert!(
+        rendered.contains("Assistant: parent evaluation final answer"),
+        "parent evaluation terminal summary should remain usable context: {rendered}"
+    );
+}
+
+#[test]
 fn runtime_query_session_turns_restores_background_parent_evaluation() {
     let runtime_home = temp_runtime_home();
     let selected = live_selected_agent(
@@ -4547,6 +4579,103 @@ fn live_master_rejects_complete_while_parent_child_task_open() {
             .expect("child unchanged")
             .status,
         TaskStatus::WaitingAgent
+    );
+
+    fs::remove_dir_all(runtime_home).expect("cleanup runtime home");
+}
+
+#[test]
+fn live_master_rejects_waiting_when_child_tasks_are_terminal_and_no_owner_will_wake() {
+    let _cwd_lock = cwd_lock()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    let runtime_home = temp_runtime_home();
+    let task_runtime =
+        TaskRuntime::boot(&runtime_home, AgentId::new("agent-live")).expect("task runtime");
+    let child = task_runtime
+        .create_task(TaskCreateRequest {
+            task_id: Some(TaskId::new("closed-child-task")),
+            title: "Closed child task".to_owned(),
+            content: "child work is already terminal".to_owned(),
+            goal: "prove stale parent waiting is rejected".to_owned(),
+            deliverables: vec!["child result".to_owned()],
+            acceptance: vec!["child task closed".to_owned()],
+            priority: 90,
+            target_cwd: Some(runtime_home.display().to_string()),
+            execution_profile: TaskExecutionProfile::Workspace,
+            dispatch: TaskDispatchRequest::None,
+            parent: TaskParentRef {
+                session_id: Some(SessionId::new("session-live")),
+                turn_id: Some(TurnId::new("runtime-turn-1")),
+                trace_id: Some(TraceId::new("runtime-trace-1")),
+            },
+            actor: lifecycle_test_actor(),
+            watermark: lifecycle_test_watermark("closed-child"),
+        })
+        .expect("create child")
+        .task;
+    task_runtime
+        .cancel_task(TaskMutationRequest {
+            task_id: child.task_id.clone(),
+            actor: lifecycle_test_actor(),
+            watermark: lifecycle_test_watermark("cancel-closed-child"),
+        })
+        .expect("terminal child");
+    let (base_url, rx, handle) = spawn_sequence_server(
+        "application/json",
+        vec![
+            waiting_single_response("Waiting for the user to pick option A or option B"),
+            blocked_single_response(
+                "needs user choice",
+                "waiting for user choice after child task is already terminal",
+            ),
+        ],
+    );
+    let mut request = live_request(false);
+    request.runtime_home = runtime_home.clone();
+    request.cwd = Some(runtime_home.clone());
+
+    let outcome = run_live_reason_turn_with_hooks(
+        &live_selected_agent(base_url, freehand_config::ProviderType::Anthropic),
+        request,
+        |_| {},
+        |_| {},
+        |_| {},
+    )
+    .expect("stale waiting must repair to non-running terminal state");
+    let requests = vec![
+        rx.recv_timeout(Duration::from_secs(2))
+            .expect("initial provider request"),
+        rx.recv_timeout(Duration::from_secs(2))
+            .expect("schema repair provider request after rejected stale waiting"),
+    ];
+    handle.join().expect("join provider");
+
+    assert_eq!(outcome.rounds, 2);
+    assert_eq!(
+        outcome
+            .turn
+            .terminal_event
+            .as_ref()
+            .map(|event| event.status.clone()),
+        Some(TerminalStatus::Blocked)
+    );
+    assert_eq!(outcome.schema_rejections.len(), 1);
+    assert_eq!(outcome.schema_rejections[0].issues[0].field, "claim");
+    assert!(
+        outcome.schema_rejections[0].issues[0]
+            .message
+            .contains("claim=`waiting` requires open Task Center or timer owner truth"),
+        "unexpected rejection: {:?}",
+        outcome.schema_rejections[0].issues[0]
+    );
+    assert!(requests[1].contains("claim=`waiting` requires open Task Center or timer owner truth"));
+    assert_eq!(
+        task_runtime
+            .query_task(&child.task_id)
+            .expect("child unchanged")
+            .status,
+        TaskStatus::Cancelled
     );
 
     fs::remove_dir_all(runtime_home).expect("cleanup runtime home");
