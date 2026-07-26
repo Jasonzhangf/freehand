@@ -8500,3 +8500,60 @@ Current real root cause split:
 
 - To remove dirty-worktree ambiguity, applied `git diff --cached` to detached clean worktree `/tmp/freehand-lifecycle-staged-20260726T013236Z`, built daemon/CLI with `/tmp/freehand-target-lifecycle-staged-online`, and reran `scripts/verify-master-three-worker-e2e-online.sh` from that clean staged tree.
 - Clean staged online proof passed: session `online-master-three-worker-evaluation-1785029697`, evidence dir `/tmp/freehand-three-worker-home.VtEpeP/.freehand/tmp/three-worker-e2e-20260726T093457-96986`, final `runtime-turn-3` Success with all four worker_result tokens, gamma explicit PID restart `99273 -> 2375`, restart idempotency `final_evaluation_count=1`.
+
+# 2026-07-26T02:05:00Z mobile UI tree correction
+
+- Jason corrected the approach: stop patching individual WebUI symptoms and first lock the full mobile UI tree.
+- Design baseline added:
+  - `docs/design/mobile-webui-ui-tree.md`
+  - `docs/design/mobile-webui-ui-tree.manifest.json`
+- Locked route split:
+  - `Home` owns global `正在运行` and `历史会话`.
+  - `SessionDetail(session_id)` owns one selected session transcript and composer.
+  - The two body surfaces are mutually exclusive on phone.
+- Lifecycle UI closure rule:
+  - `等待用户选择` without open task/timer/Master retry owner truth is not `正在运行`.
+  - stale `active_turn_id` / historical `ToolPending` cannot keep a session in Home running after owner truth closes.
+- Tools registry design:
+  - phone-first read-only owner projection page/sheet with sticky close/refresh, compact summary, collapsed details, and no document-level horizontal overflow.
+
+# 2026-07-26T02:12:00Z mobile Home dashboard correction
+
+- Jason clarified normal Home behavior:
+  - four corner entries remain quick entrances.
+  - center Home is a concise dashboard for running sessions plus time-ordered historical sessions.
+  - Home must support session CRUD management through owner paths.
+  - Home rows are for scan/status/open/manage, not expanded transcript/task/tool/debug dumps.
+  - selecting a session enters `SessionDetail` to continue the conversation/work or inspect details.
+- Updated `docs/design/mobile-webui-ui-tree.md` and manifest:
+  - added `DashboardHeader` and compact row fields.
+  - added owner-backed CRUD actions.
+  - forbade default Worker child expansion, full transcript/task/event rows, raw ids, and browser-local CRUD truth on Home.
+
+# 2026-07-26T02:18:00Z mobile Home history buckets
+
+- Jason clarified Home history grouping:
+  - history is grouped into exactly one line each for `今天`, `过去一周`, and `所有更早的`.
+  - keep chronological rows inside those buckets.
+  - do not add deeper date/month/year trees or extra headings by default.
+- Updated `docs/design/mobile-webui-ui-tree.md`, manifest, and memory.
+
+# 2026-07-26T02:20:00Z mobile Home one-row session rule
+
+- Jason clarified: one session occupies one row.
+- Updated mobile UI tree:
+  - Home uses one-line compact rows.
+  - row text is clipped/ellipsis.
+  - no default multi-line cards or inline expansion.
+  - full detail is only in `SessionDetail` or explicit detail/action sheet.
+
+# 2026-07-26T02:23:00Z adaptive portrait layout rule
+
+- Jason clarified: every WebUI surface must auto-layout for portrait by height/width ratio.
+- Updated mobile UI tree and manifest:
+  - layout input is width + height + height/width ratio + orientation + safe-area.
+  - every route adapts, not only Home.
+  - portrait shows one primary surface at a time.
+  - Tools/Settings/Timer/Search/New use portrait-safe sheets/pages with sticky close/back.
+  - long schema/log/prose must scroll or wrap internally, never widen the page.
+  - layout changes preserve selected session/draft/route/scroll/pending submit/owner query state.

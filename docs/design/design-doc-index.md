@@ -42,6 +42,7 @@ Use this directory family for durable design truth.
 - `docs/design/ui-protocol-design.md`
 - `docs/design/webui-console-proposal.md`
 - `docs/design/webui-layered-controls-and-attachments.md`
+- `docs/design/mobile-webui-ui-tree.md`
 - `docs/design/runtime-command-dispatch-design.md`
 - `docs/design/runtime-checkpoint-rewind-design.md`
 - `docs/design/runtime-daemon-design.md`
@@ -98,6 +99,8 @@ Use this directory family for durable design truth.
   - CLI/WebUI scope, commands, projections, subscription model, black-box targets
 - `webui-console-proposal.md`
   - proposal-only WebUI information architecture, visual direction, and binding matrix for a static review prototype
+- `mobile-webui-ui-tree.md`
+  - mobile WebUI route/page tree, Home versus selected-session split, phone-first Tools registry shape, and lifecycle UI closure rules
 - `multi-platform-ui-architecture.md`
   - shared WebUI/mobile/Android responsive architecture, ADP-first transport, aspect-ratio layout matrix, and mobile daemon connection config direction
 - `runtime-command-dispatch-design.md`

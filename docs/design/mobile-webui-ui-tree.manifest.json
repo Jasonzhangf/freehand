@@ -1,0 +1,228 @@
+{
+  "ui_tree_id": "mobile-webui-ui-tree",
+  "status": "design_baseline",
+  "owner_feature_id": "app.webui-smoke",
+  "canonical_doc": "docs/design/mobile-webui-ui-tree.md",
+  "source_truth": [
+    "ui.protocol",
+    "reason.persistence",
+    "task.orchestration",
+    "agent.lifecycle",
+    "runtime.master-worker-loop",
+    "tool.registry",
+    "runtime.ui-command-dispatch"
+  ],
+  "adaptive_layout": {
+    "inputs": [
+      "viewport_width",
+      "viewport_height",
+      "height_width_ratio",
+      "orientation",
+      "safe_area_insets"
+    ],
+    "shape_classes": [
+      "phone_portrait",
+      "tall_phone",
+      "tablet_portrait",
+      "phone_landscape",
+      "tablet_landscape",
+      "desktop_large"
+    ],
+    "rules": [
+      "Every WebUI route adapts by width plus height/width ratio, not device name or width alone.",
+      "Portrait layouts show one primary surface at a time.",
+      "Home rows remain one-line in portrait.",
+      "Settings, Timer, Tools, Search, and New surfaces use portrait-safe pages or sheets with sticky close/back controls.",
+      "Long code/schema/log/prose blocks scroll or wrap internally without widening the document.",
+      "Layout changes preserve selected session, draft input, route, scroll intent, pending submit, and owner query state.",
+      "Layout state must not create fallback owner truth."
+    ]
+  },
+  "routes": [
+    {
+      "node_id": "root",
+      "label": "Mobile WebUI Root",
+      "owns": "route selection only",
+      "truth_source": "browser route state over ADP projections"
+    },
+    {
+      "node_id": "home",
+      "label": "Home / 会话首页",
+      "owns": "session navigation dashboard and session CRUD management",
+      "truth_source": "QuerySessionList plus scoped owner projections",
+      "body_sections": [
+        "dashboard_header",
+        "running_sessions",
+        "session_history"
+      ],
+      "history_buckets": [
+        "今天",
+        "过去一周",
+        "所有更早的"
+      ],
+      "row_fields": [
+        "title",
+        "latest_activity_time",
+        "status_badge",
+        "same_line_clipped_summary",
+        "small_counts",
+        "row_actions_menu"
+      ],
+      "row_layout": {
+        "one_session_one_row": true,
+        "wrap_allowed": false,
+        "overflow_policy": "ellipsis_or_explicit_detail_sheet"
+      },
+      "crud_actions": [
+        "open",
+        "rename",
+        "archive_when_supported",
+        "restore_when_supported",
+        "delete_remove",
+        "batch_archive_delete_when_supported"
+      ],
+      "forbidden": [
+        "selected transcript as primary body",
+        "worker-task top-level rows",
+        "global floating session overlay",
+        "full transcript rows",
+        "full task/event history rows",
+        "expanded Worker child lists by default",
+        "raw ids outside debug/detail mode",
+        "browser-local CRUD truth"
+      ]
+    },
+    {
+      "node_id": "session_detail",
+      "label": "SessionDetail(session_id) / 单会话",
+      "owns": "one selected session transcript and scoped status",
+      "truth_source": "QuerySessionTurns pinned to session_id plus scoped TaskBoard/AgentBoard",
+      "body_sections": [
+        "session_header",
+        "session_relationship_panel",
+        "transcript",
+        "composer"
+      ],
+      "forbidden": [
+        "global Home running/history panels",
+        "unrelated global active-session fallback",
+        "synthesized worker-task ids"
+      ]
+    },
+    {
+      "node_id": "current_session_agent_sheet",
+      "label": "CurrentSessionAgentSheet",
+      "owns": "selected-session child task and Worker navigation presentation",
+      "truth_source": "TaskBoard and AgentBoard scoped by parent_session_id / worker_session_id",
+      "forbidden": [
+        "global TaskBoard history",
+        "Worker capacity mutation"
+      ]
+    },
+    {
+      "node_id": "tools_registry",
+      "label": "ToolsRegistry / 内置工具",
+      "owns": "read-only tool registry presentation",
+      "truth_source": "QueryToolRegistry",
+      "body_sections": [
+        "sticky_header",
+        "compact_summary",
+        "guidance_overview",
+        "tool_cards"
+      ],
+      "forbidden": [
+        "tool execution",
+        "session-specific tool turns",
+        "desktop-width clipped modal",
+        "page-level horizontal overflow"
+      ]
+    },
+    {
+      "node_id": "settings",
+      "label": "Settings / 设置",
+      "owns": "settings stack navigation",
+      "truth_source": "ConfigStatus and owner command receipts",
+      "first_level": [
+        "模型",
+        "智能体运行时",
+        "连接",
+        "可观测性",
+        "外观",
+        "关于"
+      ]
+    },
+    {
+      "node_id": "timer_dashboard",
+      "label": "TimerDashboard / 定时任务",
+      "owns": "timer projection and schedule/cancel surface",
+      "truth_source": "QueryTimerList and timer commands"
+    },
+    {
+      "node_id": "session_search",
+      "label": "SessionSearch / 会话搜索",
+      "owns": "owner-backed persisted session search",
+      "truth_source": "QuerySessionSearch"
+    },
+    {
+      "node_id": "new_session",
+      "label": "NewSession / 新建会话",
+      "owns": "CreateSession entry",
+      "truth_source": "CreateSession command receipt plus QuerySessionList"
+    }
+  ],
+  "edges": [
+    { "from": "root", "to": "home", "trigger": "app_launch_or_home" },
+    { "from": "home", "to": "session_detail", "trigger": "tap_session" },
+    { "from": "session_detail", "to": "home", "trigger": "back_or_home" },
+    { "from": "session_detail", "to": "current_session_agent_sheet", "trigger": "open_agent_sheet" },
+    { "from": "root", "to": "settings", "trigger": "settings_entry" },
+    { "from": "root", "to": "timer_dashboard", "trigger": "timer_entry" },
+    { "from": "root", "to": "tools_registry", "trigger": "tools_entry" },
+    { "from": "root", "to": "session_search", "trigger": "search_entry" },
+    { "from": "root", "to": "new_session", "trigger": "new_session_entry" },
+    { "from": "session_search", "to": "session_detail", "trigger": "select_search_result" },
+    { "from": "new_session", "to": "session_detail", "trigger": "create_session_receipt" }
+  ],
+  "mutual_exclusion": [
+    {
+      "nodes": [
+        "home",
+        "session_detail"
+      ],
+      "rule": "Home running/history dashboard and selected transcript primary body cannot be visible at the same time on phone."
+    }
+  ],
+  "status_classification": {
+    "running": [
+      "active provider/model request",
+      "waiting/running tool activity",
+      "provider retry/failover",
+      "open same-session child task",
+      "active/running source timer",
+      "resumable Master attention/retry truth"
+    ],
+    "needs_user": [
+      "ToolPending/user choice without open lifecycle owner"
+    ],
+    "terminal": [
+      "success",
+      "failed",
+      "blocked",
+      "closed"
+    ],
+    "stale": [
+      "active-looking summary obsoleted by later terminal turn or closed owner projection"
+    ]
+  },
+  "acceptance_gates": [
+    "Home route body contains compact dashboard header plus running/history rows only.",
+    "Home history rows are grouped only as 今天, 过去一周, and 所有更早的.",
+    "Home renders exactly one visible row per session; rows do not wrap into multi-line cards.",
+    "Every route adapts to portrait by viewport width plus height/width ratio and keeps no document-level horizontal overflow.",
+    "Home supports owner-backed session CRUD controls without browser-local session truth.",
+    "SessionDetail route hides Home running/history sections.",
+    "Waiting-user sessions are not classified as running.",
+    "ToolsRegistry has no document-level horizontal overflow on phone.",
+    "All visible route/status decisions are backed by owner projections."
+  ]
+}
