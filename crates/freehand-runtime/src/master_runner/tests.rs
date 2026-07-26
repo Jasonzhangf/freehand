@@ -282,6 +282,174 @@ fn production_master_retry_reuses_task_session_with_fresh_attempt_turn() {
 }
 
 #[test]
+fn production_master_runner_recovers_after_crash_with_admitted_attention_before_decision() {
+    let runtime_home = temp_path("restart-admitted-attention");
+    bootstrap_runner(&runtime_home);
+    let task_id = seed_review_ready_task(&runtime_home);
+    let pre_crash_runner = test_runner(
+        runtime_home.clone(),
+        Arc::new(StubMasterExecutor::new(|_| {
+            Err("simulated process exit before provider decision".to_owned())
+        })),
+    );
+    let task_runtime =
+        TaskRuntime::boot(&runtime_home, AgentId::new("master")).expect("task runtime");
+    let mut state = pre_crash_runner.load_state().expect("pre-crash state");
+    let inbox = pre_crash_runner
+        .query_event_inbox_repairing_stale_cursor(&task_runtime, &mut state)
+        .expect("event inbox");
+    pre_crash_runner
+        .admit_attention_events(&task_runtime, &mut state, inbox.events)
+        .expect("admit attention before crash");
+    let admitted = pre_crash_runner.load_state().expect("admitted state");
+    assert_eq!(admitted.pending_attention.len(), 1);
+    assert_eq!(admitted.retry_event_id, None);
+    assert_eq!(admitted.retry_attempt, 0);
+    drop(task_runtime);
+
+    let action_task_id = task_id.clone();
+    let request_turns = Arc::new(Mutex::new(Vec::<String>::new()));
+    let observed_turns = Arc::clone(&request_turns);
+    let restarted = test_runner(
+        runtime_home.clone(),
+        Arc::new(StubMasterExecutor::new(move |request| {
+            observed_turns
+                .lock()
+                .expect("request turns")
+                .push(request.turn_id.as_str().to_owned());
+            let runtime = TaskRuntime::boot(&request.runtime_home, AgentId::new("master"))
+                .map_err(to_string)?;
+            runtime
+                .approve_review(TaskMutationRequest {
+                    task_id: action_task_id.clone(),
+                    actor: test_actor("master"),
+                    watermark: test_watermark("restart-after-admit-approve"),
+                })
+                .map_err(to_string)?;
+            runtime
+                .close_task(TaskMutationRequest {
+                    task_id: action_task_id.clone(),
+                    actor: test_actor("master"),
+                    watermark: test_watermark("restart-after-admit-close"),
+                })
+                .map_err(to_string)?;
+            Ok("closed after admitted-attention restart".to_owned())
+        })),
+    );
+    assert!(matches!(
+        restarted.run_once().expect("restart consumes admitted attention"),
+        ProductionMasterTickOutcome::TaskAdvanced {
+            task_id: ref outcome_task_id,
+            from: TaskStatus::ReviewSubmitted,
+            to: TaskStatus::Closed,
+            ..
+        } if outcome_task_id == &task_id
+    ));
+    let request_turns = request_turns.lock().expect("request turns");
+    assert_eq!(request_turns.len(), 1);
+    assert!(
+        request_turns[0].contains("-attempt-0-decision"),
+        "crash before retry-state write must resume the original admitted event attempt, got {}",
+        request_turns[0]
+    );
+    drop(request_turns);
+    let final_state = restarted.load_state().expect("final state");
+    assert!(final_state.pending_attention.is_empty());
+    assert_eq!(final_state.retry_event_id, None);
+    assert_eq!(final_state.retry_attempt, 0);
+
+    fs::remove_dir_all(runtime_home).expect("cleanup");
+}
+
+#[test]
+fn production_master_runner_restarts_after_executor_failure_and_closes_same_event() {
+    let runtime_home = temp_path("restart-executor-failure");
+    bootstrap_runner(&runtime_home);
+    let task_id = seed_review_ready_task(&runtime_home);
+    let failing = test_runner(
+        runtime_home.clone(),
+        Arc::new(StubMasterExecutor::new(|_| {
+            Err("provider system failure before Master decision".to_owned())
+        })),
+    );
+
+    assert!(matches!(
+        failing
+            .run_once()
+            .expect_err("provider failure remains retryable"),
+        ProductionMasterRunnerError::Execution(_)
+    ));
+    let retry_state = failing.load_state().expect("retry state");
+    assert_eq!(retry_state.pending_attention.len(), 1);
+    assert_eq!(
+        retry_state.retry_event_id.as_deref(),
+        Some(retry_state.pending_attention[0].event.event_id.as_str())
+    );
+    assert_eq!(retry_state.retry_attempt, 1);
+    assert_eq!(
+        TaskRuntime::boot(&runtime_home, AgentId::new("master"))
+            .expect("runtime")
+            .query_task(&task_id)
+            .expect("task")
+            .status,
+        TaskStatus::ReviewSubmitted
+    );
+
+    let action_task_id = task_id.clone();
+    let request_turns = Arc::new(Mutex::new(Vec::<String>::new()));
+    let observed_turns = Arc::clone(&request_turns);
+    let restarted = test_runner(
+        runtime_home.clone(),
+        Arc::new(StubMasterExecutor::new(move |request| {
+            observed_turns
+                .lock()
+                .expect("request turns")
+                .push(request.turn_id.as_str().to_owned());
+            let runtime = TaskRuntime::boot(&request.runtime_home, AgentId::new("master"))
+                .map_err(to_string)?;
+            runtime
+                .approve_review(TaskMutationRequest {
+                    task_id: action_task_id.clone(),
+                    actor: test_actor("master"),
+                    watermark: test_watermark("restart-after-failure-approve"),
+                })
+                .map_err(to_string)?;
+            runtime
+                .close_task(TaskMutationRequest {
+                    task_id: action_task_id.clone(),
+                    actor: test_actor("master"),
+                    watermark: test_watermark("restart-after-failure-close"),
+                })
+                .map_err(to_string)?;
+            Ok("closed after provider failure restart".to_owned())
+        })),
+    );
+
+    assert!(matches!(
+        restarted.run_once().expect("restart retry closes event"),
+        ProductionMasterTickOutcome::TaskAdvanced {
+            task_id: ref outcome_task_id,
+            from: TaskStatus::ReviewSubmitted,
+            to: TaskStatus::Closed,
+            ..
+        } if outcome_task_id == &task_id
+    ));
+    let request_turns = request_turns.lock().expect("request turns");
+    assert_eq!(request_turns.len(), 1);
+    assert!(
+        request_turns[0].contains("-attempt-1-decision"),
+        "restart after persisted retry state must use attempt-1 turn id, got {}",
+        request_turns[0]
+    );
+    let final_state = restarted.load_state().expect("final state");
+    assert!(final_state.pending_attention.is_empty());
+    assert_eq!(final_state.retry_event_id, None);
+    assert_eq!(final_state.retry_attempt, 0);
+
+    fs::remove_dir_all(runtime_home).expect("cleanup");
+}
+
+#[test]
 fn production_master_runner_retries_unresolved_review_event() {
     let runtime_home = temp_path("review-missing-decision");
     bootstrap_runner(&runtime_home);
@@ -760,6 +928,128 @@ fn production_master_runner_can_take_over_interrupted_task_to_another_worker() {
         history
             .iter()
             .any(|event| event.event_type == "TaskInterrupted")
+    );
+
+    fs::remove_dir_all(runtime_home).expect("cleanup");
+}
+
+#[test]
+fn production_master_runner_reassigns_expired_running_task_after_restart() {
+    let runtime_home = temp_path("master-recovers-expired-worker-lease");
+    bootstrap_runner(&runtime_home);
+    let runtime = TaskRuntime::boot(&runtime_home, AgentId::new("master")).expect("runtime");
+    ensure_test_worker(&runtime);
+    let task_id = TaskId::new(format!("task-expired-running-{}", now_unix_nanos()));
+    runtime
+        .create_task(TaskCreateRequest {
+            task_id: Some(task_id.clone()),
+            title: "expired running Worker task".to_owned(),
+            content: "continue after Worker process exit".to_owned(),
+            goal: "recover without losing task identity".to_owned(),
+            deliverables: vec!["recovery-evidence.md".to_owned()],
+            acceptance: vec!["TaskInterrupted is followed by a Master reassignment".to_owned()],
+            priority: 80,
+            target_cwd: Some(runtime_home.display().to_string()),
+            execution_profile: TaskExecutionProfile::Workspace,
+            dispatch: TaskDispatchRequest::Agent {
+                agent_id: AgentId::new("worker"),
+            },
+            parent: TaskParentRef {
+                session_id: Some(SessionId::new("parent-expired-running")),
+                turn_id: Some(TurnId::new("runtime-turn-1")),
+                trace_id: Some(TraceId::new("trace-runtime-turn-1")),
+            },
+            actor: test_actor("master"),
+            watermark: test_watermark("create-expired-running"),
+        })
+        .expect("create task");
+    let old_execution_id = format!("exec-before-worker-exit-{}", now_unix_nanos());
+    runtime
+        .claim_next_task(TaskClaimRequest {
+            agent_id: AgentId::new("worker"),
+            execution_id: old_execution_id.clone(),
+            ttl_seconds: 300,
+            actor: test_actor("worker"),
+            watermark: test_watermark("claim-before-worker-exit"),
+        })
+        .expect("claim running task");
+    let leases_path = runtime_home.join("state/task-runtime/master/leases.json");
+    let raw_leases = fs::read_to_string(&leases_path).expect("read leases");
+    let mut leases: Vec<serde_json::Value> =
+        serde_json::from_str(&raw_leases).expect("parse leases");
+    assert_eq!(leases.len(), 1);
+    leases[0]["expires_at"] = serde_json::json!(now_unix_seconds().saturating_sub(1));
+    fs::write(
+        &leases_path,
+        serde_json::to_string_pretty(&leases).expect("render expired leases"),
+    )
+    .expect("write expired leases");
+    drop(runtime);
+
+    let action_task_id = task_id.clone();
+    let executor = Arc::new(StubMasterExecutor::new(move |request| {
+        assert!(request.prompt.contains("execution_interrupted"));
+        assert!(request.prompt.contains("missing_or_expired_lease"));
+        let runtime =
+            TaskRuntime::boot(&request.runtime_home, AgentId::new("master")).map_err(to_string)?;
+        runtime
+            .assign_task(freehand_task::TaskAssignRequest {
+                task_id: action_task_id.clone(),
+                agent_id: AgentId::new("worker"),
+                actor: test_actor("master"),
+                watermark: test_watermark("master-reassign-after-worker-exit"),
+            })
+            .map_err(to_string)?;
+        Ok("same task reassigned after Worker exit".to_owned())
+    }));
+    let restarted_master = test_runner(runtime_home.clone(), executor.clone());
+
+    assert!(matches!(
+        restarted_master
+            .run_once()
+            .expect("Master restart handles expired running lease"),
+        ProductionMasterTickOutcome::TaskAdvanced {
+            task_id: ref outcome_task_id,
+            from: TaskStatus::Interrupted,
+            to: TaskStatus::Assigned,
+            ..
+        } if outcome_task_id == &task_id
+    ));
+    assert_eq!(executor.calls.load(Ordering::Relaxed), 1);
+    let recovered = TaskRuntime::boot(&runtime_home, AgentId::new("master")).expect("recovered");
+    let task = recovered.query_task(&task_id).expect("task");
+    assert_eq!(task.status, TaskStatus::Assigned);
+    assert_eq!(
+        task.assignee.as_ref().expect("assignee").agent_id.as_str(),
+        "worker"
+    );
+    assert_eq!(task.task_id, task_id);
+    let history = recovered.task_history(&task_id).expect("history");
+    let events = history
+        .iter()
+        .map(|event| event.event_type.as_str())
+        .collect::<Vec<_>>();
+    let interrupted_index = events
+        .iter()
+        .position(|event| *event == "TaskInterrupted")
+        .expect("TaskInterrupted event");
+    let second_assigned_index = events
+        .iter()
+        .enumerate()
+        .filter(|(_, event)| **event == "TaskAssigned")
+        .nth(1)
+        .map(|(index, _)| index)
+        .expect("second TaskAssigned event");
+    assert!(
+        interrupted_index < second_assigned_index,
+        "Master reassignment must follow owner-recorded interruption, events={events:?}"
+    );
+    assert!(
+        history.iter().any(|event| {
+            event.event_type == "TaskResumed"
+                && event.payload["execution_id"] == serde_json::json!(old_execution_id)
+        }),
+        "old execution id must remain immutable in pre-crash history"
     );
 
     fs::remove_dir_all(runtime_home).expect("cleanup");
@@ -2458,9 +2748,10 @@ fn production_master_runner_recovers_parent_goal_from_first_round_turn_start_led
         restored.closed_turns[0].request.turn_id,
         TurnId::new("runtime-turn-1-r2")
     );
-    seed_parent_children(
+    seed_parent_children_for_turn(
         &runtime_home,
         &parent_session_id,
+        &TurnId::new("runtime-turn-1"),
         &[("alpha", true), ("beta", true)],
     );
     let observed_request = Arc::new(Mutex::new(None::<LiveReasonTurnRequest>));
@@ -2587,9 +2878,10 @@ fn production_master_runner_rejects_parent_evaluation_without_persisted_goal_tru
     let runtime_home = temp_path("parent-evaluation-missing-goal");
     bootstrap_runner(&runtime_home);
     let parent_session_id = SessionId::new("parent-session-missing-goal");
-    seed_parent_children(
+    seed_parent_children_for_turn(
         &runtime_home,
         &parent_session_id,
+        &TurnId::new("runtime-turn-1"),
         &[("alpha", true), ("beta", true)],
     );
     let executor = Arc::new(StubMasterExecutor::new(|_| {
@@ -3017,9 +3309,10 @@ fn production_master_runner_closed_loop_requires_next_round_before_final_evaluat
         &parent_session_id,
         "Overall goal requires an integrated report after alpha and beta.",
     );
-    seed_parent_children(
+    seed_parent_children_for_turn(
         &runtime_home,
         &parent_session_id,
+        &TurnId::new("runtime-turn-1"),
         &[("alpha", true), ("beta", true)],
     );
     let next_task_id = TaskId::new("task-parent-next-round-integration");
@@ -3036,6 +3329,15 @@ fn production_master_runner_closed_loop_requires_next_round_before_final_evaluat
             return Err("parent evaluation prompt forbids next-round work".to_owned());
         }
         if call == 0 {
+            if !request.prompt.contains("alpha review summary")
+                || !request.prompt.contains("beta review summary")
+                || request.prompt.contains("integration review summary")
+            {
+                return Err(format!(
+                    "first parent evaluation prompt had wrong child context: {}",
+                    request.prompt
+                ));
+            }
             let runtime = TaskRuntime::boot(&request.runtime_home, AgentId::new("master"))
                 .map_err(to_string)?;
             runtime
@@ -3064,6 +3366,15 @@ fn production_master_runner_closed_loop_requires_next_round_before_final_evaluat
                 .map_err(to_string)?;
             Ok("overall goal incomplete; integration task created".to_owned())
         } else {
+            if !request.prompt.contains("alpha review summary")
+                || !request.prompt.contains("beta review summary")
+                || !request.prompt.contains("integration review summary")
+            {
+                return Err(format!(
+                    "final parent evaluation prompt missed same-objective prior child truth: {}",
+                    request.prompt
+                ));
+            }
             Ok("overall goal verified only after integration closed".to_owned())
         }
     }));
@@ -3140,6 +3451,90 @@ fn production_master_runner_closed_loop_requires_next_round_before_final_evaluat
         "unexpected final outcome: {final_outcome:?}"
     );
     assert_eq!(evaluation_calls.load(Ordering::Relaxed), 2);
+
+    fs::remove_dir_all(runtime_home).expect("cleanup");
+}
+
+#[test]
+fn production_master_runner_parent_context_excludes_prior_user_turn_children() {
+    let runtime_home = temp_path("parent-evaluation-context-scope");
+    bootstrap_runner(&runtime_home);
+    let parent_session_id = SessionId::new("parent-session-context-scope");
+    persist_parent_user_objective_with_turn_id(
+        &runtime_home,
+        &parent_session_id,
+        &TurnId::new("runtime-turn-1"),
+        "Old objective already completed.",
+        TerminalStatus::Success,
+        "old objective done",
+    );
+    let old_child_ids = seed_parent_children_for_turn(
+        &runtime_home,
+        &parent_session_id,
+        &TurnId::new("runtime-turn-1"),
+        &[("old", true)],
+    );
+    persist_parent_user_objective_with_turn_id(
+        &runtime_home,
+        &parent_session_id,
+        &TurnId::new("runtime-turn-5"),
+        "New objective should not inherit old child review truth.",
+        TerminalStatus::ToolPending,
+        "waiting for new delegated child work",
+    );
+    let new_child_ids = seed_parent_children_for_turn(
+        &runtime_home,
+        &parent_session_id,
+        &TurnId::new("runtime-turn-5"),
+        &[("new", true)],
+    );
+
+    let observed_request = Arc::new(Mutex::new(None::<LiveReasonTurnRequest>));
+    let request_out = Arc::clone(&observed_request);
+    let executor = Arc::new(StubMasterExecutor::new(move |request| {
+        *request_out.lock().expect("request lock") = Some(request.clone());
+        if request.prompt.contains("old review summary") {
+            return Err(format!(
+                "new objective parent evaluation leaked prior user-turn child truth: {}",
+                request.prompt
+            ));
+        }
+        if !request.prompt.contains("new review summary") {
+            return Err(format!(
+                "new objective parent evaluation missed current child truth: {}",
+                request.prompt
+            ));
+        }
+        Ok("new objective evaluated without old child truth".to_owned())
+    }));
+    let runner = test_runner(runtime_home.clone(), executor.clone());
+    let runtime = TaskRuntime::boot(&runtime_home, AgentId::new("master")).expect("runtime");
+    let old_children = parent_workset_children(
+        &runtime,
+        &parent_session_id,
+        Some(&TurnId::new("runtime-turn-1")),
+    )
+    .expect("old children");
+    let old_evaluation_key = parent_evaluation_key(&parent_session_id, &old_children);
+    let mut state = runner.load_state().expect("load state");
+    state
+        .completed_parent_evaluations
+        .insert(old_evaluation_key);
+    runner.write_state(&state).expect("write state");
+
+    let outcome = runner.run_once().expect("new objective evaluation");
+    assert!(matches!(
+        outcome,
+        ProductionMasterTickOutcome::ParentEvaluated {
+            parent_session_id: ref outcome_parent,
+            evaluated_child_task_ids: ref outcome_children,
+            ref summary,
+        } if outcome_parent == &parent_session_id
+            && outcome_children == &new_child_ids
+            && summary == "new objective evaluated without old child truth"
+    ));
+    assert_eq!(old_child_ids.len(), 1);
+    assert_eq!(executor.calls.load(Ordering::Relaxed), 1);
 
     fs::remove_dir_all(runtime_home).expect("cleanup");
 }

@@ -8477,3 +8477,26 @@ Current real root cause split:
 
 - Applied `git diff --cached` to clean detached worktree `/tmp/freehand-parent-closure-staged.vmp91B` from HEAD to prove the commit scope independently of unrelated dirty files.
 - Passed there: `effective_context_`, `live_master_`, `runtime_query_session_turns_restores_background_parent_evaluation`, `cargo fmt --check`, `xtask mainlines check`, `xtask gates check`, and `git diff --check`.
+
+# 2026-07-26T00:46:00Z crash/restart lifecycle closure
+
+- run_id: `20260726T004623Z-Macstudio.local-44975-af0ed29f`
+- scope: Jason corrected the target from prior stale-wait symptom chasing to a full Master/Slave lifecycle closure contract: if Master or Worker/Slave exits mid-lifecycle because of provider/system/process failure, the next daemon start must recover from owner truth and close/retry/block without requiring a user message to escape the state.
+- first owner target: `runtime.master-worker-loop` with TaskRuntime leases, AgentLifecycle, EventInbox, MasterLoopState retry cursor, and master active-work checkpoints as durable truth; need prove foreground Master crash, background Master lifecycle crash/provider error, Worker Running crash/lease expiry, Worker provider/system interruption, and pending attention restart.
+
+# 2026-07-26T01:30:00Z parent next-round context lifecycle fix
+
+- Online three-worker verifier did not fail because Workers failed to close: offline artifact `/tmp/freehand-three-worker-home.x4cBSa/.freehand` shows alpha/beta/gamma/integration all `closed`, gamma provider failure wrote `TaskInterrupted`, Master reassigned same gamma task to `worker-alpha`, and integration closed.
+- Real lifecycle gap found in owner truth: after integration closed, `state/master-loop/master.json` kept pending `task-three-worker-1781785027647-integration:13` with `retry_attempt=13`; parent evaluation prompt contained only integration accepted review truth, missing prior alpha/beta/gamma accepted truth, so the fixture correctly returned `parent evaluation missing accepted worker results: alpha,beta,gamma` and the parent could not close.
+- Fix target: `runtime.master-worker-loop` parent evaluation keeps current closed workset as idempotency key, but prompt context now widens to same-objective prior closed child review truth since the latest external user objective ordinal, while excluding older user-turn child truth. Positive/negative tests added for final integration context and prior-user-turn exclusion.
+
+# 2026-07-26T01:39:00Z lifecycle online proof after parent context fix
+
+- Online isolated three-worker verifier passed after the parent next-round context fix: session `online-master-three-worker-evaluation-1785029016`, evidence dir `/tmp/freehand-three-worker-home.IuTFG5/.freehand/tmp/three-worker-e2e-20260726T092336-71162`.
+- Owner truth: alpha closed, beta rejected then closed, gamma provider failure wrote `TaskInterrupted` then same-task takeover to `worker-alpha` and closed, integration task closed, final parent turn `runtime-turn-3` was `Success` with all four worker_result tokens, restart idempotency kept `final_evaluation_count=1`.
+- Final Master loop state had `pending_attention=[]`, `retry_event_id=null`, `retry_attempt=0`, and completed parent evaluations for both first child set and integration set.
+
+# 2026-07-26T01:37:00Z clean staged online proof
+
+- To remove dirty-worktree ambiguity, applied `git diff --cached` to detached clean worktree `/tmp/freehand-lifecycle-staged-20260726T013236Z`, built daemon/CLI with `/tmp/freehand-target-lifecycle-staged-online`, and reran `scripts/verify-master-three-worker-e2e-online.sh` from that clean staged tree.
+- Clean staged online proof passed: session `online-master-three-worker-evaluation-1785029697`, evidence dir `/tmp/freehand-three-worker-home.VtEpeP/.freehand/tmp/three-worker-e2e-20260726T093457-96986`, final `runtime-turn-3` Success with all four worker_result tokens, gamma explicit PID restart `99273 -> 2375`, restart idempotency `final_evaluation_count=1`.

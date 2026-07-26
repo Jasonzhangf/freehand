@@ -105,6 +105,9 @@ all present.
 | Task / execution | TaskRuntime task ledger, task snapshot, execution id, review state | `TaskInterrupted`, `TaskBlocked`, `TaskReviewRejected`, stale `TaskReviewSubmitted`, stale `Approved` without `Closed` | Master must reject/retry, reassign same task, append blocked decision, approve+close, or leave a deliberate blocked decision; Worker must not silently retry blocked/interrupted work | TaskBoard, TaskHistory, EventInbox, selected parent session | `cargo test -p freehand-runtime production_master_runner -- --nocapture --test-threads=1`; `scripts/verify-master-three-worker-e2e-online.sh` |
 | Worker process / agent resource | AgentLifecycle and AgentBoard process instance, pid, heartbeat, TTL-derived alive, current task/execution binding | heartbeat stale, `alive=false`, process restart, current binding after terminal task truth | launchd may restart the process; Master uses TaskHistory plus AgentBoard truth to choose same-task retry or cross-Worker takeover; terminal task truth must clear current binding | AgentBoard process fields, `restart_count`, `alive`, `current_task_id`, `current_execution_id`, `last_activity` | `cargo test -p freehand-task agent_process -- --nocapture`; `scripts/verify-master-three-worker-e2e-online.sh` offline/restart phase |
 | Master supervisor attention | Master loop state, EventInbox cursor, pending attention, lifecycle turn, target-task decision boundary | missing review decision, incomplete approval, blocked without append, interrupted without reassignment, provider retry/failover/schema repair | keep the same attention item retryable with bounded backoff until owner mutation closes the boundary; after retry cap, record explicit blocked-decision truth where applicable; never mark success without Task Center mutation | internal lifecycle session, ErrorCenter, SessionList active turn, TaskHistory cursor advance | `cargo test -p freehand-runtime production_master_runner -- --nocapture --test-threads=1`; `cargo test -p freehand-runtime runtime_query_session_turns_ -- --nocapture --test-threads=1` |
+| Master background crash/restart | Master loop state `cursor`, durable `pending_attention`, `retry_event_id`, `retry_attempt`, TaskRuntime EventInbox | process exits after EventInbox admission but before provider decision; provider/system executor failure after a decision attempt | restart must reuse the same durable attention item, preserve or reset the attempt according to what was persisted, and close only after Task Center owner mutation; cursor must not advance to success on prose/error alone | master-loop state JSON, internal lifecycle turn id `attempt-N`, TaskHistory terminal/mutation truth | `cargo test -p freehand-runtime production_master_runner_recovers_after_crash_with_admitted_attention_before_decision -- --nocapture --test-threads=1`; `cargo test -p freehand-runtime production_master_runner_restarts_after_executor_failure_and_closes_same_event -- --nocapture --test-threads=1` |
+| Master foreground active work crash/restart | `master_work` active-work checkpoint plus reason active-turn snapshot | foreground Master provider/tool turn owner process disappears; active-work checkpoint has no live in-memory owner | runtime bootstrap must either interrupt and close the matching active reason turn or clear invalid checkpoint-only truth before accepting new work; it must not require a new user message to unlock the UI | selected parent session terminal projection and absent active-work checkpoint | `cargo test -p freehand-runtime live_dispatch_recovers_dead_owner_master_active_work_before_new_turn -- --nocapture --test-threads=1`; `cargo test -p freehand-runtime live_bootstrap_clears_dead_owner_master_active_work_without_active_snapshot -- --nocapture --test-threads=1`; `cargo test -p freehand-runtime live_bootstrap_clears_dead_owner_master_active_work_without_session_truth -- --nocapture --test-threads=1` |
+| Worker running-task crash/restart | TaskRuntime lease snapshot, task ledger, AgentLifecycle current binding | Worker exits while task is `Running`; lease missing/expired before next boot | next TaskRuntime boot writes `TaskInterrupted`, releases the Worker binding, and Master restart must explicitly reassign the same task before any new Worker execution starts | TaskHistory `TaskInterrupted -> TaskAssigned`, same task id, AgentBoard idle/reusable Worker | `cargo test -p freehand-runtime production_master_runner_reassigns_expired_running_task_after_restart -- --nocapture --test-threads=1`; `cargo test -p freehand-runtime production_worker_runner_expired_lease_waits_for_master_reassignment -- --nocapture --test-threads=1` |
 | Parent user session / workset | reason persistence parent turn truth, Task parent links, parent evaluation marker keyed by parent session plus logical turn workset | child tasks still actionable, first closed exact-round child while siblings remain open, decided `TaskBlocked` without parent follow-up, failed/interrupted/cancelled parent-evaluation turn | parent stays `waiting` while any same-logical-turn child is actionable; once all close, one idempotent parent evaluation approves final completion, creates next-round work, or records blocker; once no active/reviewable sibling remains and a blocked child has Master `blocked_decision`, one idempotent parent blocked follow-up closes the parent session observably as blocked; failed evaluation remains retryable | selected parent session turns, task tree, parent `runtime-turn-N` / `runtime-turn-N-rM` cards | `cargo test -p freehand-runtime production_master_runner_groups_parent_workset_by_logical_turn_rounds -- --nocapture --test-threads=1`; `cargo test -p freehand-runtime production_master_runner_projects_decided_worker_block_to_parent_session -- --nocapture`; `scripts/verify-master-three-worker-e2e-online.sh` |
 
 | branch | required owner truth | required next action |
@@ -122,6 +125,9 @@ all present.
 | daemon stopped before rejected retry | `TaskReviewRejected` is seeded through TaskRuntime owner API while Master and Worker daemons are offline | after restart, Worker uses a new execution and Master closes or rejects the new review |
 | daemon stopped before blocked decision | `TaskBlocked` is seeded through TaskRuntime owner API while Master daemon is offline | after restart, Master writes a persisted `blocked_decision` or reassignment |
 | Worker stopped while task is running | lease-backed `Running` is seeded through TaskRuntime owner API, then the Worker service is stopped long enough for lease expiry | after Worker/Master recovery, TaskHistory contains `TaskInterrupted`, a new execution, and terminal review/close or explicit blocked truth |
+| Master exits after durable EventInbox admission but before provider decision | `pending_attention` contains the event and cursor has advanced only to durable admission; `retry_event_id` is absent | after restart, the same event is processed at attempt 0 and must close through Task Center mutation, not be skipped by the cursor |
+| Master provider/system failure during lifecycle decision | `pending_attention` still contains the event, `retry_event_id` names it, and `retry_attempt` is incremented | after restart, the next lifecycle turn uses attempt N, keeps task truth unchanged until the decision mutation succeeds, and then clears retry state |
+| Master foreground process exits with active user work | `master_work` checkpoint points at a dead owner process and matching reason active-turn truth | bootstrap interrupts/closes the active turn or clears invalid checkpoint-only truth before new UI/ADP work is accepted |
 | provider fixture verifier disables background lifecycle | `FREEHAND_TEST_DISABLE_MASTER_LIFECYCLE_RUNNER=1` is present only in the temporary verifier daemon env | WebUI/ADP live submit remains available, but background Master lifecycle runner is not started, so historical Task Center events cannot consume the temporary provider fixture; restore removes the env and restarts normal lifecycle service |
 
 Lifecycle closure must not rely on a user sending another chat message. The
@@ -247,6 +253,18 @@ Task Center truth before another execution starts.
 - Retryable Master lifecycle failure preserves the same pending attention item,
   admitted sequence, and cursor; stale no-op events are removed and selection
   continues in the same runner tick.
+- A Master restart after durable EventInbox admission but before provider
+  decision reuses the persisted `pending_attention` item at attempt 0 and
+  closes only after the target Task Center mutation:
+  `production_master_runner_recovers_after_crash_with_admitted_attention_before_decision`.
+- A Master restart after provider/system executor failure preserves
+  `retry_event_id` and `retry_attempt`, uses the next event-scoped lifecycle
+  turn id, leaves task truth unchanged until mutation, then clears retry state:
+  `production_master_runner_restarts_after_executor_failure_and_closes_same_event`.
+- A Master restart after a Worker exits mid-`Running` boots TaskRuntime,
+  observes the expired lease as `TaskInterrupted`, and explicitly reassigns
+  the same task before another Worker execution:
+  `production_master_runner_reassigns_expired_running_task_after_restart`.
 - A stale persisted EventInbox cursor is repaired by clearing the cursor,
   rewriting loop state, and replaying current Task Center ledger truth; a
   missing-task EventInbox row or pending attention is skipped explicitly and
@@ -290,6 +308,14 @@ Task Center truth before another execution starts.
 - retrying the same event increments a persisted attempt id and uses a fresh
   deterministic lifecycle turn and trace id, so retry attempts remain auditable
   without creating a new user-visible session name.
+- restart after pre-decision crash with durable `pending_attention` and no
+  retry state:
+  `production_master_runner_recovers_after_crash_with_admitted_attention_before_decision`
+- restart after provider/system executor failure with persisted retry state:
+  `production_master_runner_restarts_after_executor_failure_and_closes_same_event`
+- restart after Worker `Running` lease expiry and Master reassignment of the
+  same task:
+  `production_master_runner_reassigns_expired_running_task_after_restart`
 - Master lifecycle model responses containing nullable unused status fields
   remain valid; a non-null status type mismatch is polished in another model
   round instead of killing the lifecycle runner.
@@ -383,6 +409,13 @@ Task Center truth before another execution starts.
   logical `runtime-turn-N` must not trigger parent evaluation until all
   same-logical-turn children are terminal closed; covered by
   `cargo test -p freehand-runtime production_master_runner_groups_parent_workset_by_logical_turn_rounds -- --nocapture --test-threads=1`.
+- A next-round parent evaluation must include prior accepted child review truth
+  from the same external objective scope, not only the final integration task;
+  covered by
+  `cargo test -p freehand-runtime production_master_runner_closed_loop_requires_next_round_before_final_evaluation -- --nocapture --test-threads=1`.
+- A later external user objective must not inherit closed child review truth
+  from older same-session objectives; covered by
+  `cargo test -p freehand-runtime production_master_runner_parent_context_excludes_prior_user_turn_children -- --nocapture --test-threads=1`.
 - A closed child workset in a later parent turn must still trigger parent
   evaluation when older same-session child tasks from earlier turns are blocked
   and the durable EventInbox cursor has already advanced past the close event.
@@ -457,7 +490,12 @@ Task Center truth before another execution starts.
     older same-session turn remains blocked:
     `production_master_runner_recovers_closed_parent_workset_after_cursor_advanced`
   - parent evaluation request contains original user objective history plus
-    each child task's goal/deliverables/acceptance and accepted review result
+    each current-workset child task's goal/deliverables/acceptance and accepted
+    review result, and final next-round evaluation carries same-objective prior
+    accepted child truth:
+    `production_master_runner_closed_loop_requires_next_round_before_final_evaluation`
+  - parent evaluation context excludes prior user-turn closed child truth:
+    `production_master_runner_parent_context_excludes_prior_user_turn_children`
   - missing original parent objective truth is non-final and idempotently skipped:
     `production_master_runner_rejects_parent_evaluation_without_persisted_goal_truth`
   - parent evaluation creates a same-session improvement task when the combined

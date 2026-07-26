@@ -1599,7 +1599,14 @@ impl ProductionMasterRunner {
                 reason,
             }));
         };
-        let completed_subtasks = children
+        let completed_context_children = parent_completed_context_children(
+            task_runtime,
+            &self.runtime_home,
+            &self.master_agent_id,
+            &parent_session_id,
+            &children,
+        )?;
+        let completed_subtasks = completed_context_children
             .iter()
             .map(|task| parent_completed_subtask_truth(task_runtime, task))
             .collect::<Result<Vec<_>, _>>()?;
@@ -1894,6 +1901,87 @@ fn parent_workset_children(
                 && parent_turns_share_logical_group(task.parent.turn_id.as_ref(), parent_turn_id)
         })
         .collect())
+}
+
+fn parent_completed_context_children(
+    task_runtime: &TaskRuntime,
+    runtime_home: &Path,
+    agent_id: &AgentId,
+    parent_session_id: &SessionId,
+    current_children: &[TaskSnapshot],
+) -> Result<Vec<TaskSnapshot>, ProductionMasterRunnerError> {
+    let mut selected = BTreeMap::<TaskId, TaskSnapshot>::new();
+    for task in current_children {
+        if task.status == TaskStatus::Closed {
+            selected.insert(task.task_id.clone(), task.clone());
+        }
+    }
+    let Some(parent_turn_id) = current_children
+        .first()
+        .and_then(|task| task.parent.turn_id.as_ref())
+    else {
+        return Ok(selected.into_values().collect());
+    };
+    let (target_ordinal, _, _) = runtime_turn_position(parent_turn_id);
+    if target_ordinal == 0 {
+        return Ok(selected.into_values().collect());
+    }
+    let Some(scope_start_ordinal) = parent_latest_external_objective_ordinal_at_or_before(
+        runtime_home,
+        agent_id,
+        parent_session_id,
+        target_ordinal,
+    )?
+    else {
+        return Ok(selected.into_values().collect());
+    };
+    let board = task_runtime
+        .query_task_board(TaskBoardQuery {
+            status: None,
+            assignee: None,
+            include_terminal: true,
+        })
+        .map_err(task_center_error)?;
+    for task in board.tasks {
+        if task.parent.session_id.as_ref() != Some(parent_session_id)
+            || task.status != TaskStatus::Closed
+        {
+            continue;
+        }
+        let Some(turn_id) = task.parent.turn_id.as_ref() else {
+            continue;
+        };
+        let (ordinal, _, _) = runtime_turn_position(turn_id);
+        if ordinal != 0 && ordinal >= scope_start_ordinal && ordinal <= target_ordinal {
+            selected.insert(task.task_id.clone(), task);
+        }
+    }
+    Ok(selected.into_values().collect())
+}
+
+fn parent_latest_external_objective_ordinal_at_or_before(
+    runtime_home: &Path,
+    agent_id: &AgentId,
+    parent_session_id: &SessionId,
+    target_ordinal: u64,
+) -> Result<Option<u64>, ProductionMasterRunnerError> {
+    let persistence = ReasonPersistence::new(runtime_home.to_path_buf(), agent_id.clone());
+    let turns = match persistence.restore_turn_start_snapshots(parent_session_id) {
+        Ok(turns) => turns,
+        Err(ReasonPersistenceError::MissingRecoveryTruth(_)) => return Ok(None),
+        Err(error) => return Err(ProductionMasterRunnerError::State(error.to_string())),
+    };
+    Ok(turns
+        .into_iter()
+        .filter_map(|turn| {
+            let (ordinal, round, _) = runtime_turn_position(&turn.request.turn_id);
+            (ordinal != 0
+                && ordinal <= target_ordinal
+                && round == 1
+                && parent_user_objective_text_is_external(&ui_user_text_for_turn(&turn)))
+            .then_some(ordinal)
+        })
+        .max())
 }
 
 fn parent_turn_group_key(parent_turn_id: Option<&TurnId>) -> String {
