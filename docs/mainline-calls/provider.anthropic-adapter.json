@@ -196,6 +196,28 @@
       "caller": "runtime/provider caller",
       "callee": "HTTP executor plus adapter stream parser",
       "binding_status": "bound"
+    },
+    {
+      "step": "09",
+      "symbol_path": "AnthropicExecutorFactory::build_executor",
+      "file_path": "crates/freehand-provider-anthropic/src/lib.rs",
+      "responsibility": "adapt provider-core executor config into an Anthropic executor without exposing Anthropic wire DTOs to runtime",
+      "input_semantic": "provider descriptor plus auth/base URL",
+      "output_semantic": "boxed provider-core live executor or explicit unsupported/build failure",
+      "caller": "freehand-provider-executors assembly",
+      "callee": "Anthropic executor factory",
+      "binding_status": "bound"
+    },
+    {
+      "step": "10",
+      "symbol_path": "classify_anthropic_executor_error",
+      "file_path": "crates/freehand-provider-anthropic/src/lib.rs",
+      "responsibility": "classify Anthropic executor build/transport/adapter/callback failures into provider-core retry/failover error info",
+      "input_semantic": "Anthropic executor error",
+      "output_semantic": "provider-core executor error info with code/message/retry/failover flags",
+      "caller": "Anthropic executor factory and ProviderLiveExecutor impl",
+      "callee": "Anthropic error classifier",
+      "binding_status": "bound"
     }
   ],
   "sync_status": [
@@ -209,6 +231,7 @@
     "request renderer default output budget is locked by `DEFAULT_ANTHROPIC_MAX_TOKENS=8192`",
     "stream parser now binds indexed Anthropic `tool_use` events where `content_block_start` has id/name and later `input_json_delta` / `content_block_stop` events reference only `index`",
     "hosted Anthropic Messages web_search request rendering and hosted-search response observations are adapter-owned and covered by focused web-search tests",
-    "generated wiki must be regenerated from `docs/mainline-calls/provider.anthropic-adapter.json` when this function-map truth changes"
+    "generated wiki must be regenerated from `docs/mainline-calls/provider.anthropic-adapter.json` when this function-map truth changes",
+    "AnthropicExecutorFactory implements provider-core `ProviderExecutorFactory`, and AnthropicExecutor implements provider-core `ProviderLiveExecutor`, so runtime consumes only provider-core traits while Anthropic wire execution stays adapter-owned."
   ]
 }

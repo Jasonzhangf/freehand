@@ -201,7 +201,7 @@
 - known gaps:
   - streaming provider failover is intentionally unsupported until partial semantic output/tool-call rollback or resume is a typed contract; current production Master/Worker/lifecycle requests use `stream=false`
 - sync status between design and implementation:
-  - provider-selected live bridge owner is now `freehand-runtime`; provider-specific wire execution stays inside provider driver implementations backed by provider crates
+  - provider-selected live bridge owner is now `freehand-runtime`; provider-specific wire execution stays inside provider adapter crates and is selected only through provider-core `ProviderLiveExecutor` / `freehand-provider-executors` assembly, so runtime no longer depends on concrete provider crates
   - runtime white-box coverage includes single-shot, SSE, invalid-schema retry, retry exhaustion, unsupported provider, registry-backed tool loop, persistence restore, runtime metadata producer wiring, and provider raw debug-ledger wiring
   - runtime white-box coverage now also proves runtime-owned debug snapshots for restore/request/tool/terminal lifecycle boundaries without prompt or tool-result leakage
   - runtime live bridge now injects tool owner schema fingerprint into reason planner diagnostics before provider request build

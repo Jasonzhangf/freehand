@@ -897,13 +897,13 @@ Non-violation pending items live in `docs/architecture/architecture-gaps.md`. Ea
 ### `provider.reason-live-bridge`
 
 - owner: `crates/freehand-runtime`
-- allowed_paths: `crates/freehand-runtime/**`, `crates/freehand-config/**`, `crates/freehand-provider-core/**`, `crates/freehand-provider-anthropic/**`, `crates/freehand-provider-openai/**`, `crates/freehand-reason/**`, `crates/freehand-blocks/**`, `docs/function-maps/**`, `docs/testing/**`, `docs/design/**`
+- allowed_paths: `crates/freehand-runtime/**`, `crates/freehand-config/**`, `crates/freehand-provider-core/**`, `crates/freehand-provider-executors/**`, `crates/freehand-reason/**`, `crates/freehand-blocks/**`, `docs/function-maps/**`, `docs/testing/**`, `docs/design/**`
 - forbidden_paths: `crates/freehand-reason/**` semantic-owner changes unrelated to provider-neutral consumption, `apps/freehand-daemon/**`
 - required_checks:
   - `cargo test -p freehand-runtime`
 - required_white_box_tests:
   - live bridge request build tests
-  - live bridge provider-neutral driver selection tests
+  - live bridge provider-core executor selection tests
   - live bridge anthropic single-shot mock tests
   - live bridge anthropic SSE mock tests
   - live bridge OpenAI-compatible protocol descriptor tests
@@ -943,7 +943,7 @@ Non-violation pending items live in `docs/architecture/architecture-gaps.md`. Ea
   - CLI live-turn command shape changes
 - lifecycle_checks:
   - reason remains provider-implementation independent
-  - live bridge owns runtime composition without duplicating adapter semantics
+  - live bridge owns runtime composition without duplicating adapter semantics and without direct concrete provider-crate dependencies
   - anthropic live path is closed-loop from config selection to turn truth, persistence, and UI projection
   - completion schema loop remains bridge composition, not provider or app semantics
   - migrated mainline call source and generated wiki stay in sync with the function map

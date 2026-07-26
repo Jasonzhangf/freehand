@@ -5,6 +5,7 @@
 - `freehand-contracts`: global shared semantic source and shared error/ID contracts
 - `freehand-blocks`: reusable pure functions
 - `freehand-provider-*`: provider adapters only
+- `freehand-provider-executors`: production assembly that installs concrete provider factories behind provider-core executor traits
 - `freehand-tools`: built-in tool registry, tool specs, and tool execution owner
 - `freehand-reason`: turn orchestration, session-history / rewrite-gate truth, and event emission
 - `freehand-node`: master/slave runtime
@@ -71,6 +72,7 @@
 - Debug may observe or link metadata, but debug is not the metadata write owner.
 - Test ownership follows the same single-truth rule as runtime semantics.
 - `freehand-reason` must not depend on provider adapter crates.
+- `freehand-runtime` must not depend on concrete provider adapter crates; it may only use provider-core executor traits and the production assembly crate.
 - Provider adapter crates must not depend on `freehand-reason`.
 - Metadata/debug/provider/cache/control fields and request-chain content fields must use separate types and separate builders.
 - Metadata must not be embedded into request text unless an explicit context builder converted it into request data.

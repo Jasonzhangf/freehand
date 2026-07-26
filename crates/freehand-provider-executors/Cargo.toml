@@ -1,0 +1,10 @@
+[package]
+name = "freehand-provider-executors"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[dependencies]
+freehand-provider-anthropic = { path = "../freehand-provider-anthropic" }
+freehand-provider-core = { path = "../freehand-provider-core" }
+freehand-provider-openai = { path = "../freehand-provider-openai" }

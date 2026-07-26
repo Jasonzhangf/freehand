@@ -659,3 +659,11 @@
 - Session-level bootstrap cleanup path `recover_stale_lifecycle_waits_on_bootstrap` remains the owner for no-owner ToolPending residuals.
 - Separate remaining residual: old Task Center non-terminal sample tasks still appear as TaskBoard activity counts; that is task residual cleanup, not session waiting residual.
 Tags: #lifecycle #bootstrap #session-waiting #taskboard-residual
+
+# 2026-07-26T20:31:29Z Gap5 runtime provider dependency edges closed
+
+- runtime no longer depends on freehand-provider-openai/anthropic in [dependencies]
+- production provider assembly lives in freehand-provider-executors
+- provider-core owns ProviderLiveExecutor/ProviderExecutorFactory contracts
+- FORBIDDEN edges runtime->provider-openai/anthropic baseline_violation=false
+- remaining Gap5: node->ui-protocol

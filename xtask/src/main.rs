@@ -3370,13 +3370,13 @@ const FORBIDDEN_DEPENDENCY_EDGES: &[ForbiddenDependencyEdge] = &[
         from: "crates/freehand-runtime",
         to: "freehand-provider-openai",
         reason: "runtime must reach providers through freehand-provider-core, not concrete adapters",
-        baseline_violation: true,
+        baseline_violation: false,
     },
     ForbiddenDependencyEdge {
         from: "crates/freehand-runtime",
         to: "freehand-provider-anthropic",
         reason: "runtime must reach providers through freehand-provider-core, not concrete adapters",
-        baseline_violation: true,
+        baseline_violation: false,
     },
     ForbiddenDependencyEdge {
         from: "crates/freehand-testkit",

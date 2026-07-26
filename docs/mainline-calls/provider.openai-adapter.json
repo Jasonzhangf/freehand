@@ -114,6 +114,28 @@
       "binding_status": "bound"
     },
     {
+      "step": "05a",
+      "symbol_path": "OpenAiExecutorFactory::build_executor",
+      "file_path": "crates/freehand-provider-openai/src/lib.rs",
+      "responsibility": "adapt provider-core executor config into an OpenAI executor without exposing OpenAI wire DTOs to runtime",
+      "input_semantic": "provider descriptor plus auth/base URL",
+      "output_semantic": "boxed provider-core live executor or explicit unsupported/build failure",
+      "caller": "freehand-provider-executors assembly",
+      "callee": "OpenAI executor factory",
+      "binding_status": "bound"
+    },
+    {
+      "step": "05b",
+      "symbol_path": "classify_openai_executor_error",
+      "file_path": "crates/freehand-provider-openai/src/lib.rs",
+      "responsibility": "classify OpenAI executor build/transport/adapter/callback failures into provider-core retry/failover error info",
+      "input_semantic": "OpenAI executor error",
+      "output_semantic": "provider-core executor error info with code/message/retry/failover flags",
+      "caller": "OpenAI executor factory and ProviderLiveExecutor impl",
+      "callee": "OpenAI error classifier",
+      "binding_status": "bound"
+    },
+    {
       "step": "03",
       "symbol_path": "OpenAiAdapter::parse_stream_event",
       "file_path": "crates/freehand-provider-openai/src/lib.rs",
@@ -150,6 +172,7 @@
   "sync_status": [
     "renderer/parser bindings match `OpenAiAdapter`, and live HTTP/SSE executor bindings match `OpenAiExecutor`",
     "hosted OpenAI Responses web_search request rendering and `web_search_call` observation are adapter-owned and covered by focused adapter tests",
-    "generated wiki must be regenerated from `docs/mainline-calls/provider.openai-adapter.json` when this function-map truth changes"
+    "generated wiki must be regenerated from `docs/mainline-calls/provider.openai-adapter.json` when this function-map truth changes",
+    "OpenAiExecutorFactory implements provider-core `ProviderExecutorFactory`, and OpenAiExecutor implements provider-core `ProviderLiveExecutor`, so runtime consumes only provider-core traits while OpenAI wire execution stays adapter-owned."
   ]
 }

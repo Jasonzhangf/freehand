@@ -104,20 +104,16 @@ use freehand_node::{
     LocalNodeRuntime, MasterNodeConfig, NodeRuntimeError, PairingRequest, PairingTransport,
     SlaveNodeConfig,
 };
-use freehand_provider_anthropic::{
-    AnthropicAdapterConfig, AnthropicExecutor, AnthropicExecutorConfig, AnthropicExecutorError,
-    AnthropicRawCapture, DEFAULT_ANTHROPIC_MAX_TOKENS,
-};
 use freehand_provider_core::{
-    ProviderCapabilities, ProviderDescriptor, ProviderEventContext, ProviderFamily,
-    ProviderHostedToolDefinition, ProviderInputAttachment, ProviderInputAttachmentKind,
-    ProviderProtocol, ProviderSemanticOutput, ProviderSemanticRequest, ProviderToolChoice,
-    ProviderToolDefinition, ProviderToolExchange, ProviderWebSearchCapability,
-    ProviderWebSearchMode as SemanticWebSearchMode, build_semantic_request,
+    ProviderCapabilities, ProviderDescriptor, ProviderEventContext, ProviderExecutorConfig,
+    ProviderExecutorErrorInfo, ProviderExecutorFactory, ProviderExecutorFactoryError,
+    ProviderFamily, ProviderHostedToolDefinition, ProviderInputAttachment,
+    ProviderInputAttachmentKind, ProviderLiveExecutor, ProviderProtocol, ProviderRawCapture,
+    ProviderSemanticOutput, ProviderToolChoice, ProviderToolDefinition, ProviderToolExchange,
+    ProviderWebSearchCapability, ProviderWebSearchMode as SemanticWebSearchMode,
+    build_semantic_request,
 };
-use freehand_provider_openai::{
-    OpenAiExecutor, OpenAiExecutorConfig, OpenAiExecutorError, OpenAiRawCapture,
-};
+use freehand_provider_executors::production_provider_executor_factory;
 use freehand_reason::{
     PersistedSessionIndexEntry, PersistedSessionMetadataEntry, ProviderRawLedgerWrite,
     ProviderRawScenePosition, ReasonBroadcastEvent, ReasonPersistence, ReasonPersistenceError,
@@ -371,20 +367,6 @@ struct ExecutedToolResult {
 enum FrameworkLiveTurnFinalization {
     Complete(String),
     Blocked(String),
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-struct ProviderExecutorErrorInfo {
-    code: String,
-    message: String,
-    retryable: bool,
-    failover_eligible: bool,
-}
-
-impl ProviderExecutorErrorInfo {
-    fn terminal_message(&self) -> String {
-        format!("{}: {}", self.code, self.message)
-    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -8061,10 +8043,10 @@ fn record_live_provider_raw(
     turn_id: &TurnId,
     trace_id: &TraceId,
     provider_family: ProviderFamily,
-    raw: LiveProviderRawCapture<'_>,
+    raw: ProviderRawCapture<'_>,
 ) -> Result<(), RuntimeLiveBridgeError> {
     let (raw_kind, crate_name, function, raw_exchange_id, body, headers) = match raw {
-        LiveProviderRawCapture::Response {
+        ProviderRawCapture::Response {
             body,
             crate_name,
             function,
@@ -8076,7 +8058,7 @@ fn record_live_provider_raw(
             body.to_owned(),
             BTreeMap::new(),
         ),
-        LiveProviderRawCapture::HttpError {
+        ProviderRawCapture::HttpError {
             status,
             body,
             crate_name,
@@ -8089,7 +8071,7 @@ fn record_live_provider_raw(
             body.to_owned(),
             BTreeMap::from([("http-status".to_owned(), status.to_string())]),
         ),
-        LiveProviderRawCapture::StreamEvent {
+        ProviderRawCapture::StreamEvent {
             event_index,
             event_body,
             crate_name,
@@ -8135,96 +8117,6 @@ fn terminal_debug_details(
         format!("tool_executions={tool_executions}"),
         format!("terminal_status={status:?}"),
     ]
-}
-
-fn classify_anthropic_executor_error(err: &AnthropicExecutorError) -> ProviderExecutorErrorInfo {
-    match err {
-        AnthropicExecutorError::HttpStatus { status, body } => ProviderExecutorErrorInfo {
-            code: format!("anthropic_http_status_{status}"),
-            message: body.clone(),
-            retryable: *status == 408
-                || *status == 409
-                || *status == 425
-                || *status == 429
-                || *status >= 500,
-            failover_eligible: true,
-        },
-        AnthropicExecutorError::Http(err) => ProviderExecutorErrorInfo {
-            code: "anthropic_http_request_failed".to_owned(),
-            message: err.to_string(),
-            retryable: err.is_connect() || err.is_timeout() || err.is_request(),
-            failover_eligible: true,
-        },
-        AnthropicExecutorError::StreamRead(err) => ProviderExecutorErrorInfo {
-            code: "anthropic_stream_read_failed".to_owned(),
-            message: err.to_string(),
-            retryable: true,
-            failover_eligible: true,
-        },
-        AnthropicExecutorError::Adapter(err) => ProviderExecutorErrorInfo {
-            code: "anthropic_adapter_failed".to_owned(),
-            message: err.to_string(),
-            retryable: false,
-            failover_eligible: false,
-        },
-        AnthropicExecutorError::InvalidConfig => ProviderExecutorErrorInfo {
-            code: "anthropic_invalid_config".to_owned(),
-            message: err.to_string(),
-            retryable: false,
-            failover_eligible: false,
-        },
-        AnthropicExecutorError::Callback(message) => ProviderExecutorErrorInfo {
-            code: "anthropic_callback_failed".to_owned(),
-            message: message.clone(),
-            retryable: false,
-            failover_eligible: false,
-        },
-    }
-}
-
-fn classify_openai_executor_error(err: &OpenAiExecutorError) -> ProviderExecutorErrorInfo {
-    match err {
-        OpenAiExecutorError::HttpStatus { status, body } => ProviderExecutorErrorInfo {
-            code: format!("openai_http_status_{status}"),
-            message: body.clone(),
-            retryable: *status == 408
-                || *status == 409
-                || *status == 425
-                || *status == 429
-                || *status >= 500,
-            failover_eligible: true,
-        },
-        OpenAiExecutorError::Http(err) => ProviderExecutorErrorInfo {
-            code: "openai_http_request_failed".to_owned(),
-            message: err.to_string(),
-            retryable: err.is_connect() || err.is_timeout() || err.is_request(),
-            failover_eligible: true,
-        },
-        OpenAiExecutorError::StreamRead(err) => ProviderExecutorErrorInfo {
-            code: "openai_stream_read_failed".to_owned(),
-            message: err.to_string(),
-            retryable: true,
-            failover_eligible: true,
-        },
-        OpenAiExecutorError::Adapter(err) => ProviderExecutorErrorInfo {
-            code: "openai_adapter_failed".to_owned(),
-            message: err.to_string(),
-            retryable: false,
-            failover_eligible: false,
-        },
-        OpenAiExecutorError::InvalidConfig => ProviderExecutorErrorInfo {
-            code: "openai_invalid_config".to_owned(),
-            message: err.to_string(),
-            retryable: false,
-            failover_eligible: false,
-        },
-        OpenAiExecutorError::Callback(message) => ProviderExecutorErrorInfo {
-            code: "openai_callback_failed".to_owned(),
-            message: message.clone(),
-            retryable: false,
-            failover_eligible: false,
-        },
-    }
 }
 
 fn provider_executor_retry_plan() -> ProviderExecutorRetryPlan {
@@ -8694,223 +8586,34 @@ fn live_provider_label(provider: &SelectedProviderConfig) -> LiveProviderLabel {
     }
 }
 
-enum LiveProviderRawCapture<'a> {
-    Response {
-        crate_name: &'static str,
-        function: &'static str,
-        body: &'a str,
-    },
-    HttpError {
-        crate_name: &'static str,
-        function: &'static str,
-        status: u16,
-        body: &'a str,
-    },
-    StreamEvent {
-        crate_name: &'static str,
-        function: &'static str,
-        event_index: usize,
-        event_body: &'a str,
-    },
-}
-
-#[derive(Debug)]
-struct LiveProviderDriverError {
-    info: ProviderExecutorErrorInfo,
-}
-
-impl LiveProviderDriverError {
-    fn info(&self) -> &ProviderExecutorErrorInfo {
-        &self.info
-    }
-}
-
-trait LiveProviderDriver {
-    fn execute_once_with_raw(
-        &mut self,
-        ctx: &ProviderEventContext,
-        request: &ProviderSemanticRequest,
-        on_raw: &mut dyn FnMut(LiveProviderRawCapture<'_>) -> Result<(), String>,
-    ) -> Result<Vec<ProviderSemanticOutput>, LiveProviderDriverError>;
-
-    fn execute_stream_with_raw(
-        &mut self,
-        ctx: &ProviderEventContext,
-        request: &ProviderSemanticRequest,
-        on_raw: &mut dyn FnMut(LiveProviderRawCapture<'_>) -> Result<(), String>,
-        on_outputs: &mut dyn FnMut(&[ProviderSemanticOutput]) -> Result<(), String>,
-    ) -> Result<Vec<ProviderSemanticOutput>, LiveProviderDriverError>;
-}
-
-struct AnthropicLiveProviderDriver {
-    executor: AnthropicExecutor,
-}
-
-struct OpenAiLiveProviderDriver {
-    executor: OpenAiExecutor,
-}
-
-impl LiveProviderDriver for AnthropicLiveProviderDriver {
-    fn execute_once_with_raw(
-        &mut self,
-        ctx: &ProviderEventContext,
-        request: &ProviderSemanticRequest,
-        on_raw: &mut dyn FnMut(LiveProviderRawCapture<'_>) -> Result<(), String>,
-    ) -> Result<Vec<ProviderSemanticOutput>, LiveProviderDriverError> {
-        self.executor
-            .execute_once_with_raw(ctx, request, |raw| {
-                on_raw(live_raw_from_anthropic(raw)).map_err(AnthropicExecutorError::Callback)
-            })
-            .map_err(|err| LiveProviderDriverError {
-                info: classify_anthropic_executor_error(&err),
-            })
-    }
-
-    fn execute_stream_with_raw(
-        &mut self,
-        ctx: &ProviderEventContext,
-        request: &ProviderSemanticRequest,
-        on_raw: &mut dyn FnMut(LiveProviderRawCapture<'_>) -> Result<(), String>,
-        on_outputs: &mut dyn FnMut(&[ProviderSemanticOutput]) -> Result<(), String>,
-    ) -> Result<Vec<ProviderSemanticOutput>, LiveProviderDriverError> {
-        self.executor
-            .execute_stream_with_raw(
-                ctx,
-                request,
-                |raw| {
-                    on_raw(live_raw_from_anthropic(raw)).map_err(AnthropicExecutorError::Callback)
-                },
-                |batch| on_outputs(batch).map_err(AnthropicExecutorError::Callback),
-            )
-            .map_err(|err| LiveProviderDriverError {
-                info: classify_anthropic_executor_error(&err),
-            })
-    }
-}
-
-impl LiveProviderDriver for OpenAiLiveProviderDriver {
-    fn execute_once_with_raw(
-        &mut self,
-        ctx: &ProviderEventContext,
-        request: &ProviderSemanticRequest,
-        on_raw: &mut dyn FnMut(LiveProviderRawCapture<'_>) -> Result<(), String>,
-    ) -> Result<Vec<ProviderSemanticOutput>, LiveProviderDriverError> {
-        self.executor
-            .execute_once_with_raw(ctx, request, |raw| {
-                on_raw(live_raw_from_openai(raw)).map_err(OpenAiExecutorError::Callback)
-            })
-            .map_err(|err| LiveProviderDriverError {
-                info: classify_openai_executor_error(&err),
-            })
-    }
-
-    fn execute_stream_with_raw(
-        &mut self,
-        ctx: &ProviderEventContext,
-        request: &ProviderSemanticRequest,
-        on_raw: &mut dyn FnMut(LiveProviderRawCapture<'_>) -> Result<(), String>,
-        on_outputs: &mut dyn FnMut(&[ProviderSemanticOutput]) -> Result<(), String>,
-    ) -> Result<Vec<ProviderSemanticOutput>, LiveProviderDriverError> {
-        self.executor
-            .execute_stream_with_raw(
-                ctx,
-                request,
-                |raw| on_raw(live_raw_from_openai(raw)).map_err(OpenAiExecutorError::Callback),
-                |batch| on_outputs(batch).map_err(OpenAiExecutorError::Callback),
-            )
-            .map_err(|err| LiveProviderDriverError {
-                info: classify_openai_executor_error(&err),
-            })
-    }
-}
-
 fn build_live_provider_driver(
     provider: &SelectedProviderConfig,
-) -> Result<Box<dyn LiveProviderDriver>, RuntimeLiveBridgeError> {
-    match (provider.provider_type, provider.protocol) {
-        (ProviderType::Anthropic, ConfigProviderProtocol::Messages) => {
-            let executor = AnthropicExecutor::new(AnthropicExecutorConfig {
-                base_url: provider.base_url.clone(),
-                api_key: provider.api_key.clone(),
-                anthropic_version: "2023-06-01".to_owned(),
-                adapter: AnthropicAdapterConfig {
-                    max_tokens: DEFAULT_ANTHROPIC_MAX_TOKENS,
-                },
-            })
-            .map_err(|err| {
-                RuntimeLiveBridgeError::ProviderExecutorFailed(
-                    classify_anthropic_executor_error(&err).terminal_message(),
-                )
-            })?;
-            Ok(Box::new(AnthropicLiveProviderDriver { executor }))
-        }
-        (ProviderType::OpenAi, ConfigProviderProtocol::Responses)
-        | (ProviderType::OpenAi, ConfigProviderProtocol::ChatCompletions) => {
-            let executor = OpenAiExecutor::new(OpenAiExecutorConfig {
-                base_url: provider.base_url.clone(),
-                api_key: provider.api_key.clone(),
-            })
-            .map_err(|err| {
-                RuntimeLiveBridgeError::ProviderExecutorFailed(
-                    classify_openai_executor_error(&err).terminal_message(),
-                )
-            })?;
-            Ok(Box::new(OpenAiLiveProviderDriver { executor }))
-        }
-        _ => Err(RuntimeLiveBridgeError::UnsupportedLiveProvider {
-            provider: provider.provider_type.as_str().to_owned(),
-            protocol: provider.protocol.as_str().to_owned(),
-        }),
-    }
+) -> Result<Box<dyn ProviderLiveExecutor>, RuntimeLiveBridgeError> {
+    let descriptor = provider_descriptor(provider)?;
+    let factory = production_provider_executor_factory();
+    factory
+        .build_executor(ProviderExecutorConfig {
+            descriptor,
+            base_url: provider.base_url.clone(),
+            api_key: provider.api_key.clone(),
+        })
+        .map_err(|err| provider_executor_factory_error(provider, err))
 }
 
-fn live_raw_from_anthropic(raw: &AnthropicRawCapture) -> LiveProviderRawCapture<'_> {
-    match raw {
-        AnthropicRawCapture::ResponseBody { body } => LiveProviderRawCapture::Response {
-            crate_name: "freehand-provider-anthropic",
-            function: "AnthropicExecutor::execute_once_with_raw",
-            body,
-        },
-        AnthropicRawCapture::HttpErrorBody { status, body } => LiveProviderRawCapture::HttpError {
-            crate_name: "freehand-provider-anthropic",
-            function: "AnthropicExecutor::send_rendered_request",
-            status: *status,
-            body,
-        },
-        AnthropicRawCapture::StreamEventBody {
-            event_index,
-            event_body,
-        } => LiveProviderRawCapture::StreamEvent {
-            crate_name: "freehand-provider-anthropic",
-            function: "AnthropicExecutor::execute_stream_with_raw",
-            event_index: *event_index,
-            event_body,
-        },
-    }
-}
-
-fn live_raw_from_openai(raw: &OpenAiRawCapture) -> LiveProviderRawCapture<'_> {
-    match raw {
-        OpenAiRawCapture::ResponseBody { body } => LiveProviderRawCapture::Response {
-            crate_name: "freehand-provider-openai",
-            function: "OpenAiExecutor::execute_once_with_raw",
-            body,
-        },
-        OpenAiRawCapture::HttpErrorBody { status, body } => LiveProviderRawCapture::HttpError {
-            crate_name: "freehand-provider-openai",
-            function: "OpenAiExecutor::send_rendered_request",
-            status: *status,
-            body,
-        },
-        OpenAiRawCapture::StreamEventBody {
-            event_index,
-            event_body,
-        } => LiveProviderRawCapture::StreamEvent {
-            crate_name: "freehand-provider-openai",
-            function: "OpenAiExecutor::execute_stream_with_raw",
-            event_index: *event_index,
-            event_body,
-        },
+fn provider_executor_factory_error(
+    provider: &SelectedProviderConfig,
+    error: ProviderExecutorFactoryError,
+) -> RuntimeLiveBridgeError {
+    match error {
+        ProviderExecutorFactoryError::Unsupported { .. } => {
+            RuntimeLiveBridgeError::UnsupportedLiveProvider {
+                provider: provider.provider_type.as_str().to_owned(),
+                protocol: provider.protocol.as_str().to_owned(),
+            }
+        }
+        ProviderExecutorFactoryError::BuildFailed(info) => {
+            RuntimeLiveBridgeError::ProviderExecutorFailed(info.terminal_message())
+        }
     }
 }
 

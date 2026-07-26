@@ -23,6 +23,7 @@
   - `web_search_call` output items re-enter as provider-hosted reasoning observations, not local tool executions
   - partial tool-call chunks accumulate until arguments become complete
   - live HTTP/SSE executor renders the selected OpenAI-compatible protocol, captures raw response/error/stream bodies, and returns only provider-neutral semantic outputs to runtime
+  - OpenAI executor factory implements provider-core `ProviderExecutorFactory` and classifies transport/adapter/callback failures into provider-core error info
 - white-box plan:
   - request renderer, response parser, stream parser, partial tool accumulator, executor raw capture, executor HTTP status classification surface
   - Responses and Chat Completions success bodies carrying a wire-level `error: null` field must not emit `ProviderSemanticOutput::Error`

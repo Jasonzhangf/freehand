@@ -6,6 +6,7 @@ members = [
   "crates/freehand-provider-core",
   "crates/freehand-provider-openai",
   "crates/freehand-provider-anthropic",
+  "crates/freehand-provider-executors",
   "crates/freehand-reason",
   "crates/freehand-node",
   "crates/freehand-debug",

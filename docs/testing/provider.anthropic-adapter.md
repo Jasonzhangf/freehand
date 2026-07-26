@@ -21,6 +21,7 @@
   - semantic request renders provider-neutral tool schema/choice/exchange into Anthropic tool wire shape
   - semantic request renders provider-neutral hosted web_search metadata into Anthropic server-tool wire without creating local Freehand tool truth
   - executor posts rendered Messages API request with explicit auth/version/content headers
+  - Anthropic executor factory implements provider-core `ProviderExecutorFactory` and classifies transport/adapter/callback failures into provider-core error info
   - single-shot and SSE outputs normalize into shared semantic events
   - hosted `server_tool_use` / `web_search_tool_result` blocks normalize into reasoning observations rather than local tool calls
   - partial tool-use input accumulates until arguments become complete

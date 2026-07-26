@@ -378,6 +378,15 @@ dependencies = [
 ]
 
 [[package]]
+name = "freehand-provider-executors"
+version = "0.1.0"
+dependencies = [
+ "freehand-provider-anthropic",
+ "freehand-provider-core",
+ "freehand-provider-openai",
+]
+
+[[package]]
 name = "freehand-provider-openai"
 version = "0.1.0"
 dependencies = [
@@ -418,9 +427,8 @@ dependencies = [
  "freehand-instructions",
  "freehand-metadata",
  "freehand-node",
- "freehand-provider-anthropic",
  "freehand-provider-core",
- "freehand-provider-openai",
+ "freehand-provider-executors",
  "freehand-reason",
  "freehand-task",
  "freehand-tools",

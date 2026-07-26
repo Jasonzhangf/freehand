@@ -102,6 +102,8 @@
 | 06 | `AnthropicExecutor::execute_stream` | `crates/freehand-provider-anthropic/src/lib.rs` | execute one Anthropic SSE request and return accumulated semantic outputs | semantic request + auth/base URL | provider semantic outputs | runtime/provider caller | `execute_stream_with` + adapter stream parser | bound |
 | 07 | `AnthropicExecutor::execute_stream_with` | `crates/freehand-provider-anthropic/src/lib.rs` | execute one Anthropic SSE request and call back for each parsed semantic batch before stream completion | semantic request + auth/base URL + callback | incremental provider semantic output batches plus final accumulated outputs | runtime/provider caller | `execute_stream_with_raw` + adapter stream parser | bound |
 | 08 | `AnthropicExecutor::execute_stream_with_raw` | `crates/freehand-provider-anthropic/src/lib.rs` | execute one Anthropic SSE request and expose each raw SSE event body before semantic parsing | semantic request + auth/base URL + raw callback + output callback | incremental raw event bodies plus incremental provider semantic output batches | runtime/provider caller | HTTP executor + adapter stream parser | bound |
+| 09 | `AnthropicExecutorFactory::build_executor` | `crates/freehand-provider-anthropic/src/lib.rs` | adapt provider-core executor config into an Anthropic executor without exposing Anthropic wire DTOs to runtime | provider descriptor + auth/base URL | boxed provider-core live executor or explicit unsupported/build failure | freehand-provider-executors assembly | Anthropic executor factory | bound |
+| 10 | `classify_anthropic_executor_error` | `crates/freehand-provider-anthropic/src/lib.rs` | classify Anthropic executor build/transport/adapter/callback failures into provider-core retry/failover error info | Anthropic executor error | provider-core executor error info with code/message/retry/failover flags | Anthropic executor factory and ProviderLiveExecutor impl | Anthropic error classifier | bound |
 
 ## Sync Status Against Code
 
@@ -115,4 +117,5 @@
 - request renderer default output budget is locked by `DEFAULT_ANTHROPIC_MAX_TOKENS=8192`
 - stream parser now binds indexed Anthropic `tool_use` events where `content_block_start` has id/name and later `input_json_delta` / `content_block_stop` events reference only `index`
 - hosted Anthropic Messages web_search request rendering and hosted-search response observations are adapter-owned and covered by focused web-search tests
+- `AnthropicExecutorFactory` implements provider-core `ProviderExecutorFactory`, and `AnthropicExecutor` implements provider-core `ProviderLiveExecutor`
 - the generated wiki must be regenerated from `docs/mainline-calls/provider.anthropic-adapter.json` when this function-map truth changes

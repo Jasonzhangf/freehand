@@ -12,6 +12,8 @@
 - owner entry symbols:
   - `run_live_reason_turn`
   - `LiveReasonExecutionRole::hosted_tool_definitions`
+  - `build_live_provider_driver`
+  - `CompositeProviderExecutorFactory::build_executor`
 
 ## Resource Map Binding
 
@@ -61,7 +63,7 @@
   instruction capability, task-space snapshot, and original-task segments, so
   UI/debug clients can identify the exact pre-provider segment instead of a
   silent pending submit
-- bridge derives provider descriptor and executor config from the active primary/fallback route without exposing provider wire DTOs
+- bridge derives provider descriptor and executor config from the active primary/fallback route, then obtains a provider-core `ProviderLiveExecutor` through `freehand-provider-executors` assembly without exposing concrete provider wire DTOs to the live loop
 - bridge derives provider-hosted search capability from config/provider descriptor and execution profile; OpenAI Responses and Anthropic Messages providers with `web_search=auto` can declare hosted search, while disabled or protocol-unsupported combinations leave it absent
 - `reason.turn` may start multiple rounds under one logical live request when completion schema says `continue` or when schema rejection requires same-task retry
 - provider semantic request is built from each round's turn-owned provider payload
@@ -94,7 +96,7 @@
   first-call path patterns such as `ls` before `read_file`; Worker capability
   guidance also names `web_fetch` for known HTTP/HTTPS URLs
 - runtime emits provider-request lifecycle debug snapshots through `debug.core` without provider payload text
-- Anthropic live executor runs the HTTP/SSE request through raw-capable callbacks so runtime can capture debug-only provider raw bodies/events before semantic parsing
+- provider-core `ProviderLiveExecutor` runs concrete HTTP/SSE executor requests through raw-capable callbacks owned by the adapter crates so runtime can capture debug-only provider raw bodies/events before semantic parsing
 - stream mode applies outputs incrementally through the executor callback path before the provider response completes
 - completed provider tool calls are classified by registry execution scope;
   Master local workspace read/search/write/edit tools execute only in the
@@ -221,8 +223,8 @@
 | 08 | `build_semantic_request` | `crates/freehand-provider-core/src/lib.rs` | build provider-neutral request | provider descriptor + provider payload | provider semantic request | live bridge | provider semantic owner | bound |
 | 09 | `write_live_bridge_metadata` | `crates/freehand-runtime/src/lib.rs` | write runtime-owned provider-request lifecycle metadata without payload text | round ordinal + provider/model/tool-count control facts | durable runtime metadata record | live bridge | metadata owner | bound |
 | 10 | `emit_live_bridge_debug` | `crates/freehand-runtime/src/lib.rs` | emit runtime-owned provider-request lifecycle debug snapshot without payload text | round ordinal + provider/model/tool-count control facts | runtime-owned debug event | live bridge | `debug.core` | bound |
-| 11 | `build_live_provider_driver` | `crates/freehand-runtime/src/lib.rs` | select the provider driver abstraction from config without exposing provider wire DTOs to the live loop | selected provider type/protocol + auth/base URL | boxed provider-neutral live driver or explicit unsupported provider error | live bridge | provider driver factory | bound |
-| 12 | `LiveProviderDriver::execute_once_with_raw` / `LiveProviderDriver::execute_stream_with_raw` | `crates/freehand-runtime/src/lib.rs` | execute the provider-selected request through one provider-neutral driver interface while provider crates own protocol-specific wire rendering/parsing | provider semantic request + provider-neutral raw/output callbacks | provider semantic outputs plus callback-visible provider-neutral raw capture | live bridge | provider driver abstraction | bound |
+| 11 | `build_live_provider_driver` / `CompositeProviderExecutorFactory::build_executor` | `crates/freehand-runtime/src/lib.rs` / `crates/freehand-provider-executors/src/lib.rs` | select a provider-core live executor from config through the provider executor assembly without runtime depending on concrete adapter crates | selected provider type/protocol + descriptor/auth/base URL | boxed `ProviderLiveExecutor` or explicit unsupported/build error | live bridge | provider-core executor factory assembly | bound |
+| 12 | `ProviderLiveExecutor::execute_once_with_raw` / `ProviderLiveExecutor::execute_stream_with_raw` | `crates/freehand-provider-core/src/lib.rs` | execute the provider-selected request through one provider-core trait while provider adapter crates own protocol-specific wire rendering/parsing | provider semantic request + provider-neutral raw/output callbacks | provider semantic outputs plus callback-visible provider-neutral raw capture | live bridge | provider-core executor trait | bound |
 | 13 | `record_live_provider_raw` | `crates/freehand-runtime/src/lib.rs` | translate provider-neutral raw captures into runtime-owned provider-raw ledger writes | raw response/error/event body + session/turn/trace identity | provider raw ledger write or explicit persistence failure | provider driver callback path | live bridge owner | bound |
 | 14 | `ReasonPersistence::record_provider_raw_event` | `crates/freehand-reason/src/persistence.rs` | append debug-only provider raw ledger evidence | provider family + session/turn/trace identity + scene provenance + raw body | durable provider raw debug evidence | live bridge | persistence owner | bound |
 | 15 | `ReasonTurnEngine::apply_provider_output` | `crates/freehand-reason/src/lib.rs` | write provider-neutral outputs into turn truth | provider semantic output | updated turn record + broadcast or explicit provider-output apply error | live bridge | reason owner | bound |
@@ -242,12 +244,12 @@
 
 ## Sync Status Against Code
 
-- current live path supports Anthropic `messages`, OpenAI-compatible `responses`, and OpenAI-compatible `chat_completions` through a provider-neutral runtime driver abstraction
+- current live path supports Anthropic `messages`, OpenAI-compatible `responses`, and OpenAI-compatible `chat_completions` through provider-core `ProviderLiveExecutor`; runtime no longer has direct `freehand-provider-openai` or `freehand-provider-anthropic` dependency edges
 - current live path selects provider-hosted search only as provider-neutral hosted tool metadata; OpenAI Responses and Anthropic Messages wire rendering remain adapter-owned
 - runtime owner path preserves incremental stream apply, completion schema loop, persistence, registry-backed tool loop, tool-schema fingerprint wiring, shared metadata-ledger producer wiring, runtime-owned debug snapshot emission, checkpoint gating, and shared path/symlink diagnostics without duplicating adapter or path semantics
 - runtime live bridge now bootstraps one shared metadata ledger and writes restore/request/tool/terminal lifecycle metadata without request-text leakage
 - runtime live bridge now emits restore/request/tool/terminal lifecycle debug snapshots through `debug.core` without prompt, provider-payload, or tool-result leakage
-- runtime live bridge now retains Anthropic raw response/error/event bodies through `ReasonPersistence::record_provider_raw_event` without promoting them into authoritative turn/session truth
+- runtime live bridge now retains provider-neutral raw response/error/event bodies through `ReasonPersistence::record_provider_raw_event` without promoting them into authoritative turn/session truth
 - restored same-session follow-up requests now rebuild `reason.session-history` base context from effective persisted turns before the next round starts, so the next provider request includes prior user/assistant turn truth
 - repaired multi-round logical turns keep raw failed attempts in persisted turn/UI truth but admit only the latest repaired round into future prompt context by default
 - runtime live bridge cancellation checkpoints now have positive and negative coverage before tool execution, before terminal persistence, and during provider retry backoff sleep

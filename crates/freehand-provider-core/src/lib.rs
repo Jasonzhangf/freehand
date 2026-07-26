@@ -9,6 +9,7 @@ use freehand_contracts::{
 };
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
+use std::fmt;
 use thiserror::Error;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -150,6 +151,103 @@ pub enum ProviderToolChoice {
 pub struct ProviderToolExchange {
     pub tool_call: ReasonReq04ToolCall,
     pub tool_result: ReasonReq05ToolResultReentry,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ProviderExecutorConfig {
+    pub descriptor: ProviderDescriptor,
+    pub base_url: String,
+    pub api_key: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct ProviderExecutorErrorInfo {
+    pub code: String,
+    pub message: String,
+    pub retryable: bool,
+    pub failover_eligible: bool,
+}
+
+impl ProviderExecutorErrorInfo {
+    pub fn terminal_message(&self) -> String {
+        format!("{}: {}", self.code, self.message)
+    }
+}
+
+impl fmt::Display for ProviderExecutorErrorInfo {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(formatter, "{}", self.terminal_message())
+    }
+}
+
+#[derive(Debug)]
+pub struct ProviderLiveExecutorError {
+    info: ProviderExecutorErrorInfo,
+}
+
+impl ProviderLiveExecutorError {
+    pub fn new(info: ProviderExecutorErrorInfo) -> Self {
+        Self { info }
+    }
+
+    pub fn info(&self) -> &ProviderExecutorErrorInfo {
+        &self.info
+    }
+}
+
+#[derive(Debug, Error)]
+pub enum ProviderExecutorFactoryError {
+    #[error("provider executor is unsupported for `{family:?}` / `{protocol:?}`")]
+    Unsupported {
+        family: ProviderFamily,
+        protocol: ProviderProtocol,
+    },
+    #[error("provider executor build failed: {0}")]
+    BuildFailed(ProviderExecutorErrorInfo),
+}
+
+pub enum ProviderRawCapture<'a> {
+    Response {
+        crate_name: &'static str,
+        function: &'static str,
+        body: &'a str,
+    },
+    HttpError {
+        crate_name: &'static str,
+        function: &'static str,
+        status: u16,
+        body: &'a str,
+    },
+    StreamEvent {
+        crate_name: &'static str,
+        function: &'static str,
+        event_index: usize,
+        event_body: &'a str,
+    },
+}
+
+pub trait ProviderLiveExecutor: Send {
+    fn execute_once_with_raw(
+        &mut self,
+        ctx: &ProviderEventContext,
+        request: &ProviderSemanticRequest,
+        on_raw: &mut dyn FnMut(ProviderRawCapture<'_>) -> Result<(), String>,
+    ) -> Result<Vec<ProviderSemanticOutput>, ProviderLiveExecutorError>;
+
+    fn execute_stream_with_raw(
+        &mut self,
+        ctx: &ProviderEventContext,
+        request: &ProviderSemanticRequest,
+        on_raw: &mut dyn FnMut(ProviderRawCapture<'_>) -> Result<(), String>,
+        on_outputs: &mut dyn FnMut(&[ProviderSemanticOutput]) -> Result<(), String>,
+    ) -> Result<Vec<ProviderSemanticOutput>, ProviderLiveExecutorError>;
+}
+
+pub trait ProviderExecutorFactory: Send + Sync {
+    fn build_executor(
+        &self,
+        config: ProviderExecutorConfig,
+    ) -> Result<Box<dyn ProviderLiveExecutor>, ProviderExecutorFactoryError>;
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

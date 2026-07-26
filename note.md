@@ -8744,3 +8744,23 @@ Current real root cause split:
   - tests moved to `crates/freehand-testkit/tests/reason_smoke_bin.rs`
   - FORBIDDEN edge baseline flipped to false
   - proofs: freehand-testkit 9 tests ok; freehand-cli config_startup 24 ok; mainlines/gates ok
+
+# 2026-07-26T20:31:29Z Gap5 provider edge closeout
+
+- run_id: `20260726T200735Z-Macstudio.local-51951-19b45a-provider-edge`
+- scope: close runtime direct dependency edges to freehand-provider-openai/anthropic via provider-core executor trait + freehand-provider-executors assembly.
+- implementation:
+  - provider-core: ProviderLiveExecutor / ProviderExecutorFactory / ProviderExecutorErrorInfo / ProviderRawCapture
+  - openai/anthropic adapters implement factory + trait and own error classification
+  - freehand-provider-executors owns production composite factory
+  - runtime builds executors only through assembly; removed concrete provider crate deps and local LiveProviderDriver wrappers
+  - FORBIDDEN_DEPENDENCY_EDGES for runtime->provider-openai/anthropic flipped to false
+- validation:
+  - freehand-provider-openai 17 ok
+  - freehand-provider-anthropic 19 ok
+  - freehand-provider-core 7 ok
+  - freehand-runtime live_bridge 52 ok
+  - freehand-cli config_startup 24 ok
+  - freehand-daemon 21 ok
+  - mainlines generate/check + gates check ok
+- remaining Gap5: node -> freehand-ui-protocol

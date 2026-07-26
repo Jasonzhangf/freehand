@@ -83,9 +83,12 @@
 | 03 | `OpenAiAdapter::parse_stream_event` | `crates/freehand-provider-openai/src/lib.rs` | parse one OpenAI stream event and update partial state | raw stream event | provider semantic outputs | runtime/provider caller | adapter stream parser | bound |
 | 04 | `OpenAiExecutor::execute_once_with_raw` | `crates/freehand-provider-openai/src/lib.rs` | render and execute one non-stream OpenAI-compatible request without leaking wire DTOs to runtime | provider semantic request + auth/base URL + raw callback | provider semantic outputs plus callback-visible raw body/error body | runtime provider driver | OpenAI executor | bound |
 | 05 | `OpenAiExecutor::execute_stream_with_raw` | `crates/freehand-provider-openai/src/lib.rs` | render and execute one streaming OpenAI-compatible request, collecting SSE events through adapter-owned parsing | provider semantic request + auth/base URL + raw callback + semantic callback | incremental raw event bodies plus incremental semantic output batches plus accumulated outputs | runtime provider driver | OpenAI executor | bound |
+| 05a | `OpenAiExecutorFactory::build_executor` | `crates/freehand-provider-openai/src/lib.rs` | adapt provider-core executor config into an OpenAI executor without exposing OpenAI wire DTOs to runtime | provider descriptor + auth/base URL | boxed provider-core live executor or explicit unsupported/build failure | freehand-provider-executors assembly | OpenAI executor factory | bound |
+| 05b | `classify_openai_executor_error` | `crates/freehand-provider-openai/src/lib.rs` | classify OpenAI executor build/transport/adapter/callback failures into provider-core retry/failover error info | OpenAI executor error | provider-core executor error info with code/message/retry/failover flags | OpenAI executor factory and ProviderLiveExecutor impl | OpenAI error classifier | bound |
 
 ## Sync Status Against Code
 
 - renderer/parser bindings match `OpenAiAdapter`, and live HTTP/SSE executor bindings match `OpenAiExecutor`
+- `OpenAiExecutorFactory` implements provider-core `ProviderExecutorFactory`, and `OpenAiExecutor` implements provider-core `ProviderLiveExecutor`
 - hosted OpenAI Responses web_search request rendering and `web_search_call` observation are adapter-owned and covered by focused adapter tests
 - the generated wiki must be regenerated from `docs/mainline-calls/provider.openai-adapter.json` when this function-map truth changes

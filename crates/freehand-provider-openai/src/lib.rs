@@ -11,9 +11,12 @@ use freehand_contracts::{
     ErrorClass, TerminalStatus, TokenUsage, ToolCallContract, ToolCallId, ToolResultStatus,
 };
 use freehand_provider_core::{
-    ProviderAdapterEvent, ProviderErrorHint, ProviderEventContext, ProviderHostedToolDefinition,
-    ProviderInputAttachment, ProviderInputAttachmentKind, ProviderProtocol, ProviderSemanticOutput,
-    ProviderSemanticRequest, ProviderToolChoice, ProviderToolExchange, map_adapter_events,
+    ProviderAdapterEvent, ProviderErrorHint, ProviderEventContext, ProviderExecutorConfig,
+    ProviderExecutorErrorInfo, ProviderExecutorFactory, ProviderExecutorFactoryError,
+    ProviderFamily, ProviderHostedToolDefinition, ProviderInputAttachment,
+    ProviderInputAttachmentKind, ProviderLiveExecutor, ProviderLiveExecutorError, ProviderProtocol,
+    ProviderRawCapture, ProviderSemanticOutput, ProviderSemanticRequest, ProviderToolChoice,
+    ProviderToolExchange, map_adapter_events,
 };
 use serde_json::{Value, json};
 use thiserror::Error;
@@ -94,6 +97,135 @@ pub enum OpenAiRawCapture {
         event_index: usize,
         event_body: String,
     },
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct OpenAiExecutorFactory;
+
+impl ProviderExecutorFactory for OpenAiExecutorFactory {
+    fn build_executor(
+        &self,
+        config: ProviderExecutorConfig,
+    ) -> Result<Box<dyn ProviderLiveExecutor>, ProviderExecutorFactoryError> {
+        if config.descriptor.family != ProviderFamily::OpenAiCompatible
+            || (config.descriptor.protocol != ProviderProtocol::OpenAiResponses
+                && config.descriptor.protocol != ProviderProtocol::OpenAiChatCompletions)
+        {
+            return Err(ProviderExecutorFactoryError::Unsupported {
+                family: config.descriptor.family,
+                protocol: config.descriptor.protocol,
+            });
+        }
+        OpenAiExecutor::new(OpenAiExecutorConfig {
+            base_url: config.base_url,
+            api_key: config.api_key,
+        })
+        .map(|executor| Box::new(executor) as Box<dyn ProviderLiveExecutor>)
+        .map_err(|err| {
+            ProviderExecutorFactoryError::BuildFailed(classify_openai_executor_error(&err))
+        })
+    }
+}
+
+impl ProviderLiveExecutor for OpenAiExecutor {
+    fn execute_once_with_raw(
+        &mut self,
+        ctx: &ProviderEventContext,
+        request: &ProviderSemanticRequest,
+        on_raw: &mut dyn FnMut(ProviderRawCapture<'_>) -> Result<(), String>,
+    ) -> Result<Vec<ProviderSemanticOutput>, ProviderLiveExecutorError> {
+        OpenAiExecutor::execute_once_with_raw(self, ctx, request, |raw| {
+            on_raw(openai_raw_capture(raw)).map_err(OpenAiExecutorError::Callback)
+        })
+        .map_err(|err| ProviderLiveExecutorError::new(classify_openai_executor_error(&err)))
+    }
+
+    fn execute_stream_with_raw(
+        &mut self,
+        ctx: &ProviderEventContext,
+        request: &ProviderSemanticRequest,
+        on_raw: &mut dyn FnMut(ProviderRawCapture<'_>) -> Result<(), String>,
+        on_outputs: &mut dyn FnMut(&[ProviderSemanticOutput]) -> Result<(), String>,
+    ) -> Result<Vec<ProviderSemanticOutput>, ProviderLiveExecutorError> {
+        OpenAiExecutor::execute_stream_with_raw(
+            self,
+            ctx,
+            request,
+            |raw| on_raw(openai_raw_capture(raw)).map_err(OpenAiExecutorError::Callback),
+            |batch| on_outputs(batch).map_err(OpenAiExecutorError::Callback),
+        )
+        .map_err(|err| ProviderLiveExecutorError::new(classify_openai_executor_error(&err)))
+    }
+}
+
+fn openai_raw_capture(raw: &OpenAiRawCapture) -> ProviderRawCapture<'_> {
+    match raw {
+        OpenAiRawCapture::ResponseBody { body } => ProviderRawCapture::Response {
+            crate_name: "freehand-provider-openai",
+            function: "OpenAiExecutor::execute_once_with_raw",
+            body,
+        },
+        OpenAiRawCapture::HttpErrorBody { status, body } => ProviderRawCapture::HttpError {
+            crate_name: "freehand-provider-openai",
+            function: "OpenAiExecutor::send_rendered_request",
+            status: *status,
+            body,
+        },
+        OpenAiRawCapture::StreamEventBody {
+            event_index,
+            event_body,
+        } => ProviderRawCapture::StreamEvent {
+            crate_name: "freehand-provider-openai",
+            function: "OpenAiExecutor::execute_stream_with_raw",
+            event_index: *event_index,
+            event_body,
+        },
+    }
+}
+
+pub fn classify_openai_executor_error(err: &OpenAiExecutorError) -> ProviderExecutorErrorInfo {
+    match err {
+        OpenAiExecutorError::HttpStatus { status, body } => ProviderExecutorErrorInfo {
+            code: format!("openai_http_status_{status}"),
+            message: body.clone(),
+            retryable: *status == 408
+                || *status == 409
+                || *status == 425
+                || *status == 429
+                || *status >= 500,
+            failover_eligible: true,
+        },
+        OpenAiExecutorError::Http(err) => ProviderExecutorErrorInfo {
+            code: "openai_http_request_failed".to_owned(),
+            message: err.to_string(),
+            retryable: err.is_connect() || err.is_timeout() || err.is_request(),
+            failover_eligible: true,
+        },
+        OpenAiExecutorError::StreamRead(err) => ProviderExecutorErrorInfo {
+            code: "openai_stream_read_failed".to_owned(),
+            message: err.to_string(),
+            retryable: true,
+            failover_eligible: true,
+        },
+        OpenAiExecutorError::Adapter(err) => ProviderExecutorErrorInfo {
+            code: "openai_adapter_failed".to_owned(),
+            message: err.to_string(),
+            retryable: false,
+            failover_eligible: false,
+        },
+        OpenAiExecutorError::InvalidConfig => ProviderExecutorErrorInfo {
+            code: "openai_invalid_config".to_owned(),
+            message: err.to_string(),
+            retryable: false,
+            failover_eligible: false,
+        },
+        OpenAiExecutorError::Callback(message) => ProviderExecutorErrorInfo {
+            code: "openai_callback_failed".to_owned(),
+            message: message.clone(),
+            retryable: false,
+            failover_eligible: false,
+        },
+    }
 }
 
 impl OpenAiExecutor {

@@ -12,9 +12,12 @@ use freehand_contracts::{
     ErrorClass, TerminalStatus, TokenUsage, ToolCallContract, ToolCallId, ToolResultStatus,
 };
 use freehand_provider_core::{
-    ProviderAdapterEvent, ProviderErrorHint, ProviderEventContext, ProviderHostedToolDefinition,
-    ProviderInputAttachment, ProviderInputAttachmentKind, ProviderProtocol, ProviderSemanticOutput,
-    ProviderSemanticRequest, ProviderToolChoice, ProviderToolExchange, map_adapter_events,
+    ProviderAdapterEvent, ProviderErrorHint, ProviderEventContext, ProviderExecutorConfig,
+    ProviderExecutorErrorInfo, ProviderExecutorFactory, ProviderExecutorFactoryError,
+    ProviderFamily, ProviderHostedToolDefinition, ProviderInputAttachment,
+    ProviderInputAttachmentKind, ProviderLiveExecutor, ProviderLiveExecutorError, ProviderProtocol,
+    ProviderRawCapture, ProviderSemanticOutput, ProviderSemanticRequest, ProviderToolChoice,
+    ProviderToolExchange, map_adapter_events,
 };
 use serde_json::{Value, json};
 use thiserror::Error;
@@ -105,6 +108,140 @@ pub enum AnthropicRawCapture {
         event_index: usize,
         event_body: String,
     },
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct AnthropicExecutorFactory;
+
+impl ProviderExecutorFactory for AnthropicExecutorFactory {
+    fn build_executor(
+        &self,
+        config: ProviderExecutorConfig,
+    ) -> Result<Box<dyn ProviderLiveExecutor>, ProviderExecutorFactoryError> {
+        if config.descriptor.family != ProviderFamily::Anthropic
+            || config.descriptor.protocol != ProviderProtocol::AnthropicMessages
+        {
+            return Err(ProviderExecutorFactoryError::Unsupported {
+                family: config.descriptor.family,
+                protocol: config.descriptor.protocol,
+            });
+        }
+        AnthropicExecutor::new(AnthropicExecutorConfig {
+            base_url: config.base_url,
+            api_key: config.api_key,
+            anthropic_version: "2023-06-01".to_owned(),
+            adapter: AnthropicAdapterConfig {
+                max_tokens: DEFAULT_ANTHROPIC_MAX_TOKENS,
+            },
+        })
+        .map(|executor| Box::new(executor) as Box<dyn ProviderLiveExecutor>)
+        .map_err(|err| {
+            ProviderExecutorFactoryError::BuildFailed(classify_anthropic_executor_error(&err))
+        })
+    }
+}
+
+impl ProviderLiveExecutor for AnthropicExecutor {
+    fn execute_once_with_raw(
+        &mut self,
+        ctx: &ProviderEventContext,
+        request: &ProviderSemanticRequest,
+        on_raw: &mut dyn FnMut(ProviderRawCapture<'_>) -> Result<(), String>,
+    ) -> Result<Vec<ProviderSemanticOutput>, ProviderLiveExecutorError> {
+        AnthropicExecutor::execute_once_with_raw(self, ctx, request, |raw| {
+            on_raw(anthropic_raw_capture(raw)).map_err(AnthropicExecutorError::Callback)
+        })
+        .map_err(|err| ProviderLiveExecutorError::new(classify_anthropic_executor_error(&err)))
+    }
+
+    fn execute_stream_with_raw(
+        &mut self,
+        ctx: &ProviderEventContext,
+        request: &ProviderSemanticRequest,
+        on_raw: &mut dyn FnMut(ProviderRawCapture<'_>) -> Result<(), String>,
+        on_outputs: &mut dyn FnMut(&[ProviderSemanticOutput]) -> Result<(), String>,
+    ) -> Result<Vec<ProviderSemanticOutput>, ProviderLiveExecutorError> {
+        AnthropicExecutor::execute_stream_with_raw(
+            self,
+            ctx,
+            request,
+            |raw| on_raw(anthropic_raw_capture(raw)).map_err(AnthropicExecutorError::Callback),
+            |batch| on_outputs(batch).map_err(AnthropicExecutorError::Callback),
+        )
+        .map_err(|err| ProviderLiveExecutorError::new(classify_anthropic_executor_error(&err)))
+    }
+}
+
+fn anthropic_raw_capture(raw: &AnthropicRawCapture) -> ProviderRawCapture<'_> {
+    match raw {
+        AnthropicRawCapture::ResponseBody { body } => ProviderRawCapture::Response {
+            crate_name: "freehand-provider-anthropic",
+            function: "AnthropicExecutor::execute_once_with_raw",
+            body,
+        },
+        AnthropicRawCapture::HttpErrorBody { status, body } => ProviderRawCapture::HttpError {
+            crate_name: "freehand-provider-anthropic",
+            function: "AnthropicExecutor::send_rendered_request",
+            status: *status,
+            body,
+        },
+        AnthropicRawCapture::StreamEventBody {
+            event_index,
+            event_body,
+        } => ProviderRawCapture::StreamEvent {
+            crate_name: "freehand-provider-anthropic",
+            function: "AnthropicExecutor::execute_stream_with_raw",
+            event_index: *event_index,
+            event_body,
+        },
+    }
+}
+
+pub fn classify_anthropic_executor_error(
+    err: &AnthropicExecutorError,
+) -> ProviderExecutorErrorInfo {
+    match err {
+        AnthropicExecutorError::HttpStatus { status, body } => ProviderExecutorErrorInfo {
+            code: format!("anthropic_http_status_{status}"),
+            message: body.clone(),
+            retryable: *status == 408
+                || *status == 409
+                || *status == 425
+                || *status == 429
+                || *status >= 500,
+            failover_eligible: true,
+        },
+        AnthropicExecutorError::Http(err) => ProviderExecutorErrorInfo {
+            code: "anthropic_http_request_failed".to_owned(),
+            message: err.to_string(),
+            retryable: err.is_connect() || err.is_timeout() || err.is_request(),
+            failover_eligible: true,
+        },
+        AnthropicExecutorError::StreamRead(err) => ProviderExecutorErrorInfo {
+            code: "anthropic_stream_read_failed".to_owned(),
+            message: err.to_string(),
+            retryable: true,
+            failover_eligible: true,
+        },
+        AnthropicExecutorError::Adapter(err) => ProviderExecutorErrorInfo {
+            code: "anthropic_adapter_failed".to_owned(),
+            message: err.to_string(),
+            retryable: false,
+            failover_eligible: false,
+        },
+        AnthropicExecutorError::InvalidConfig => ProviderExecutorErrorInfo {
+            code: "anthropic_invalid_config".to_owned(),
+            message: err.to_string(),
+            retryable: false,
+            failover_eligible: false,
+        },
+        AnthropicExecutorError::Callback(message) => ProviderExecutorErrorInfo {
+            code: "anthropic_callback_failed".to_owned(),
+            message: message.clone(),
+            retryable: false,
+            failover_eligible: false,
+        },
+    }
 }
 
 impl AnthropicExecutor {
