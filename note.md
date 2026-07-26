@@ -8557,3 +8557,57 @@ Current real root cause split:
   - Tools/Settings/Timer/Search/New use portrait-safe sheets/pages with sticky close/back.
   - long schema/log/prose must scroll or wrap internally, never widen the page.
   - layout changes preserve selected session/draft/route/scroll/pending submit/owner query state.
+
+# 2026-07-26T03:43:32Z mobile modular WebUI implementation continuation
+
+- run_id: `20260726T034240Z-Macstudio.local-8755-rbu80l`
+- scope: implement Jason's mobile WebUI tree execution, not another plan: modular split from giant `webui.js`, explicit route/edge registry, Home vs SessionDetail mutual exclusion, compact one-row Home history, phone portrait-safe Tools layout, owner-projection-only CRUD surfaces.
+- pre-edit checks refreshed: USER/profile, freehand-dev, CACHE/MEMORY/note, MemoryPalace search, app.webui-smoke function/test/mainline docs, collab kill switch/claims.
+
+# 2026-07-26T05:40:00Z mobile modular WebUI continuation
+
+- run_id: `20260726T052624Z-Macstudio.local-34723-jczbaq`
+- objective source: `/Users/fanzhang/.codex/attachments/db4fa4e5-a5cd-4bf6-9bf7-c08e347fe49f/pasted-text-1.txt` says implement, not write a plan.
+- implementation progress:
+  - Added independent surface modules for `SessionDetail`, `SessionSearch`, `NewSession`, `Settings`, plus control modules for `ToolsRegistry` and `TimerDashboard`.
+  - Legacy WebUI now delegates selected-session switching, New dialog mode/submit, SessionSearch render, Settings shell/diagnostics/nav, Tools open/refresh, and Timer open/refresh/schedule/cancel to surface modules.
+  - Asset server now serves the additional surface module files.
+  - Mobile/Android back intent now closes visible sheets/dialogs before leaving `SessionDetail`, matching the UI tree edge order.
+- verification so far:
+  - `node --check` passed for WebUI entry, bootstrap, legacy, and all WebUI submodules.
+  - `node scripts/verify-webui-layout-shapes.mjs` passed.
+  - `CARGO_TARGET_DIR=/tmp/freehand-target-mobile-modular cargo test -p freehand-server webui -- --nocapture --test-threads=1` passed 3/3 after updating asset smoke to check new modules.
+- remaining:
+  - Sync function-map/mainline/test docs/wiki/memory.
+  - Run full local gates and S-profile online verifier; Android true-device only if ADB is reachable.
+
+# 2026-07-26T06:35:00Z mobile modular WebUI validation/commit prep
+
+- run_id: `20260726T052624Z-Macstudio.local-34723-jczbaq`
+- implementation closeout:
+  - `apps/freehand-server/assets/webui.js` is a thin bootstrap shell.
+  - Split modules exist for `app-shell` (`adp-client`, `edge-registry`, `layout-shape`, `route-controller`) and surfaces `Home`, `SessionDetail`, `ToolsRegistry`, `TimerDashboard`, `Settings`, `SessionSearch`, and `NewSession`.
+  - `legacy-monolith.js` now delegates Home rendering, selected-session switching, Tools/Timer controls, Settings shell/diagnostics/nav, Search rendering, and New session controls to split modules.
+  - `apps/freehand-server/src/assets.rs` serves the split module assets.
+  - Mobile Home/Sessions route behavior follows the locked UI tree: `Home` owns running/history dashboard; `SessionDetail(session_id)` hides the Home body on phone; Android/browser Back closes visible sheets/dialogs before route exit.
+- online proof:
+  - S-profile restarted with `FREEHAND_LAUNCHD_HEALTH_WAIT_SECONDS=90 scripts/install-launchd.sh restartS` after the old daemon served stale assets.
+  - Passed: `node scripts/verify-webui-mobile-ui-tree-online.mjs`, artifact `artifacts/webui-online/mobile-ui-tree-phase1-20260726T055239-75558`; it fetched split module assets and proved Home/SessionDetail mutual exclusion, one-row/fixed-bucket Home, Settings route, and no portrait overflow.
+  - Passed: `node scripts/verify-webui-tools-registry-online.mjs`, artifact `artifacts/webui-online/webui-tools-registry-20260726T055254-75609`.
+  - Passed: `node scripts/verify-webui-timer-dashboard-online.mjs`, artifact `artifacts/webui-online/webui-timer-dashboard-20260726T055254-75611`.
+  - Passed: `node scripts/verify-webui-session-search-online.mjs`, artifact `artifacts/webui-online/webui-session-search-1785045174090`.
+  - Passed: `node scripts/verify-webui-new-session-online.mjs`, artifact `artifacts/webui-online/webui-new-session-1785045244650`.
+- local validation:
+  - Passed JS checks for `apps/freehand-server/assets/webui.js`, `apps/freehand-server/assets/webui/bootstrap.js`, all split `apps/freehand-server/assets/webui/**/*.js`, and touched WebUI verifiers.
+  - Passed `node scripts/verify-webui-layout-shapes.mjs`.
+  - Passed `CARGO_TARGET_DIR=/tmp/freehand-target-mobile-modular cargo test -p freehand-server webui -- --nocapture --test-threads=1`.
+  - Passed `CARGO_TARGET_DIR=/tmp/freehand-target-mobile-modular cargo test -p freehand-daemon -- --test-threads=1` 21/21 after updating daemon tests for current Master tool exposure and continuation-round user_text projection.
+  - Passed `CARGO_TARGET_DIR=/tmp/freehand-target-mobile-modular cargo test -p freehand-cli --test config_startup -- --test-threads=1` 27/27 after updating the same Master tool exposure expectation.
+  - Passed focused runtime regression `active_live_cancel_returns_before_provider_finishes_and_blocks_success_projection` after fixing its provider-release synchronization timeout.
+  - Passed `cargo fmt --check`, `cargo build --workspace`, `cargo clippy --workspace --all-targets -- -D warnings`, `cargo run -p xtask -- mainlines check`, `cargo run -p xtask -- gates check`, and `git diff --check`.
+- explicit gaps:
+  - `cargo test --workspace` was interrupted once after `freehand-runtime` live tests stalled; targeted sample showed `active_live_cancel...` was waiting on provider release. The synchronization bug was fixed and its focused test passed.
+  - Full serial `cargo test -p freehand-runtime -- --test-threads=1` is still not green: 241/250 passed, 9 failed in pre-existing adjacent live/autonomy/worker expectations (`live_bridge_admits_long_operator_task_without_semantic_truncation`, three Master autonomy tests, failed-tool projection, non-default session ordinal restore, `master_create_gate_rejects_implicit_dispatch_without_task_mutation`, `runtime_task_tool_mutation_publishes_task_list_projection`, and `production_worker_runner_clean_search_blocks_when_provider_has_no_hosted_search`). These are outside the WebUI modular surface owner slice and are not claimed closed.
+  - Android true-device proof is blocked by lockscreen, not missing ADB: `adb connect 100.104.163.65:5555` succeeded, `verify-device-ui.sh` artifact `artifacts/android-device/20260726T062015Z-100.104.163.65_5555-9796` reports `device_locked_or_dreaming` with `mCurrentFocus=NotificationShade`, `mFocusedApp=com.freehand.android/.ui.MainActivity`, and `mDreamingLockscreen=true`. `node scripts/verify-mobile-ui-tree-goal-audit.mjs` now reports `mobile_ui_tree_goal_audit_blocked` with 18 passed and 1 blocked.
+- lesson:
+  - When WebUI is split into module assets, server asset smoke is not enough. The online verifier must fetch all module assets and capture browser runtime exceptions; the first stale-daemon run and `toolRegistryTools` `ReferenceError` proved that syntax/asset checks alone do not prove live bootstrap execution.

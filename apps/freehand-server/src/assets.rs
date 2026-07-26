@@ -27,6 +27,131 @@ const WEBUI_JS: Asset = Asset {
     body: include_str!("../assets/webui.js"),
 };
 
+const WEBUI_BOOTSTRAP_JS: Asset = Asset {
+    content_type: "application/javascript; charset=utf-8",
+    body: include_str!("../assets/webui/bootstrap.js"),
+};
+
+const WEBUI_LEGACY_MONOLITH_JS: Asset = Asset {
+    content_type: "application/javascript; charset=utf-8",
+    body: include_str!("../assets/webui/legacy-monolith.js"),
+};
+
+const WEBUI_LAYOUT_SHAPE_JS: Asset = Asset {
+    content_type: "application/javascript; charset=utf-8",
+    body: include_str!("../assets/webui/app-shell/layout-shape.js"),
+};
+
+const WEBUI_EDGE_REGISTRY_JS: Asset = Asset {
+    content_type: "application/javascript; charset=utf-8",
+    body: include_str!("../assets/webui/app-shell/edge-registry.js"),
+};
+
+const WEBUI_ROUTE_CONTROLLER_JS: Asset = Asset {
+    content_type: "application/javascript; charset=utf-8",
+    body: include_str!("../assets/webui/app-shell/route-controller.js"),
+};
+
+const WEBUI_ADP_CLIENT_JS: Asset = Asset {
+    content_type: "application/javascript; charset=utf-8",
+    body: include_str!("../assets/webui/app-shell/adp-client.js"),
+};
+
+const WEBUI_SURFACE_HOME_DASHBOARD_JS: Asset = Asset {
+    content_type: "application/javascript; charset=utf-8",
+    body: include_str!("../assets/webui/surfaces/home-dashboard/index.js"),
+};
+
+const WEBUI_SURFACE_HOME_DASHBOARD_MODEL_JS: Asset = Asset {
+    content_type: "application/javascript; charset=utf-8",
+    body: include_str!("../assets/webui/surfaces/home-dashboard/model.js"),
+};
+
+const WEBUI_SURFACE_HOME_DASHBOARD_VIEW_JS: Asset = Asset {
+    content_type: "application/javascript; charset=utf-8",
+    body: include_str!("../assets/webui/surfaces/home-dashboard/view.js"),
+};
+
+const WEBUI_SURFACE_HOME_DASHBOARD_CONTROLS_JS: Asset = Asset {
+    content_type: "application/javascript; charset=utf-8",
+    body: include_str!("../assets/webui/surfaces/home-dashboard/controls.js"),
+};
+
+const WEBUI_SURFACE_SESSION_DETAIL_JS: Asset = Asset {
+    content_type: "application/javascript; charset=utf-8",
+    body: include_str!("../assets/webui/surfaces/session-detail/index.js"),
+};
+
+const WEBUI_SURFACE_SESSION_DETAIL_CONTROLS_JS: Asset = Asset {
+    content_type: "application/javascript; charset=utf-8",
+    body: include_str!("../assets/webui/surfaces/session-detail/controls.js"),
+};
+
+const WEBUI_SURFACE_TOOLS_REGISTRY_JS: Asset = Asset {
+    content_type: "application/javascript; charset=utf-8",
+    body: include_str!("../assets/webui/surfaces/tools-registry/index.js"),
+};
+
+const WEBUI_SURFACE_TOOLS_REGISTRY_VIEW_JS: Asset = Asset {
+    content_type: "application/javascript; charset=utf-8",
+    body: include_str!("../assets/webui/surfaces/tools-registry/view.js"),
+};
+
+const WEBUI_SURFACE_TOOLS_REGISTRY_CONTROLS_JS: Asset = Asset {
+    content_type: "application/javascript; charset=utf-8",
+    body: include_str!("../assets/webui/surfaces/tools-registry/controls.js"),
+};
+
+const WEBUI_SURFACE_TIMER_DASHBOARD_JS: Asset = Asset {
+    content_type: "application/javascript; charset=utf-8",
+    body: include_str!("../assets/webui/surfaces/timer-dashboard/index.js"),
+};
+
+const WEBUI_SURFACE_TIMER_DASHBOARD_VIEW_JS: Asset = Asset {
+    content_type: "application/javascript; charset=utf-8",
+    body: include_str!("../assets/webui/surfaces/timer-dashboard/view.js"),
+};
+
+const WEBUI_SURFACE_TIMER_DASHBOARD_CONTROLS_JS: Asset = Asset {
+    content_type: "application/javascript; charset=utf-8",
+    body: include_str!("../assets/webui/surfaces/timer-dashboard/controls.js"),
+};
+
+const WEBUI_SURFACE_SETTINGS_JS: Asset = Asset {
+    content_type: "application/javascript; charset=utf-8",
+    body: include_str!("../assets/webui/surfaces/settings/index.js"),
+};
+
+const WEBUI_SURFACE_SETTINGS_VIEW_JS: Asset = Asset {
+    content_type: "application/javascript; charset=utf-8",
+    body: include_str!("../assets/webui/surfaces/settings/view.js"),
+};
+
+const WEBUI_SURFACE_SETTINGS_DIAGNOSTICS_JS: Asset = Asset {
+    content_type: "application/javascript; charset=utf-8",
+    body: include_str!("../assets/webui/surfaces/settings/diagnostics.js"),
+};
+
+const WEBUI_SURFACE_SESSION_SEARCH_JS: Asset = Asset {
+    content_type: "application/javascript; charset=utf-8",
+    body: include_str!("../assets/webui/surfaces/session-search/index.js"),
+};
+
+const WEBUI_SURFACE_SESSION_SEARCH_VIEW_JS: Asset = Asset {
+    content_type: "application/javascript; charset=utf-8",
+    body: include_str!("../assets/webui/surfaces/session-search/view.js"),
+};
+
+const WEBUI_SURFACE_NEW_SESSION_JS: Asset = Asset {
+    content_type: "application/javascript; charset=utf-8",
+    body: include_str!("../assets/webui/surfaces/new-session/index.js"),
+};
+
+const WEBUI_SURFACE_NEW_SESSION_CONTROLS_JS: Asset = Asset {
+    content_type: "application/javascript; charset=utf-8",
+    body: include_str!("../assets/webui/surfaces/new-session/controls.js"),
+};
+
 const LOGO_PNG: &[u8] = include_bytes!("../../../assets/logo.png");
 
 pub fn asset_response(path: &str) -> Result<Response, StatusCode> {
@@ -35,6 +160,31 @@ pub fn asset_response(path: &str) -> Result<Response, StatusCode> {
         "webui.css" => &WEBUI_CSS,
         "theme.js" => &THEME_JS,
         "webui.js" => &WEBUI_JS,
+        "webui/bootstrap.js" => &WEBUI_BOOTSTRAP_JS,
+        "webui/legacy-monolith.js" => &WEBUI_LEGACY_MONOLITH_JS,
+        "webui/app-shell/layout-shape.js" => &WEBUI_LAYOUT_SHAPE_JS,
+        "webui/app-shell/edge-registry.js" => &WEBUI_EDGE_REGISTRY_JS,
+        "webui/app-shell/route-controller.js" => &WEBUI_ROUTE_CONTROLLER_JS,
+        "webui/app-shell/adp-client.js" => &WEBUI_ADP_CLIENT_JS,
+        "webui/surfaces/home-dashboard/index.js" => &WEBUI_SURFACE_HOME_DASHBOARD_JS,
+        "webui/surfaces/home-dashboard/model.js" => &WEBUI_SURFACE_HOME_DASHBOARD_MODEL_JS,
+        "webui/surfaces/home-dashboard/view.js" => &WEBUI_SURFACE_HOME_DASHBOARD_VIEW_JS,
+        "webui/surfaces/home-dashboard/controls.js" => &WEBUI_SURFACE_HOME_DASHBOARD_CONTROLS_JS,
+        "webui/surfaces/session-detail/index.js" => &WEBUI_SURFACE_SESSION_DETAIL_JS,
+        "webui/surfaces/session-detail/controls.js" => &WEBUI_SURFACE_SESSION_DETAIL_CONTROLS_JS,
+        "webui/surfaces/tools-registry/index.js" => &WEBUI_SURFACE_TOOLS_REGISTRY_JS,
+        "webui/surfaces/tools-registry/view.js" => &WEBUI_SURFACE_TOOLS_REGISTRY_VIEW_JS,
+        "webui/surfaces/tools-registry/controls.js" => &WEBUI_SURFACE_TOOLS_REGISTRY_CONTROLS_JS,
+        "webui/surfaces/timer-dashboard/index.js" => &WEBUI_SURFACE_TIMER_DASHBOARD_JS,
+        "webui/surfaces/timer-dashboard/view.js" => &WEBUI_SURFACE_TIMER_DASHBOARD_VIEW_JS,
+        "webui/surfaces/timer-dashboard/controls.js" => &WEBUI_SURFACE_TIMER_DASHBOARD_CONTROLS_JS,
+        "webui/surfaces/settings/index.js" => &WEBUI_SURFACE_SETTINGS_JS,
+        "webui/surfaces/settings/view.js" => &WEBUI_SURFACE_SETTINGS_VIEW_JS,
+        "webui/surfaces/settings/diagnostics.js" => &WEBUI_SURFACE_SETTINGS_DIAGNOSTICS_JS,
+        "webui/surfaces/session-search/index.js" => &WEBUI_SURFACE_SESSION_SEARCH_JS,
+        "webui/surfaces/session-search/view.js" => &WEBUI_SURFACE_SESSION_SEARCH_VIEW_JS,
+        "webui/surfaces/new-session/index.js" => &WEBUI_SURFACE_NEW_SESSION_JS,
+        "webui/surfaces/new-session/controls.js" => &WEBUI_SURFACE_NEW_SESSION_CONTROLS_JS,
         "logo.png" => {
             return Response::builder()
                 .header(header::CONTENT_TYPE, HeaderValue::from_static("image/png"))

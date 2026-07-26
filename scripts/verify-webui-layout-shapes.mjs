@@ -1,18 +1,9 @@
 import assert from 'node:assert/strict';
-import { readFile } from 'node:fs/promises';
 
-const source = await readFile(new URL('../apps/freehand-server/assets/webui.js', import.meta.url), 'utf8');
-const functionMatch = source.match(/export function classifyLayoutShape[\s\S]*?\n}\n\nfunction isMobileDrawerLayout/);
-assert(functionMatch, 'classifyLayoutShape export must exist before DOM bindings');
-
-const functionSource = functionMatch[0]
-  .replace('export function classifyLayoutShape', 'function classifyLayoutShape')
-  .replace('export function classifyLayoutShapeForClient', 'function classifyLayoutShapeForClient')
-  .replace('\n\nfunction isMobileDrawerLayout', '');
-
-const { classifyLayoutShape, classifyLayoutShapeForClient } = Function(
-  `${functionSource}; return { classifyLayoutShape, classifyLayoutShapeForClient };`,
-)();
+const {
+  classifyLayoutShape,
+  classifyLayoutShapeForClient,
+} = await import('../apps/freehand-server/assets/webui/app-shell/layout-shape.js');
 
 const cases = [
   { width: 375, height: 812, expected: 'tall_phone' },

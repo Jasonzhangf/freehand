@@ -609,7 +609,8 @@ mod tests {
         assert!(first_request.starts_with("POST /v1/messages HTTP/1.1"));
         assert!(first_request.contains("\"name\":\"task\""));
         assert!(first_request.contains("\"name\":\"timer\""));
-        assert!(!first_request.contains("\"name\":\"read_file\""));
+        assert!(first_request.contains("\"name\":\"read_file\""));
+        assert!(!first_request.contains("\"name\":\"bash\""));
         assert!(second_request.contains("\"type\":\"tool_result\""));
         assert!(second_request.contains("toolu_task_1"));
         assert!(!second_request.contains("Cargo.toml"));
@@ -623,14 +624,19 @@ mod tests {
         let queried: UiPublicTurnProjection = queried.json().await.expect("query json");
         assert_eq!(queried.turn.turn_id, TurnId::new("runtime-turn-1-r2"));
         assert_eq!(queried.turn.source.source_node_id, "master-node");
-        assert_eq!(queried.turn.user_text.as_deref(), Some("daemon turn"));
-        assert_eq!(queried.public_conversation[0].body, "daemon turn");
+        assert_eq!(queried.turn.user_text, None);
         assert!(
             queried
                 .turn
                 .terminal_text
                 .as_deref()
                 .is_some_and(|text| text.contains("Summary: tool done"))
+        );
+        assert!(
+            queried
+                .public_conversation
+                .iter()
+                .any(|item| item.body.contains("Summary: tool done"))
         );
 
         server.stop().await;
@@ -755,7 +761,8 @@ mod tests {
                 result: UiQueryResult::Turn(Some(turn)),
             } => {
                 assert_eq!(request_id, "query-1");
-                assert_eq!(turn.user_text.as_deref(), Some("daemon adp turn"));
+                assert_eq!(turn.turn_id, TurnId::new("runtime-turn-1-r2"));
+                assert_eq!(turn.user_text, None);
                 assert!(
                     turn.terminal_text
                         .as_deref()

@@ -4643,7 +4643,7 @@ fn live_master_rejects_waiting_when_child_tasks_are_terminal_and_no_owner_will_w
         |_| {},
     )
     .expect("stale waiting must repair to non-running terminal state");
-    let requests = vec![
+    let requests = [
         rx.recv_timeout(Duration::from_secs(2))
             .expect("initial provider request"),
         rx.recv_timeout(Duration::from_secs(2))
@@ -9577,8 +9577,7 @@ fn live_bridge_sends_image_payload_once_and_persists_metadata_only() {
         .as_array()
         .expect("second messages")
         .iter()
-        .filter(|message| message["role"] == json!("user"))
-        .last()
+        .rfind(|message| message["role"] == json!("user"))
         .expect("tool-result user message")["content"]
         .as_array()
         .expect("tool result content");
@@ -11479,7 +11478,7 @@ fn active_live_cancel_returns_before_provider_finishes_and_blocks_success_projec
         )
         .to_owned();
     let remaining_chunks = complete_stream_response("late success");
-    let (base_url, _rx, released_rx, continue_tx, handle) =
+    let (base_url, request_rx, released_rx, continue_tx, handle) =
         spawn_incremental_stream_server(first_chunk, remaining_chunks);
     let runtime = Arc::new(
         RuntimeCommandDispatcher::from_selected_agent_with_live(
@@ -11514,6 +11513,9 @@ fn active_live_cancel_returns_before_provider_finishes_and_blocks_success_projec
         }
         thread::sleep(Duration::from_millis(10));
     }
+    request_rx
+        .recv_timeout(Duration::from_secs(5))
+        .expect("provider request before stream cancel");
 
     let cancel_receipt = runtime
         .dispatch(
@@ -11550,7 +11552,9 @@ fn active_live_cancel_returns_before_provider_finishes_and_blocks_success_projec
     }
 
     continue_tx.send(()).expect("release provider");
-    let released = released_rx.recv().expect("release status");
+    let released = released_rx
+        .recv_timeout(Duration::from_secs(5))
+        .expect("release status");
     assert!(released);
     let submit_err = submit_handle
         .join()

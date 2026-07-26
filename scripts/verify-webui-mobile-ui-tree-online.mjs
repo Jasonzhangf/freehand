@@ -9,7 +9,7 @@ const debugPort = Number.parseInt(process.env.FREEHAND_WEBUI_DEBUG_PORT || '9247
 const baseUrl = normalizedBaseUrl(process.env.FREEHAND_WEBUI_BASE_URL || 'http://127.0.0.1:4042/');
 const runId = `mobile-ui-tree-phase1-${new Date().toISOString().replace(/[-:.]/g, '').slice(0, 15)}-${process.pid}`;
 const artifactDir = path.join(process.cwd(), 'artifacts', 'webui-online', runId);
-const assetVersion = '20260725-session-panel-ui';
+const assetVersion = '20260726-mobile-route-one-row';
 const forbiddenUiTerms = [
   /rootfs/i,
   /shared-folder/i,
@@ -80,12 +80,14 @@ try {
       !!document.getElementById('mobile-home-dashboard');
   }, 20_000, 'production WebUI shell 就绪');
 
+  const moduleAssets = await captureModuleAssets();
   const snapshots = [];
   for (const viewport of viewports) {
     snapshots.push(await captureViewport(cdp, viewport));
   }
+  const sessionDetail = await captureSessionDetailRoute(cdp);
   const settings = await captureSettingsTree(cdp);
-  const summary = buildSummary({ snapshots, settings });
+  const summary = buildSummary({ snapshots, sessionDetail, settings, moduleAssets });
   await fs.writeFile(path.join(artifactDir, 'summary.json'), JSON.stringify(summary, null, 2));
 
   const failed = Object.entries(summary.checks)
@@ -140,6 +142,62 @@ async function captureViewport(cdp, viewport) {
   return result;
 }
 
+async function captureSessionDetailRoute(cdp) {
+  await cdp.send('Emulation.setDeviceMetricsOverride', {
+    width: 390,
+    height: 844,
+    deviceScaleFactor: 2,
+    mobile: true,
+  });
+  await evalInPage(cdp, () => {
+    window.dispatchEvent(new Event('resize'));
+    window.__freehandLayout?.applyLayoutShape?.();
+  });
+  await delay(350);
+  const clickResult = await evalInPage(cdp, () => {
+    const row = document.querySelector('#mobile-home-dashboard [data-session-id] .mobile-home-session-open');
+    if (!row) {
+      return { clicked: false, reason: 'no_session_row' };
+    }
+    const host = row.closest('[data-session-id]');
+    row.click();
+    return { clicked: true, sessionId: host?.dataset.sessionId || '' };
+  });
+  if (!clickResult.clicked) {
+    const state = await evalInPage(cdp, collectPhaseOneState);
+    const result = { skipped: true, reason: clickResult.reason, state };
+    await fs.writeFile(path.join(artifactDir, 'session-detail-route.json'), JSON.stringify(result, null, 2));
+    return result;
+  }
+  await waitForFunction(cdp, (sessionId) => {
+    return document.body.dataset.webuiRoute === 'session_detail' &&
+      document.querySelector('[data-webui-shell="true"]')?.dataset.routeSession === sessionId &&
+      !isVisibleForVerifier(document.getElementById('mobile-home-dashboard')) &&
+      isVisibleForVerifier(document.querySelector('.conversation-region'));
+
+    function isVisibleForVerifier(node) {
+      if (!node || node.hidden) return false;
+      const style = getComputedStyle(node);
+      const rect = node.getBoundingClientRect();
+      return style.display !== 'none' &&
+        style.visibility !== 'hidden' &&
+        Number.parseFloat(style.opacity || '1') > 0 &&
+        rect.width > 0 &&
+        rect.height > 0;
+    }
+  }, 12_000, 'SessionDetail route mutual exclusion', clickResult.sessionId);
+  const state = await evalInPage(cdp, collectPhaseOneState);
+  const screenshot = await cdp.send('Page.captureScreenshot', {
+    format: 'png',
+    captureBeyondViewport: true,
+  });
+  const screenshotName = 'session-detail-route.png';
+  await fs.writeFile(path.join(artifactDir, screenshotName), Buffer.from(screenshot.data, 'base64'));
+  const result = { skipped: false, clicked: clickResult, screenshot: screenshotName, state };
+  await fs.writeFile(path.join(artifactDir, 'session-detail-route.json'), JSON.stringify(result, null, 2));
+  return result;
+}
+
 async function captureSettingsTree(cdp) {
   await cdp.send('Emulation.setDeviceMetricsOverride', {
     width: 390,
@@ -191,6 +249,49 @@ async function captureSettingsTree(cdp) {
   };
   await fs.writeFile(path.join(artifactDir, 'settings-tree.json'), JSON.stringify(result, null, 2));
   return result;
+}
+
+async function captureModuleAssets() {
+  const modules = [
+    'assets/webui/app-shell/adp-client.js',
+    'assets/webui/app-shell/route-controller.js',
+    'assets/webui/app-shell/edge-registry.js',
+    'assets/webui/app-shell/layout-shape.js',
+    'assets/webui/surfaces/home-dashboard/index.js',
+    'assets/webui/surfaces/home-dashboard/view.js',
+    'assets/webui/surfaces/home-dashboard/model.js',
+    'assets/webui/surfaces/home-dashboard/controls.js',
+    'assets/webui/surfaces/session-detail/index.js',
+    'assets/webui/surfaces/session-detail/controls.js',
+    'assets/webui/surfaces/tools-registry/index.js',
+    'assets/webui/surfaces/tools-registry/view.js',
+    'assets/webui/surfaces/tools-registry/controls.js',
+    'assets/webui/surfaces/timer-dashboard/index.js',
+    'assets/webui/surfaces/timer-dashboard/view.js',
+    'assets/webui/surfaces/timer-dashboard/controls.js',
+    'assets/webui/surfaces/settings/index.js',
+    'assets/webui/surfaces/settings/view.js',
+    'assets/webui/surfaces/settings/diagnostics.js',
+    'assets/webui/surfaces/session-search/index.js',
+    'assets/webui/surfaces/session-search/view.js',
+    'assets/webui/surfaces/new-session/index.js',
+    'assets/webui/surfaces/new-session/controls.js',
+  ];
+  const results = [];
+  for (const assetPath of modules) {
+    const response = await fetch(new URL(assetPath, baseUrl), { cache: 'no-store' });
+    const text = await response.text();
+    results.push({
+      assetPath,
+      ok: response.ok,
+      status: response.status,
+      containsModuleSyntax: /export\s+/.test(text),
+      textContainsSurface:
+        /home-dashboard|session-detail|tools-registry|timer-dashboard|settings|session-search|new-session|createAdpClient|createRouteController|edge-registry|classifyLayoutShape|renderHomeDashboard|createHomeDashboardModel|setSelectedSessionId|openToolsRegistrySurface|openTimerDashboardSurface/.test(text) ||
+        /assets\/webui\/(app-shell|surfaces)\//.test(assetPath),
+    });
+  }
+  return results;
 }
 
 async function navigateSettingsPage(cdp, currentPage, targetPage) {
@@ -250,7 +351,7 @@ async function captureSettingsSnapshot(cdp, fileBase) {
   return result;
 }
 
-function buildSummary({ snapshots, settings }) {
+function buildSummary({ snapshots, sessionDetail, settings, moduleAssets }) {
   const portraitSnapshots = snapshots.filter((snapshot) =>
     ['phone_portrait', 'tall_phone', 'tablet_portrait'].includes(snapshot.state.layoutShape)
   );
@@ -273,7 +374,9 @@ function buildSummary({ snapshots, settings }) {
     artifactDir,
     assetVersion,
     snapshots,
+    sessionDetail,
     settings,
+    moduleAssets,
     checks: {
       productionAssetVersion: snapshots.every((snapshot) => snapshot.state.assetVersionSeen),
       viewportMatrixCovered: snapshots.length === viewports.length,
@@ -283,23 +386,46 @@ function buildSummary({ snapshots, settings }) {
       desktopDoesNotForceMobileHome: snapshots
         .filter((snapshot) => snapshot.viewport.width >= 1180)
         .every((snapshot) => !snapshot.state.mobileHomeDashboardVisible),
+      sessionDetailMutualExclusion:
+        sessionDetail &&
+        !sessionDetail.skipped &&
+        sessionDetail.state.webuiRoute === 'session_detail' &&
+        sessionDetail.state.shellRoute === 'session_detail' &&
+        !sessionDetail.state.mobileHomeDashboardVisible &&
+        sessionDetail.state.conversationRegionVisible &&
+        sessionDetail.state.sessionRelationHeaderVisible &&
+        !sessionDetail.state.mobileAgentSummaryVisible,
+      mobileHistoryBucketsFixed: portraitSnapshots.every((snapshot) =>
+        snapshot.state.mobileHomeBucketLabels.join(',') === '今天,过去一周,所有更早的'
+      ),
+      mobileRowsSingleLine: portraitSnapshots.every((snapshot) =>
+        snapshot.state.mobileHomeHistoryRows.every((row) =>
+          row.height <= 42 &&
+          row.hasActions &&
+          row.hasRenameAction &&
+          row.hasRemoveAction &&
+          row.sessionKind !== 'worker' &&
+          row.openButtonHeight <= 32
+        )
+      ),
       globalSessionListExcludesInternalSessions: !internalSessionTerms.some((pattern) => pattern.test(globalSessionText)),
       homeShowsOnlyActivityAndHistory: portraitSnapshots.every((snapshot) =>
         snapshot.state.mobileHomeActiveVisible &&
         snapshot.state.mobileHomeHistoryVisible &&
         snapshot.state.mobileHomeRunningClass &&
         snapshot.state.mobileHomeStaticClass &&
-        snapshot.state.mobileHomeCardCount === 2 &&
         snapshot.state.mobileHomeRunningHistoryOverlap.length === 0 &&
         !snapshot.state.mobileHomeFloatingTree &&
         snapshot.state.mobileHomeText.includes('正在运行') &&
         snapshot.state.mobileHomeText.includes('历史会话') &&
+        !snapshot.state.mobileHomeText.includes('waitingUser') &&
         !snapshot.state.homeHasTimerList &&
         !snapshot.state.homeHasTimerMarker &&
         !snapshot.state.homeHasCurrentCard &&
         !snapshot.state.homeHasNewEntryButtonInsideHome &&
         !snapshot.state.mobileHomeText.includes('timer dashboard') &&
-        !snapshot.state.mobileHomeText.includes('Timer 权威真源')
+        !snapshot.state.mobileHomeText.includes('Timer 权威真源') &&
+        snapshot.state.mobileHomeCardCount >= 2
       ),
       settingsRootOnlyTopLevel:
         rootSettings.settingsPage === 'root' &&
@@ -353,6 +479,8 @@ function buildSummary({ snapshots, settings }) {
       settingsPartialMarkersPresent: rootSettings.statusMarkerToneCounts.partial > 0,
       settingsAttentionMarkersPresent: rootSettings.statusMarkerToneCounts.attention > 0,
       diagnosticsIsObservabilityDetail: rootSettings.diagnosticsPageExists && rootSettings.diagnosticsGroup === 'observability',
+      modularWebuiAssets: Array.isArray(moduleAssets) && moduleAssets.length > 0 && moduleAssets.every((asset) => asset.ok && asset.containsModuleSyntax),
+      modularSurfaceAssets: Array.isArray(moduleAssets) && moduleAssets.every((asset) => asset.textContainsSurface),
       noForbiddenUiStorageTerms: !forbiddenUiTerms.some((pattern) => pattern.test(allTexts)),
       statusMarkersAreHollow: rootSettings.statusMarkerCount > 0 && rootSettings.statusMarkerAllHollow,
     },
@@ -454,7 +582,11 @@ function collectPhaseOneState() {
   return {
     layoutShape: document.body.dataset.layoutShape || '',
     shellLayoutShape: shell?.dataset.layoutShape || '',
-    assetVersionSeen: html.includes('20260725-session-panel-ui'),
+    webuiRoute: document.body.dataset.webuiRoute || '',
+    shellRoute: shell?.dataset.webuiRoute || '',
+    routeSession: shell?.dataset.routeSession || '',
+    selectedSession: shell?.dataset.selectedSession || '',
+    assetVersionSeen: html.includes('20260726-mobile-route-one-row'),
     bodyText,
     bodyWidth: document.body.scrollWidth,
     docWidth: document.documentElement.scrollWidth,
@@ -466,14 +598,31 @@ function collectPhaseOneState() {
     mobileHomeText: document.getElementById('mobile-home-dashboard')?.innerText || '',
     mobileHomeActiveVisible: localIsVisible(document.getElementById('mobile-home-active-list')),
     mobileHomeHistoryVisible: localIsVisible(document.getElementById('mobile-home-session-list')),
+    mobileHomeSessionCountVisible: localIsVisible(document.getElementById('mobile-home-session-count')),
+    conversationRegionVisible: localIsVisible(document.querySelector('.conversation-region')),
+    sessionRelationHeaderVisible: localIsVisible(document.getElementById('session-relation-header')),
+    mobileAgentSummaryVisible: localIsVisible(document.getElementById('mobile-agent-summary-strip')),
     mobileHomeRunningClass: document.getElementById('mobile-home-active-list')?.classList.contains('mobile-running-session-list') || false,
     mobileHomeStaticClass: document.getElementById('mobile-home-session-list')?.classList.contains('mobile-static-session-list') || false,
+    mobileHomeBucketLabels: Array.from(document.querySelectorAll('#mobile-home-session-list .mobile-home-history-bucket span')).map((node) => node.textContent?.trim() || ''),
     mobileHomeRunningIds: Array.from(document.querySelectorAll('#mobile-home-active-list [data-session-id]'))
       .map((node) => node.dataset.sessionId || '')
       .filter(Boolean),
     mobileHomeHistoryIds: Array.from(document.querySelectorAll('#mobile-home-session-list [data-session-id]'))
       .map((node) => node.dataset.sessionId || '')
       .filter(Boolean),
+    mobileHomeHistoryRows: Array.from(document.querySelectorAll('#mobile-home-session-list .mobile-home-session-item')).map((node) => ({
+      sessionId: node.dataset.sessionId || '',
+      sessionKind: node.dataset.sessionKind || '',
+      height: localRectOf(node).height,
+      width: localRectOf(node).width,
+      openButtonHeight: localRectOf(node.querySelector('.mobile-home-session-open')).height,
+      lineCount: (node.innerText || '').split('\n').length,
+      hasActions: !!node.querySelector('.mobile-home-session-actions'),
+      hasRenameAction: !!node.querySelector('[data-session-action="rename"]'),
+      hasRemoveAction: !!node.querySelector('[data-session-action="remove"]'),
+      text: node.innerText || '',
+    })),
     mobileHomeRunningHistoryOverlap: (() => {
       const running = new Set(Array.from(document.querySelectorAll('#mobile-home-active-list [data-session-id]'))
         .map((node) => node.dataset.sessionId || '')
@@ -483,6 +632,7 @@ function collectPhaseOneState() {
         .filter((sessionId) => sessionId && running.has(sessionId));
     })(),
     mobileHomeCardCount: document.querySelectorAll('#mobile-home-dashboard .mobile-home-card').length,
+    mobileHomeHistoryGroupCount: document.querySelectorAll('#mobile-home-session-list .mobile-home-history-bucket').length,
     mobileHomeFloatingTree: (() => {
       const dropdown = document.getElementById('session-tree-dropdown');
       if (!dropdown) return false;

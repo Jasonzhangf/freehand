@@ -1371,6 +1371,29 @@ body.theme-dark .status-pill {
   transform: rotate(180deg);
 }
 
+.session-agent-sheet-button {
+  display: none;
+  place-items: center;
+  width: 40px;
+  min-width: 40px;
+  min-height: 40px;
+  border: 1px solid rgba(31, 108, 88, 0.16);
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.86);
+  color: var(--master);
+  cursor: pointer;
+}
+
+.session-agent-sheet-button svg {
+  width: 20px;
+  height: 20px;
+  fill: none;
+  stroke: currentColor;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+  stroke-width: 1.8;
+}
+
 .session-tree-dropdown {
   position: static;
   max-height: min(34vh, 320px);
@@ -4527,7 +4550,7 @@ body[data-layout-shape="tablet_portrait"] .session-relation-header {
 body[data-layout-shape="phone_portrait"] .session-dashbar-row,
 body[data-layout-shape="tall_phone"] .session-dashbar-row,
 body[data-layout-shape="tablet_portrait"] .session-dashbar-row {
-  grid-template-columns: minmax(0, 1fr);
+  grid-template-columns: minmax(0, 1fr) auto;
 }
 
 body[data-layout-shape="phone_portrait"] .session-dashbar,
@@ -4538,6 +4561,12 @@ body[data-layout-shape="tablet_portrait"] .session-dashbar {
   border-color: var(--mobile-agent-border);
   border-radius: 15px;
   background: var(--mobile-agent-panel);
+}
+
+body[data-layout-shape="phone_portrait"] .session-agent-sheet-button,
+body[data-layout-shape="tall_phone"] .session-agent-sheet-button,
+body[data-layout-shape="tablet_portrait"] .session-agent-sheet-button {
+  display: grid;
 }
 
 body[data-layout-shape="phone_portrait"] .session-dashbar-copy,
@@ -4581,7 +4610,7 @@ body[data-layout-shape="tablet_portrait"] .drawer-close-button {
 body[data-layout-shape="phone_portrait"] .mobile-agent-summary-strip,
 body[data-layout-shape="tall_phone"] .mobile-agent-summary-strip,
 body[data-layout-shape="tablet_portrait"] .mobile-agent-summary-strip {
-  display: block;
+  display: none;
   margin: 6px 8px 2px;
 }
 
@@ -5056,6 +5085,24 @@ body[data-layout-shape="tablet_portrait"] .mobile-home-dashboard {
   overflow: auto;
 }
 
+body[data-layout-shape="phone_portrait"][data-webui-route="session_detail"] .mobile-home-dashboard,
+body[data-layout-shape="tall_phone"][data-webui-route="session_detail"] .mobile-home-dashboard,
+body[data-layout-shape="tablet_portrait"][data-webui-route="session_detail"] .mobile-home-dashboard {
+  display: none !important;
+}
+
+body[data-layout-shape="phone_portrait"][data-webui-route="home_dashboard"] .conversation-region,
+body[data-layout-shape="tall_phone"][data-webui-route="home_dashboard"] .conversation-region,
+body[data-layout-shape="tablet_portrait"][data-webui-route="home_dashboard"] .conversation-region,
+body[data-layout-shape="phone_portrait"][data-webui-route="home_dashboard"] .mobile-agent-summary-strip,
+body[data-layout-shape="tall_phone"][data-webui-route="home_dashboard"] .mobile-agent-summary-strip,
+body[data-layout-shape="tablet_portrait"][data-webui-route="home_dashboard"] .mobile-agent-summary-strip,
+body[data-layout-shape="phone_portrait"][data-webui-route="home_dashboard"] .session-relation-header,
+body[data-layout-shape="tall_phone"][data-webui-route="home_dashboard"] .session-relation-header,
+body[data-layout-shape="tablet_portrait"][data-webui-route="home_dashboard"] .session-relation-header {
+  display: none !important;
+}
+
 .mobile-home-card {
   min-width: 0;
   display: grid;
@@ -5124,15 +5171,15 @@ body[data-layout-shape="tablet_portrait"] .mobile-home-dashboard {
 .mobile-home-session-item {
   min-width: 0;
   display: grid;
-  grid-template-columns: auto minmax(0, 1fr) auto;
-  gap: 7px;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 5px;
   align-items: center;
   width: 100%;
   border: 1px solid rgba(43, 66, 58, 0.10);
-  border-radius: 13px;
+  border-radius: 11px;
   background: rgba(255, 255, 255, 0.54);
   color: inherit;
-  padding: 8px;
+  padding: 5px 6px;
   text-align: left;
 }
 
@@ -5147,10 +5194,74 @@ body[data-layout-shape="tablet_portrait"] .mobile-home-dashboard {
   background: rgba(250, 247, 238, 0.78);
 }
 
-.mobile-home-session-copy {
+.mobile-home-session-open {
   min-width: 0;
   display: grid;
-  gap: 1px;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  gap: 5px;
+  align-items: center;
+  width: 100%;
+  border: 0;
+  background: transparent;
+  color: inherit;
+  padding: 0;
+  text-align: left;
+}
+
+.mobile-home-session-actions {
+  display: inline-flex;
+  gap: 3px;
+}
+
+.mobile-home-session-actions button {
+  border: 1px solid rgba(31, 108, 88, 0.14);
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.82);
+  color: var(--text-soft);
+  min-width: 24px;
+  height: 24px;
+  padding: 0 5px;
+  font-size: 9px;
+  line-height: 1;
+  white-space: nowrap;
+}
+
+.mobile-home-session-actions button.danger {
+  border-color: rgba(176, 58, 46, 0.18);
+  color: #8a2f27;
+}
+
+.mobile-home-history-bucket {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  margin-top: 4px;
+  color: var(--text-soft);
+  font-size: 10px;
+  font-weight: 760;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+}
+
+.mobile-home-history-bucket small {
+  color: var(--text-faint);
+  font-weight: 600;
+  letter-spacing: 0;
+  text-transform: none;
+}
+
+.mobile-home-empty-row {
+  padding: 6px 2px 2px;
+  color: var(--text-faint);
+  font-size: 10px;
+}
+
+.mobile-home-session-copy {
+  min-width: 0;
+  display: flex;
+  align-items: baseline;
+  gap: 5px;
 }
 
 .mobile-home-session-copy strong,
@@ -5161,11 +5272,13 @@ body[data-layout-shape="tablet_portrait"] .mobile-home-dashboard {
 }
 
 .mobile-home-session-copy strong {
+  flex: 0 1 auto;
   color: var(--text);
   font-size: 11px;
 }
 
 .mobile-home-session-copy small {
+  flex: 1 1 auto;
   color: var(--text-soft);
   font-size: 9.5px;
 }
@@ -5174,7 +5287,7 @@ body[data-layout-shape="tablet_portrait"] .mobile-home-dashboard {
   border-radius: 999px;
   background: rgba(31, 108, 88, 0.08);
   color: var(--master);
-  padding: 3px 6px;
+  padding: 2px 5px;
   font-size: 9px;
   font-weight: 760;
   white-space: nowrap;
@@ -5554,8 +5667,48 @@ body[data-layout-shape="tablet_portrait"] .session-search-dialog,
 body[data-layout-shape="phone_portrait"] .tools-dashboard-dialog,
 body[data-layout-shape="tall_phone"] .tools-dashboard-dialog,
 body[data-layout-shape="tablet_portrait"] .tools-dashboard-dialog {
-  width: calc(100vw - 18px);
-  max-height: min(78vh, 720px);
+  width: calc(100vw - 12px);
+  max-height: min(86svh, 760px);
+  margin: auto 6px max(6px, env(safe-area-inset-bottom));
+}
+
+body[data-layout-shape="phone_portrait"] .tools-dashboard-panel,
+body[data-layout-shape="tall_phone"] .tools-dashboard-panel,
+body[data-layout-shape="tablet_portrait"] .tools-dashboard-panel {
+  gap: 10px;
+  max-height: inherit;
+  padding: 12px;
+  overflow: auto;
+}
+
+body[data-layout-shape="phone_portrait"] .tool-registry-title strong,
+body[data-layout-shape="tall_phone"] .tool-registry-title strong,
+body[data-layout-shape="tablet_portrait"] .tool-registry-title strong {
+  font-size: 12px;
+}
+
+body[data-layout-shape="phone_portrait"] .tool-registry-title small,
+body[data-layout-shape="tall_phone"] .tool-registry-title small,
+body[data-layout-shape="tablet_portrait"] .tool-registry-title small,
+body[data-layout-shape="phone_portrait"] .tools-dashboard-guidance p,
+body[data-layout-shape="tall_phone"] .tools-dashboard-guidance p,
+body[data-layout-shape="tablet_portrait"] .tools-dashboard-guidance p,
+body[data-layout-shape="phone_portrait"] .tool-registry-description,
+body[data-layout-shape="tall_phone"] .tool-registry-description,
+body[data-layout-shape="tablet_portrait"] .tool-registry-description {
+  font-size: 10.5px;
+}
+
+body[data-layout-shape="phone_portrait"] .tool-registry-section-example code,
+body[data-layout-shape="tall_phone"] .tool-registry-section-example code,
+body[data-layout-shape="tablet_portrait"] .tool-registry-section-example code,
+body[data-layout-shape="phone_portrait"] .tool-registry-schema pre,
+body[data-layout-shape="tall_phone"] .tool-registry-schema pre,
+body[data-layout-shape="tablet_portrait"] .tool-registry-schema pre {
+  max-width: 100%;
+  overflow-x: auto;
+  white-space: pre-wrap;
+  word-break: break-word;
 }
 
 body[data-layout-shape="phone_portrait"] .timer-form-grid,

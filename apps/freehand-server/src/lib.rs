@@ -993,18 +993,11 @@ mod tests {
     };
     use futures_util::{SinkExt, StreamExt};
     use reqwest::Client;
-    use std::ffi::OsString;
-    use std::sync::OnceLock;
     use std::time::Duration;
     use tokio::sync::oneshot;
     use tokio::time::timeout;
     use tokio_tungstenite::connect_async;
     use tokio_tungstenite::tungstenite::Message as WsMessage;
-
-    fn android_update_env_lock() -> &'static Mutex<()> {
-        static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
-        LOCK.get_or_init(|| Mutex::new(()))
-    }
 
     #[tokio::test]
     async fn asset_response_serves_shared_logo_png() {
@@ -1019,34 +1012,6 @@ mod tests {
             .expect("logo asset body");
         assert!(body.starts_with(b"\x89PNG\r\n\x1a\n"));
         assert!(body.len() > 1024);
-    }
-
-    struct EnvSnapshot {
-        values: Vec<(&'static str, Option<OsString>)>,
-    }
-
-    impl EnvSnapshot {
-        fn capture(keys: &[&'static str]) -> Self {
-            Self {
-                values: keys
-                    .iter()
-                    .map(|key| (*key, std::env::var_os(key)))
-                    .collect(),
-            }
-        }
-    }
-
-    impl Drop for EnvSnapshot {
-        fn drop(&mut self) {
-            for (key, value) in &self.values {
-                unsafe {
-                    match value {
-                        Some(value) => std::env::set_var(key, value),
-                        None => std::env::remove_var(key),
-                    }
-                }
-            }
-        }
     }
 
     struct TestServer {
@@ -1306,8 +1271,23 @@ mod tests {
             .expect("relay webui js proxy");
         assert_eq!(webui_js.status(), StatusCode::OK);
         let webui_js_body = webui_js.text().await.expect("webui js body");
-        assert!(webui_js_body.contains("from \"/relay/daemon/studio-host/assets/theme.js?v="));
-        assert!(!webui_js_body.contains("from \"/assets/theme.js"));
+        assert!(
+            webui_js_body.contains("from \"/relay/daemon/studio-host/assets/webui/bootstrap.js?v=")
+        );
+        assert!(!webui_js_body.contains("from \"/assets/webui/bootstrap.js"));
+
+        let bootstrap_js = client
+            .get(format!(
+                "{}/relay/daemon/studio-host/assets/webui/bootstrap.js?v=relay-test",
+                relay.base_url
+            ))
+            .send()
+            .await
+            .expect("relay bootstrap js proxy");
+        assert_eq!(bootstrap_js.status(), StatusCode::OK);
+        let bootstrap_js_body = bootstrap_js.text().await.expect("bootstrap js body");
+        assert!(bootstrap_js_body.contains("from \"/relay/daemon/studio-host/assets/theme.js?v="));
+        assert!(!bootstrap_js_body.contains("from \"/assets/theme.js"));
 
         let turn_query = client
             .get(format!(
@@ -1389,7 +1369,7 @@ mod tests {
         assert!(html.contains("/assets/webui.css"));
         assert!(html.contains("/assets/logo.png"));
         assert!(html.contains("/assets/webui.js"));
-        assert!(html.contains("20260725-session-panel-ui"));
+        assert!(html.contains("20260726-mobile-route-one-row"));
         assert!(html.contains("data-adp-endpoint=\"/adp\""));
         assert!(html.contains("data-selected-session=\"\""));
         assert!(html.contains("data-selected-turn=\"\""));
@@ -1898,904 +1878,254 @@ mod tests {
             js.headers().get("cache-control").unwrap(),
             "no-store, max-age=0"
         );
-        assert!(
-            js.text()
-                .await
-                .expect("js body")
-                .contains("initializeThemeToggle")
-        );
-        let js_body = client
-            .get(format!("{}/assets/webui.js", server.base_url))
+        let js_body = js.text().await.expect("js body");
+        assert!(js_body.contains("initializeMobileWebui"));
+        assert!(js_body.contains("/assets/webui/bootstrap.js?v=20260726-mobile-route-one-row"));
+        assert!(!js_body.contains("initializeThemeToggle"));
+
+        let bootstrap = client
+            .get(format!("{}/assets/webui/bootstrap.js", server.base_url))
             .send()
             .await
-            .expect("js response 2")
+            .expect("bootstrap response");
+        assert_eq!(bootstrap.status(), StatusCode::OK);
+        let bootstrap_body = bootstrap.text().await.expect("bootstrap body");
+        assert!(bootstrap_body.contains("initializeThemeToggle"));
+        assert!(bootstrap_body.contains("surfaceContracts"));
+        assert!(bootstrap_body.contains("./legacy-monolith.js"));
+        assert!(bootstrap_body.contains("__freehandWebUiSurfaceContracts"));
+
+        let legacy = client
+            .get(format!(
+                "{}/assets/webui/legacy-monolith.js",
+                server.base_url
+            ))
+            .send()
+            .await
+            .expect("legacy response");
+        assert_eq!(legacy.status(), StatusCode::OK);
+        let legacy_body = legacy.text().await.expect("legacy body");
+        assert!(legacy_body.contains("function renderMobileHomeDashboard"));
+        assert!(legacy_body.contains("function mobileHomeSessionButton"));
+        assert!(legacy_body.contains("renderHomeDashboardSurface"));
+        assert!(legacy_body.contains("renderToolsRegistrySurface"));
+        assert!(legacy_body.contains("renderTimerDashboardSurface"));
+        assert!(legacy_body.contains("renderSessionSearchSurface"));
+        assert!(legacy_body.contains("renderSettingsShellSurface"));
+        assert!(legacy_body.contains("openNewSessionSurface"));
+        assert!(legacy_body.contains("switchConversationSessionInSurface"));
+        assert!(legacy_body.contains("createAdpClient"));
+        assert!(legacy_body.contains("dispatchWebUiEdge"));
+
+        let layout_shape = client
+            .get(format!(
+                "{}/assets/webui/app-shell/layout-shape.js",
+                server.base_url
+            ))
+            .send()
+            .await
+            .expect("layout-shape response");
+        assert_eq!(layout_shape.status(), StatusCode::OK);
+        let layout_shape_body = layout_shape.text().await.expect("layout-shape body");
+        assert!(layout_shape_body.contains("export function classifyLayoutShape"));
+        assert!(layout_shape_body.contains("export function viewportDimensionsForLayout"));
+
+        let edge_registry = client
+            .get(format!(
+                "{}/assets/webui/app-shell/edge-registry.js",
+                server.base_url
+            ))
+            .send()
+            .await
+            .expect("edge-registry response");
+        assert_eq!(edge_registry.status(), StatusCode::OK);
+        let edge_registry_body = edge_registry.text().await.expect("edge-registry body");
+        assert!(edge_registry_body.contains("root.open_home"));
+        assert!(edge_registry_body.contains("session.open_parent_session"));
+        assert!(edge_registry_body.contains("home.rename_session"));
+
+        let route_controller = client
+            .get(format!(
+                "{}/assets/webui/app-shell/route-controller.js",
+                server.base_url
+            ))
+            .send()
+            .await
+            .expect("route-controller response");
+        assert_eq!(route_controller.status(), StatusCode::OK);
+        let route_controller_body = route_controller
             .text()
             .await
-            .expect("js body 2");
-        assert!(js_body.contains("new WebSocket(adpUrl())"));
-        assert!(js_body.contains("new EventSource(endpoint)"));
-        assert!(js_body.contains("function ensureSseTurnSubscription"));
-        assert!(js_body.contains("SSE turn refresh received"));
-        assert!(js_body.contains("function classifyLayoutShape"));
-        assert!(js_body.contains("function applyLayoutShape"));
-        assert!(js_body.contains("function markWebUiJavascriptReady"));
-        assert!(js_body.contains("webuiJsReady"));
-        assert!(js_body.contains("function viewportDimensionsForLayout"));
-        assert!(js_body.contains("function setMobileDrawer"));
-        assert!(js_body.contains("function handleBackNavigationIntent"));
-        assert!(js_body.contains("function turnTimingProjection"));
-        assert!(js_body.contains("function turnTimingLine"));
-        assert!(js_body.contains("first_response_at_ms"));
-        assert!(js_body.contains("total_elapsed_ms"));
-        assert!(js_body.contains("turn-cycle-header-pill"));
+            .expect("route-controller body");
+        assert!(route_controller_body.contains("session.open_parent_session"));
+        assert!(route_controller_body.contains("root.open_home"));
+
+        let home_surface = client
+            .get(format!(
+                "{}/assets/webui/surfaces/home-dashboard/index.js",
+                server.base_url
+            ))
+            .send()
+            .await
+            .expect("home-surface response");
+        assert_eq!(home_surface.status(), StatusCode::OK);
         assert!(
-            js_body.contains("window.__freehandHandleAndroidBack = handleBackNavigationIntent")
+            home_surface
+                .text()
+                .await
+                .expect("home-surface body")
+                .contains("renderSurface")
         );
-        assert!(js_body.contains("function closeVisibleNavigationSurface"));
-        assert!(js_body.contains("function showInspectorPanel"));
-        assert!(js_body.contains("function renderSettingsShell"));
-        assert!(js_body.contains("function topLevelPersistedSessions"));
-        assert!(js_body.contains("function renderMobileHomeDashboard"));
-        assert!(js_body.contains("function mobileHomeHistorySessions"));
-        assert!(js_body.contains("function mobileHomeSessionButton"));
-        assert!(js_body.contains("function activeSessionsForHome"));
-        assert!(js_body.contains("function renderMobileHomeActiveList"));
-        assert!(js_body.contains("function renderMobileHomeSessionList"));
-        assert!(!js_body.contains("phaseOneSettingsTree"));
-        assert!(!js_body.contains("function renderSettingsReviewTree"));
+
+        let home_view = client
+            .get(format!(
+                "{}/assets/webui/surfaces/home-dashboard/view.js",
+                server.base_url
+            ))
+            .send()
+            .await
+            .expect("home-view response");
+        assert_eq!(home_view.status(), StatusCode::OK);
+        assert!(
+            home_view
+                .text()
+                .await
+                .expect("home-view body")
+                .contains("renderHomeDashboard")
+        );
+
+        let tools_view = client
+            .get(format!(
+                "{}/assets/webui/surfaces/tools-registry/view.js",
+                server.base_url
+            ))
+            .send()
+            .await
+            .expect("tools-view response");
+        assert_eq!(tools_view.status(), StatusCode::OK);
+        assert!(
+            tools_view
+                .text()
+                .await
+                .expect("tools-view body")
+                .contains("renderToolsRegistrySurface")
+        );
+
+        let adp_client = client
+            .get(format!(
+                "{}/assets/webui/app-shell/adp-client.js",
+                server.base_url
+            ))
+            .send()
+            .await
+            .expect("adp-client response");
+        assert_eq!(adp_client.status(), StatusCode::OK);
+        assert!(
+            adp_client
+                .text()
+                .await
+                .expect("adp-client body")
+                .contains("export function createAdpClient")
+        );
+
+        let session_detail_surface = client
+            .get(format!(
+                "{}/assets/webui/surfaces/session-detail/index.js",
+                server.base_url
+            ))
+            .send()
+            .await
+            .expect("session-detail surface response");
+        assert_eq!(session_detail_surface.status(), StatusCode::OK);
+        assert!(
+            session_detail_surface
+                .text()
+                .await
+                .expect("session-detail body")
+                .contains("message-list")
+        );
+
+        let modular_surface_assets = [
+            ("session-detail/controls.js", "switchConversationSession"),
+            ("session-search/view.js", "renderSessionSearchSurface"),
+            ("new-session/controls.js", "openNewSessionSurface"),
+            ("settings/view.js", "renderSettingsShellSurface"),
+            (
+                "settings/diagnostics.js",
+                "renderSettingsDiagnosticsSurface",
+            ),
+            ("tools-registry/controls.js", "refreshToolsRegistrySurface"),
+            ("tools-registry/controls.js", "QueryToolRegistry"),
+            ("timer-dashboard/controls.js", "scheduleTimerFromSurface"),
+            ("timer-dashboard/controls.js", "QueryTimerList"),
+        ];
+        for (asset, symbol) in modular_surface_assets {
+            let response = client
+                .get(format!(
+                    "{}/assets/webui/surfaces/{}",
+                    server.base_url, asset
+                ))
+                .send()
+                .await
+                .expect("modular surface asset response");
+            assert_eq!(response.status(), StatusCode::OK, "asset {asset}");
+            assert!(
+                response
+                    .text()
+                    .await
+                    .expect("modular surface asset body")
+                    .contains(symbol),
+                "asset {asset} should contain {symbol}"
+            );
+        }
+
         assert!(root_body.contains("模型服务配置"));
         assert!(root_body.contains("模型服务切换与策略"));
         assert!(root_body.contains("诊断日志"));
-        assert!(js_body.contains("QueryTimerList"));
-        assert!(js_body.contains("ScheduleTimer"));
-        assert!(js_body.contains("CancelTimer"));
-        assert!(js_body.contains("function renderTimerDashboard"));
-        assert!(js_body.contains("function scheduleTimerFromForm"));
-        assert!(js_body.contains("QueryToolRegistry"));
-        assert!(js_body.contains("QueryDiagnostics"));
-        assert!(js_body.contains("function renderToolsDashboard"));
-        assert!(js_body.contains("function refreshToolsDashboard"));
-        assert!(js_body.contains("function renderSettingsDiagnostics"));
-        assert!(js_body.contains("function refreshDiagnosticsStatus"));
-        assert!(js_body.contains("tool.exposed_to_master"));
-        assert!(js_body.contains("tool.exposed_to_worker"));
-        assert!(!js_body.contains("rootfs"));
-        assert!(!js_body.contains("shared-folder"));
-        assert!(!js_body.contains("mount-directory"));
-        assert!(js_body.contains("QueryConfigStatus"));
-        assert!(js_body.contains("QueryTaskBoard"));
-        assert!(js_body.contains("QueryAgentBoard"));
-        assert!(js_body.contains("QueryEventInbox"));
-        assert!(js_body.contains("QueryTaskHistory"));
-        assert!(js_body.contains("QueryWorkerControl"));
-        assert!(js_body.contains("工作器控制"));
-        assert!(js_body.contains("function applyPhase2QueryResult"));
-        assert!(js_body.contains("function refreshPhase2Status"));
-        assert!(js_body.contains("function renderPhase2Dashboard"));
-        assert!(js_body.contains("function renderTaskBoardProjection"));
-        assert!(js_body.contains("function renderAgentBoardProjection"));
-        assert!(js_body.contains("function phase2SortedAgents"));
-        assert!(js_body.contains("function openWorkerTaskSession"));
-        assert!(js_body.contains("function returnToParentSession"));
-        assert!(js_body.contains("function renderWorkerSessionNavigation"));
-        assert!(js_body.contains("function switchConversationSession"));
-        assert!(js_body.contains("sessionRefreshInFlight"));
-        assert!(js_body.contains("function selectedSessionIsLoading"));
-        assert!(js_body.contains("function loadingConversationBubble"));
-        assert!(js_body.contains("function workerTranscriptWaitingBubble"));
-        assert!(js_body.contains("function workerTranscriptRetryContext"));
-        assert!(js_body.contains("function selectedWorkerTranscriptRefreshRetryable"));
-        assert!(js_body.contains("function scheduleSessionRefreshRetry"));
-        assert!(js_body.contains("正在从运行时真源加载选中会话 transcript。"));
-        assert!(
-            js_body.contains("工作器记录 尚未持久化；任务面板 仍显示该 工作器任务处于活动状态。")
-        );
-        assert!(js_body.contains("正在刷新同一个 owner 投影的 工作器会话；这不是任务派发失败。"));
-        assert!(js_body.contains("const workerTranscriptRefreshRetryDelayMs = 3000"));
-        assert!(js_body.contains("function renderSessionRefreshFailure"));
-        assert!(js_body.contains("clearConversationForSessionSwitch"));
-        assert!(js_body.contains("const adpRequestTimeoutMs = 45000"));
-        assert!(!js_body.contains("state.adpFailure = message"));
-        assert!(js_body.contains("这是选中 transcript 的刷新错误，不是全局连接失败。"));
-        assert!(js_body.contains("function sessionRefreshFailureBubble"));
-        assert!(js_body.contains("function exitSessionRefreshErrorToNewConversation"));
-        assert!(js_body.contains("function returnToSessionListFromRefreshError"));
-        assert!(js_body.contains("function dismissSessionRefreshError"));
-        assert!(js_body.contains("simulateSessionRefreshFailureForTest"));
-        assert!(js_body.contains("captureSessionRefreshExitState"));
-        assert!(js_body.contains("function toolPendingRepresentsLifecycle"));
-        assert!(js_body.contains("function toolPendingStatusLabelForTurn"));
-        assert!(js_body.contains("function normalizeWaitingUserToolPendingTerminalBody"));
-        assert!(js_body.contains("waitingUserToolPending"));
-        assert!(js_body.contains("等待用户选择"));
-        assert!(js_body.contains("sessionRefresh: true"));
-        assert!(js_body.contains("const requestedSessionId = state.selectedSessionId"));
-        assert!(js_body.contains("state.selectedSessionId !== requestedSessionId"));
-        assert!(js_body.contains("projection.session_id !== state.selectedSessionId"));
-        assert!(js_body.contains("waiting_lifecycle"));
-        assert!(js_body.contains("function renderEventInboxProjection"));
-        assert!(js_body.contains("function renderTaskHistoryProjection"));
-        assert!(js_body.contains("function renderWorkerControlProjection"));
-        assert!(js_body.contains("function sendWorkerControl"));
-        assert!(js_body.contains("function buildMobileAgentDashboardModel"));
-        assert!(js_body.contains("function currentSessionTasks"));
-        assert!(js_body.contains("function currentSessionAgents"));
-        assert!(js_body.contains("function currentSessionEvents"));
-        assert!(js_body.contains("function currentSessionTaskStatusLabel"));
-        assert!(js_body.contains("function taskVisibleInSession"));
-        assert!(js_body.contains("function workerOrdinalFromAgentId"));
-        assert!(js_body.contains("normalizeAgentId(agent.agent_id) !== \"master\""));
-        assert!(js_body.contains("task.parent_session_id === sessionId"));
-        assert!(js_body.contains("task.attached_session_ids.includes(sessionId)"));
-        assert!(js_body.contains("currentSessionTaskStatusLabel(tasks)"));
-        assert!(js_body.contains("currentSessionEvents()"));
-        assert!(js_body.contains("currentSessionAgents()"));
-        assert!(js_body.contains("state.selectedSessionId !== nextSessionId"));
-        assert!(js_body.contains("state.taskHistory = null"));
-        assert!(js_body.contains("state.workerControl = null"));
-        assert!(!js_body.contains("parentTasks.length > 0 ? parentTasks : allTasks"));
-        assert!(!js_body.contains("(taskBoard && taskBoard.tasks || []).length"));
-        assert!(js_body.contains("function renderMobileAgentSummaryStrip"));
-        assert!(js_body.contains("function renderMobileAgentSheet"));
-        assert!(js_body.contains("function setMobileAgentSheetOpen"));
-        assert!(js_body.contains("function renderSessionRelationHeader"));
-        assert!(js_body.contains("function renderSessionTree"));
-        assert!(js_body.contains("state.sessionTreeOpen"));
-        assert!(js_body.contains("sessionTreeDropdown.hidden = !state.sessionTreeOpen"));
-        assert!(js_body.contains("node.dataset.relationSchema"));
-        assert!(js_body.contains("TaskBoard.worker_session_id"));
-        assert!(js_body.contains("node.dataset.sessionId"));
-        assert!(js_body.contains("node.dataset.taskId"));
-        assert!(js_body.contains("state.mobileAgentSheetOpen"));
-        assert!(js_body.contains("runningAgents.length"));
-        assert!(js_body.contains("mobileAgentLifecycleSummary(counts)"));
-        assert!(js_body.contains("个运行任务"));
-        assert!(js_body.contains("个阻塞任务"));
-        assert!(!js_body.contains("delegated task"));
-        assert!(js_body.contains("limit ${workerLimit}"));
-        assert!(js_body.contains("UpdateAgentResourceConfig"));
-        assert!(js_body.contains("function submitAgentResourceConfigUpdate"));
-        assert!(js_body.contains("function renderSystemAgentResourceConfig"));
-        assert!(js_body.contains("保存工作器上限"));
-        assert!(js_body.contains("agent_resource_config_saved_restart_required:count="));
-        assert!(js_body.contains("需要重启并启动 Worker 进程"));
-        assert!(!js_body.contains("freehand-webui-agent-resource-count"));
-        assert!(!js_body.contains("mobileAgentResourceSave"));
-        assert!(js_body.contains("当前投影中没有 工作器任务"));
-        assert!(!js_body.contains("A等待中 Master evaluation"));
-        assert!(!js_body.contains("Master evaluating"));
-        assert!(!js_body.contains("Rework required"));
-        assert!(!js_body.contains("Goal complete"));
-        assert!(js_body.contains("data-worker-control-op"));
-        assert!(js_body.contains("state.taskBoard"));
-        assert!(js_body.contains("state.agentBoard"));
-        assert!(js_body.contains("state.eventInbox"));
-        assert!(js_body.contains("state.taskHistory"));
-        assert!(js_body.contains("state.workerControl"));
-        assert!(js_body.contains("function commandReceiptStatus(receipt)"));
-        assert!(js_body.contains("function commandReceiptCode(dispatchStatus)"));
-        assert!(js_body.contains("不支持的命令回执"));
-        assert!(!js_body.contains("function commandReceiptStatus(receipt, fallback"));
-        assert!(!js_body.contains("return fallback"));
-        assert!(!js_body.contains("request processed"));
-        assert!(!js_body.contains("status.includes(\"task_\")"));
-        assert!(!js_body.contains("status.includes(\"worker_control\")"));
-        assert!(!js_body.contains("status.includes(\"reason_turn_started\")"));
-        assert!(!js_body.contains("freehand-webui-task-board"));
-        assert!(!js_body.contains("freehand-webui-worker-control"));
-        assert!(!js_body.contains("freehand-webui-mobile-agent-dashboard"));
-        assert!(!js_body.contains("aggregate worker results"));
-        assert!(!js_body.contains("allTasksClosed ? \"Goal complete\""));
-        assert!(js_body.contains("refreshConfigStatus"));
-        assert!(js_body.contains("variantPayload(result, \"ConfigStatus\")"));
-        assert!(js_body.contains("state.configStatus"));
-        assert!(js_body.contains("settings-provider-host"));
-        assert!(js_body.contains("settings-provider-auth"));
-        assert!(js_body.contains("settings-provider-current-select"));
-        assert!(js_body.contains("settings-provider-fallback-select"));
-        assert!(js_body.contains("settings-provider-registry-list"));
-        assert!(js_body.contains("providerSelectionDraft"));
-        assert!(js_body.contains("function updateProviderSelectionDraftFromControls"));
-        assert!(!js_body.contains("settingsProviderFallbackSelect?.dataset.optionsInitialized"));
-        assert!(js_body.contains("settings-config-error"));
-        assert!(js_body.contains("UpsertProviderConfig"));
-        assert!(js_body.contains("UpdateAgentProviderSelection"));
-        assert!(js_body.contains("function submitProviderConfigUpdate"));
-        assert!(js_body.contains("function submitProviderSelectionUpdate"));
-        assert!(js_body.contains("function requestAndroidApkUpdateCheck"));
-        assert!(js_body.contains("function receiveAndroidApkUpdateStatus"));
-        assert!(js_body.contains("function optionalAndroidApkUpdateNumber"));
-        assert!(js_body.contains("\"already_checking\""));
-        assert!(js_body.contains("window.__freehandAndroidApkUpdateStatus"));
-        assert!(js_body.contains("window.FreehandAndroidApkUpdate"));
-        assert!(js_body.contains("bridge.check();"));
-        assert!(js_body.contains("settings-apk-update-check-button"));
-        assert!(js_body.contains("settings-apk-update-status"));
-        assert!(js_body.contains("APK 升级检查仅在 Freehand 安卓 App 内可用。"));
-        assert!(js_body.contains("function providerConfigReceiptStatus"));
-        assert!(js_body.contains("function providerConfigUpsertReceiptStatus"));
-        assert!(js_body.contains("function providerSelectionReceiptStatus"));
-        assert!(js_body.contains("provider_config_upserted_restart_required"));
-        assert!(js_body.contains("agent_provider_selection_saved_restart_required"));
-        assert!(js_body.contains("模型服务配置已保存，需要重启。"));
-        assert!(js_body.contains("配置保存返回了未预期的服务状态。"));
-        assert!(!js_body.contains("return \"Provider config saved.\""));
-        assert!(!js_body.contains("`${receipt.dispatch_status} -> ${receipt.target_feature_id}`"));
-        assert!(js_body.contains("function settingsAuthTypeLabel"));
-        assert!(js_body.contains("authType === \"apikey\" ? \"credential\""));
-        assert!(js_body.contains("open-settings-drawer-button"));
-        assert!(js_body.contains("settings-shell-toggle"));
-        assert!(
-            js_body.contains(
-                "state.inspectorPanel = panel === \"settings\" ? \"settings\" : \"debug\""
-            )
-        );
-        assert!(js_body.contains("const attachments = currentAttachments();"));
-        assert!(!js_body.contains("currentDraftAttachments"));
-        assert!(js_body.contains("case \"/设置\""));
-        assert!(js_body.contains("function syncMobileDrawerForLayout"));
-        assert!(js_body.contains("function installMobileSessionSwipeGesture"));
-        assert!(js_body.contains("setMobileDrawer(\"sessions\")"));
-        assert!(js_body.contains("deltaX >= openThreshold"));
-        assert!(js_body.contains("window.__freehandLayout"));
-        assert!(js_body.contains("document.body.dataset.layoutShape"));
-        assert!(js_body.contains("shell.dataset.layoutShape"));
-        assert!(js_body.contains("document.body.dataset.mobileDrawer"));
-        assert!(js_body.contains("shell.dataset.mobileDrawer"));
-        assert!(js_body.contains("function setComposerFocused"));
-        assert!(js_body.contains("document.body.dataset.composerFocused"));
-        assert!(js_body.contains("shell.dataset.composerFocused"));
-        assert!(js_body.contains("composerInput.addEventListener(\"focus\""));
-        assert!(js_body.contains("composerInput.addEventListener(\"blur\""));
-        assert!(js_body.contains("function openNewSessionDialog"));
-        assert!(js_body.contains("function submitNewSessionDialog"));
-        assert!(js_body.contains("newTaskPathPresets.addEventListener(\"click\""));
-        assert!(js_body.contains("DeleteSession"));
-        assert!(!js_body.contains("ArchiveSession"));
-        assert!(!js_body.contains("RestoreSession"));
-        assert!(!js_body.contains("QueryArchivedSessionList"));
-        assert!(!js_body.contains("worker-context-tag"));
-        assert!(!js_body.contains("task-context-tag"));
-        assert!(!js_body.contains("transport-context-tag"));
-        assert!(js_body.contains("open-session-drawer-button"));
-        assert!(js_body.contains("open-detail-drawer-button"));
-        assert!(js_body.contains("setMobileDrawer(\"settings\")"));
-        assert!(!js_body.contains("localStorage.setItem(\"freehand-config"));
-        assert!(!js_body.contains("writeConfig"));
-        assert!(!js_body.contains("apiKey"));
-        assert!(js_body.contains("window.visualViewport.addEventListener(\"resize\", () =>"));
-        assert!(js_body.contains("window.addEventListener(\"orientationchange\", () =>"));
-        assert!(js_body.contains("return \"phone_portrait\""));
-        assert!(js_body.contains("return \"phone_landscape\""));
-        assert!(js_body.contains("return \"tablet_portrait\""));
-        assert!(js_body.contains("return \"tablet_landscape\""));
-        assert!(js_body.contains("return \"foldable_unfolded\""));
-        assert!(js_body.contains("return \"desktop_large\""));
-        assert!(js_body.contains("adpSubscribe"));
-        assert!(js_body.contains("subscription_accepted"));
-        assert!(!js_body.contains("fetch("));
-        assert!(js_body.contains("refreshCheckpoints"));
-        assert!(js_body.contains("freehand-webui-selected-session"));
-        assert!(js_body.contains("window.localStorage.getItem"));
-        assert!(js_body.contains("QuerySessionList"));
-        assert!(js_body.contains("QuerySessionTurns"));
-        assert!(js_body.contains("refreshSelectedSession"));
-        assert!(js_body.contains("newDraftSessionId"));
-        assert!(js_body.contains("function browserRandomId"));
-        assert!(js_body.contains("typeof cryptoApi.randomUUID === \"function\""));
-        assert!(js_body.contains("cryptoApi.getRandomValues(bytes)"));
-        assert!(!js_body.contains("crypto.randomUUID().slice"));
-        assert!(js_body.contains("initialSelectedSessionId"));
-        assert!(js_body.contains("isDraftSessionId"));
-        assert!(js_body.contains("startNewConversation"));
-        assert!(js_body.contains("startNewTask"));
-        let start_new_conversation_pos = js_body
-            .find("async function startNewConversation()")
-            .expect("new conversation flow exists");
-        let start_new_task_pos = js_body
-            .find("async function startNewTask")
-            .expect("new task flow exists");
-        let start_new_conversation_body = &js_body[start_new_conversation_pos..start_new_task_pos];
-        assert!(start_new_conversation_body.contains("CreateSession"));
-        assert!(start_new_conversation_body.contains("title: \"新会话\""));
-        assert!(start_new_conversation_body.contains("await refreshSessions();"));
-        assert!(start_new_conversation_body.contains("await refreshSelectedSession();"));
-        assert!(js_body.contains("selectedSessionIds"));
-        assert!(js_body.contains("function workerChildSessionsForParent"));
-        assert!(js_body.contains("parent_session_id"));
-        assert!(js_body.contains("task.worker_session_id"));
-        assert!(js_body.contains("card.dataset.taskId"));
-        assert!(js_body.contains("card.dataset.workerSessionId"));
-        assert!(!js_body.contains("model.tasks.slice(0, 8)"));
-        assert!(js_body.contains("任务面板 投影中没有可用 工作器会话"));
-        assert!(js_body.contains("选中会话刷新失败"));
-        assert!(js_body.contains("function renderSessionWithWorkerChildren"));
-        assert!(js_body.contains("function renderSessionAgentGroup"));
-        assert!(js_body.contains("group.className = \"session-agent-group\""));
-        assert!(js_body.contains("sessionNodes.className = \"session-agent-sessions\""));
-        assert!(js_body.contains("function renderSessionItem"));
-        assert!(!js_body.contains("return `worker-task-${sanitizeRuntimeIdentifier(taskId)}`"));
-        assert!(js_body.contains("session.temporary"));
-        assert!(js_body.contains("selectAllSessions"));
-        assert!(js_body.contains("draftSessionId: null"));
-        assert!(js_body.contains("state.draftSessionId === sessionId"));
-        assert!(js_body.contains("__freehandDraftSessionIdsForTest"));
-        assert!(!js_body.contains("startsWith(\"webui-session-\")"));
-        assert!(js_body.contains("if (state.draftSessionId)"));
-        assert!(js_body.contains("发送消息开始这个会话。"));
-        assert!(js_body.contains("function pendingExecutionCard"));
-        assert!(js_body.contains("function turnExecutionCard"));
-        assert!(js_body.contains("function turnChatCards"));
-        assert!(js_body.contains("function userChatBubble"));
-        assert!(js_body.contains("function assistantChatBubble"));
-        assert!(js_body.contains("function appendTurnActionBar"));
-        assert!(js_body.contains("function editAndRerunFromTurn"));
-        assert!(js_body.contains("function rollbackEffectiveTranscriptThroughTurn"));
-        assert!(js_body.contains("function startNewConversationFromText"));
-        assert!(js_body.contains("function renderToolSection"));
-        assert!(js_body.contains("function renderFinalSummary"));
-        assert!(js_body.contains("function finalSummaryBlocks"));
-        assert!(js_body.contains("function normalizeFinalSummaryLine"));
-        assert!(!js_body.contains("function splitFinalSummaryInlineStructure"));
-        assert!(!js_body.contains("function inlineStructureIndexes"));
-        assert!(!js_body.contains("function collectInlineStructureIndexes"));
-        assert!(js_body.contains("function toolSemanticLines"));
-        assert!(js_body.contains("function buildConversationRenderModel"));
-        assert!(js_body.contains("function buildRenderTurn"));
-        assert!(js_body.contains("function buildRenderRows"));
-        assert!(js_body.contains("function buildToolActivityRenderRow"));
-        assert!(js_body.contains("function buildModelRequestRenderRow"));
-        assert!(js_body.contains("function conversationTimelineItems"));
-        assert!(js_body.contains("function timelineItemChatCards"));
-        assert!(js_body.contains("function timelineItemCycleCard"));
-        assert!(js_body.contains("function renderConversationFragments"));
-        assert!(js_body.contains("function reconcileCycleCardFragments"));
-        assert!(js_body.contains("function frozenCycleCardNeedsAuthoritativeMetadataRefresh"));
-        assert!(js_body.contains("function frozenCycleCardNeedsLifecycleClassificationRefresh"));
-        assert!(js_body.contains("existing.dataset.frozen === \"true\""));
-        assert!(
-            js_body
-                .contains("!frozenCycleCardNeedsAuthoritativeMetadataRefresh(existing, nextCard)")
-        );
-        assert!(
-            js_body
-                .contains("!existing.dataset.totalElapsedMs && !!nextCard.dataset.totalElapsedMs")
-        );
-        assert!(js_body.contains("article.dataset.lifecyclePhase"));
-        assert!(js_body.contains("waiting_lifecycle"));
-        assert!(js_body.contains("waiting_user"));
-        assert!(js_body.contains("function cycleCardFromChatCards"));
-        assert!(js_body.contains("function cycleCardKey"));
-        assert!(js_body.contains("function cycleCardKeyFromNode"));
-        assert!(js_body.contains("function latestClosedTurnForSession"));
-        assert!(js_body.contains("function closedTurnObsoletesSessionSummary"));
-        assert!(js_body.contains("closedTurnObsoletesSessionSummary(latestClosedTurn, summary)"));
-        assert!(js_body.contains("function sessionLiveObservation"));
-        assert!(js_body.contains("function globalLiveSessionObservation"));
-        assert!(js_body.contains("return parent ? { ...parent, scope: \"父 Master\" } : null;"));
-        assert!(js_body.contains("function liveObservationLine"));
-        assert!(js_body.contains("function cycleCardMetaForTimelineItem"));
-        assert!(js_body.contains("function cycleCardIsTerminal"));
-        assert!(js_body.contains("function pendingSubmitTimelineIndex"));
-        assert!(js_body.contains("function acceptedSubmitReceiptTimelineIndex"));
-        assert!(js_body.contains("function firstCycleTurnIndex"));
-        assert!(js_body.contains("function renderTurnCreatedAtMs"));
-        assert!(js_body.contains("submitId: turn.submit_id || \"\""));
-        assert!(js_body.contains("startedAt: pendingStartedAt"));
-        assert!(js_body.contains(
-            "sessionId: state.pendingSubmitSessionId || state.selectedSessionId || \"\""
-        ));
-        assert!(js_body.contains("submitId: state.pendingSubmitId || \"\""));
-        assert!(js_body.contains("function modelRequestStaticStatus"));
-        assert!(js_body.contains("function buildObservableLiveTurnRenderRow"));
-        assert!(js_body.contains("function inactiveToolLifecycleForRender"));
-        assert!(js_body.contains("function isToolPendingStatus"));
-        assert!(js_body.contains("function terminalTurnStatusLabel"));
-        assert!(js_body.contains("isToolPendingStatus(turn.terminal_status)"));
-        assert!(js_body.contains("function turnRequiresLifecycleTruthRefresh"));
-        assert!(
-            js_body.contains("turnRequiresLifecycleTruthRefresh(activeTurnForSelectedSession())")
-        );
-        assert!(js_body.contains(
-            "title: isToolPending ? (toolPendingIsLifecycle ? \"生命周期\" : \"等待用户\") : \"最终结果\""
-        ));
-        assert!(js_body.contains("? terminalTurnStatusLabelForTurn(turn, turn.terminal_status)"));
-        assert!(!js_body.contains("turn.terminal_text\n    ? \"completed\""));
-        assert!(js_body.contains("phase: \"tool_failed\""));
-        assert!(js_body.contains("phase: \"tool_completed\""));
-        assert!(
-            js_body.contains("const inactiveToolLifecycle = inactiveToolLifecycleForRender(turn);")
-        );
-        assert!(js_body.contains("请求已接收；等待协议可见的 turn 详情"));
-        assert!(js_body.contains("function pendingUserInputIsMaterialized"));
-        assert!(js_body.contains("function clearPendingUserInputIfMaterialized"));
-        assert!(js_body.contains("function acceptedSubmitReceiptChatCards"));
-        assert!(js_body.contains("function acceptedSubmitReceiptForRender"));
-        assert!(js_body.contains("服务已通过 任务面板 真源接收该请求。"));
-        assert!(js_body.contains("clearPendingUserInputIfMaterialized();"));
-        assert!(js_body.contains("async function refreshAfterAmbiguousSubmitFailure"));
-        assert!(js_body.contains("await refreshAfterAmbiguousSubmitFailure(error)"));
-        assert!(js_body.contains("服务刷新后请求已可见"));
-        assert!(js_body.contains("服务刷新后仍未验证提交回执"));
-        assert!(js_body.contains("function installWebUiTestHooks"));
-        assert!(js_body.contains("__freehandEnableTestHooks"));
-        assert!(js_body.contains("captureAmbiguousSubmitState"));
-        assert!(js_body.contains("renderAll()"));
-        assert!(js_body.contains("function activeTurnForSelectedSession"));
-        assert!(js_body.contains(
-            "state.selectedSessionId && state.turn.session_id !== state.selectedSessionId"
-        ));
-        assert!(js_body.contains("function sameRenderableTurn"));
-        assert!(js_body.contains("const merged = [];"));
-        assert!(js_body.contains("sameRenderableTurn(existing, turn)"));
-        assert!(js_body.contains("state.sessionTurns = logicalSessionTurns"));
-        assert!(js_body.contains("sameRenderableTurn(existing, state.turn)"));
-        assert!(js_body.contains("sameRenderableTurn(turn, latestTurn)"));
-        assert!(js_body.contains("const leftSessionId = `${left.session_id || \"\"}`.trim();"));
-        assert!(js_body.contains("const rightSessionId = `${right.session_id || \"\"}`.trim();"));
-        assert!(js_body.contains("return !!leftSessionId && leftSessionId === rightSessionId;"));
-        assert!(!js_body.contains("existing.turn_id === state.turn.turn_id"));
-        assert!(js_body.contains("function renderModelHasLiveLifecycle"));
-        assert!(js_body.contains("function turnIsCurrentLiveTurn"));
-        assert!(js_body.contains("conversationTurns.length === 0 && state.turn"));
-        assert!(
-            !js_body
-                .contains("conversationTurns.length === 0 && turnIsCurrentLiveTurn(state.turn)")
-        );
-        assert!(js_body.contains("conversationTimelineItems(renderModel).forEach"));
-        assert!(js_body.contains("fragments.push(timelineItemCycleCard(item))"));
-        assert!(!js_body.contains("fragments.push(...timelineItemChatCards(item))"));
-        assert!(js_body.contains("return turnChatCards(item.renderTurn);"));
-        assert!(js_body.contains("return pendingChatCards(item.pendingSubmit);"));
-        assert!(js_body.contains("article.className = `turn-cycle-card"));
-        assert!(js_body.contains("article.dataset.cycleKey = cycleCardKey(meta)"));
-        assert!(js_body.contains("article.dataset.cycleKind = kind"));
-        assert!(js_body.contains("article.dataset.sessionId"));
-        assert!(js_body.contains("article.dataset.submitId"));
-        assert!(js_body.contains("article.dataset.terminal = \"true\""));
-        assert!(js_body.contains("article.dataset.frozen = \"true\""));
-        assert!(js_body.contains("if (kind === \"turn\" && turnId)"));
-        assert!(js_body.contains("return `turn:${sessionId}:${turnId}`"));
-        assert!(js_body.contains("sessionRelationHeader.dataset.liveSessionId"));
-        assert!(js_body.contains("sessionRelationHeader.dataset.liveTurnId"));
-        assert!(js_body.contains("活动 · ${observation.label}"));
-        assert!(js_body.contains("existing.dataset.frozen === \"true\""));
-        assert!(js_body.contains("return `submit:${sessionId}:${submitId}`"));
-        assert!(js_body.contains("state.renderedCycleSessionId"));
-        assert!(!js_body.contains("messageList.replaceChildren();"));
-        assert!(!js_body.contains("function uniqueChatFragments"));
-        assert!(!js_body.contains("uniqueChatFragments(fragments).forEach"));
-        assert!(js_body.contains("article.dataset.turnId"));
-        assert!(!js_body.contains("previousAssistantText"));
-        assert!(
-            !js_body.contains("fragments.push(...pendingChatCards(renderModel.pendingSubmit))")
-        );
-        assert!(js_body.contains("deleteSelectedSessions"));
-        assert!(js_body.contains("RollbackLatestSessionTurn"));
-        assert!(js_body.contains("rollbackLatestSessionTurn"));
-        assert!(js_body.contains("session-selector"));
-        assert!(js_body.contains("session-rename-selected-button"));
-        assert!(js_body.contains("renderSessionBulkToolbar"));
-        assert!(js_body.contains("selectedWorkspaceCwd"));
-        assert!(js_body.contains("requireTaskCwd"));
-        assert!(js_body.contains("需要任务目标目录"));
-        assert!(js_body.contains("CreateSession"));
-        assert!(js_body.contains("SubmitUserInput.session_id"));
-        assert!(js_body.contains("SubmitUserInput.cwd"));
-        assert!(js_body.contains("freehand-webui-selected-cwd"));
-        assert!(js_body.contains("turn.session_id !== state.selectedSessionId"));
-        assert!(js_body.contains("scrollMessagesToBottom"));
-        assert!(js_body.contains("messageListIsNearBottom"));
-        assert!(js_body.contains("userScrollLocked"));
-        assert!(js_body.contains("syncUserScrollLock"));
-        assert!(js_body.contains("scrollHostForConversation"));
-        assert!(js_body.contains("updateComposerClearance"));
-        assert!(js_body.contains("--composer-clearance"));
-        assert!(js_body.contains("forceScrollToBottom"));
-        assert!(js_body.contains("const streamStage = document.querySelector(\".stream-stage\")"));
-        assert!(js_body.contains("host.scrollTop = host.scrollHeight"));
-        assert!(!js_body.contains("scrollIntoView"));
-        assert!(!js_body.contains("window.scrollTo({ top: document.documentElement.scrollHeight"));
-        assert!(js_body.contains("function conversationTurnsForRender"));
-        assert!(js_body.contains("if (!state.selectedSessionId)"));
-        assert!(js_body.contains("sessionListLoaded: false"));
-        assert!(js_body.contains("state.sessionListLoaded = true"));
-        assert!(js_body.contains("function sessionTruthAllowsTurn"));
-        assert!(js_body.contains("function sessionTruthAllowsSessionId"));
-        assert!(js_body.contains("!state.selectedSessionId && !state.sessionListLoaded"));
-        assert!(js_body.contains("if (turn && !sessionTruthAllowsTurn(turn))"));
-        assert!(js_body.contains("!sessionTruthAllowsSessionId(projection.session_id)"));
-        assert!(js_body.contains("clearLocalConversationTruth"));
-        assert!(
-            !js_body.contains(
-                "state.selectedSessionId && !hasSelectedSessionTranscript && !state.turn"
-            )
-        );
-        assert!(!js_body.contains("WebUI 正在查询最新 turn。"));
-        assert!(!js_body.contains("等待数据"));
-        assert!(!root_body.contains("WebUI 正在查询最新 turn。"));
-        assert!(!root_body.contains("等待数据"));
-        assert!(root_body.contains("新会话"));
-        assert!(js_body.contains("发送消息开始这个会话。"));
-        assert!(js_body.contains("if (projection && projection.session_id)"));
-        assert!(
-            !js_body.contains(
-                "if (projection && projection.session_id && state.sessionTurns.length > 0)"
-            )
-        );
-        assert!(js_body.contains("turns.filter(Boolean).forEach"));
-        assert!(js_body.contains("merged[index] = turn;"));
-        assert!(!js_body.contains("function compareTurnIds"));
-        assert!(js_body.contains("latestTurn.session_id !== state.selectedSessionId"));
-        assert!(js_body.contains("const renderModel = buildConversationRenderModel();"));
-        assert!(!js_body.contains("function successorBaseTurnIds"));
-        assert!(!js_body.contains("successorBaseTurns"));
-        assert!(!js_body.contains("hideTerminal"));
-        assert!(!js_body.contains("hideUser"));
-        assert!(js_body.contains("case \"/new\""));
-        assert!(js_body.contains("case \"/task\""));
-        assert!(js_body.contains("case \"/cwd\""));
-        assert!(!js_body.contains("selected session:"));
-        assert!(js_body.contains("CancelTurn"));
-        assert!(js_body.contains("CancelLatestActiveTurn"));
-        assert!(js_body.contains("event.key !== \"Escape\""));
-        assert!(js_body.contains("cancelActiveTurn"));
-        assert!(js_body.contains("normalizePublicConversation"));
-        assert!(!js_body.contains("const toolIndex = new Map()"));
-        assert!(!js_body.contains("normalized[existingIndex] = item"));
-        assert!(!js_body.contains("function compactToolBodyLines"));
-        assert!(!js_body.contains("function isGenericToolResult"));
-        assert!(!js_body.contains("function shouldShowToolParameterSummary"));
-        assert!(!js_body.contains("function compactToolDisplayFields"));
-        assert!(js_body.contains("isInternalRuntimePrompt"));
-        assert!(!js_body.contains("__hideUserRow"));
-        assert!(!js_body.contains("logicalExecutionKey"));
-        assert!(!js_body.contains("__supersededRound"));
-        assert!(!js_body.contains("continued"));
-        assert!(!js_body.contains("modelRequestStatusForTurn"));
-        assert!(!js_body.contains("function logicalTurnKey"));
-        assert!(!js_body.contains("function mergeLogicalTurnGroup"));
-        assert!(js_body.contains("logicalSessionTurns(state.sessionTurns)"));
-        assert!(js_body.contains("stripFreehandCompletionBlock"));
-        assert!(js_body.contains("stripped.includes(\"</freehand_completion>\")"));
-        assert!(!js_body.contains(
-            "left.session_id && right.session_id && left.session_id !== right.session_id"
-        ));
-        assert!(!js_body.contains("normalizeVisibleText(left.user_text)"));
-        assert!(!js_body.contains("normalizeVisibleText(right.user_text)"));
-        assert!(js_body.contains("terminalBodyForDisplay"));
-        assert!(js_body.contains("terminalSummaryBlock"));
-        assert!(!js_body.contains("function terminalSummaryLine"));
-        assert!(js_body.contains("stripDebugTerminalLines"));
-        assert!(js_body.contains("debugDetailsVisible"));
-        assert!(js_body.contains("debugDetailsToggle"));
-        assert!(js_body.contains("调试关"));
-        assert!(js_body.contains("<freehand_completion>"));
-        assert!(js_body.contains("toolSummaryBody"));
-        assert!(js_body.contains("renderToolBody"));
-        assert!(js_body.contains("pushToolLine"));
-        assert!(js_body.contains("splitToolDetailLines"));
-        assert!(js_body.contains("display.parameter_summary"));
-        assert!(js_body.contains("display.result_summary"));
-        assert!(js_body.contains("elapsedSince"));
-        assert!(js_body.contains("submitStartedAt"));
-        assert!(js_body.contains("pendingSubmitId"));
-        assert!(js_body.contains("pendingSubmitSessionId"));
-        assert!(js_body.contains("pendingSubmitError"));
-        assert!(js_body.contains("turn.submit_id !== submitId"));
-        assert!(js_body.contains("turn.session_id !== submitSessionId"));
-        assert!(js_body.contains("modelRequestTimingKey"));
-        assert!(js_body.contains("modelRequestKind"));
-        assert!(js_body.contains("function modelRequestPhase"));
-        assert!(js_body.contains("phase: modelRequestPhase(turn)"));
-        assert!(js_body.contains("modelRequestLabel"));
-        assert!(js_body.contains("function modelRequestTransport"));
-        assert!(js_body.contains("function modelRequestTransportPhase"));
-        assert!(js_body.contains("function modelRequestTransportLabel"));
-        assert!(!js_body.contains("function modelRequestKindIsLegacyTransport"));
-        assert!(js_body.contains("turnIsWaitingForModelResponse"));
-        assert!(js_body.contains("Schema 修复"));
-        assert!(js_body.contains("工具结果后继续推理"));
-        assert!(js_body.contains("传输重试"));
-        assert!(js_body.contains("传输切换"));
-        assert!(js_body.contains("return \"provider_retry\";"));
-        assert!(js_body.contains("return \"provider_failover\";"));
-        assert!(!js_body.contains("return \"provider retry\";"));
-        assert!(!js_body.contains("return \"provider failover\";"));
-        assert!(!js_body.contains("label.startsWith(\"provider \")"));
-        assert!(!js_body.contains("turnIsWaitingForModel("));
-        assert!(js_body.contains("rememberInputHistory"));
-        assert!(js_body.contains("recallInputHistory"));
-        assert!(js_body.contains("ArrowUp"));
-        assert!(js_body.contains("ArrowDown"));
-        assert!(js_body.contains("toolTimelineLine"));
-        assert!(js_body.contains("running-tool-state"));
-        assert!(js_body.contains("className: \"pending\""));
-        assert!(js_body.contains("label: \"等待中\""));
-        assert!(js_body.contains("RenderLifecycle"));
-        assert!(!js_body.contains("modelRequestBody"));
-        assert!(!js_body.contains("modelWaitBody"));
-        assert!(!js_body.contains("shouldRenderLiveWaitForTurn"));
-        assert!(!js_body.contains("compactToolResultLine"));
-        assert!(!js_body.contains("succeeded: result returned"));
-        assert!(!js_body.contains("succeeded: shell command"));
-        assert!(js_body.contains("buildConversationRenderModel()"));
-        assert!(js_body.contains("renderModelHasLiveLifecycle()"));
-        assert!(!js_body.contains("hasPendingSubmit"));
-        assert!(!js_body.contains("hasModelRequestWait"));
-        assert!(!js_body.contains("hasModelWait"));
-        assert!(js_body.contains("waitingToolStatus"));
-        assert!(js_body.contains("tool.display || null"));
-        assert!(js_body.contains("display.diff"));
-        assert!(js_body.contains("display.result_summary"));
-        assert!(js_body.contains("compact-tool-state"));
-        assert!(js_body.contains("display.fields"));
-        assert!(js_body.contains("/^(result|failure):/i.test(line)"));
-        assert!(js_body.contains("function assistantSectionHeadingLabel"));
-        assert!(js_body.contains("if (row.kind === \"final\")"));
-        assert!(js_body.contains("if (row.kind === \"system\")"));
-        assert!(
-            js_body.contains("const showSectionStatus = row.kind !== \"assistant\" && row.status;")
-        );
-        assert!(js_body.contains("if (headingLabel || showSectionStatus)"));
-        assert!(js_body.contains("formatDuration"));
-        assert!(js_body.contains("composerInput.value = \"\";"));
-        assert!(js_body.contains("tool_call_id"));
-        assert!(!js_body.contains("ADP"));
-        assert!(!js_body.contains("ADP success sample"));
-        assert!(!js_body.contains("ADP failure sample"));
-        assert!(js_body.contains("definitely-missing-freehand-task"));
-        assert!(js_body.contains(r#""op":"query""#));
-        assert!(!js_body.contains("read_file tool exactly"));
-        assert!(js_body.contains("scenario loaded"));
-        assert!(js_body.contains("loadSamplePrompt"));
-        assert!(js_body.contains("shortcutHelp"));
-        assert!(js_body.contains("runSlashCommand"));
-        assert!(js_body.contains("attachmentDraftStorageKey"));
-        assert!(js_body.contains("freehand-webui-attachment-drafts-v1"));
-        assert!(js_body.contains("loadAttachmentDrafts"));
-        assert!(js_body.contains("persistAttachmentDrafts"));
-        assert!(js_body.contains("addAttachmentFiles"));
-        assert!(js_body.contains("renderAttachmentTray"));
-        assert!(js_body.contains("textWithAttachmentDisplay"));
-        assert!(js_body.contains("attachmentsForSubmit"));
-        assert!(js_body.contains("FreehandAndroidNotifications"));
-        assert!(js_body.contains("androidObservedNonTerminalTurns"));
-        assert!(js_body.contains("data_base64"));
-        assert!(js_body.contains("attachment-preview-overlay"));
-        assert!(js_body.contains("clearCurrentAttachments"));
-        assert!(js_body.contains("服务刷新后仍未验证提交回执；重复发送前正在检查服务真源"));
-        assert!(js_body.contains("正在根据服务真源验证提交收据。"));
-        assert!(js_body.contains("服务刷新完成前不要重复发送。"));
-        assert!(js_body.contains("if (!state.selectedSessionId)"));
-        assert!(js_body.contains("state.draftSessionId = sessionId"));
-        assert!(js_body.contains("case \"/附件\""));
-        assert!(js_body.contains("case \"/model\""));
-        assert!(js_body.contains("模型选择器只读"));
-        assert!(js_body.contains("setCommandStatus"));
-        assert!(js_body.contains("setBackgroundCommandStatus"));
-        assert!(js_body.contains("adpRequestTimeoutMs"));
-        assert!(js_body.contains("request timed out after"));
-        assert!(js_body.contains("commandStatusStickyUntil"));
-        assert!(js_body.contains("stickyMs"));
-        assert!(js_body.contains("Cmd/Ctrl+Enter"));
-        assert!(js_body.contains("requestSubmit()"));
-        assert!(js_body.contains("refreshAllProtocolState"));
-        assert!(js_body.contains("foregroundRefreshMinIntervalMs"));
-        assert!(js_body.contains("function refreshProtocolStateAfterForeground"));
-        assert!(js_body.contains("function shouldRefreshAfterForeground"));
-        assert!(js_body.contains("window.addEventListener(\"pageshow\""));
-        assert!(js_body.contains("window.addEventListener(\"focus\""));
-        assert!(js_body.contains("window.addEventListener(\"online\""));
-        assert!(js_body.contains("document.addEventListener(\"visibilitychange\""));
-        assert!(js_body.contains("refreshProtocolStateAfterForeground(\"应用恢复\")"));
-        assert!(js_body.contains("检查服务真源"));
-        assert!(js_body.contains("foregroundRefreshInFlight"));
-        assert!(js_body.contains("foregroundRefreshLastAt"));
-        assert!(js_body.contains("if (command.startsWith(\"/\")"));
-        assert!(js_body.contains("composerInput.value = \"\";"));
-        assert!(js_body.contains("case \"/help\""));
-        assert!(js_body.contains("case \"/new\""));
-        assert!(js_body.contains("case \"/task\""));
-        assert!(js_body.contains("case \"/sessions\""));
-        assert!(js_body.contains("case \"/reload\""));
-        assert!(js_body.contains("case \"/success\""));
-        assert!(js_body.contains("case \"/failure\""));
-        assert!(js_body.contains("case \"/cancel\""));
-        assert!(js_body.contains("case \"/clear\""));
-        assert!(webui_css_body.contains("composer-control-strip"));
-        assert!(webui_css_body.contains("session-create-actions"));
-        assert!(webui_css_body.contains("task-cwd-control"));
-        assert!(webui_css_body.contains("attachment-tray"));
-        assert!(webui_css_body.contains("attachment-chip"));
-        assert!(!js_body.contains("Tool call requested"));
-        assert!(!js_body.contains("Tool result returned for"));
-        assert!(!js_body.contains("Tool execution failed for"));
-        let turn_render_pos = js_body
-            .find("const renderModel = buildConversationRenderModel();")
-            .expect("turn render branch present");
-        let adp_failure_pos = js_body
-            .rfind("if (renderModel.adpFailure)")
-            .expect("adp failure branch present");
-        assert!(
-            adp_failure_pos > turn_render_pos,
-            "connection failure card must render after conversation timeline branch"
-        );
+        assert!(root_body.contains("id=\"mobile-home-dashboard\""));
+        assert!(root_body.contains("id=\"mobile-home-session-list\""));
+        assert!(root_body.contains("id=\"open-timer-dashboard-button\""));
+        assert!(root_body.contains("id=\"open-tools-dashboard-button\""));
+        assert!(root_body.contains("id=\"mobile-new-entry-button\""));
+        assert!(root_body.contains("id=\"session-relation-header\""));
+        assert!(root_body.contains("id=\"tools-dashboard-dialog\""));
+        assert!(root_body.contains("id=\"timer-dashboard-dialog\""));
+        assert!(root_body.contains("id=\"session-search-dialog\""));
+        assert!(root_body.contains("id=\"new-session-dialog\""));
+        assert!(root_body.contains("id=\"settings-shell\""));
+
+        assert!(legacy_body.contains("QueryTimerList"));
+        assert!(legacy_body.contains("QueryDiagnostics"));
+        assert!(legacy_body.contains("QueryConfigStatus"));
+        assert!(legacy_body.contains("QueryTaskBoard"));
+        assert!(legacy_body.contains("QueryAgentBoard"));
+        assert!(legacy_body.contains("QueryEventInbox"));
+        assert!(legacy_body.contains("QueryTaskHistory"));
+        assert!(legacy_body.contains("QueryWorkerControl"));
+        assert!(legacy_body.contains("function renderMobileHomeDashboard"));
+        assert!(legacy_body.contains("function mobileHomeSessionButton"));
+        assert!(legacy_body.contains("function renderToolsDashboard"));
+        assert!(legacy_body.contains("function renderTimerDashboard"));
+        assert!(legacy_body.contains("function renderSettingsDiagnostics"));
+        assert!(legacy_body.contains("function renderPhase2Dashboard"));
+        assert!(legacy_body.contains("function openWorkerTaskSession"));
+        assert!(legacy_body.contains("function switchConversationSession"));
+        assert!(legacy_body.contains("function returnToParentSession"));
+        assert!(legacy_body.contains("function sessionLiveObservation"));
+        assert!(legacy_body.contains("function globalLiveSessionObservation"));
+        assert!(legacy_body.contains("function mobileHomeHistoryBuckets"));
+        assert!(legacy_body.contains("function mobileHomeHistoryBucketId"));
+        assert!(legacy_body.contains("function renameSessionFromHome"));
+        assert!(legacy_body.contains("function deleteSessionFromHome"));
+        assert!(legacy_body.contains("dispatchWebUiEdge"));
+        assert!(legacy_body.contains("session.open_parent_session"));
+        assert!(legacy_body.contains("root.open_home"));
+        assert!(legacy_body.contains("renderHomeDashboardSurface"));
+        assert!(!legacy_body.contains("运行、重试、等待用户选择的会话"));
+        assert!(!legacy_body.contains("parentTasks.length > 0 ? parentTasks : allTasks"));
+        assert!(!legacy_body.contains("function renderSettingsReviewTree"));
 
         server.stop().await;
-    }
-
-    #[tokio::test]
-    #[allow(clippy::await_holding_lock)]
-    async fn android_update_routes_return_manifest_and_explicit_missing_apk() {
-        let _env_guard = android_update_env_lock().lock().expect("env lock");
-        let _snapshot = EnvSnapshot::capture(&[
-            "FREEHAND_ANDROID_VERSION_CODE",
-            "FREEHAND_ANDROID_VERSION_NAME",
-            "FREEHAND_ANDROID_APK_PATH",
-            "FREEHAND_ANDROID_UPDATE_MANIFEST_PATH",
-        ]);
-        unsafe {
-            std::env::set_var("FREEHAND_ANDROID_VERSION_CODE", "42");
-            std::env::set_var("FREEHAND_ANDROID_VERSION_NAME", "0.4.2");
-            std::env::set_var(
-                "FREEHAND_ANDROID_APK_PATH",
-                "/tmp/freehand-missing-test-android.apk",
-            );
-            std::env::remove_var("FREEHAND_ANDROID_UPDATE_MANIFEST_PATH");
-        }
-
-        let server = TestServer::spawn_empty().await;
-        let client = Client::builder().build().expect("client");
-
-        let manifest = client
-            .get(format!("{}/android/update.json", server.base_url))
-            .send()
-            .await
-            .expect("manifest response");
-        assert_eq!(manifest.status(), StatusCode::OK);
-        assert_eq!(
-            manifest.headers().get(header::CACHE_CONTROL),
-            Some(&HeaderValue::from_static("no-store, max-age=0"))
-        );
-        let manifest_json: serde_json::Value = manifest.json().await.expect("manifest json");
-        assert_eq!(manifest_json["versionCode"], 42);
-        assert_eq!(manifest_json["versionName"], "0.4.2");
-        assert_eq!(
-            manifest_json["apkUrl"],
-            serde_json::Value::String("/android/freehand-android.apk".to_owned())
-        );
-
-        let apk = client
-            .get(format!("{}/android/freehand-android.apk", server.base_url))
-            .send()
-            .await
-            .expect("apk response");
-        assert_eq!(apk.status(), StatusCode::NOT_FOUND);
-
-        server.stop().await;
-    }
-
-    #[tokio::test]
-    #[allow(clippy::await_holding_lock)]
-    async fn android_update_manifest_uses_compiled_sidecar_without_env_override() {
-        let _env_guard = android_update_env_lock().lock().expect("env lock");
-        let _snapshot = EnvSnapshot::capture(&[
-            "FREEHAND_ANDROID_VERSION_CODE",
-            "FREEHAND_ANDROID_VERSION_NAME",
-            "FREEHAND_ANDROID_APK_PATH",
-            "FREEHAND_ANDROID_UPDATE_MANIFEST_PATH",
-        ]);
-        let temp_dir = std::env::temp_dir().join(format!(
-            "freehand-android-update-sidecar-{}",
-            std::process::id()
-        ));
-        fs::create_dir_all(&temp_dir).expect("temp dir");
-        let manifest_path = temp_dir.join("update.json");
-        fs::write(
-            &manifest_path,
-            r#"{"versionCode":7,"versionName":"0.7.0","apkUrl":"/android/freehand-android.apk","releaseNotes":"sidecar","required":false}"#,
-        )
-        .expect("write sidecar");
-        unsafe {
-            std::env::remove_var("FREEHAND_ANDROID_VERSION_CODE");
-            std::env::remove_var("FREEHAND_ANDROID_VERSION_NAME");
-            std::env::set_var("FREEHAND_ANDROID_UPDATE_MANIFEST_PATH", &manifest_path);
-            std::env::set_var(
-                "FREEHAND_ANDROID_APK_PATH",
-                "/tmp/freehand-missing-test-android.apk",
-            );
-        }
-
-        let server = TestServer::spawn_empty().await;
-        let client = Client::builder().build().expect("client");
-        let manifest = client
-            .get(format!("{}/android/update.json", server.base_url))
-            .send()
-            .await
-            .expect("manifest response");
-        assert_eq!(manifest.status(), StatusCode::OK);
-        assert_eq!(
-            manifest.headers().get(header::CACHE_CONTROL),
-            Some(&HeaderValue::from_static("no-store, max-age=0"))
-        );
-        let manifest_json: serde_json::Value = manifest.json().await.expect("manifest json");
-        assert_eq!(manifest_json["versionCode"], 7);
-        assert_eq!(manifest_json["versionName"], "0.7.0");
-        assert_eq!(manifest_json["releaseNotes"], "sidecar");
-
-        server.stop().await;
-        fs::remove_dir_all(&temp_dir).expect("remove temp dir");
-    }
-
-    #[tokio::test]
-    #[allow(clippy::await_holding_lock)]
-    async fn android_update_manifest_missing_sidecar_does_not_report_false_current_version() {
-        let _env_guard = android_update_env_lock().lock().expect("env lock");
-        let _snapshot = EnvSnapshot::capture(&[
-            "FREEHAND_ANDROID_VERSION_CODE",
-            "FREEHAND_ANDROID_VERSION_NAME",
-            "FREEHAND_ANDROID_APK_PATH",
-            "FREEHAND_ANDROID_UPDATE_MANIFEST_PATH",
-        ]);
-        let missing_path = std::env::temp_dir().join(format!(
-            "freehand-missing-update-sidecar-{}-update.json",
-            std::process::id()
-        ));
-        unsafe {
-            std::env::remove_var("FREEHAND_ANDROID_VERSION_CODE");
-            std::env::remove_var("FREEHAND_ANDROID_VERSION_NAME");
-            std::env::set_var("FREEHAND_ANDROID_UPDATE_MANIFEST_PATH", &missing_path);
-        }
-
-        let server = TestServer::spawn_empty().await;
-        let client = Client::builder().build().expect("client");
-        let manifest = client
-            .get(format!("{}/android/update.json", server.base_url))
-            .send()
-            .await
-            .expect("manifest response");
-        assert_eq!(manifest.status(), StatusCode::NOT_FOUND);
-
-        server.stop().await;
-    }
-
-    #[test]
-    fn android_update_default_paths_use_runtime_home_not_process_cwd() {
-        let _env_guard = android_update_env_lock().lock().expect("env lock");
-        let _snapshot = EnvSnapshot::capture(&[
-            "FREEHAND_ANDROID_VERSION_CODE",
-            "FREEHAND_ANDROID_VERSION_NAME",
-            "FREEHAND_ANDROID_APK_PATH",
-            "FREEHAND_ANDROID_UPDATE_MANIFEST_PATH",
-            "FREEHAND_RUNTIME_HOME",
-            "FREEHAND_DAEMON_WORKDIR",
-        ]);
-        let runtime_home = std::env::temp_dir().join(format!(
-            "freehand-android-update-运行时-home-{}",
-            std::process::id()
-        ));
-        unsafe {
-            std::env::remove_var("FREEHAND_ANDROID_APK_PATH");
-            std::env::remove_var("FREEHAND_ANDROID_UPDATE_MANIFEST_PATH");
-            std::env::set_var("FREEHAND_RUNTIME_HOME", &runtime_home);
-            std::env::remove_var("FREEHAND_DAEMON_WORKDIR");
-        }
-
-        assert_eq!(
-            android_update_manifest_path(),
-            runtime_home
-                .join("dist")
-                .join("android")
-                .join("update.json")
-        );
-        assert_eq!(
-            android_update_apk_path(),
-            runtime_home
-                .join("dist")
-                .join("android")
-                .join("freehand-android-release.apk")
-        );
     }
 
     #[tokio::test]

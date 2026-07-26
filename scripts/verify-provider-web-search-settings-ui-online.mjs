@@ -28,7 +28,7 @@ const fixtureKeyName = 'FREEHAND_PROVIDER_WEB_SEARCH_UI_FIXTURE_KEY';
 const fixtureModel = 'gpt-5.5-web-search-ui';
 const runId = `provider-web-search-settings-ui-${Date.now()}`;
 const artifactDir = path.join(repo, 'artifacts', 'webui-online', runId);
-const assetVersion = '20260725-session-panel-ui';
+const assetVersion = '20260726-mobile-route-one-row';
 
 let chrome = null;
 let cdp = null;

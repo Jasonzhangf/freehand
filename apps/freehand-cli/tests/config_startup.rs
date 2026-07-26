@@ -4415,7 +4415,8 @@ provider = "minimonth"
     assert!(first_request.contains("\"tools\""));
     assert!(first_request.contains("\"name\":\"task\""));
     assert!(first_request.contains("\"name\":\"timer\""));
-    assert!(!first_request.contains("\"name\":\"read_file\""));
+    assert!(first_request.contains("\"name\":\"read_file\""));
+    assert!(!first_request.contains("\"name\":\"bash\""));
     assert!(!first_request.contains("\"tool_choice\""));
     assert!(second_request.contains("\"type\":\"tool_result\""));
     assert!(second_request.contains("toolu_task_1"));

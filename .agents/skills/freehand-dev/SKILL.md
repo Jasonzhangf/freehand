@@ -597,6 +597,11 @@ Use this skill for any non-trivial work in this repo.
   explicit blocker report, not completion; an Android locked/dozing state must be
   shown with the latest `apps/freehand-android/scripts/verify-device-ui.sh`
   artifact and ADB window signals before reporting the remaining gap.
+- For WebUI modular surface splits, asset smoke is only a serving/import gate.
+  After moving code out of `webui.js`, the online verifier must capture browser
+  `Runtime.exceptionThrown` or console failures and fetch every new module asset;
+  a green `node --check` plus asset route test does not prove bootstrap executed
+  in the live browser.
 
 ## Memory Workflow
 
