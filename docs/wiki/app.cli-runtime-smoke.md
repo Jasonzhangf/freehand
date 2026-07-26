@@ -12,7 +12,7 @@ Generated from `docs/mainline-calls/app.cli-runtime-smoke.json`. Do not edit by 
 
 - operator invokes `freehand-cli`
 - CLI parses the command shape and selects one agent plus its bound provider from `~/.freehand/config.toml`
-- for reason E2E smoke, CLI builds one scripted runtime harness request
+- for reason E2E smoke, freehand-reason-smoke (freehand-testkit bin) builds one scripted runtime harness request
 - provider semantic outputs enter the harness, then reason turn truth, then rewrite runtime, then terminal reporting
 - for ADP smoke, CLI connects to a caller-provided daemon `/adp` WebSocket URL and sends protocol-owned subscribe, query, and query-as-command frames
 - for ADP turn samples, CLI connects to the same daemon `/adp`, creates an isolated sample session, subscribes to latest-turn updates, submits a success sample prompt, a tool-result-failure recovery prompt, a no-tool schema-mismatch polishing prompt, or a provider-retry prompt, verifies the matching terminal projection, then queries the sample session transcript to prove round/tool/schema/provider evidence
@@ -101,9 +101,9 @@ Generated from `docs/mainline-calls/app.cli-runtime-smoke.json`. Do not edit by 
 
 | step | symbol path | file path | responsibility | input semantic | output semantic | caller | callee | source resource | target resource | resource operation | binding status |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
-| 01 | `run` | `apps/freehand-cli/src/main.rs` | parse CLI command and dispatch config startup or reason E2E smoke | CLI args | selected command path | shell/operator | CLI dispatcher |  |  |  | bound |
+| 01 | `run` | `apps/freehand-cli/src/main.rs` | parse CLI command and dispatch production runtime/ADP paths (reason smoke owned by freehand-reason-smoke) | CLI args | selected command path | shell/operator | CLI dispatcher |  |  |  | bound |
 | 02 | `load_default_config` | `crates/freehand-config/src/lib.rs` | load runtime config from `~/.freehand/config.toml` | runtime home config path | selected config truth | CLI dispatcher | config owner |  |  |  | bound |
-| 03 | `run_reason_e2e_smoke` | `apps/freehand-cli/src/main.rs` | build scripted E2E runtime harness request from selected agent | selected agent plus scenario | terminal-facing smoke summary | CLI dispatcher | app smoke runner |  |  |  | bound |
+| 03 | `run_reason_e2e` | `crates/freehand-testkit/src/bin/freehand_reason_smoke.rs` | build scripted E2E runtime harness request from freehand-reason-smoke bin | selected agent plus scenario | terminal-facing smoke summary | freehand-reason-smoke bin | app smoke runner |  |  |  | bound |
 | 04 | `ReasonRuntimeHarness::run_provider_turn` | `crates/freehand-testkit/src/lib.rs` | route provider usage into turn truth and rewrite policy | scripted provider outputs plus compaction scenario | turn truth plus optional compaction outcome | app smoke runner | testkit harness |  |  |  | bound |
 | 05 | `ReasonRuntimeHarness::apply_resume_rebuild` | `crates/freehand-testkit/src/lib.rs` | route restore state into recovery policy | restore status plus optional rebuild payload | recovery outcome | app smoke runner | testkit harness |  |  |  | bound |
 | 06 | `run_adp_smoke` | `apps/freehand-cli/src/main.rs` | parse ADP smoke URL and run a bounded no-UI WebSocket smoke | --url ws://.../adp | terminal-facing ADP smoke summary | CLI dispatcher | ADP smoke runner |  |  |  | bound |

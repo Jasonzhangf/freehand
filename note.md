@@ -8728,3 +8728,19 @@ Current real root cause split:
 - Asset modules/page use `__WEBUI_ASSET_VERSION__` stamp; online scripts aligned to current WEBUI_ASSET_VERSION.
 - Gap 6/8 step-1 status updated; Gap 5 remains open.
 - Proof: freehand-ui-protocol 75 ok; freehand-server 16 ok; freehand-cli config_startup 27 ok.
+
+# 2026-07-27 stale session waiting residual + Gap5 CLI/testkit edge
+
+- Jason feedback: two sessions still show waiting residual after unexpected failure/restart; treat as startup lifecycle cleanup scope.
+- Live S-profile evidence after restart:
+  - `adp-session-query` shows `webui-path-diagnostic-state-sync-fixed:2:blocked` and `webui-session-20260723001509-bd98e156:8:blocked`.
+  - turn truth: `runtime-turn-522` Blocked, `runtime-turn-541-r3` Blocked.
+  - mobile UI verifier `artifacts/webui-online/mobile-ui-tree-phase1-20260726T192944-36677` has `mobileHomeRunningIds=[]` and history status `已阻塞` for both.
+  - No session-level toolpending residual remains for those two user sessions.
+- Remaining residual class (not the two user sessions): TaskBoard still has 20 non-terminal sample/history tasks (`waiting_agent`/`assigned`/`review_submitted`/`interrupted`) from old CLI/online samples; these are task-owner residual, not SessionList waiting residual. Session bootstrap cleanup already closed no-owner ToolPending parents.
+- Also closed incomplete Gap 5 slice `apps/freehand-cli -> freehand-testkit`:
+  - production CLI no longer depends on testkit
+  - smoke bin `freehand-reason-smoke` under `crates/freehand-testkit`
+  - tests moved to `crates/freehand-testkit/tests/reason_smoke_bin.rs`
+  - FORBIDDEN edge baseline flipped to false
+  - proofs: freehand-testkit 9 tests ok; freehand-cli config_startup 24 ok; mainlines/gates ok

@@ -652,3 +652,10 @@
 - Master poll split: Command=`RunMasterPoll`/`run_master_poll`; Query=`QueryMasterPoll`/`preview_master_poll`.
 - WebUI cache-busting owner is `WEBUI_ASSET_VERSION` in `apps/freehand-server/src/assets.rs`; authoring uses `__WEBUI_ASSET_VERSION__` token and server stamps responses.
 - Package-level proof for this slice: freehand-ui-protocol + freehand-server package tests, freehand-cli config_startup including master-poll foundation sample/verify.
+
+## Stale session ToolPending residual closed on S-profile (2026-07-27 recheck)
+- After restart, SessionList truth for the two previously waiting user sessions is durable `blocked`, not `toolpending`.
+- Home running list is empty; history labels show `已阻塞`.
+- Session-level bootstrap cleanup path `recover_stale_lifecycle_waits_on_bootstrap` remains the owner for no-owner ToolPending residuals.
+- Separate remaining residual: old Task Center non-terminal sample tasks still appear as TaskBoard activity counts; that is task residual cleanup, not session waiting residual.
+Tags: #lifecycle #bootstrap #session-waiting #taskboard-residual

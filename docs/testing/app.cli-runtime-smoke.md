@@ -165,3 +165,11 @@
   - CLI ADP provider web_search test command is implemented for live daemon provider-hosted search checks
   - CLI ADP error query command is implemented for live daemon error-center metadata checks
   - migrated mainline-call source and generated wiki are kept in sync with this test design
+
+
+## Reason smoke harness bin
+
+- owner crate: `crates/freehand-testkit`
+- bin: `freehand-reason-smoke`
+- integration tests: `crates/freehand-testkit/tests/reason_smoke_bin.rs`
+- production `apps/freehand-cli` must not depend on `freehand-testkit`

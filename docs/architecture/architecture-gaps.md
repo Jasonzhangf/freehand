@@ -57,7 +57,7 @@ Non-violation pending items. Not regressions. Not false positives. Each gap has 
 |---|---|
 | feature_id | `runtime.ui-command-dispatch`, `node.master-slave`, `app.cli-runtime-smoke` |
 | owner crate | `crates/freehand-node`, `apps/freehand-cli`, `crates/freehand-runtime` |
-| gap kind | 2026-07-26 全仓审计确认三条依赖边违反 workspace 分层意图但已在生产使用：`node -> freehand-ui-protocol`（node 以 UI 契约类型作为内部状态查询通道）、`freehand-cli -> freehand-testkit`（生产二进制引用 smoke harness）、`runtime -> freehand-provider-{openai,anthropic}`（runtime 绕过 provider-core 直连具体 executor，含 5 处 (ProviderType, Protocol) 双 match 与字符串错误分类） |
+| gap kind | 2026-07-26 全仓审计确认剩余依赖边违反 workspace 分层意图：`node -> freehand-ui-protocol`（node 以 UI 契约类型作为内部状态查询通道）、`runtime -> freehand-provider-{openai,anthropic}`（runtime 绕过 provider-core 直连具体 executor）。`apps/freehand-cli -> freehand-testkit` 已清除：reason smoke 入口迁到 `crates/freehand-testkit` bin `freehand-reason-smoke`，FORBIDDEN edge baseline 翻为 false。 |
 | why not violation | 三条边已登记进 xtask `verify_dependency_graph` 的 `FORBIDDEN_DEPENDENCY_EDGES` 基线（`baseline_violation: true`），gate 冻结漂移：基线只许缩小不许新增；同任务已删除 `reason -> ui-protocol`、`testkit -> {config,provider-anthropic,runtime}` 四条零使用死边并锁定为禁止复活 |
 | risk | node 层被 UI 类型反向锚定，接入第二种 UI 需连带内核类型；testkit 进入发布依赖闭包；provider 可重试性判断靠 `"anthropic_http_status_5"` 类字符串 contains，provider 改码前缀即静默失效 |
 | gate | `cargo run -p xtask -- gates check` 的 `verify_dependency_graph`：基线内边消失时强制翻转 `baseline_violation` 为 false 锁死，新增禁边立即失败 |

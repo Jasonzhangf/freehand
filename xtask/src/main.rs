@@ -3364,7 +3364,7 @@ const FORBIDDEN_DEPENDENCY_EDGES: &[ForbiddenDependencyEdge] = &[
         from: "apps/freehand-cli",
         to: "freehand-testkit",
         reason: "production binaries must not depend on test harness crates",
-        baseline_violation: true,
+        baseline_violation: false,
     },
     ForbiddenDependencyEdge {
         from: "crates/freehand-runtime",

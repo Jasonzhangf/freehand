@@ -14,9 +14,6 @@ use freehand_task::{
     TaskCreateRequest, TaskDispatchRequest, TaskExecutionProfile, TaskId, TaskParentRef,
     TaskReviewRejection, TaskReviewSubmission, TaskRuntime, TaskWatermark,
 };
-use freehand_testkit::{
-    ReasonRuntimeSmokeScenario, run_reason_persistence_smoke, run_reason_runtime_smoke,
-};
 use freehand_ui_protocol::{
     UiAdpRequest, UiAdpResponse, UiAgentBoardProjection, UiAgentLifecycleProjection, UiClientKind,
     UiCommand, UiExecutionFactCommand, UiExecutionFactKind, UiMasterPollProjection,
@@ -46,12 +43,6 @@ fn run() -> Result<String, String> {
     let Some(flag) = args.next() else {
         return Err("usage: freehand-cli --agent <name>".to_owned());
     };
-    if flag == "reason-e2e" {
-        return run_reason_e2e_smoke(args.collect());
-    }
-    if flag == "reason-persist-smoke" {
-        return run_reason_persist_smoke(args.collect());
-    }
     if flag == "reason-live" {
         return run_reason_live(args.collect());
     }
@@ -123,7 +114,7 @@ fn run() -> Result<String, String> {
     }
     if flag != "--agent" {
         return Err(
-        "usage: freehand-cli --agent <name>\n   or: freehand-cli reason-e2e --agent <name> --scenario <usage-compaction|recovery-block>\n   or: freehand-cli reason-persist-smoke --agent <name>\n   or: freehand-cli reason-live --agent <name> --prompt <text> [--stream]\n   or: freehand-cli adp-smoke --url ws://127.0.0.1:4041/adp\n   or: freehand-cli adp-turn-sample --url ws://127.0.0.1:4041/adp --sample <success|failure|schema-mismatch|provider-retry>\n   or: freehand-cli session-continue-sample --url ws://127.0.0.1:4041/adp\n   or: freehand-cli task-lifecycle-sample --url ws://127.0.0.1:4041/adp\n   or: freehand-cli task-restart-seed-review --agent master --task <id> --worker <id> --execution <id> --target-cwd <path> --summary <text>\n   or: freehand-cli task-restart-seed-rejected --agent master --task <id> --worker <id> --execution <id> --target-cwd <path> --summary <text>\n   or: freehand-cli task-restart-seed-blocked --agent master --task <id> --worker <id> --execution <id> --target-cwd <path> --summary <text>\n   or: freehand-cli task-restart-seed-running --agent master --task <id> --worker <id> --execution <id> --target-cwd <path> --summary <text>\n   or: freehand-cli phase1-foundation-sample --url ws://127.0.0.1:4041/adp [--verify-task <task_id> --review-task <task_id> --execution <id> --agent <id>]\n   or: freehand-cli master-worker-foundation-sample --url ws://127.0.0.1:4041/adp [--verify-task <task_id> --execution <id> --agent <id>]\n   or: freehand-cli master-worker-autonomy-sample --url ws://127.0.0.1:4041/adp [--scenario <all|success|execution-error|reject-retry>] [--verify-task <task_id> --execution <id> --agent <id>]\n   or: freehand-cli master-poll-foundation-sample --url ws://127.0.0.1:4041/adp [--verify-task <task_id> --execution <id> --agent <id> --cursor <cursor>]\n   or: freehand-cli worker-control-foundation-sample --url ws://127.0.0.1:4041/adp [--verify-task <task_id> --execution <id> --agent <id> --control <control_id>]\n   or: freehand-cli adp-session-query --url ws://127.0.0.1:4041/adp [--session <id>]\n   or: freehand-cli adp-session-manage --url ws://127.0.0.1:4041/adp --action <create|rename|archive|restore|delete> --session <id> [--title <title>] [--cwd <path>]\n   or: freehand-cli adp-config-query --url ws://127.0.0.1:4041/adp\n   or: freehand-cli adp-provider-web-search-test --url ws://127.0.0.1:4041/adp --provider <id> [--query <text>]\n   or: freehand-cli adp-config-update --url ws://127.0.0.1:4041/adp --agent <name> --provider <id> --type <openai|anthropic> --protocol <responses|chat_completions|messages> --base-url <url> --model <model> [--web-search auto|disabled] --api-key-env <ENV>\n   or: freehand-cli adp-task-query --url ws://127.0.0.1:4041/adp [--status <status>] [--agent <id>] [--history <task_id>]\n   or: freehand-cli adp-task-subscribe --url ws://127.0.0.1:4041/adp [--status <status>] [--agent <id>]\n   or: freehand-cli adp-error-query --url ws://127.0.0.1:4041/adp --session <id> [--trace <id>] [--turn <id>] [--domain <domain>]\n   or: freehand-cli remote-daemon-bootstrap-link --daemon <id> --credential-env <ENV> [--ttl-seconds <seconds>] [--web]"
+        "usage: freehand-cli --agent <name>\n   or: freehand-cli reason-live --agent <name> --prompt <text> [--stream]\n   or: freehand-cli adp-smoke --url ws://127.0.0.1:4041/adp\n   or: freehand-cli adp-turn-sample --url ws://127.0.0.1:4041/adp --sample <success|failure|schema-mismatch|provider-retry>\n   or: freehand-cli session-continue-sample --url ws://127.0.0.1:4041/adp\n   or: freehand-cli task-lifecycle-sample --url ws://127.0.0.1:4041/adp\n   or: freehand-cli task-restart-seed-review --agent master --task <id> --worker <id> --execution <id> --target-cwd <path> --summary <text>\n   or: freehand-cli task-restart-seed-rejected --agent master --task <id> --worker <id> --execution <id> --target-cwd <path> --summary <text>\n   or: freehand-cli task-restart-seed-blocked --agent master --task <id> --worker <id> --execution <id> --target-cwd <path> --summary <text>\n   or: freehand-cli task-restart-seed-running --agent master --task <id> --worker <id> --execution <id> --target-cwd <path> --summary <text>\n   or: freehand-cli phase1-foundation-sample --url ws://127.0.0.1:4041/adp [--verify-task <task_id> --review-task <task_id> --execution <id> --agent <id>]\n   or: freehand-cli master-worker-foundation-sample --url ws://127.0.0.1:4041/adp [--verify-task <task_id> --execution <id> --agent <id>]\n   or: freehand-cli master-worker-autonomy-sample --url ws://127.0.0.1:4041/adp [--scenario <all|success|execution-error|reject-retry>] [--verify-task <task_id> --execution <id> --agent <id>]\n   or: freehand-cli master-poll-foundation-sample --url ws://127.0.0.1:4041/adp [--verify-task <task_id> --execution <id> --agent <id> --cursor <cursor>]\n   or: freehand-cli worker-control-foundation-sample --url ws://127.0.0.1:4041/adp [--verify-task <task_id> --execution <id> --agent <id> --control <control_id>]\n   or: freehand-cli adp-session-query --url ws://127.0.0.1:4041/adp [--session <id>]\n   or: freehand-cli adp-session-manage --url ws://127.0.0.1:4041/adp --action <create|rename|archive|restore|delete> --session <id> [--title <title>] [--cwd <path>]\n   or: freehand-cli adp-config-query --url ws://127.0.0.1:4041/adp\n   or: freehand-cli adp-provider-web-search-test --url ws://127.0.0.1:4041/adp --provider <id> [--query <text>]\n   or: freehand-cli adp-config-update --url ws://127.0.0.1:4041/adp --agent <name> --provider <id> --type <openai|anthropic> --protocol <responses|chat_completions|messages> --base-url <url> --model <model> [--web-search auto|disabled] --api-key-env <ENV>\n   or: freehand-cli adp-task-query --url ws://127.0.0.1:4041/adp [--status <status>] [--agent <id>] [--history <task_id>]\n   or: freehand-cli adp-task-subscribe --url ws://127.0.0.1:4041/adp [--status <status>] [--agent <id>]\n   or: freehand-cli adp-error-query --url ws://127.0.0.1:4041/adp --session <id> [--trace <id>] [--turn <id>] [--domain <domain>]\n   or: freehand-cli remote-daemon-bootstrap-link --daemon <id> --credential-env <ENV> [--ttl-seconds <seconds>] [--web]"
                 .to_owned(),
         );
     }
@@ -5216,66 +5207,6 @@ fn live_id_stamp() -> Result<u128, String> {
         .duration_since(UNIX_EPOCH)
         .map(|duration| duration.as_nanos())
         .map_err(|err| err.to_string())
-}
-
-fn run_reason_persist_smoke(args: Vec<String>) -> Result<String, String> {
-    if args.len() != 2 || args[0] != "--agent" {
-        return Err("usage: freehand-cli reason-persist-smoke --agent <name>".to_owned());
-    }
-    let config = load_default_config().map_err(|err| err.to_string())?;
-    let selected = config
-        .select_agent(&args[1])
-        .map_err(|err| err.to_string())?;
-    let runtime_home = default_config_path()
-        .map_err(|err| err.to_string())?
-        .parent()
-        .ok_or_else(|| "default config path has no runtime home parent".to_owned())?
-        .to_path_buf();
-    let report = run_reason_persistence_smoke(&selected.name, &runtime_home)
-        .map_err(|err| err.to_string())?;
-    Ok(format!(
-        "agent={} restored_terminal={} reason_seq={} ui_sidecar_exists={} session_index_entries={}",
-        selected.name,
-        report.restored_terminal_summary,
-        report.reason_seq,
-        report.ui_sidecar_exists,
-        report.session_index_entries
-    ))
-}
-
-fn run_reason_e2e_smoke(args: Vec<String>) -> Result<String, String> {
-    if args.len() != 4 || args[0] != "--agent" || args[2] != "--scenario" {
-        return Err(
-            "usage: freehand-cli reason-e2e --agent <name> --scenario <usage-compaction|recovery-block>"
-                .to_owned(),
-        );
-    }
-    let agent_name = &args[1];
-    let scenario = ReasonRuntimeSmokeScenario::parse(&args[3]).ok_or_else(|| {
-        "usage: freehand-cli reason-e2e --agent <name> --scenario <usage-compaction|recovery-block>"
-            .to_owned()
-    })?;
-
-    let config = load_default_config().map_err(|err| err.to_string())?;
-    let selected = config
-        .select_agent(agent_name)
-        .map_err(|err| err.to_string())?;
-
-    let report =
-        run_reason_runtime_smoke(&selected.name, scenario).map_err(|err| err.to_string())?;
-
-    Ok(format!(
-        "scenario={} agent={} rewrite_action={} rewrite_version={} latest_usage_tokens={} blocked={}",
-        report.scenario.as_str(),
-        selected.name,
-        report.rewrite_action,
-        report.rewrite_version,
-        report
-            .latest_usage_tokens
-            .map(|value| value.to_string())
-            .unwrap_or_else(|| "none".to_owned()),
-        report.blocked
-    ))
 }
 
 fn mode_label(mode: AgentMode) -> &'static str {

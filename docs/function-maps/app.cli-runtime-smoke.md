@@ -1,5 +1,6 @@
 # Function Map: `app.cli-runtime-smoke`
 
+- reason runtime smoke harness CLI is owned by `crates/freehand-testkit` bin `freehand-reason-smoke` (not `apps/freehand-cli`)
 - feature_id: `app.cli-runtime-smoke`
 - owner crate: `apps/freehand-cli`
 - owner module: `apps/freehand-cli/src/main.rs`
@@ -168,7 +169,7 @@
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | 01 | `run` | `apps/freehand-cli/src/main.rs` | parse CLI command and dispatch config startup or reason E2E smoke | CLI args | selected command path | shell/operator | CLI dispatcher | bound |
 | 02 | `load_default_config` | `crates/freehand-config/src/lib.rs` | load runtime config from `~/.freehand/config.toml` | runtime home config path | selected config truth | CLI dispatcher | config owner | bound |
-| 03 | `run_reason_e2e_smoke` | `apps/freehand-cli/src/main.rs` | build scripted E2E runtime harness request from selected agent | selected agent + scenario | terminal-facing smoke summary | CLI dispatcher | app smoke runner | bound |
+| 03 | `run_reason_e2e` | `crates/freehand-testkit/src/bin/freehand_reason_smoke.rs` | build scripted E2E runtime harness request from selected agent | selected agent + scenario | terminal-facing smoke summary | CLI dispatcher | app smoke runner | bound |
 | 04 | `ReasonRuntimeHarness::run_provider_turn` | `crates/freehand-testkit/src/lib.rs` | route provider usage into turn truth and rewrite policy | scripted provider outputs + compaction scenario | turn truth + optional compaction outcome | app smoke runner | testkit harness | bound |
 | 05 | `ReasonRuntimeHarness::apply_resume_rebuild` | `crates/freehand-testkit/src/lib.rs` | route restore state into recovery policy | restore status + optional rebuild payload | recovery outcome | app smoke runner | testkit harness | bound |
 | 06 | `run_adp_smoke` | `apps/freehand-cli/src/main.rs` | parse ADP smoke URL and run a bounded no-UI WebSocket smoke | `--url ws://.../adp` | terminal-facing ADP smoke summary | CLI dispatcher | ADP smoke runner | bound |
