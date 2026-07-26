@@ -119,6 +119,15 @@ export const webuiEdges = Object.freeze([
     forbiddenEffects: ["show_global_task_history", "mutate_worker_capacity"],
   },
   {
+    id: "session.expand_worker_status",
+    from: WebUiSurface.SessionDetail,
+    event: "worker_status.expand",
+    to: WebUiSurface.SessionDetail,
+    requires: ["session_id", "task_id"],
+    allowedEffects: ["toggle_header_worker_detail"],
+    forbiddenEffects: ["show_global_task_history", "mutate_worker_capacity", "synthesize_worker_session_id"],
+  },
+  {
     id: "session.open_worker_session",
     from: WebUiSurface.SessionDetail,
     event: "worker_session.open",

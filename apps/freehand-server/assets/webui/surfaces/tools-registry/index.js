@@ -1,5 +1,5 @@
-import { renderToolsRegistrySurface } from './view.js?v=20260726-session-select-rename';
-import { openToolsRegistrySurface, refreshToolsRegistrySurface } from './controls.js?v=20260726-session-select-rename';
+import { renderToolsRegistrySurface } from './view.js?v=20260726-header-worker-rail';
+import { openToolsRegistrySurface, refreshToolsRegistrySurface } from './controls.js?v=20260726-header-worker-rail';
 
 export const surfaceId = 'tools_registry';
 

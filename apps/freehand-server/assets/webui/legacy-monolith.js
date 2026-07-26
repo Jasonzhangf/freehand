@@ -1,14 +1,14 @@
-import { createHomeDashboardModel } from "./surfaces/home-dashboard/model.js?v=20260726-session-select-rename";
-import { createHomeSessionRow } from "./surfaces/home-dashboard/controls.js?v=20260726-session-select-rename";
-import { renderSurface as renderHomeDashboardSurface } from "./surfaces/home-dashboard/index.js?v=20260726-session-select-rename";
-import { renderRunningList as renderHomeRunningList, renderHistoryList as renderHomeHistoryList } from "./surfaces/home-dashboard/view.js?v=20260726-session-select-rename";
-import { openToolsRegistrySurface, refreshToolsRegistrySurface, renderSurface as renderToolsRegistrySurface } from "./surfaces/tools-registry/index.js?v=20260726-session-select-rename";
-import { cancelTimerFromSurface, openTimerDashboardSurface, refreshTimerDashboardSurface, renderSurface as renderTimerDashboardSurface, scheduleTimerFromSurface } from "./surfaces/timer-dashboard/index.js?v=20260726-session-select-rename";
-import { renderSurface as renderSessionSearchSurface, renderSessionSearchResult as renderSessionSearchResultSurface } from "./surfaces/session-search/index.js?v=20260726-session-select-rename";
-import { renderDiagnosticLogRow as renderDiagnosticLogRowSurface, renderSurface as renderSettingsShellSurface, renderNavigation as renderSettingsNavigationSurface, renderDiagnostics as renderSettingsDiagnosticsSurface } from "./surfaces/settings/index.js?v=20260726-session-select-rename";
-import { chooseNewTaskDirectory as chooseNewTaskDirectoryFromSurface, openNewSessionSurface, closeNewSessionSurface, selectedNewSessionKind as selectedNewSessionKindFromSurface, submitNewSessionSurface, syncNewSessionDialogMode as syncNewSessionDialogModeFromSurface } from "./surfaces/new-session/index.js?v=20260726-session-select-rename";
-import { setSelectedSessionId as setSelectedSessionIdInSurface, clearConversationForSessionSwitch as clearConversationForSessionSwitchInSurface, switchConversationSession as switchConversationSessionInSurface } from "./surfaces/session-detail/index.js?v=20260726-session-select-rename";
-import { createAdpClient } from "./app-shell/adp-client.js?v=20260726-session-select-rename";
+import { createHomeDashboardModel } from "./surfaces/home-dashboard/model.js?v=20260726-header-worker-rail";
+import { createHomeSessionRow } from "./surfaces/home-dashboard/controls.js?v=20260726-header-worker-rail";
+import { renderSurface as renderHomeDashboardSurface } from "./surfaces/home-dashboard/index.js?v=20260726-header-worker-rail";
+import { renderRunningList as renderHomeRunningList, renderHistoryList as renderHomeHistoryList } from "./surfaces/home-dashboard/view.js?v=20260726-header-worker-rail";
+import { openToolsRegistrySurface, refreshToolsRegistrySurface, renderSurface as renderToolsRegistrySurface } from "./surfaces/tools-registry/index.js?v=20260726-header-worker-rail";
+import { cancelTimerFromSurface, openTimerDashboardSurface, refreshTimerDashboardSurface, renderSurface as renderTimerDashboardSurface, scheduleTimerFromSurface } from "./surfaces/timer-dashboard/index.js?v=20260726-header-worker-rail";
+import { renderSurface as renderSessionSearchSurface, renderSessionSearchResult as renderSessionSearchResultSurface } from "./surfaces/session-search/index.js?v=20260726-header-worker-rail";
+import { renderDiagnosticLogRow as renderDiagnosticLogRowSurface, renderSurface as renderSettingsShellSurface, renderNavigation as renderSettingsNavigationSurface, renderDiagnostics as renderSettingsDiagnosticsSurface } from "./surfaces/settings/index.js?v=20260726-header-worker-rail";
+import { chooseNewTaskDirectory as chooseNewTaskDirectoryFromSurface, openNewSessionSurface, closeNewSessionSurface, selectedNewSessionKind as selectedNewSessionKindFromSurface, submitNewSessionSurface, syncNewSessionDialogMode as syncNewSessionDialogModeFromSurface } from "./surfaces/new-session/index.js?v=20260726-header-worker-rail";
+import { setSelectedSessionId as setSelectedSessionIdInSurface, clearConversationForSessionSwitch as clearConversationForSessionSwitchInSurface, switchConversationSession as switchConversationSessionInSurface } from "./surfaces/session-detail/index.js?v=20260726-header-worker-rail";
+import { createAdpClient } from "./app-shell/adp-client.js?v=20260726-header-worker-rail";
 
 export const classifyLayoutShape = window.__freehandLayout.classifyLayoutShape;
 export const classifyLayoutShapeForClient = window.__freehandLayout.classifyLayoutShapeForClient;
@@ -48,6 +48,7 @@ const mobileAgentSheet = document.getElementById("mobile-agent-sheet");
 const mobileAgentTaskList = document.getElementById("mobile-agent-task-list");
 const sessionRelationHeader = document.getElementById("session-relation-header");
 const sessionRelationToggleButton = document.getElementById("session-relation-toggle-button");
+const sessionWorkerRail = document.getElementById("session-worker-rail");
 const sessionTreeDropdown = document.getElementById("session-tree-dropdown");
 const sessionTree = document.getElementById("session-tree");
 const workerSessionNav = document.getElementById("worker-session-nav");
@@ -195,6 +196,7 @@ const foregroundRefreshMinIntervalMs = 1500;
 const adpReconnectBaseDelayMs = 1000;
 const adpReconnectMaxDelayMs = 10000;
 const liveTruthWatchdogIntervalMs = 10000;
+const headerWorkerRailStatusRefreshMs = 3000;
 const workerTranscriptRefreshRetryDelayMs = 3000;
 const shortcutHelp =
   "快捷键：Cmd/Ctrl+Enter 发送 · Esc 停止/清空 · Cmd/Ctrl+R 刷新 · Cmd/Ctrl+K 聚焦输入框 · Cmd/Ctrl+1 成功样例 · Cmd/Ctrl+2 失败样例。Slash：/help /new /task /设置 /cwd /sessions /reload /success /failure /cancel /clear /附件 /model";
@@ -253,6 +255,7 @@ const state = {
   sessionSearchInFlight: false,
   phase2StatusError: null,
   phase2LastRefreshAt: null,
+  phase2LiveRefreshInFlight: false,
   workerControlInFlight: false,
   configStatus: null,
   configStatusError: null,
@@ -274,6 +277,7 @@ const state = {
   diagnosticsInFlight: false,
   settingsPage: "root",
   sessionTreeOpen: false,
+  workerRailExpandedTaskId: null,
   toolTimings: new Map(),
   lifecycleClocks: new Map(),
   pendingUserInput: null,
@@ -513,6 +517,11 @@ function closeVisibleNavigationSurface() {
   }
   if (state.sessionTreeOpen) {
     state.sessionTreeOpen = false;
+    renderSessionRelationHeader();
+    return true;
+  }
+  if (state.workerRailExpandedTaskId) {
+    state.workerRailExpandedTaskId = null;
     renderSessionRelationHeader();
     return true;
   }
@@ -6491,7 +6500,165 @@ function renderSessionRelationHeader(model = buildMobileAgentDashboardModel()) {
     sessionTreeDropdown.hidden = !state.sessionTreeOpen;
   }
   renderWorkerSessionNavigation(selectedWorkerSession);
+  renderSessionWorkerRail(parentSession, model.tasks || [], selectedWorkerSession);
   renderSessionTree(parentSession, tasks, selectedWorkerSession);
+}
+
+function renderSessionWorkerRail(parentSession, tasks = [], selectedWorkerSession = null) {
+  if (!sessionWorkerRail) {
+    return;
+  }
+  const scopedTasks = Array.isArray(tasks) ? tasks : [];
+  const expandedTaskId = `${state.workerRailExpandedTaskId || ""}`.trim();
+  if (expandedTaskId && !scopedTasks.some((task) => `${task.task_id || ""}` === expandedTaskId)) {
+    state.workerRailExpandedTaskId = null;
+  }
+  const activeExpandedTaskId = `${state.workerRailExpandedTaskId || ""}`.trim();
+  sessionWorkerRail.replaceChildren();
+  sessionWorkerRail.dataset.workerCount = `${scopedTasks.length}`;
+  sessionWorkerRail.dataset.expandedTaskId = activeExpandedTaskId;
+  sessionWorkerRail.dataset.parentSessionId = parentSession?.session_id || "";
+  sessionWorkerRail.dataset.hasLiveTask = scopedTasks.some((task) => !terminalTaskStatus(task.status)) ? "true" : "false";
+  if (!parentSession || scopedTasks.length === 0) {
+    sessionWorkerRail.hidden = true;
+    return;
+  }
+  sessionWorkerRail.hidden = false;
+
+  const list = document.createElement("div");
+  list.className = "session-worker-list";
+  list.setAttribute("role", "list");
+
+  scopedTasks.forEach((task, index) => {
+    const taskId = `${task.task_id || ""}`.trim();
+    const workerSessionId = `${workerSessionIdForTask(task) || ""}`.trim();
+    const status = workerTaskStatusLabel(task);
+    const duration = taskDurationLabel(task);
+    const durationState = taskDurationState(task);
+    const tone = phase2StatusClass(task.status);
+    const expanded = activeExpandedTaskId !== "" && activeExpandedTaskId === taskId;
+    const selected = selectedWorkerSession && selectedWorkerSession.task_id === taskId;
+    const title = compactSentence(taskTitle(task), 72);
+    const workerLabel = assigneeLabel(task.assignee_agent_id) || `Worker ${index + 1}`;
+    const meta = compactSentence(
+      [status, task.active_execution_id ? "有执行" : null, freshnessLabel(task.last_progress_at || task.updated_at)]
+        .filter(Boolean)
+        .join(" · "),
+      96,
+    );
+
+    const row = document.createElement("div");
+    row.className = [
+      "session-worker-row",
+      expanded ? "is-expanded" : "",
+      selected ? "is-selected" : "",
+      tone,
+    ].filter(Boolean).join(" ");
+    row.dataset.taskId = taskId;
+    row.dataset.workerSessionId = workerSessionId;
+    row.dataset.relationSchema = "UiTaskSnapshotProjection";
+    row.dataset.relationSource = "TaskBoard.worker_session_id";
+    row.dataset.durationState = durationState;
+    row.dataset.status = `${task.status || ""}`;
+    row.dataset.workerLabel = workerLabel;
+    row.setAttribute("role", "listitem");
+
+    const pill = document.createElement("button");
+    pill.type = "button";
+    pill.className = "session-worker-pill";
+    pill.setAttribute("aria-expanded", expanded ? "true" : "false");
+    if (taskId) {
+      pill.setAttribute("aria-controls", `session-worker-detail-${taskId}`);
+    }
+    pill.dataset.taskId = taskId;
+    pill.dataset.workerSessionId = workerSessionId;
+
+    const statusDot = document.createElement("span");
+    statusDot.className = "session-worker-status-dot";
+    statusDot.setAttribute("aria-hidden", "true");
+
+    const labelNode = document.createElement("span");
+    labelNode.className = "session-worker-label";
+    labelNode.textContent = workerLabel;
+
+    const copy = document.createElement("span");
+    copy.className = "session-worker-copy";
+    const titleNode = document.createElement("span");
+    titleNode.className = "session-worker-title";
+    titleNode.textContent = title;
+    const metaNode = document.createElement("span");
+    metaNode.className = "session-worker-meta";
+    metaNode.textContent = meta || status;
+    copy.append(titleNode, metaNode);
+
+    const durationNode = document.createElement("span");
+    durationNode.className = "session-worker-duration";
+    durationNode.dataset.durationState = durationState;
+    durationNode.textContent = duration;
+
+    const chevron = document.createElement("span");
+    chevron.className = "session-worker-chevron";
+    chevron.setAttribute("aria-hidden", "true");
+    chevron.textContent = expanded ? "⌃" : "⌄";
+
+    pill.append(statusDot, labelNode, copy, durationNode, chevron);
+    pill.addEventListener("click", () => {
+      if (parentSession?.session_id && taskId) {
+        dispatchWebUiEdge("session.expand_worker_status", { session_id: parentSession.session_id, task_id: taskId });
+      }
+      state.workerRailExpandedTaskId = expanded ? null : taskId || null;
+      renderSessionRelationHeader();
+    });
+    row.appendChild(pill);
+
+    if (expanded) {
+      const detail = document.createElement("section");
+      detail.className = "session-worker-detail";
+      if (taskId) {
+        detail.id = `session-worker-detail-${taskId}`;
+      }
+      detail.dataset.taskId = taskId;
+      detail.dataset.workerSessionId = workerSessionId;
+
+      const detailTitle = document.createElement("div");
+      detailTitle.className = "session-worker-detail-title";
+      detailTitle.textContent = compactSentence(taskTitle(task), 110);
+
+      const detailMeta = document.createElement("div");
+      detailMeta.className = "session-worker-detail-meta";
+      detailMeta.textContent = [
+        status,
+        assigneeLabel(task.assignee_agent_id),
+        `持续 ${duration}`,
+        task.active_execution_id ? "执行跟踪中" : null,
+      ].filter(Boolean).join(" · ");
+
+      const detailCopy = document.createElement("div");
+      detailCopy.className = "session-worker-detail-copy";
+      detailCopy.textContent = compactSentence(task.goal || task.target_cwd || "任务目标不可用", 160);
+
+      const actions = document.createElement("div");
+      actions.className = "session-worker-detail-actions";
+      const openButton = document.createElement("button");
+      openButton.type = "button";
+      openButton.className = "session-worker-open-button";
+      openButton.textContent = workerSessionId ? "打开工作器会话" : "工作器会话不可用";
+      openButton.disabled = !workerSessionId;
+      openButton.dataset.taskId = taskId;
+      openButton.dataset.workerSessionId = workerSessionId;
+      openButton.addEventListener("click", () => {
+        openWorkerTaskSession(task);
+      });
+      actions.appendChild(openButton);
+
+      detail.append(detailTitle, detailMeta, detailCopy, actions);
+      row.appendChild(detail);
+    }
+
+    list.appendChild(row);
+  });
+
+  sessionWorkerRail.appendChild(list);
 }
 
 function renderSessionTree(parentSession, workerSessions, selectedWorkerSession) {
@@ -6796,6 +6963,84 @@ function freshnessLabel(timestamp) {
     return "刚刚";
   }
   return `${formatDuration(elapsed)} 前`;
+}
+
+function taskStartedAtMs(task) {
+  return timestampToMilliseconds(task && task.created_at);
+}
+
+function taskDurationEndMs(task) {
+  if (!task) {
+    return null;
+  }
+  if (terminalTaskStatus(task.status)) {
+    return timestampToMilliseconds(task.updated_at || task.last_progress_at || task.created_at);
+  }
+  return Date.now();
+}
+
+function taskDurationLabel(task) {
+  const startedAt = taskStartedAtMs(task);
+  if (!startedAt) {
+    return "时间不可用";
+  }
+  const endedAt = taskDurationEndMs(task);
+  if (!endedAt) {
+    return "时间不可用";
+  }
+  const elapsed = Math.max(0, endedAt - startedAt);
+  const label = formatDuration(elapsed);
+  return label || "0s";
+}
+
+function taskDurationState(task) {
+  if (!taskStartedAtMs(task)) {
+    return "unavailable";
+  }
+  return terminalTaskStatus(task.status) ? "frozen" : "live";
+}
+
+function workerTaskStatusLabel(task) {
+  if (!task) {
+    return "未知";
+  }
+  const bucket = taskLifecycleBucket(task.status);
+  if (task.active_execution_id && bucket === "active") {
+    return "执行中";
+  }
+  return statusLabel(task.status);
+}
+
+function headerWorkerRailNeedsClock() {
+  if (!sessionWorkerRail || sessionWorkerRail.hidden) {
+    return false;
+  }
+  return currentSessionTasks().some((task) => taskDurationState(task) === "live");
+}
+
+function headerWorkerRailHasOpenTasks() {
+  if (!sessionWorkerRail || sessionWorkerRail.hidden) {
+    return false;
+  }
+  return currentSessionTasks().some((task) => task && !terminalTaskStatus(task.status));
+}
+
+function refreshHeaderWorkerRailStatusIfNeeded() {
+  if (!headerWorkerRailHasOpenTasks() || state.phase2LiveRefreshInFlight) {
+    return;
+  }
+  const lastRefreshAt = Number(state.phase2LastRefreshAt) || 0;
+  if (Date.now() - lastRefreshAt < headerWorkerRailStatusRefreshMs) {
+    return;
+  }
+  state.phase2LiveRefreshInFlight = true;
+  refreshPhase2Status()
+    .catch((error) => {
+      state.phase2StatusError = error.message;
+    })
+    .finally(() => {
+      state.phase2LiveRefreshInFlight = false;
+    });
 }
 
 function eventKindLabel(kind) {
@@ -8128,11 +8373,15 @@ function syncSelectedSessionActions() {
 }
 
 setInterval(() => {
-  if (renderModelHasLiveLifecycle()) {
+  if (renderModelHasLiveLifecycle() || headerWorkerRailNeedsClock()) {
     renderMessages();
     renderTurnMeta();
     renderCommandStatus();
+    if (headerWorkerRailNeedsClock()) {
+      renderSessionRelationHeader();
+    }
   }
+  refreshHeaderWorkerRailStatusIfNeeded();
 }, 1000);
 
 setInterval(() => {
@@ -8157,6 +8406,9 @@ function hasNonTerminalProtocolActivity() {
     return true;
   }
   if (turnRequiresLifecycleTruthRefresh(activeTurnForSelectedSession())) {
+    return true;
+  }
+  if (headerWorkerRailHasOpenTasks()) {
     return true;
   }
   return conversationTurnsForRender().some((turn) => {

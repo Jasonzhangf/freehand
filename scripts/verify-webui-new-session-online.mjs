@@ -12,7 +12,7 @@ const debugPort = Number.parseInt(process.env.FREEHAND_NEW_SESSION_DEBUG_PORT ||
 const conversationSessionId = process.env.FREEHAND_NEW_CONVERSATION_SESSION_ID || 'webui-new-conversation-fixed';
 const taskSessionId = process.env.FREEHAND_NEW_TASK_SESSION_ID || 'webui-new-task-fixed';
 const taskCwd = process.env.FREEHAND_NEW_TASK_CWD || repo;
-const assetVersion = '20260726-session-select-rename';
+const assetVersion = '20260726-header-worker-rail';
 const runId = `webui-new-session-${Date.now()}`;
 const artifactDir = path.join(repo, 'artifacts', 'webui-online', runId);
 

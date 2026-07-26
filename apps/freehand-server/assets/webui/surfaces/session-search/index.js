@@ -1,4 +1,4 @@
-import { renderSessionSearchResult, renderSessionSearchSurface } from './view.js?v=20260726-session-select-rename';
+import { renderSessionSearchResult, renderSessionSearchSurface } from './view.js?v=20260726-header-worker-rail';
 
 export const surfaceId = 'session_search';
 

@@ -99,10 +99,34 @@
       "truth_source": "QuerySessionTurns pinned to session_id plus scoped TaskBoard/AgentBoard",
       "body_sections": [
         "session_header",
+        "worker_status_rail",
         "session_relationship_panel",
         "transcript",
         "composer"
       ],
+      "header_worker_status_rail": {
+        "truth_source": "TaskBoard/AgentBoard scoped by selected parent_session_id",
+        "row_fields": [
+          "worker_label",
+          "task_status",
+          "duration_from_owner_timestamps",
+          "short_task_title"
+        ],
+        "status_refresh": "nonterminal_rows_requery_taskboard_owner_truth_while_duration_ticks",
+        "click_behavior": "toggle_header_worker_detail",
+        "detail_action": "open_worker_session_using_taskboard_worker_session_id",
+        "dispatch_wait_model": {
+          "context_boundary": "Worker transcripts stay isolated from the Master transcript until TaskBoard/TaskHistory/EventInbox returns typed child result truth.",
+          "parent_notifications": "success, failure, blocked, and interrupted child outcomes are rigid parent-visible owner notifications, not browser guesses.",
+          "waiting_state": "selected Master sessions may wait while child tasks or source timers can wake lifecycle, and the composer remains available for user input.",
+          "timer_boundary": "periodic waiting checks belong to runtime Timer/TaskBoard owner truth; WebUI refreshes projections but never synthesizes timers."
+        },
+        "forbidden": [
+          "browser_synthesized_worker_session_id",
+          "global_task_history_fallback",
+          "worker_capacity_mutation"
+        ]
+      },
       "session_actions": [
         "rename_current_session"
       ],
@@ -226,6 +250,7 @@
     "Home supports multi-select and owner-backed delete/remove controls without browser-local session truth.",
     "Rename controls appear only in SessionDetail for the current selected session.",
     "SessionDetail route hides Home running/history sections.",
+    "SessionDetail Header Worker rail shows current child Worker status plus owner-timestamp duration and expands details on row click.",
     "Waiting-user sessions are not classified as running.",
     "ToolsRegistry has no document-level horizontal overflow on phone.",
     "All visible route/status decisions are backed by owner projections."

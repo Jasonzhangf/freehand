@@ -8635,3 +8635,10 @@ Current real root cause split:
   - Provider web_search Settings verifier passed with artifact `artifacts/webui-online/provider-web-search-settings-ui-1785053748916`; pre-restore summary proved `minimaxTestOutcome=passed`, fixture `fixtureRequestCount=1`, hosted tools `["web_search"]`, and function tools `[]`; final restore returned S config to `minimax/MiniMax-M3` with fixture env grep 0.
   - Model Group Settings verifier passed with artifact `artifacts/webui-online/model-group-ui-1785052967602`; it proved model-group upsert and selection UI paths, then restored provider/model/group truth to `minimax/MiniMax-M3` and no active model group.
 - Android true-device proof is not closed for this slice: `apps/freehand-android/scripts/verify-device-ui.sh 100.104.163.65:5555` artifact `artifacts/android-device/20260726T082041Z-100.104.163.65_5555-78309` is `blocked` with reason `device_locked_or_dreaming`.
+# 2026-07-26T10:01:19Z header worker rail closeout
+
+- run_id: `20260726T095327Z-Macstudio.local-86270-59463-header-worker-rail-closeout`
+- built isolated S target `/tmp/freehand-target-header-workers`, installed S binaries explicitly, and kickstarted `com.freehand.daemonS` without broad process kills.
+- online verifier passed with artifact `artifacts/webui-online/mobile-ui-tree-phase1-20260726T100119-26232`.
+- verified Header Worker rail: duration/status/expand details, `worker_session_id` open action, and composer still usable while the rail is open.
+- recorded the dispatch-wait model in design/function-map/test-design/skill docs: isolated Worker transcript context, rigid parent-visible child outcomes, composer stays usable while waiting, timer checks stay owner-owned.

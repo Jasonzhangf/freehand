@@ -1369,7 +1369,7 @@ mod tests {
         assert!(html.contains("/assets/webui.css"));
         assert!(html.contains("/assets/logo.png"));
         assert!(html.contains("/assets/webui.js"));
-        assert!(html.contains("20260726-session-select-rename"));
+        assert!(html.contains("20260726-header-worker-rail"));
         assert!(html.contains("data-adp-endpoint=\"/adp\""));
         assert!(html.contains("data-selected-session=\"\""));
         assert!(html.contains("data-selected-turn=\"\""));
@@ -1659,6 +1659,7 @@ mod tests {
         assert!(root_body.contains("id=\"selected-session-rename-button\""));
         assert!(root_body.contains("id=\"selected-session-rename-button\" type=\"button\" aria-label=\"重命名当前会话\" hidden disabled"));
         assert!(root_body.contains("id=\"session-relation-toggle-button\""));
+        assert!(root_body.contains("id=\"session-worker-rail\""));
         assert!(root_body.contains("id=\"session-tree-dropdown\""));
         assert!(root_body.contains("id=\"session-tree\""));
         assert!(root_body.contains("id=\"worker-session-nav\""));
@@ -1820,6 +1821,9 @@ mod tests {
         assert!(webui_css_body.contains(".mobile-agent-sheet-handle"));
         assert!(webui_css_body.contains(".session-relation-header"));
         assert!(webui_css_body.contains(".session-dashbar"));
+        assert!(webui_css_body.contains(".session-worker-rail"));
+        assert!(webui_css_body.contains(".session-worker-pill"));
+        assert!(webui_css_body.contains(".session-worker-detail"));
         assert!(webui_css_body.contains(".session-tree-dropdown"));
         assert!(webui_css_body.contains("max-height: min(34vh, 320px)"));
         assert!(!webui_css_body.contains("position: absolute;\n  top: calc(100% + 8px)"));
@@ -1883,7 +1887,7 @@ mod tests {
         );
         let js_body = js.text().await.expect("js body");
         assert!(js_body.contains("initializeMobileWebui"));
-        assert!(js_body.contains("/assets/webui/bootstrap.js?v=20260726-session-select-rename"));
+        assert!(js_body.contains("/assets/webui/bootstrap.js?v=20260726-header-worker-rail"));
         assert!(!js_body.contains("initializeThemeToggle"));
 
         let bootstrap = client

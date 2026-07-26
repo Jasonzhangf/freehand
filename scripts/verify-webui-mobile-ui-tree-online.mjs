@@ -10,10 +10,15 @@ const baseUrl = normalizedBaseUrl(process.env.FREEHAND_WEBUI_BASE_URL || 'http:/
 const adpUrl = process.env.FREEHAND_WEBUI_ADP_URL || adpUrlFromBaseUrl(baseUrl);
 const runId = `mobile-ui-tree-phase1-${new Date().toISOString().replace(/[-:.]/g, '').slice(0, 15)}-${process.pid}`;
 const artifactDir = path.join(process.cwd(), 'artifacts', 'webui-online', runId);
-const assetVersion = '20260726-session-select-rename';
+const assetVersion = '20260726-header-worker-rail';
 const multiSelectSessionIds = [
   'webui-home-multiselect-fixed-a',
   'webui-home-multiselect-fixed-b',
+];
+const workerRailSessionId = 'webui-header-worker-rail-fixed';
+const workerRailTaskIds = [
+  'task-webui-header-worker-rail-a',
+  'task-webui-header-worker-rail-b',
 ];
 const forbiddenUiTerms = [
   /rootfs/i,
@@ -50,6 +55,7 @@ let cdp = null;
 try {
   await assertProductionPageReachable();
   await ensureMultiSelectSessions();
+  await ensureHeaderWorkerRailTruth();
   chrome = spawn(
     chromePath,
     [
@@ -215,7 +221,9 @@ async function captureSessionDetailRoute(cdp) {
   });
   await delay(350);
   const clickResult = await evalInPage(cdp, () => {
-    const row = document.querySelector('#mobile-home-dashboard [data-session-id] .mobile-home-session-open');
+    const targetSessionId = 'webui-header-worker-rail-fixed';
+    const row = document.querySelector(`#mobile-home-dashboard [data-session-id="${targetSessionId}"] .mobile-home-session-open`) ||
+      document.querySelector('#mobile-home-dashboard [data-session-id] .mobile-home-session-open');
     if (!row) {
       return { clicked: false, reason: 'no_session_row' };
     }
@@ -233,7 +241,9 @@ async function captureSessionDetailRoute(cdp) {
     return document.body.dataset.webuiRoute === 'session_detail' &&
       document.querySelector('[data-webui-shell="true"]')?.dataset.routeSession === sessionId &&
       !isVisibleForVerifier(document.getElementById('mobile-home-dashboard')) &&
-      isVisibleForVerifier(document.querySelector('.conversation-region'));
+      isVisibleForVerifier(document.querySelector('.conversation-region')) &&
+      isVisibleForVerifier(document.getElementById('session-worker-rail')) &&
+      document.querySelectorAll('#session-worker-rail .session-worker-row').length >= 2;
 
     function isVisibleForVerifier(node) {
       if (!node || node.hidden) return false;
@@ -247,13 +257,32 @@ async function captureSessionDetailRoute(cdp) {
     }
   }, 12_000, 'SessionDetail route mutual exclusion', clickResult.sessionId);
   const state = await evalInPage(cdp, collectPhaseOneState);
+  const expand = await evalInPage(cdp, () => {
+    const pill = document.querySelector('#session-worker-rail .session-worker-pill');
+    if (!pill) {
+      return { clicked: false, reason: 'missing_worker_pill' };
+    }
+    const taskId = pill.dataset.taskId || '';
+    pill.click();
+    return { clicked: true, taskId };
+  });
+  if (expand.clicked) {
+    await waitForFunction(cdp, (taskId) => {
+      const rail = document.getElementById('session-worker-rail');
+      const row = taskId ? document.querySelector(`#session-worker-rail .session-worker-row[data-task-id="${taskId}"]`) : null;
+      return rail?.dataset.expandedTaskId === taskId &&
+        !!row?.querySelector('.session-worker-detail') &&
+        !!row?.querySelector('.session-worker-open-button');
+    }, 5_000, 'Header worker detail expansion', expand.taskId);
+  }
+  const expandedState = await evalInPage(cdp, collectPhaseOneState);
   const screenshot = await cdp.send('Page.captureScreenshot', {
     format: 'png',
     captureBeyondViewport: true,
   });
   const screenshotName = 'session-detail-route.png';
   await fs.writeFile(path.join(artifactDir, screenshotName), Buffer.from(screenshot.data, 'base64'));
-  const result = { skipped: false, clicked: clickResult, screenshot: screenshotName, state };
+  const result = { skipped: false, clicked: clickResult, expand, screenshot: screenshotName, state, expandedState };
   await fs.writeFile(path.join(artifactDir, 'session-detail-route.json'), JSON.stringify(result, null, 2));
   return result;
 }
@@ -456,6 +485,41 @@ function buildSummary({ snapshots, homeMultiSelect, sessionDetail, settings, mod
         sessionDetail.state.conversationRegionVisible &&
         sessionDetail.state.sessionRelationHeaderVisible &&
         !sessionDetail.state.mobileAgentSummaryVisible,
+      headerWorkerRailShowsDurationStatus:
+        sessionDetail &&
+        !sessionDetail.skipped &&
+        sessionDetail.state.sessionWorkerRailVisible &&
+        sessionDetail.state.sessionWorkerRailCount >= 2 &&
+        workerRailTaskIds.every((taskId) => sessionDetail.state.sessionWorkerRailRows.some((row) =>
+          row.taskId === taskId &&
+          row.relationSchema === 'UiTaskSnapshotProjection' &&
+          row.relationSource === 'TaskBoard.worker_session_id' &&
+          row.workerSessionId &&
+          row.workerLabel &&
+          row.statusText &&
+          row.durationText &&
+          row.durationText !== '时间不可用' &&
+          ['live', 'frozen'].includes(row.durationState) &&
+          row.height <= 56
+        )),
+      headerWorkerRailClickExpandsDetails:
+        sessionDetail &&
+        !sessionDetail.skipped &&
+        sessionDetail.expand?.clicked === true &&
+        sessionDetail.expandedState?.sessionWorkerRailExpandedTaskId === sessionDetail.expand.taskId &&
+        sessionDetail.expandedState?.sessionWorkerRailRows.some((row) =>
+          row.taskId === sessionDetail.expand.taskId &&
+          row.expanded &&
+          row.detailVisible &&
+          row.openButtonExists &&
+          row.detailText.includes('持续')
+        ),
+      masterWaitComposerUsable:
+        sessionDetail &&
+        !sessionDetail.skipped &&
+        sessionDetail.state.composerFormVisible &&
+        sessionDetail.state.composerInputVisible &&
+        !sessionDetail.state.composerInputDisabled,
       mobileHistoryBucketsFixed: portraitSnapshots.every((snapshot) =>
         snapshot.state.mobileHomeBucketLabels.join(',') === '今天,过去一周,所有更早的'
       ),
@@ -643,6 +707,7 @@ function collectPhaseOneState() {
   const markerNodes = Array.from(document.querySelectorAll('.settings-status-marker'));
   const settingsShell = document.getElementById('settings-shell');
   const settingsPages = Array.from(document.querySelectorAll('[data-settings-page]'));
+  const sessionWorkerRail = document.getElementById('session-worker-rail');
   const detailControlIds = [
     'settings-provider-id',
     'settings-provider-form',
@@ -661,7 +726,7 @@ function collectPhaseOneState() {
     shellRoute: shell?.dataset.webuiRoute || '',
     routeSession: shell?.dataset.routeSession || '',
     selectedSession: shell?.dataset.selectedSession || '',
-    assetVersionSeen: html.includes('20260726-session-select-rename'),
+    assetVersionSeen: html.includes('20260726-header-worker-rail'),
     bodyText,
     bodyWidth: document.body.scrollWidth,
     docWidth: document.documentElement.scrollWidth,
@@ -676,6 +741,32 @@ function collectPhaseOneState() {
     mobileHomeSessionCountVisible: localIsVisible(document.getElementById('mobile-home-session-count')),
     conversationRegionVisible: localIsVisible(document.querySelector('.conversation-region')),
     sessionRelationHeaderVisible: localIsVisible(document.getElementById('session-relation-header')),
+    sessionWorkerRailVisible: localIsVisible(sessionWorkerRail),
+    sessionWorkerRailCount: Number(sessionWorkerRail?.dataset.workerCount || 0),
+    sessionWorkerRailExpandedTaskId: sessionWorkerRail?.dataset.expandedTaskId || '',
+    sessionWorkerRailRows: Array.from(document.querySelectorAll('#session-worker-rail .session-worker-row')).map((node) => {
+      const detail = node.querySelector('.session-worker-detail');
+      const openButton = node.querySelector('.session-worker-open-button');
+      return {
+        taskId: node.dataset.taskId || '',
+        workerSessionId: node.dataset.workerSessionId || '',
+        workerLabel: node.dataset.workerLabel || '',
+        relationSchema: node.dataset.relationSchema || '',
+        relationSource: node.dataset.relationSource || '',
+        durationState: node.dataset.durationState || '',
+        status: node.dataset.status || '',
+        statusText: node.querySelector('.session-worker-meta')?.textContent?.trim() || '',
+        durationText: node.querySelector('.session-worker-duration')?.textContent?.trim() || '',
+        expanded: node.classList.contains('is-expanded'),
+        selected: node.classList.contains('is-selected'),
+        height: localRectOf(node.querySelector('.session-worker-pill')).height,
+        detailVisible: localIsVisible(detail),
+        openButtonExists: !!openButton,
+        openButtonDisabled: !!openButton?.disabled,
+        detailText: detail?.innerText || '',
+        text: node.innerText || '',
+      };
+    }),
     mobileAgentSummaryVisible: localIsVisible(document.getElementById('mobile-agent-summary-strip')),
     mobileHomeRunningClass: document.getElementById('mobile-home-active-list')?.classList.contains('mobile-running-session-list') || false,
     mobileHomeStaticClass: document.getElementById('mobile-home-session-list')?.classList.contains('mobile-static-session-list') || false,
@@ -706,6 +797,9 @@ function collectPhaseOneState() {
     mobileHomeBulkSelectableCount: document.querySelector('#mobile-home-session-list .mobile-home-bulk-actions')?.dataset.selectableCount || '',
     selectedSessionRenameVisible: localIsVisible(document.getElementById('selected-session-rename-button')),
     selectedSessionRenameDisabled: !!document.getElementById('selected-session-rename-button')?.disabled,
+    composerFormVisible: localIsVisible(document.getElementById('composer-form')),
+    composerInputVisible: localIsVisible(document.getElementById('composer-input')),
+    composerInputDisabled: !!document.getElementById('composer-input')?.disabled,
     mobileHomeRunningHistoryOverlap: (() => {
       const running = new Set(Array.from(document.querySelectorAll('#mobile-home-active-list [data-session-id]'))
         .map((node) => node.dataset.sessionId || '')
@@ -974,8 +1068,73 @@ async function ensureMultiSelectSessions() {
   }
 }
 
+async function ensureHeaderWorkerRailTruth() {
+  await fs.mkdir('/tmp/freehand-header-worker-rail', { recursive: true });
+  await ensureSession(workerRailSessionId, 'Header Worker 状态验证');
+  for (const agentId of ['worker', 'worker-2']) {
+    try {
+      await adpCommand({ CreateTaskAgent: { agent: { agent_id: agentId, capabilities: ['repository'] } } }, 20_000);
+    } catch (error) {
+      if (!/already exists|already_exists|AgentAlreadyExists|exists/i.test(error.message || '')) {
+        throw error;
+      }
+    }
+  }
+  for (const [index, taskId] of workerRailTaskIds.entries()) {
+    const agentId = index === 0 ? 'worker' : 'worker-2';
+    try {
+      await adpCommand({
+        CreateTask: {
+          task: {
+            task_id: taskId,
+            title: `Header Worker ${index + 1}`,
+            content: 'Verifier-owned task for Header worker rail rendering.',
+            goal: 'Prove Header shows worker duration, realtime status, and expandable detail.',
+            deliverables: ['Header Worker rail row with status, duration, and expandable details.'],
+            acceptance: ['DOM row uses TaskBoard worker_session_id and never synthesizes a Worker session id.'],
+            priority: 20 - index,
+            target_cwd: '/tmp/freehand-header-worker-rail',
+            execution_profile: 'workspace',
+            session_id: workerRailSessionId,
+            dispatch: { mode: 'agent', agent_id: agentId },
+          },
+        },
+      }, 20_000);
+    } catch (error) {
+      if (!/already exists|already_exists|TaskAlreadyExists|exists/i.test(error.message || '')) {
+        throw error;
+      }
+    }
+  }
+  const board = await adpQueryVariant({ QueryTaskBoard: { include_terminal: true } }, 'TaskBoard', 20_000);
+  const tasksById = new Map((board.tasks || []).map((task) => [task.task_id, task]));
+  const invalid = workerRailTaskIds
+    .map((taskId) => tasksById.get(taskId))
+    .filter((task) => !task || task.parent_session_id !== workerRailSessionId || !task.worker_session_id || ['approved', 'closed', 'cancelled', 'failed'].includes(`${task.status || ''}`.toLowerCase()));
+  if (invalid.length > 0) {
+    throw new Error(`Header worker rail fixture is not live owner truth: ${JSON.stringify(invalid)}`);
+  }
+}
+
+async function ensureSession(sessionId, title) {
+  try {
+    await adpCommand({ CreateSession: { session_id: sessionId, title } }, 20_000);
+  } catch (error) {
+    await adpCommand({ RenameSession: { session_id: sessionId, title } }, 20_000);
+  }
+  await adpCommand({ RestoreSession: { session_id: sessionId } }, 20_000);
+}
+
 async function adpCommand(command, timeoutMs = 30_000) {
   return await adpRequest('command', 'command', command, timeoutMs);
+}
+
+async function adpQueryVariant(query, variant, timeoutMs = 30_000) {
+  const result = await adpRequest('query', 'query', query, timeoutMs);
+  if (!result || typeof result !== 'object' || !Object.prototype.hasOwnProperty.call(result, variant)) {
+    throw new Error(`ADP query expected ${variant}, got ${JSON.stringify(result)}`);
+  }
+  return result[variant];
 }
 
 function adpRequest(kind, payloadKey, payload, timeoutMs) {
@@ -993,7 +1152,7 @@ function adpRequest(kind, payloadKey, payload, timeoutMs) {
       clearTimeout(timer);
       socket.close();
       if (message.kind === 'failure') {
-        reject(new Error(message.error?.message || JSON.stringify(message.error || message)));
+        reject(new Error(message.failure?.message || message.error?.message || JSON.stringify(message.failure || message.error || message)));
         return;
       }
       resolve(message.result || message.receipt || message);

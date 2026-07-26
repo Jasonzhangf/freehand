@@ -334,7 +334,8 @@ SessionDetail(session_id)
 ├── SessionHeader
 │   ├── back/home affordance
 │   ├── selected session title/status
-│   └── current-session Agent/Worker summary
+│   ├── current-session Agent/Worker summary
+│   └── WorkerStatusRail* as compact one-row Worker status entries
 ├── SessionRelationshipPanel (inline expandable, scoped to this session)
 ├── Transcript
 │   └── TurnCycleCard* in protocol order
@@ -347,12 +348,32 @@ SessionDetail(session_id)
 - The global Home panels are hidden.
 - The transcript is the dominant body.
 - Header relationship panel is scoped to the selected session only.
+- Header Worker status rail is scoped to the selected parent session's
+  TaskBoard/AgentBoard projections. It shows every current child Worker task as
+  one compact row with Worker label, real task status, and duration derived from
+  owner timestamps; clicking a row expands only that Worker's details in the
+  Header.
+- Nonterminal Worker rows refresh TaskBoard owner status while their duration
+  clocks tick; the browser must not freeze status text from an old projection.
+- Master/Worker dispatch waits are context-isolated. Worker transcripts stay
+  separate from the Master transcript until TaskBoard/TaskHistory/EventInbox
+  returns typed child result truth; success, failure, blocked, and interrupted
+  child outcomes are rigid parent-visible notifications, not browser guesses.
+- While a selected Master session is waiting on open child tasks or a source
+  timer that can wake the lifecycle, the Composer remains available for new
+  user input. The UI must not trap the user in a waiting state.
+- Periodic waiting checks belong to runtime Timer/TaskBoard owner truth. The
+  WebUI may render active source timers and refresh owner projections, but it
+  must not synthesize timer status or child lifecycle state in the browser.
 - Agent sheet is scoped to selected session TaskBoard/AgentBoard truth only.
 - Selected transcript query is pinned to `session_id`; late responses for older
   selected sessions are discarded.
 - No fallback to unrelated global active sessions.
 - Worker task taps use `worker_session_id` from TaskBoard projection. The UI
   must not synthesize `worker-task-*` ids.
+- Worker row expansion is presentation-only. Opening the Worker transcript is a
+  separate explicit action that still uses the TaskBoard-projected
+  `worker_session_id`.
 
 ## CurrentSessionAgentSheet
 

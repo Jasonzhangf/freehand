@@ -1,4 +1,4 @@
-import { renderSettingsDiagnosticsSurface } from './diagnostics.js?v=20260726-session-select-rename';
+import { renderSettingsDiagnosticsSurface } from './diagnostics.js?v=20260726-header-worker-rail';
 
 export function renderSettingsShellSurface(context) {
   const { state, dom } = context;

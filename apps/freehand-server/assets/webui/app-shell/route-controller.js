@@ -1,4 +1,4 @@
-import { WebUiSurface, requireEdge } from "./edge-registry.js?v=20260726-session-select-rename";
+import { WebUiSurface, requireEdge } from "./edge-registry.js?v=20260726-header-worker-rail";
 
 export function createRouteController({ state, document }) {
   function setRoute(route, params = {}) {

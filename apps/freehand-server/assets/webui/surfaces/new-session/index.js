@@ -5,7 +5,7 @@ import {
   selectedNewSessionKind,
   submitNewSessionSurface,
   syncNewSessionDialogMode,
-} from './controls.js?v=20260726-session-select-rename';
+} from './controls.js?v=20260726-header-worker-rail';
 
 export const surfaceId = 'new_session';
 

@@ -1,6 +1,6 @@
-import { createHomeDashboardModel } from './model.js?v=20260726-session-select-rename';
-import { createHomeSessionRow } from './controls.js?v=20260726-session-select-rename';
-import { renderHomeDashboard } from './view.js?v=20260726-session-select-rename';
+import { createHomeDashboardModel } from './model.js?v=20260726-header-worker-rail';
+import { createHomeSessionRow } from './controls.js?v=20260726-header-worker-rail';
+import { renderHomeDashboard } from './view.js?v=20260726-header-worker-rail';
 
 export const surfaceId = 'home_dashboard';
 
