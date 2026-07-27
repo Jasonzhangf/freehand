@@ -98,7 +98,8 @@
       ],
       "verification_gates": [
         "openminis_ui_migration_manifest",
-        "cargo_run_xtask_gates_check"
+        "cargo_run_xtask_gates_check",
+        "webui_online_e2e"
       ],
       "evidence": []
     },
@@ -154,7 +155,8 @@
       ],
       "verification_gates": [
         "openminis_ui_migration_manifest",
-        "cargo_run_xtask_gates_check"
+        "cargo_run_xtask_gates_check",
+        "webui_online_e2e"
       ],
       "evidence": []
     },
@@ -210,7 +212,8 @@
       ],
       "verification_gates": [
         "openminis_ui_migration_manifest",
-        "cargo_run_xtask_gates_check"
+        "cargo_run_xtask_gates_check",
+        "webui_online_e2e"
       ],
       "evidence": []
     },
@@ -263,7 +266,8 @@
       ],
       "verification_gates": [
         "openminis_ui_migration_manifest",
-        "cargo_run_xtask_gates_check"
+        "cargo_run_xtask_gates_check",
+        "webui_online_e2e"
       ],
       "evidence": []
     },
@@ -326,7 +330,8 @@
       ],
       "verification_gates": [
         "openminis_ui_migration_manifest",
-        "cargo_run_xtask_gates_check"
+        "cargo_run_xtask_gates_check",
+        "webui_online_e2e"
       ],
       "evidence": []
     },
@@ -390,7 +395,203 @@
       ],
       "verification_gates": [
         "openminis_ui_migration_manifest",
-        "cargo_run_xtask_gates_check"
+        "cargo_run_xtask_gates_check",
+        "webui_online_e2e"
+      ],
+      "evidence": []
+    },
+    {
+      "migration_unit_id": "ui_migration.session_detail.header",
+      "node_id": "session_detail.header",
+      "group": "session",
+      "status": "inventoried",
+      "owner_feature_id": "app.webui-smoke",
+      "touched_feature_ids": [
+        "app.webui-smoke",
+        "reason.persistence",
+        "ui.protocol"
+      ],
+      "source_paths": [
+        "src/ios/Views/Chat/AIChatView.swift"
+      ],
+      "source_symbols": [
+        "AIChatView"
+      ],
+      "source_semantic": "selected session identity, lifecycle status, navigation, and session-scoped actions",
+      "non_migrated_source_semantics": [
+        "browser",
+        "cookie",
+        "browser_profile",
+        "browser_takeover",
+        "OpenMinis_local_runtime_or_store",
+        "layout_color_typography"
+      ],
+      "source_resources": [
+        "session",
+        "turn"
+      ],
+      "target_resource": "ui_projection",
+      "operation_id": "pending",
+      "projection_or_query": "pending",
+      "generated_command": "pending",
+      "target_paths": [
+        "apps/freehand-server/assets/webui/surfaces/session-detail"
+      ],
+      "target_symbols": [],
+      "surface_path": "apps/freehand-server/assets/webui/surfaces/session-detail",
+      "model_responsibility": "projection_to_render_model_only",
+      "view_responsibility": "render_only",
+      "control_responsibility": "registered_edge_or_generated_command_only",
+      "route_edge_ids": [],
+      "function_map_docs": [
+        "docs/function-maps/app.webui-smoke.md",
+        "docs/function-maps/reason.persistence.md",
+        "docs/function-maps/ui.protocol.md"
+      ],
+      "mainline_call_docs": [
+        "docs/mainline-calls/app.webui-smoke.json",
+        "docs/mainline-calls/reason.persistence.json",
+        "docs/mainline-calls/ui.protocol.json"
+      ],
+      "test_design_docs": [
+        "docs/testing/app.webui-smoke.md",
+        "docs/testing/reason.persistence.md",
+        "docs/testing/ui.protocol.md"
+      ],
+      "verification_gates": [
+        "openminis_ui_migration_manifest",
+        "cargo_run_xtask_gates_check",
+        "webui_online_e2e"
+      ],
+      "evidence": []
+    },
+    {
+      "migration_unit_id": "ui_migration.session_detail.transcript",
+      "node_id": "session_detail.transcript",
+      "group": "session",
+      "status": "inventoried",
+      "owner_feature_id": "app.webui-smoke",
+      "touched_feature_ids": [
+        "app.webui-smoke",
+        "reason.persistence",
+        "ui.protocol"
+      ],
+      "source_paths": [
+        "src/ios/Views/Chat/AIChatView.swift"
+      ],
+      "source_symbols": [
+        "AIChatView"
+      ],
+      "source_semantic": "chronological projection-only turn block composition",
+      "non_migrated_source_semantics": [
+        "browser",
+        "cookie",
+        "browser_profile",
+        "browser_takeover",
+        "OpenMinis_local_runtime_or_store",
+        "layout_color_typography"
+      ],
+      "source_resources": [
+        "session",
+        "turn"
+      ],
+      "target_resource": "ui_projection",
+      "operation_id": "pending",
+      "projection_or_query": "pending",
+      "generated_command": "pending",
+      "target_paths": [
+        "apps/freehand-server/assets/webui/surfaces/session-detail"
+      ],
+      "target_symbols": [],
+      "surface_path": "apps/freehand-server/assets/webui/surfaces/session-detail",
+      "model_responsibility": "projection_to_render_model_only",
+      "view_responsibility": "render_only",
+      "control_responsibility": "registered_edge_or_generated_command_only",
+      "route_edge_ids": [],
+      "function_map_docs": [
+        "docs/function-maps/app.webui-smoke.md",
+        "docs/function-maps/reason.persistence.md",
+        "docs/function-maps/ui.protocol.md"
+      ],
+      "mainline_call_docs": [
+        "docs/mainline-calls/app.webui-smoke.json",
+        "docs/mainline-calls/reason.persistence.json",
+        "docs/mainline-calls/ui.protocol.json"
+      ],
+      "test_design_docs": [
+        "docs/testing/app.webui-smoke.md",
+        "docs/testing/reason.persistence.md",
+        "docs/testing/ui.protocol.md"
+      ],
+      "verification_gates": [
+        "openminis_ui_migration_manifest",
+        "cargo_run_xtask_gates_check",
+        "webui_online_e2e"
+      ],
+      "evidence": []
+    },
+    {
+      "migration_unit_id": "ui_migration.session_detail.composer",
+      "node_id": "session_detail.composer",
+      "group": "session",
+      "status": "inventoried",
+      "owner_feature_id": "app.webui-smoke",
+      "touched_feature_ids": [
+        "app.webui-smoke",
+        "reason.persistence",
+        "ui.protocol"
+      ],
+      "source_paths": [
+        "src/ios/Views/Chat/AIChatView.swift"
+      ],
+      "source_symbols": [
+        "AIChatView"
+      ],
+      "source_semantic": "session-bound transient draft and owner-command controls",
+      "non_migrated_source_semantics": [
+        "browser",
+        "cookie",
+        "browser_profile",
+        "browser_takeover",
+        "OpenMinis_local_runtime_or_store",
+        "layout_color_typography"
+      ],
+      "source_resources": [
+        "session",
+        "turn"
+      ],
+      "target_resource": "ui_projection",
+      "operation_id": "pending",
+      "projection_or_query": "pending",
+      "generated_command": "pending",
+      "target_paths": [
+        "apps/freehand-server/assets/webui/surfaces/session-detail"
+      ],
+      "target_symbols": [],
+      "surface_path": "apps/freehand-server/assets/webui/surfaces/session-detail",
+      "model_responsibility": "projection_to_render_model_only",
+      "view_responsibility": "render_only",
+      "control_responsibility": "registered_edge_or_generated_command_only",
+      "route_edge_ids": [],
+      "function_map_docs": [
+        "docs/function-maps/app.webui-smoke.md",
+        "docs/function-maps/reason.persistence.md",
+        "docs/function-maps/ui.protocol.md"
+      ],
+      "mainline_call_docs": [
+        "docs/mainline-calls/app.webui-smoke.json",
+        "docs/mainline-calls/reason.persistence.json",
+        "docs/mainline-calls/ui.protocol.json"
+      ],
+      "test_design_docs": [
+        "docs/testing/app.webui-smoke.md",
+        "docs/testing/reason.persistence.md",
+        "docs/testing/ui.protocol.md"
+      ],
+      "verification_gates": [
+        "openminis_ui_migration_manifest",
+        "cargo_run_xtask_gates_check",
+        "webui_online_e2e"
       ],
       "evidence": []
     },
@@ -447,7 +648,8 @@
       ],
       "verification_gates": [
         "openminis_ui_migration_manifest",
-        "cargo_run_xtask_gates_check"
+        "cargo_run_xtask_gates_check",
+        "webui_online_e2e"
       ],
       "evidence": []
     },
@@ -510,7 +712,8 @@
       ],
       "verification_gates": [
         "openminis_ui_migration_manifest",
-        "cargo_run_xtask_gates_check"
+        "cargo_run_xtask_gates_check",
+        "webui_online_e2e"
       ],
       "evidence": []
     },
@@ -573,7 +776,8 @@
       ],
       "verification_gates": [
         "openminis_ui_migration_manifest",
-        "cargo_run_xtask_gates_check"
+        "cargo_run_xtask_gates_check",
+        "webui_online_e2e"
       ],
       "evidence": []
     },
@@ -632,7 +836,8 @@
       ],
       "verification_gates": [
         "openminis_ui_migration_manifest",
-        "cargo_run_xtask_gates_check"
+        "cargo_run_xtask_gates_check",
+        "webui_online_e2e"
       ],
       "evidence": []
     },
@@ -695,7 +900,8 @@
       ],
       "verification_gates": [
         "openminis_ui_migration_manifest",
-        "cargo_run_xtask_gates_check"
+        "cargo_run_xtask_gates_check",
+        "webui_online_e2e"
       ],
       "evidence": []
     },
@@ -755,7 +961,8 @@
       ],
       "verification_gates": [
         "openminis_ui_migration_manifest",
-        "cargo_run_xtask_gates_check"
+        "cargo_run_xtask_gates_check",
+        "webui_online_e2e"
       ],
       "evidence": []
     },
@@ -822,7 +1029,8 @@
       ],
       "verification_gates": [
         "openminis_ui_migration_manifest",
-        "cargo_run_xtask_gates_check"
+        "cargo_run_xtask_gates_check",
+        "webui_online_e2e"
       ],
       "evidence": []
     },
@@ -884,7 +1092,8 @@
       ],
       "verification_gates": [
         "openminis_ui_migration_manifest",
-        "cargo_run_xtask_gates_check"
+        "cargo_run_xtask_gates_check",
+        "webui_online_e2e"
       ],
       "evidence": []
     },
@@ -939,7 +1148,8 @@
       ],
       "verification_gates": [
         "openminis_ui_migration_manifest",
-        "cargo_run_xtask_gates_check"
+        "cargo_run_xtask_gates_check",
+        "webui_online_e2e"
       ],
       "evidence": []
     },
@@ -1005,7 +1215,8 @@
       ],
       "verification_gates": [
         "openminis_ui_migration_manifest",
-        "cargo_run_xtask_gates_check"
+        "cargo_run_xtask_gates_check",
+        "webui_online_e2e"
       ],
       "evidence": []
     },
@@ -1069,7 +1280,8 @@
       ],
       "verification_gates": [
         "openminis_ui_migration_manifest",
-        "cargo_run_xtask_gates_check"
+        "cargo_run_xtask_gates_check",
+        "webui_online_e2e"
       ],
       "evidence": []
     },
@@ -1136,7 +1348,8 @@
       ],
       "verification_gates": [
         "openminis_ui_migration_manifest",
-        "cargo_run_xtask_gates_check"
+        "cargo_run_xtask_gates_check",
+        "webui_online_e2e"
       ],
       "evidence": []
     },
@@ -1189,7 +1402,8 @@
       ],
       "verification_gates": [
         "openminis_ui_migration_manifest",
-        "cargo_run_xtask_gates_check"
+        "cargo_run_xtask_gates_check",
+        "webui_online_e2e"
       ],
       "evidence": []
     },
@@ -1252,7 +1466,8 @@
       ],
       "verification_gates": [
         "openminis_ui_migration_manifest",
-        "cargo_run_xtask_gates_check"
+        "cargo_run_xtask_gates_check",
+        "webui_online_e2e"
       ],
       "evidence": []
     },
@@ -1306,7 +1521,8 @@
       ],
       "verification_gates": [
         "openminis_ui_migration_manifest",
-        "cargo_run_xtask_gates_check"
+        "cargo_run_xtask_gates_check",
+        "webui_online_e2e"
       ],
       "evidence": []
     },
@@ -1369,7 +1585,8 @@
       ],
       "verification_gates": [
         "openminis_ui_migration_manifest",
-        "cargo_run_xtask_gates_check"
+        "cargo_run_xtask_gates_check",
+        "webui_online_e2e"
       ],
       "evidence": []
     },
@@ -1428,7 +1645,8 @@
       ],
       "verification_gates": [
         "openminis_ui_migration_manifest",
-        "cargo_run_xtask_gates_check"
+        "cargo_run_xtask_gates_check",
+        "webui_online_e2e"
       ],
       "evidence": []
     },
@@ -1486,7 +1704,8 @@
       ],
       "verification_gates": [
         "openminis_ui_migration_manifest",
-        "cargo_run_xtask_gates_check"
+        "cargo_run_xtask_gates_check",
+        "webui_online_e2e"
       ],
       "evidence": []
     },
@@ -1541,7 +1760,8 @@
       ],
       "verification_gates": [
         "openminis_ui_migration_manifest",
-        "cargo_run_xtask_gates_check"
+        "cargo_run_xtask_gates_check",
+        "webui_online_e2e"
       ],
       "evidence": []
     },
@@ -1605,7 +1825,8 @@
       ],
       "verification_gates": [
         "openminis_ui_migration_manifest",
-        "cargo_run_xtask_gates_check"
+        "cargo_run_xtask_gates_check",
+        "webui_online_e2e"
       ],
       "evidence": []
     },
@@ -1675,7 +1896,8 @@
       ],
       "verification_gates": [
         "openminis_ui_migration_manifest",
-        "cargo_run_xtask_gates_check"
+        "cargo_run_xtask_gates_check",
+        "webui_online_e2e"
       ],
       "evidence": []
     },
@@ -1739,7 +1961,8 @@
       ],
       "verification_gates": [
         "openminis_ui_migration_manifest",
-        "cargo_run_xtask_gates_check"
+        "cargo_run_xtask_gates_check",
+        "webui_online_e2e"
       ],
       "evidence": []
     },
@@ -1804,7 +2027,8 @@
       ],
       "verification_gates": [
         "openminis_ui_migration_manifest",
-        "cargo_run_xtask_gates_check"
+        "cargo_run_xtask_gates_check",
+        "webui_online_e2e"
       ],
       "evidence": []
     },
@@ -1870,7 +2094,8 @@
       ],
       "verification_gates": [
         "openminis_ui_migration_manifest",
-        "cargo_run_xtask_gates_check"
+        "cargo_run_xtask_gates_check",
+        "webui_online_e2e"
       ],
       "evidence": []
     },
@@ -1923,7 +2148,8 @@
       ],
       "verification_gates": [
         "openminis_ui_migration_manifest",
-        "cargo_run_xtask_gates_check"
+        "cargo_run_xtask_gates_check",
+        "webui_online_e2e"
       ],
       "evidence": []
     },
@@ -1978,7 +2204,8 @@
       ],
       "verification_gates": [
         "openminis_ui_migration_manifest",
-        "cargo_run_xtask_gates_check"
+        "cargo_run_xtask_gates_check",
+        "webui_online_e2e"
       ],
       "evidence": []
     },
@@ -2041,7 +2268,8 @@
       ],
       "verification_gates": [
         "openminis_ui_migration_manifest",
-        "cargo_run_xtask_gates_check"
+        "cargo_run_xtask_gates_check",
+        "webui_online_e2e"
       ],
       "evidence": []
     },
@@ -2098,7 +2326,8 @@
       ],
       "verification_gates": [
         "openminis_ui_migration_manifest",
-        "cargo_run_xtask_gates_check"
+        "cargo_run_xtask_gates_check",
+        "webui_online_e2e"
       ],
       "evidence": []
     },
@@ -2157,7 +2386,8 @@
       ],
       "verification_gates": [
         "openminis_ui_migration_manifest",
-        "cargo_run_xtask_gates_check"
+        "cargo_run_xtask_gates_check",
+        "webui_online_e2e"
       ],
       "evidence": []
     },
@@ -2212,7 +2442,8 @@
       ],
       "verification_gates": [
         "openminis_ui_migration_manifest",
-        "cargo_run_xtask_gates_check"
+        "cargo_run_xtask_gates_check",
+        "webui_online_e2e"
       ],
       "evidence": []
     },
@@ -2267,7 +2498,8 @@
       ],
       "verification_gates": [
         "openminis_ui_migration_manifest",
-        "cargo_run_xtask_gates_check"
+        "cargo_run_xtask_gates_check",
+        "webui_online_e2e"
       ],
       "evidence": []
     },
@@ -2326,7 +2558,9 @@
       ],
       "verification_gates": [
         "openminis_ui_migration_manifest",
-        "cargo_run_xtask_gates_check"
+        "cargo_run_xtask_gates_check",
+        "webui_online_e2e",
+        "android_device_e2e"
       ],
       "evidence": []
     }
@@ -2364,6 +2598,9 @@
     "foundation.shared_states",
     "home.dashboard",
     "session_detail.root",
+    "session_detail.header",
+    "session_detail.transcript",
+    "session_detail.composer",
     "session_detail.agent_sheet",
     "session_search.root",
     "new_session.root",
@@ -2412,5 +2649,318 @@
     "repository_id": "OpenMinis",
     "path_hint": "../OpenMinis",
     "commit": "9cf3a855fecd27bb5735b84cacbd56852a3ab8dd"
-  }
+  },
+  "entrypoint_node_id": "foundation.root",
+  "return_paths": [
+    {
+      "from_node_id": "session_detail.root",
+      "to_node_id": "foundation.root",
+      "semantic": "route_back_to_app_shell"
+    },
+    {
+      "from_node_id": "tools.registry",
+      "to_node_id": "foundation.root",
+      "semantic": "route_back_to_app_shell"
+    },
+    {
+      "from_node_id": "settings.root",
+      "to_node_id": "foundation.root",
+      "semantic": "route_back_to_app_shell"
+    },
+    {
+      "from_node_id": "session_search.root",
+      "to_node_id": "foundation.root",
+      "semantic": "route_back_to_app_shell"
+    },
+    {
+      "from_node_id": "new_session.root",
+      "to_node_id": "foundation.root",
+      "semantic": "route_back_to_app_shell"
+    },
+    {
+      "from_node_id": "timer.dashboard",
+      "to_node_id": "foundation.root",
+      "semantic": "route_back_to_app_shell"
+    },
+    {
+      "from_node_id": "files_artifacts.root",
+      "to_node_id": "foundation.root",
+      "semantic": "route_back_to_app_shell"
+    },
+    {
+      "from_node_id": "skills.root",
+      "to_node_id": "foundation.root",
+      "semantic": "route_back_to_app_shell"
+    },
+    {
+      "from_node_id": "memory.root",
+      "to_node_id": "foundation.root",
+      "semantic": "route_back_to_app_shell"
+    },
+    {
+      "from_node_id": "integrations.root",
+      "to_node_id": "foundation.root",
+      "semantic": "route_back_to_app_shell"
+    }
+  ],
+  "edges": [
+    {
+      "edge_id": "ui_tree.foundation.root.to.home.dashboard",
+      "from_node_id": "foundation.root",
+      "to_node_id": "home.dashboard",
+      "semantic": "contains_or_navigates_to"
+    },
+    {
+      "edge_id": "ui_tree.foundation.root.to.session_detail.root",
+      "from_node_id": "foundation.root",
+      "to_node_id": "session_detail.root",
+      "semantic": "contains_or_navigates_to"
+    },
+    {
+      "edge_id": "ui_tree.foundation.root.to.tools.registry",
+      "from_node_id": "foundation.root",
+      "to_node_id": "tools.registry",
+      "semantic": "contains_or_navigates_to"
+    },
+    {
+      "edge_id": "ui_tree.foundation.root.to.settings.root",
+      "from_node_id": "foundation.root",
+      "to_node_id": "settings.root",
+      "semantic": "contains_or_navigates_to"
+    },
+    {
+      "edge_id": "ui_tree.foundation.root.to.session_search.root",
+      "from_node_id": "foundation.root",
+      "to_node_id": "session_search.root",
+      "semantic": "contains_or_navigates_to"
+    },
+    {
+      "edge_id": "ui_tree.foundation.root.to.new_session.root",
+      "from_node_id": "foundation.root",
+      "to_node_id": "new_session.root",
+      "semantic": "contains_or_navigates_to"
+    },
+    {
+      "edge_id": "ui_tree.foundation.root.to.timer.dashboard",
+      "from_node_id": "foundation.root",
+      "to_node_id": "timer.dashboard",
+      "semantic": "contains_or_navigates_to"
+    },
+    {
+      "edge_id": "ui_tree.foundation.root.to.files_artifacts.root",
+      "from_node_id": "foundation.root",
+      "to_node_id": "files_artifacts.root",
+      "semantic": "contains_or_navigates_to"
+    },
+    {
+      "edge_id": "ui_tree.foundation.root.to.skills.root",
+      "from_node_id": "foundation.root",
+      "to_node_id": "skills.root",
+      "semantic": "contains_or_navigates_to"
+    },
+    {
+      "edge_id": "ui_tree.foundation.root.to.memory.root",
+      "from_node_id": "foundation.root",
+      "to_node_id": "memory.root",
+      "semantic": "contains_or_navigates_to"
+    },
+    {
+      "edge_id": "ui_tree.foundation.root.to.integrations.root",
+      "from_node_id": "foundation.root",
+      "to_node_id": "integrations.root",
+      "semantic": "contains_or_navigates_to"
+    },
+    {
+      "edge_id": "ui_tree.foundation.root.to.platform.android_bridge",
+      "from_node_id": "foundation.root",
+      "to_node_id": "platform.android_bridge",
+      "semantic": "contains_or_navigates_to"
+    },
+    {
+      "edge_id": "ui_tree.home.dashboard.to.session_detail.root",
+      "from_node_id": "home.dashboard",
+      "to_node_id": "session_detail.root",
+      "semantic": "contains_or_navigates_to"
+    },
+    {
+      "edge_id": "ui_tree.session_detail.root.to.session_detail.header",
+      "from_node_id": "session_detail.root",
+      "to_node_id": "session_detail.header",
+      "semantic": "contains_or_navigates_to"
+    },
+    {
+      "edge_id": "ui_tree.session_detail.root.to.session_detail.transcript",
+      "from_node_id": "session_detail.root",
+      "to_node_id": "session_detail.transcript",
+      "semantic": "contains_or_navigates_to"
+    },
+    {
+      "edge_id": "ui_tree.session_detail.root.to.session_detail.composer",
+      "from_node_id": "session_detail.root",
+      "to_node_id": "session_detail.composer",
+      "semantic": "contains_or_navigates_to"
+    },
+    {
+      "edge_id": "ui_tree.session_detail.root.to.session_detail.agent_sheet",
+      "from_node_id": "session_detail.root",
+      "to_node_id": "session_detail.agent_sheet",
+      "semantic": "contains_or_navigates_to"
+    },
+    {
+      "edge_id": "ui_tree.session_detail.transcript.to.turn_blocks.user",
+      "from_node_id": "session_detail.transcript",
+      "to_node_id": "turn_blocks.user",
+      "semantic": "contains_or_navigates_to"
+    },
+    {
+      "edge_id": "ui_tree.session_detail.transcript.to.turn_blocks.assistant",
+      "from_node_id": "session_detail.transcript",
+      "to_node_id": "turn_blocks.assistant",
+      "semantic": "contains_or_navigates_to"
+    },
+    {
+      "edge_id": "ui_tree.session_detail.transcript.to.turn_blocks.reasoning",
+      "from_node_id": "session_detail.transcript",
+      "to_node_id": "turn_blocks.reasoning",
+      "semantic": "contains_or_navigates_to"
+    },
+    {
+      "edge_id": "ui_tree.session_detail.transcript.to.turn_blocks.tool_activity",
+      "from_node_id": "session_detail.transcript",
+      "to_node_id": "turn_blocks.tool_activity",
+      "semantic": "contains_or_navigates_to"
+    },
+    {
+      "edge_id": "ui_tree.session_detail.transcript.to.turn_blocks.attachment",
+      "from_node_id": "session_detail.transcript",
+      "to_node_id": "turn_blocks.attachment",
+      "semantic": "contains_or_navigates_to"
+    },
+    {
+      "edge_id": "ui_tree.session_detail.transcript.to.turn_blocks.artifact",
+      "from_node_id": "session_detail.transcript",
+      "to_node_id": "turn_blocks.artifact",
+      "semantic": "contains_or_navigates_to"
+    },
+    {
+      "edge_id": "ui_tree.session_detail.transcript.to.turn_blocks.error",
+      "from_node_id": "session_detail.transcript",
+      "to_node_id": "turn_blocks.error",
+      "semantic": "contains_or_navigates_to"
+    },
+    {
+      "edge_id": "ui_tree.tools.registry.to.tools.detail",
+      "from_node_id": "tools.registry",
+      "to_node_id": "tools.detail",
+      "semantic": "contains_or_navigates_to"
+    },
+    {
+      "edge_id": "ui_tree.settings.root.to.settings.models",
+      "from_node_id": "settings.root",
+      "to_node_id": "settings.models",
+      "semantic": "contains_or_navigates_to"
+    },
+    {
+      "edge_id": "ui_tree.settings.root.to.settings.agent_runtime",
+      "from_node_id": "settings.root",
+      "to_node_id": "settings.agent_runtime",
+      "semantic": "contains_or_navigates_to"
+    },
+    {
+      "edge_id": "ui_tree.settings.root.to.settings.connection",
+      "from_node_id": "settings.root",
+      "to_node_id": "settings.connection",
+      "semantic": "contains_or_navigates_to"
+    },
+    {
+      "edge_id": "ui_tree.settings.root.to.settings.observability",
+      "from_node_id": "settings.root",
+      "to_node_id": "settings.observability",
+      "semantic": "contains_or_navigates_to"
+    },
+    {
+      "edge_id": "ui_tree.settings.root.to.settings.appearance",
+      "from_node_id": "settings.root",
+      "to_node_id": "settings.appearance",
+      "semantic": "contains_or_navigates_to"
+    },
+    {
+      "edge_id": "ui_tree.settings.root.to.settings.about",
+      "from_node_id": "settings.root",
+      "to_node_id": "settings.about",
+      "semantic": "contains_or_navigates_to"
+    },
+    {
+      "edge_id": "ui_tree.session_search.root.to.session_detail.root",
+      "from_node_id": "session_search.root",
+      "to_node_id": "session_detail.root",
+      "semantic": "contains_or_navigates_to"
+    },
+    {
+      "edge_id": "ui_tree.new_session.root.to.session_detail.root",
+      "from_node_id": "new_session.root",
+      "to_node_id": "session_detail.root",
+      "semantic": "contains_or_navigates_to"
+    },
+    {
+      "edge_id": "ui_tree.foundation.root.to.foundation.surface_contract",
+      "from_node_id": "foundation.root",
+      "to_node_id": "foundation.surface_contract",
+      "semantic": "contains_or_navigates_to"
+    },
+    {
+      "edge_id": "ui_tree.foundation.root.to.foundation.protocol_calls",
+      "from_node_id": "foundation.root",
+      "to_node_id": "foundation.protocol_calls",
+      "semantic": "contains_or_navigates_to"
+    },
+    {
+      "edge_id": "ui_tree.foundation.root.to.foundation.shared_states",
+      "from_node_id": "foundation.root",
+      "to_node_id": "foundation.shared_states",
+      "semantic": "contains_or_navigates_to"
+    },
+    {
+      "edge_id": "ui_tree.session_detail.composer.to.composer.text_submit",
+      "from_node_id": "session_detail.composer",
+      "to_node_id": "composer.text_submit",
+      "semantic": "contains_or_navigates_to"
+    },
+    {
+      "edge_id": "ui_tree.session_detail.composer.to.composer.attachments",
+      "from_node_id": "session_detail.composer",
+      "to_node_id": "composer.attachments",
+      "semantic": "contains_or_navigates_to"
+    },
+    {
+      "edge_id": "ui_tree.session_detail.composer.to.composer.queue",
+      "from_node_id": "session_detail.composer",
+      "to_node_id": "composer.queue",
+      "semantic": "contains_or_navigates_to"
+    },
+    {
+      "edge_id": "ui_tree.session_detail.composer.to.composer.stop_continue",
+      "from_node_id": "session_detail.composer",
+      "to_node_id": "composer.stop_continue",
+      "semantic": "contains_or_navigates_to"
+    },
+    {
+      "edge_id": "ui_tree.session_detail.composer.to.composer.voice",
+      "from_node_id": "session_detail.composer",
+      "to_node_id": "composer.voice",
+      "semantic": "contains_or_navigates_to"
+    },
+    {
+      "edge_id": "ui_tree.tools.registry.to.tools.activity",
+      "from_node_id": "tools.registry",
+      "to_node_id": "tools.activity",
+      "semantic": "contains_or_navigates_to"
+    },
+    {
+      "edge_id": "ui_tree.tools.registry.to.tools.permissions",
+      "from_node_id": "tools.registry",
+      "to_node_id": "tools.permissions",
+      "semantic": "contains_or_navigates_to"
+    }
+  ]
 }

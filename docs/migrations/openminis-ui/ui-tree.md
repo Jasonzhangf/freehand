@@ -20,12 +20,20 @@ online-verification claim is made by this baseline.
 ```mermaid
 flowchart TD
   Root[foundation.root / Freehand App Shell]
+  SurfaceContract[foundation.surface_contract]
+  ProtocolCalls[foundation.protocol_calls]
+  SharedStates[foundation.shared_states]
   Home[home.dashboard]
   Session[session_detail.root]
   Header[session_detail.header]
   Transcript[session_detail.transcript]
   Composer[session_detail.composer]
   AgentSheet[session_detail.agent_sheet]
+  ComposerText[composer.text_submit]
+  ComposerAttachments[composer.attachments]
+  ComposerQueue[composer.queue]
+  ComposerStop[composer.stop_continue]
+  ComposerVoice[composer.voice]
   UserBlock[turn_blocks.user]
   AssistantBlock[turn_blocks.assistant]
   ReasoningBlock[turn_blocks.reasoning]
@@ -35,6 +43,8 @@ flowchart TD
   ErrorBlock[turn_blocks.error]
   Tools[tools.registry]
   ToolDetail[tools.detail]
+  ToolsActivity[tools.activity]
+  ToolPermissions[tools.permissions]
   Settings[settings.root]
   Models[settings.models]
   Runtime[settings.agent_runtime]
@@ -52,6 +62,9 @@ flowchart TD
   Android[platform.android_bridge]
 
   Root --> Home
+  Root --> SurfaceContract
+  Root --> ProtocolCalls
+  Root --> SharedStates
   Root --> Session
   Root --> Tools
   Root --> Settings
@@ -68,6 +81,11 @@ flowchart TD
   Session --> Transcript
   Session --> Composer
   Session --> AgentSheet
+  Composer --> ComposerText
+  Composer --> ComposerAttachments
+  Composer --> ComposerQueue
+  Composer --> ComposerStop
+  Composer --> ComposerVoice
   Transcript --> UserBlock
   Transcript --> AssistantBlock
   Transcript --> ReasoningBlock
@@ -76,6 +94,8 @@ flowchart TD
   Transcript --> ArtifactBlock
   Transcript --> ErrorBlock
   Tools --> ToolDetail
+  Tools --> ToolsActivity
+  Tools --> ToolPermissions
   Settings --> Models
   Settings --> Runtime
   Settings --> Connection
@@ -116,6 +136,9 @@ Layer 7  Android platform bridge
 | --- | --- | --- | --- |
 | `home.dashboard` | `Views/ContentView.swift`, Chat store UI usage | `surfaces/home-dashboard` | `inventoried` |
 | `session_detail.root` | `Views/Chat/AIChatView.swift` | `surfaces/session-detail` | `inventoried` |
+| `session_detail.header` | `Views/Chat/AIChatView.swift` | SessionDetail identity, lifecycle, navigation, actions | `inventoried` |
+| `session_detail.transcript` | `Views/Chat/AIChatView.swift` | chronological projection-only block composition | `inventoried` |
+| `session_detail.composer` | `Views/Chat/AIChatView.swift` | session-bound draft and owner-command controls | `inventoried` |
 | `session_search.root` | session navigation/search behavior | `surfaces/session-search` | `inventoried` |
 | `new_session.root` | new-chat/session actions | `surfaces/new-session` | `inventoried` |
 | `session_detail.agent_sheet` | session-scoped tool/agent detail patterns | SessionDetail scoped Agent sheet | `inventoried` |

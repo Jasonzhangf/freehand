@@ -72,7 +72,7 @@ Every unit must record these fields before implementation:
 | `test_design_docs` | Every affected test design |
 | `verification_gates` | Must include `openminis_ui_migration_manifest` and the mapped static/module/project/online/Android gates |
 | `status` | One state from the lifecycle below |
-| `evidence` | Paths to tests/artifacts; empty until verified |
+| `evidence` | Structured gate proof records; empty until verified |
 
 Do not invent operation ids, protocol commands, symbols, or paths. Missing
 bindings remain explicit `pending`.
@@ -115,6 +115,32 @@ Meaning:
   after dependency proof.
 
 No state may be skipped by prose. `online_verified` requires evidence.
+Unknown states are rejected rather than treated as blocking aliases.
+
+`source_bound` and later states require every `target_symbol` to:
+
+1. resolve in `target_paths`;
+2. occur on a real row in one of `mainline_call_docs`;
+3. share that row with the node's `operation_id`.
+
+`online_verified` and `legacy_retired` evidence is an array of:
+
+```json
+{
+  "gate_id": "webui_online_e2e",
+  "command": "the exact replay command",
+  "artifact_path": "output/evidence/non-empty-repository-or-CI-artifact.txt",
+  "result": "passed"
+}
+```
+
+Evidence must cover every declared `verification_gates` entry, point to a
+non-empty parseable artifact, and use `result: passed`. A prose value such as
+`"passed"` is not evidence.
+
+The machine manifest owns the complete topology: `entrypoint_node_id`,
+adjacent `edges`, and `return_paths`. The gate parses the Mermaid tree and
+requires its node and edge sets to equal the machine topology exactly.
 
 ## 5. Required Function-Map Chain
 
