@@ -8834,3 +8834,79 @@ Current real root cause split:
 - Implementation: removed `target_owner_module` from `UiAdpCommandManifestEntry` and `UiCommandDispatchReceipt`; regenerated `crates/freehand-ui-protocol/generated/adp-protocol.schema.json` and `apps/freehand-server/assets/webui/generated/adp-protocol.js`; `xtask verify_adp_protocol_artifacts` now rejects `target_owner_module` and `crates/freehand-*` in generated JSON/served WebUI JS artifacts; protocol serialization test rejects `target_owner_module` / `crates/freehand-*` in public command receipts.
 - Docs/maps: Gap 6 updated to mark public artifact internal-path leak closed while leaving ui-protocol projection split, `/adp` auth, payload DTO schema/types, and command-surface contraction open; ui.protocol function map/test design/mainline/wiki synced.
 - Verification so far after v2 bump: `cargo fmt --check`; `cargo test -p freehand-ui-protocol adp -- --test-threads=1` 5 ok; `cargo test -p xtask -- --test-threads=1` 50 ok; `cargo run -p xtask -- mainlines check`; `cargo run -p xtask -- gates check`; server ADP/webui tests 3+3 ok; Node syntax checks for generated/adp-client/legacy; grep confirms no `target_owner_module` or `crates/freehand-*` in public generated artifacts.
+
+## 2026-07-28 — Worker 401 / provider failover / parent lifecycle live replay
+
+- Exact process evidence before restart: Master PID `93295` started after current config/binary; Worker PIDs `816`, `37005`, `37016` started before both. Workers therefore held stale startup-loaded provider selection and credentials.
+- Used exact service-scoped `launchctl kickstart -k` for `com.freehand.workerS.worker`, `worker-2`, and `worker-3`; new PIDs `89960`, `89964`, `89968` all started at 23:50:42. No broad kill and no installer/build overwrite.
+- Reassigned blocked `task-1785166804` through authenticated ADP `AssignTask`; owner receipt accepted it. New execution: `exec-worker-worker-1785167783036348000-229`.
+- Current route evidence: first request used `cc/openai/responses/gpt-5.5` primary and returned `openai_http_status_401`, `invalid_api_key`, `Casdoor token validation failed`; metadata then emitted `RuntimeLive05ProviderFailover` from `cc` to `minimax`, and subsequent rounds used `minimax/anthropic/messages/MiniMax-M3` fallback.
+- Live credential diagnosis (values never printed): the 12-character CC credential fingerprint shared by daemonS/current worker and the distinct 37-character fingerprint in worker-2/worker-3 both returned 401 against the configured CC `/responses` route. Master remained healthy because its primary is MiniMax; “system can run” did not prove CC health.
+- Error/lifecycle closure proof: fallback execution remained healthy with TaskHeartbeats, bounded MiniMax transport retries reached retry index 3, Worker emitted `TaskReviewSubmitted` at seq 261, Master emitted `TaskReviewApproved` at seq 262 and `TaskClosed` at seq 263, Task status became `closed`, and parent follow-up `runtime-turn-554` became `success`.
+- Live phone-width WebUI proof after closure: `mobile-home-active-title=暂无运行中会话`, active list `暂无运行中会话。`, parent row `任务 · 成功`, Worker row `已关闭`. Android rotation was restored to `accelerometer_rotation=1`, `user_rotation=0`.
+- Remaining truth: deployed failover/error/lifecycle behavior is closed for this replay; the configured CC primary credential is still invalid. Do not call CC fixed, and do not treat fallback success as credential repair.
+
+## 2026-07-28 — 现存 Worker 401 会话的 UI 真相投影诊断锁
+
+```yaml
+symptom:
+  observed: worker-task-task-1785166804 的 Header/TaskBoard 已为 closed，但普通 SessionDetail 仍把旧执行的 401 invalid_api_key 失败卡作为当前醒目失败；用户因而看到“Worker 无法授权”。
+  expected: 保留旧失败 turn 真相；同一 TaskBoard Worker session 后续存在 Success 且 owner task closed 时，普通 UI 标为“历史失败 · 后续已恢复”，原始错误仅在 debug details 可查。
+  entry: S-profile WebUI SessionDetail -> TaskBoard-projected worker_session_id
+  ids: [webui-session-20260727151900-16c3255e, task-1785166804, worker-task-task-1785166804, worker-turn-exec-worker-worker-1785166810762910000-115919, worker-turn-exec-worker-worker-1785167783036348000-229-r11]
+  raw_evidence: TaskHistory seq 261 TaskReviewSubmitted, seq 262 TaskReviewApproved, seq 263 TaskClosed; old Worker turn Failed; later Worker turn Success; phone-width Home reports no running session.
+sop_model_flow:
+  status: known
+  flow_id: app.webui-smoke.session-detail-worker-history
+  source_docs: [docs/resource-maps/core.json, docs/function-maps/app.webui-smoke.md, docs/mainline-calls/app.webui-smoke.json, docs/testing/app.webui-smoke.md]
+  lifecycle_nodes: [TaskBoard worker_session relation, SessionTurns chronological terminal truth, SessionDetail presentation model, normal/debug projection]
+  resource_edges: [task.project_to_ui, ui_projection.render]
+  forbidden_edges: [WebUI mutating Task/Turn truth, deleting historical failed turns, deriving relationship from id prefixes]
+  owner_graph: app.webui-smoke owns presentation; task.orchestration owns task terminal truth; ui.protocol owns turn projection.
+hypotheses:
+  - id: H1
+    cause: SessionDetail renders each historical Failed turn without reconciling it against later Success plus TaskBoard closed owner truth.
+    modules: [apps/freehand-server/assets/webui/legacy-monolith.js, apps/freehand-server/assets/webui/surfaces/session-detail]
+    supporting_evidence: same worker session contains old Failed then later Success while TaskBoard status is closed, but installed normal UI still exposes raw 401 as current-looking failure.
+    counter_evidence_or_gap: if no later Success or task not closed, old failure must remain red and unrecovered.
+    verification_action: pure chronological positive/negative model test, then install and open exact existing Worker session through production S-profile WebUI.
+    confidence: 98
+active_hypothesis: H1
+confirmed_hypothesis: H1
+first_divergence_node: SessionDetail presentation classification after owner projections and chronological SessionTurns are both available
+root_cause_module: apps/freehand-server/assets/webui/surfaces/session-detail recovery presentation model
+unique_owner: app.webui-smoke
+allowed_paths:
+  - apps/freehand-server/assets/webui/surfaces/session-detail/recovery.js
+  - apps/freehand-server/assets/webui/legacy-monolith.js
+  - apps/freehand-server/src/assets.rs
+  - apps/freehand-server/src/lib.rs
+  - scripts/verify-session-detail-recovery-model.mjs
+  - scripts/verify-worker-recovered-history-online.mjs
+  - docs/testing/app.webui-smoke.md
+  - docs/function-maps/app.webui-smoke.md
+  - docs/mainline-calls/app.webui-smoke.json
+  - docs/wiki/app.webui-smoke.md
+  - docs/design/mobile-webui-ui-tree.manifest.json
+  - docs/design/mobile-webui-ui-tree.md
+forbidden_paths:
+  - crates/freehand-task/**
+  - crates/freehand-runtime/**
+  - crates/freehand-provider-*/**
+required_verification:
+  - recovery pure-model positive and negative tests
+  - server asset smoke
+  - mainline generation/check and xtask gates
+  - exact production session replay in installed S-profile WebUI
+  - Android WebView replay before APK-level closure claim
+exact_replay: worker-task-task-1785166804
+```
+
+Provider truth remains separate: Master/worker/worker-2/worker-3 are now configured and process-loaded as `minimax -> cc`; a new real Worker proof execution used MiniMax primary for all provider rounds with zero 401/failover and closed normally. CC remains an invalid fallback and is not claimed fixed.
+
+## 2026-07-28 — Android exact-session replay closed
+
+- Package-scoped restart of `com.freehand.android` loaded the relay WebUI successfully; `FreehandWebUiLayout` reported `layoutClient=android-webview`, `layoutShape=tall_phone`, two stamped stylesheets at `20260728-worker-recovered-history`, `webuiCssApplied=true`, and `webuiJsReady=true`.
+- WebView DevTools opened exact Worker session `worker-task-task-1785166804`. DOM proved `data-recovery-state=historical_failure_recovered`, normal text `历史失败 · 后续已恢复`, no raw 401, exact task closed, and the later Success transcript remained visible.
+- Real-device screenshots: `artifacts/webui-online/worker-recovered-history-android.png` and `artifacts/webui-online/worker-recovered-history-android-card.png`.
+- The earlier stylesheet splash was transient device/WebView startup state; package-scoped restart plus live layout probe closed it without Android source change or APK rebuild.

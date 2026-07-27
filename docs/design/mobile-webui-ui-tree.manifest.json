@@ -135,7 +135,19 @@
         "unrelated global active-session fallback",
         "synthesized worker-task ids",
         "rename_unselected_session"
-      ]
+      ],
+      "historical_worker_failure_projection": {
+        "truth_source": "ordered QuerySessionTurns terminal statuses plus TaskBoard closed status for the projected worker_session_id",
+        "recovered_condition": "older Failed followed by later Success while task status is closed",
+        "normal_projection": "data-recovery-state=historical_failure_recovered and recovery summary without duplicate raw provider error",
+        "debug_projection": "original failed turn and provider error remain inspectable",
+        "forbidden": [
+          "latest_failure_marked_recovered",
+          "success_before_failure_marked_recovered",
+          "nonclosed_task_marked_recovered",
+          "historical_turn_deletion_or_truth_mutation"
+        ]
+      }
     },
     {
       "node_id": "current_session_agent_sheet",
@@ -253,6 +265,7 @@
     "SessionDetail Header Worker rail shows current child Worker status plus owner-timestamp duration and expands details on row click.",
     "Waiting-user sessions are not classified as running.",
     "ToolsRegistry has no document-level horizontal overflow on phone.",
-    "All visible route/status decisions are backed by owner projections."
+    "All visible route/status decisions are backed by owner projections.",
+    "Closed Worker tasks with an older Failed turn followed by a later Success mark only the older cycle historical_failure_recovered; normal mode suppresses duplicate raw provider errors and debug mode retains original failure truth."
   ]
 }

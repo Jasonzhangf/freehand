@@ -2787,6 +2787,11 @@ mod tests {
             ("new-session/controls.js", "openNewSessionSurface"),
             ("settings/view.js", "renderSettingsShellSurface"),
             (
+                "session-detail/recovery.js",
+                "recoveredHistoricalWorkerFailureTurnIds",
+            ),
+            ("session-detail/recovery.js", "historical_failure_recovered"),
+            (
                 "settings/diagnostics.js",
                 "renderSettingsDiagnosticsSurface",
             ),

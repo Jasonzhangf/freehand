@@ -5,7 +5,7 @@ use axum::response::{IntoResponse, Response};
 /// Single source of truth for the WebUI cache-busting version. Asset files and
 /// the page template reference `__WEBUI_ASSET_VERSION__`; the server stamps
 /// this value at serve time, so bumping the version is a one-line change here.
-pub const WEBUI_ASSET_VERSION: &str = "20260727-adp-schema-single-source";
+pub const WEBUI_ASSET_VERSION: &str = "20260728-worker-recovered-history";
 
 const WEBUI_ASSET_VERSION_TOKEN: &str = "__WEBUI_ASSET_VERSION__";
 
@@ -103,6 +103,11 @@ const WEBUI_SURFACE_SESSION_DETAIL_CONTROLS_JS: Asset = Asset {
     body: include_str!("../assets/webui/surfaces/session-detail/controls.js"),
 };
 
+const WEBUI_SURFACE_SESSION_DETAIL_RECOVERY_JS: Asset = Asset {
+    content_type: "application/javascript; charset=utf-8",
+    body: include_str!("../assets/webui/surfaces/session-detail/recovery.js"),
+};
+
 const WEBUI_SURFACE_TOOLS_REGISTRY_JS: Asset = Asset {
     content_type: "application/javascript; charset=utf-8",
     body: include_str!("../assets/webui/surfaces/tools-registry/index.js"),
@@ -189,6 +194,7 @@ pub fn asset_response(path: &str) -> Result<Response, StatusCode> {
         "webui/surfaces/home-dashboard/controls.js" => &WEBUI_SURFACE_HOME_DASHBOARD_CONTROLS_JS,
         "webui/surfaces/session-detail/index.js" => &WEBUI_SURFACE_SESSION_DETAIL_JS,
         "webui/surfaces/session-detail/controls.js" => &WEBUI_SURFACE_SESSION_DETAIL_CONTROLS_JS,
+        "webui/surfaces/session-detail/recovery.js" => &WEBUI_SURFACE_SESSION_DETAIL_RECOVERY_JS,
         "webui/surfaces/tools-registry/index.js" => &WEBUI_SURFACE_TOOLS_REGISTRY_JS,
         "webui/surfaces/tools-registry/view.js" => &WEBUI_SURFACE_TOOLS_REGISTRY_VIEW_JS,
         "webui/surfaces/tools-registry/controls.js" => &WEBUI_SURFACE_TOOLS_REGISTRY_CONTROLS_JS,

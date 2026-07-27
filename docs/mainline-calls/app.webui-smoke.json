@@ -53,7 +53,8 @@
     "front-end cancel button and Escape key send protocol-owned CancelTurn commands through command ingress only for nonterminal active turns",
     "front-end Escape sends CancelLatestActiveTurn when submit is in flight but no concrete turn_id has reached the browser yet",
     "command-ingress transport failures must stay explicit at the app boundary and may not collapse into success projection",
-    "transport-facing ADP subscribe route can accept protocol-owned task list and error-center subscriptions and obtain initial snapshots from the injected 运行时 query port"
+    "transport-facing ADP subscribe route can accept protocol-owned task list and error-center subscriptions and obtain initial snapshots from the injected 运行时 query port",
+    "front-end SessionDetail classifies historical Worker failures only from ordered SessionTurns plus TaskBoard-closed owner truth; no browser mutation or id-prefix inference is allowed"
   ],
   "response_mainline": [
     "app boundary renders a protocol-driven WebUI page shell; live content is populated from ADP query/subscribe/command frames plus latest-turn SSE display refresh events",
@@ -108,7 +109,8 @@
     "front-end cancel handling uses CancelTurn when turn_id is known and CancelLatestActiveTurn during submit-in-flight pre-SSE window",
     "ADP task list subscription returns accepted plus initial 运行时 task list projection and later 运行时-published task list events",
     "WebUI 可观测性 诊断 detail renders 权威投影 QueryDiagnostics rows; repeated refreshes replace only the 诊断 projection and never create sessions, tasks, timers, tool executions, or unredacted log dumps.",
-    "app boundary serves /assets/webui/generated/adp-protocol.js and the WebUI imports ADP_PROTOCOL_VERSION, ADP_HANDSHAKE_CAPABILITY, adpQueryOf, adpCommandOf, and adpSubscribeOf from that generated module"
+    "app boundary serves /assets/webui/generated/adp-protocol.js and the WebUI imports ADP_PROTOCOL_VERSION, ADP_HANDSHAKE_CAPABILITY, adpQueryOf, adpCommandOf, and adpSubscribeOf from that generated module",
+    "front-end SessionDetail marks an older failed Worker cycle historical_failure_recovered only when a later same-session Success and closed TaskBoard truth exist, suppresses duplicate raw provider-error rows in normal mode, and retains the raw failure in debug details"
   ],
   "error_mainline": [
     "ADP command/query/subscribe frames sent before handshake completion return explicit failure and do not reach dispatch or runtime query ports",
@@ -567,6 +569,17 @@
       "output_semantic": "pinned selected session route state and loading transcript state",
       "caller": "WebUI compatibility shell session switching",
       "callee": "route-controller edge dispatch plus QuerySessionTurns callback",
+      "binding_status": "bound"
+    },
+    {
+      "step": "11n-module-session-detail-recovery",
+      "symbol_path": "recoveredHistoricalWorkerFailureTurnIds / historicalFailureRecoveredLifecycle / historicalFailureRecoveredRows / historicalRecoveryProjectionChanged",
+      "file_path": "apps/freehand-server/assets/webui/surfaces/session-detail/recovery.js",
+      "responsibility": "classify only older failed Worker turns as recovered when the same ordered Worker transcript contains a later Success and TaskBoard owner status is closed; retain raw failure rows for debug mode and explicitly refresh a frozen same-key cycle when recovery owner truth or recovery debug mode changes, without mutating task or turn truth",
+      "input_semantic": "ordered SessionTurns terminal statuses plus selected Worker TaskBoard status",
+      "output_semantic": "historical_failure_recovered turn ids, terminal recovery lifecycle, and normal-mode recovery summary rows",
+      "caller": "buildConversationRenderModel / buildRenderTurn",
+      "callee": "SessionDetail cycle-card projection",
       "binding_status": "bound"
     },
     {

@@ -8,6 +8,7 @@ import { renderSurface as renderSessionSearchSurface, renderSessionSearchResult 
 import { renderDiagnosticLogRow as renderDiagnosticLogRowSurface, renderSurface as renderSettingsShellSurface, renderNavigation as renderSettingsNavigationSurface, renderDiagnostics as renderSettingsDiagnosticsSurface } from "./surfaces/settings/index.js?v=__WEBUI_ASSET_VERSION__";
 import { chooseNewTaskDirectory as chooseNewTaskDirectoryFromSurface, openNewSessionSurface, closeNewSessionSurface, selectedNewSessionKind as selectedNewSessionKindFromSurface, submitNewSessionSurface, syncNewSessionDialogMode as syncNewSessionDialogModeFromSurface } from "./surfaces/new-session/index.js?v=__WEBUI_ASSET_VERSION__";
 import { setSelectedSessionId as setSelectedSessionIdInSurface, clearConversationForSessionSwitch as clearConversationForSessionSwitchInSurface, switchConversationSession as switchConversationSessionInSurface } from "./surfaces/session-detail/index.js?v=__WEBUI_ASSET_VERSION__";
+import { HISTORICAL_FAILURE_RECOVERED, historicalFailureRecoveredLifecycle, historicalFailureRecoveredRows, historicalRecoveryProjectionChanged, recoveredHistoricalWorkerFailureTurnIds } from "./surfaces/session-detail/recovery.js?v=__WEBUI_ASSET_VERSION__";
 import { createAdpClient } from "./app-shell/adp-client.js?v=__WEBUI_ASSET_VERSION__";
 import { adpCommandOf, adpQueryOf, adpSubscribeOf } from "./generated/adp-protocol.js?v=__WEBUI_ASSET_VERSION__";
 
@@ -2454,11 +2455,18 @@ function buildConversationRenderModel() {
     conversationTurns.length === 0 && state.turn
       ? [state.turn]
       : conversationTurns;
+  const workerTask = taskForWorkerSessionId(state.selectedSessionId);
+  const recoveredFailureTurnIds = recoveredHistoricalWorkerFailureTurnIds(turnsForRender, {
+    isWorkerSession: !!workerTask,
+    taskStatus: workerTask && workerTask.status,
+  });
   const pendingStartedAt =
     state.submitStartedAt || state.ambiguousSubmitRecoveryStartedAt || Date.now();
   return {
     selectedSessionId: state.selectedSessionId,
-    turns: turnsForRender.map((turn) => buildRenderTurn(turn)),
+    turns: turnsForRender.map((turn) => buildRenderTurn(turn, {
+      historicalFailureRecovered: recoveredFailureTurnIds.has(turn.turn_id),
+    })),
     pendingSubmit: state.pendingUserInput
       ? {
           text: state.pendingUserInput,
@@ -2535,8 +2543,12 @@ function baseTurnId(turnId) {
   return `${parsed.prefix}${parsed.ordinal}`;
 }
 
-function buildRenderTurn(turn) {
-  const lifecycle = turnLifecycleForRender(turn);
+function buildRenderTurn(turn, options = {}) {
+  const historicalFailureRecovered = options.historicalFailureRecovered === true;
+  const lifecycle = historicalFailureRecovered
+    ? historicalFailureRecoveredLifecycle()
+    : turnLifecycleForRender(turn);
+  const rows = buildRenderRows(turn, lifecycle);
   return {
     turnId: turn.turn_id || "",
     sessionId: turn.session_id || "",
@@ -2546,7 +2558,11 @@ function buildRenderTurn(turn) {
     sourceTurn: turn,
     orderKey: turnOrderKey(turn.turn_id),
     lifecycle,
-    rows: buildRenderRows(turn, lifecycle),
+    recoveryState: historicalFailureRecovered ? HISTORICAL_FAILURE_RECOVERED : "",
+    recoveryDebugDetails: historicalFailureRecovered && state.debugDetailsVisible,
+    rows: historicalFailureRecovered && !state.debugDetailsVisible
+      ? historicalFailureRecoveredRows(rows)
+      : rows,
   };
 }
 
@@ -4554,6 +4570,16 @@ function frozenCycleCardNeedsAuthoritativeMetadataRefresh(existing, nextCard) {
     (!existing.dataset.timeToFirstResponseMs && !!nextCard.dataset.timeToFirstResponseMs) ||
     (!existing.dataset.totalElapsedMs && !!nextCard.dataset.totalElapsedMs) ||
     (!existingCreatedAt && !!nextCreatedAt) ||
+    historicalRecoveryProjectionChanged(
+      {
+        recoveryState: existing.dataset.recoveryState || "",
+        recoveryDebugDetails: existing.dataset.recoveryDebugDetails || "",
+      },
+      {
+        recoveryState: nextCard.dataset.recoveryState || "",
+        recoveryDebugDetails: nextCard.dataset.recoveryDebugDetails || "",
+      },
+    ) ||
     frozenCycleCardNeedsLifecycleClassificationRefresh(existing, nextCard)
   );
 }
@@ -4636,6 +4662,10 @@ function cycleCardFromChatCards(meta, chatCards) {
   article.dataset.submitId = `${(meta && meta.submitId) || ""}`;
   article.dataset.lifecycleClass = `${lifecycle.className || ""}`;
   article.dataset.lifecyclePhase = `${lifecycle.phase || ""}`;
+  if (meta && meta.recoveryState) {
+    article.dataset.recoveryState = `${meta.recoveryState}`;
+    article.dataset.recoveryDebugDetails = meta.recoveryDebugDetails ? "true" : "false";
+  }
   const createdAt = (meta && meta.createdAt) || "";
   if (createdAt) {
     article.dataset.createdAt = `${createdAt}`;
@@ -4730,6 +4760,8 @@ function cycleCardMetaForTimelineItem(item) {
       createdAt: renderTurn.createdAt || "",
       timing: renderTurn.timing || null,
       sourceTurn: renderTurn.sourceTurn || null,
+      recoveryState: renderTurn.recoveryState || "",
+      recoveryDebugDetails: renderTurn.recoveryDebugDetails === true,
       lifecycle: renderTurn.lifecycle,
       terminal: !((renderTurn.lifecycle && renderTurn.lifecycle.isLive) || false) &&
         !((renderTurn.lifecycle && renderTurn.lifecycle.neutral) || false),

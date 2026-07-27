@@ -348,6 +348,12 @@ SessionDetail(session_id)
 - The global Home panels are hidden.
 - The transcript is the dominant body.
 - Header relationship panel is scoped to the selected session only.
+- A failed Worker turn remains historical truth. Only when the same
+  TaskBoard-projected Worker session has a later successful turn and the task
+  owner status is `closed` may normal presentation relabel the older cycle
+  `历史失败 · 后续已恢复`; debug details must retain the original failure. A latest
+  failure, a success that precedes the failure, or a non-closed task must remain
+  an unrecovered failure.
 - Header Worker status rail is scoped to the selected parent session's
   TaskBoard/AgentBoard projections. It shows every current child Worker task as
   one compact row with Worker label, real task status, and duration derived from
@@ -557,3 +563,7 @@ Implementation is not complete until these are proven:
 5. Owner truth:
    - all visible route/status decisions are backed by ADP/query projections
    - no browser-local fallback truth is introduced
+   - a closed Worker task with an older failed turn followed by a later success
+     marks only the older cycle `historical_failure_recovered`; normal text does
+     not present the duplicate raw provider error as current, while debug details
+     still expose it

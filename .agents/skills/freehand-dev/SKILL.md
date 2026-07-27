@@ -598,6 +598,19 @@ Use this skill for any non-trivial work in this repo.
   proof from the Settings provider card/control to `TestProviderWebSearch`, visible
   DOM pass/fail status, S-profile restore, and request-shape evidence for hosted
   `web_search` when a fixture provider is used.
+- A safe config projection is not proof that every agent process loaded that
+  config. For Master/Worker provider divergence, compare config/binary mtimes to
+  exact service PIDs and start times, inspect each agent-specific env file by
+  presence/fingerprint only, then prove the loaded route from live provider
+  metadata. A primary-provider 401 followed by
+  `RuntimeLive05ProviderFailover` and successful fallback execution proves
+  failover, but it does not repair or validate the primary credential. Lifecycle
+  closure additionally requires Worker terminal task truth, Master review/close
+  events, parent-session terminal truth, and an empty WebUI running-session list.
+  A historical Worker failure stays in transcript truth; normal SessionDetail may
+  mark it recovered only when the same TaskBoard-projected Worker session has a
+  later Success and that exact task is closed. Keep the raw error in debug mode,
+  and never use a different task's success to rewrite an older failure/cancel.
 - For mobile UI tree closeout, run `node scripts/verify-mobile-ui-tree-goal-audit.mjs`
   after the slice verifiers. Treat `mobile_ui_tree_goal_audit_blocked` as an
   explicit blocker report, not completion; an Android locked/dozing state must be
