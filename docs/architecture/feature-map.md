@@ -1070,6 +1070,8 @@ Non-violation pending items live in `docs/architecture/architecture-gaps.md`. Ea
 
 ### `ui.protocol`
 
+- ADP WebSocket upgrade 入口鉴权已落地：`handle_adp_socket` 在 WebSocket upgrade 前检查 `Authorization: Bearer <token>` 或 `Cookie: freehand_adp_auth=<token>`，未认证返回 401；自生成 32 字节 hex token（`/dev/urandom`），可通过 `FREEHAND_ADP_AUTH_TOKEN` 环境变量覆写；根页面 `Set-Cookie` 注入 token；relay 透传认证头
+
 - owner: `crates/freehand-ui-protocol`
 - allowed_paths: `crates/freehand-ui-protocol/**`, `crates/freehand-debug/**`, `docs/architecture/**`, `docs/design/**`
 - forbidden_paths: `crates/freehand-reason/**`, `crates/freehand-provider-*/**`, `apps/**` except transport-only adapters

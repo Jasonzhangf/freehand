@@ -5,6 +5,7 @@ mod remote_relay;
 use std::collections::HashMap;
 use std::convert::Infallible;
 use std::fs;
+use std::io::Read;
 use std::net::SocketAddr;
 use std::path::{Path as FsPath, PathBuf};
 use std::sync::{Arc, Mutex};
@@ -12,7 +13,7 @@ use std::sync::{Arc, Mutex};
 use axum::body::Body;
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
 use axum::extract::{Path, Query, State};
-use axum::http::{HeaderValue, StatusCode, header};
+use axum::http::{HeaderMap, HeaderValue, StatusCode, header};
 use axum::response::Html;
 use axum::response::IntoResponse;
 use axum::response::Response;
@@ -53,6 +54,7 @@ struct WebUiState {
     command_dispatch_port: Arc<dyn UiCommandDispatchPort>,
     runtime_query_port: Arc<dyn UiRuntimeQueryPort>,
     internal_adp_command_token: Option<String>,
+    adp_auth_token: String,
 }
 
 pub fn usage(binary_name: &str) -> String {
@@ -91,6 +93,7 @@ pub fn build_webui_router(
         std::env::var("FREEHAND_ADP_INTERNAL_COMMAND_TOKEN")
             .ok()
             .filter(|token| !token.trim().is_empty()),
+        load_adp_auth_token(),
     )
 }
 
@@ -99,6 +102,7 @@ fn build_webui_router_with_internal_adp_command_token(
     command_dispatch_port: Arc<dyn UiCommandDispatchPort>,
     runtime_query_port: Arc<dyn UiRuntimeQueryPort>,
     internal_adp_command_token: Option<String>,
+    adp_auth_token: String,
 ) -> Router {
     Router::new()
         .route("/", get(handle_root))
@@ -130,6 +134,7 @@ fn build_webui_router_with_internal_adp_command_token(
             command_dispatch_port,
             runtime_query_port,
             internal_adp_command_token,
+            adp_auth_token,
         })
 }
 
@@ -168,12 +173,66 @@ pub fn seed_webui_protocol_state() -> UiProtocolState {
     state
 }
 
-async fn handle_root(Query(params): Query<HashMap<String, String>>) -> impl IntoResponse {
+const FREEHAND_ADP_AUTH_TOKEN_ENV: &str = "FREEHAND_ADP_AUTH_TOKEN";
+const FREEHAND_ADP_AUTH_COOKIE: &str = "freehand_adp_auth";
+
+fn load_adp_auth_token() -> String {
+    if let Ok(token) = std::env::var(FREEHAND_ADP_AUTH_TOKEN_ENV) {
+        let token = token.trim().to_owned();
+        if !token.is_empty() {
+            return token;
+        }
+    }
+    generate_adp_auth_token().expect("failed to generate ADP auth token from OS entropy")
+}
+
+fn generate_adp_auth_token() -> std::io::Result<String> {
+    let mut bytes = [0_u8; 32];
+    let mut file = fs::File::open("/dev/urandom")?;
+    file.read_exact(&mut bytes)?;
+    Ok(bytes.iter().map(|byte| format!("{byte:02x}")).collect())
+}
+
+fn adp_auth_cookie_header(token: &str) -> String {
+    format!("{FREEHAND_ADP_AUTH_COOKIE}={token}; Path=/; HttpOnly; SameSite=Strict")
+}
+
+fn adp_request_authorized(headers: &HeaderMap, expected_token: &str) -> bool {
+    adp_bearer_token(headers).is_some_and(|token| token == expected_token)
+        || adp_cookie_token(headers).is_some_and(|token| token == expected_token)
+}
+
+fn adp_bearer_token(headers: &HeaderMap) -> Option<&str> {
+    let value = headers.get(header::AUTHORIZATION)?.to_str().ok()?.trim();
+    value
+        .strip_prefix("Bearer ")
+        .filter(|token| !token.trim().is_empty())
+}
+
+fn adp_cookie_token(headers: &HeaderMap) -> Option<&str> {
+    let cookie = headers.get(header::COOKIE)?.to_str().ok()?;
+    cookie.split(';').find_map(|part| {
+        let (name, value) = part.trim().split_once('=')?;
+        (name == FREEHAND_ADP_AUTH_COOKIE && !value.trim().is_empty()).then_some(value)
+    })
+}
+
+async fn handle_root(
+    State(state): State<WebUiState>,
+    Query(params): Query<HashMap<String, String>>,
+) -> impl IntoResponse {
     (
-        [(
-            header::CACHE_CONTROL,
-            HeaderValue::from_static("no-store, max-age=0"),
-        )],
+        [
+            (
+                header::CACHE_CONTROL,
+                HeaderValue::from_static("no-store, max-age=0"),
+            ),
+            (
+                header::SET_COOKIE,
+                HeaderValue::from_str(&adp_auth_cookie_header(&state.adp_auth_token))
+                    .expect("ADP auth token must be cookie-safe hex"),
+            ),
+        ],
         Html(render_webui_smoke_for_client(
             params.get("client").map(String::as_str),
         )),
@@ -459,10 +518,15 @@ async fn handle_subscribe_debug_state(
 }
 
 async fn handle_adp_socket(
+    headers: HeaderMap,
     ws: WebSocketUpgrade,
     State(state): State<WebUiState>,
 ) -> impl IntoResponse {
+    if !adp_request_authorized(&headers, &state.adp_auth_token) {
+        return StatusCode::UNAUTHORIZED.into_response();
+    }
     ws.on_upgrade(move |socket| handle_adp_connection(socket, state))
+        .into_response()
 }
 
 async fn handle_adp_connection(socket: WebSocket, state: WebUiState) {
@@ -1132,6 +1196,7 @@ mod tests {
     use tokio::time::timeout;
     use tokio_tungstenite::connect_async;
     use tokio_tungstenite::tungstenite::Message as WsMessage;
+    use tokio_tungstenite::tungstenite::client::IntoClientRequest;
 
     #[tokio::test]
     async fn asset_response_serves_shared_logo_png() {
@@ -1222,6 +1287,7 @@ mod tests {
                         command_dispatch_port_for_task,
                         runtime_query_port_for_task,
                         internal_adp_command_token,
+                        "test-adp-auth-token".to_owned(),
                     ),
                 )
                 .with_graceful_shutdown(shutdown)
@@ -1374,6 +1440,25 @@ mod tests {
             panic!("unexpected ADP message: {message:?}");
         };
         serde_json::from_str(&text).expect("adp response json")
+    }
+
+    async fn connect_adp_with_bearer(
+        ws_url: &str,
+    ) -> Result<
+        (
+            tokio_tungstenite::WebSocketStream<
+                tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>,
+            >,
+            tokio_tungstenite::tungstenite::handshake::client::Response,
+        ),
+        tokio_tungstenite::tungstenite::Error,
+    > {
+        let mut request = ws_url.into_client_request().expect("test ADP request");
+        request.headers_mut().insert(
+            header::AUTHORIZATION,
+            HeaderValue::from_static("Bearer test-adp-auth-token"),
+        );
+        connect_async(request).await
     }
 
     async fn send_adp_request(
@@ -1585,9 +1670,10 @@ mod tests {
         let turn_query_body = turn_query.text().await.expect("turn query body");
         assert!(turn_query_body.contains("\"turn_id\":\"turn-webui-smoke\""));
 
-        let (mut socket, _) = connect_async(relay.ws_url("/relay/daemon/studio-host/adp"))
-            .await
-            .expect("relay adp connect");
+        let (mut socket, _) =
+            connect_adp_with_bearer(&relay.ws_url("/relay/daemon/studio-host/adp"))
+                .await
+                .expect("relay adp connect");
         perform_adp_handshake(&mut socket).await;
         socket
             .send(WsMessage::Text(
@@ -1645,6 +1731,44 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn adp_websocket_requires_auth_before_upgrade() {
+        let server = TestServer::spawn_empty().await;
+        let ws_url = server.base_url.replacen("http://", "ws://", 1) + "/adp";
+        let unauth = connect_async(ws_url.clone()).await;
+        assert!(
+            unauth.is_err(),
+            "raw ADP websocket upgrade must require auth"
+        );
+
+        let root = Client::new()
+            .get(&server.base_url)
+            .send()
+            .await
+            .expect("root response");
+        let cookie = root
+            .headers()
+            .get(header::SET_COOKIE)
+            .expect("root sets ADP auth cookie")
+            .to_str()
+            .expect("cookie header")
+            .split(';')
+            .next()
+            .expect("cookie pair")
+            .to_owned();
+        let mut cookie_request = ws_url.into_client_request().expect("cookie ws request");
+        cookie_request.headers_mut().insert(
+            header::COOKIE,
+            HeaderValue::from_str(&cookie).expect("cookie header value"),
+        );
+        let (mut socket, _) = connect_async(cookie_request)
+            .await
+            .expect("cookie-authenticated ADP connect");
+        perform_adp_handshake(&mut socket).await;
+        let _ = socket.close(None).await;
+        server.stop().await;
+    }
+
+    #[tokio::test]
     async fn adp_requires_handshake_before_query_and_accepts_after_handshake() {
         let runtime_query_port = Arc::new(CountingRuntimeQueryPort::default());
         let server = TestServer::spawn_with_state_port_and_query(
@@ -1654,7 +1778,7 @@ mod tests {
         )
         .await;
         let ws_url = server.base_url.replacen("http://", "ws://", 1) + "/adp";
-        let (mut socket, _) = connect_async(ws_url).await.expect("adp connect");
+        let (mut socket, _) = connect_adp_with_bearer(&ws_url).await.expect("adp connect");
 
         send_adp_request(
             &mut socket,
@@ -1747,7 +1871,7 @@ mod tests {
         )
         .await;
         let ws_url = server.base_url.replacen("http://", "ws://", 1) + "/adp";
-        let (mut socket, _) = connect_async(ws_url).await.expect("adp connect");
+        let (mut socket, _) = connect_adp_with_bearer(&ws_url).await.expect("adp connect");
         perform_adp_handshake(&mut socket).await;
 
         send_adp_request(
@@ -1875,12 +1999,10 @@ mod tests {
             Some("server-owned-internal-token".to_owned()),
         )
         .await;
-        let (mut token_socket, _) = connect_async(format!(
-            "{}/adp",
-            token_server.base_url.replace("http://", "ws://")
-        ))
-        .await
-        .expect("token adp connect");
+        let token_ws_url = format!("{}/adp", token_server.base_url.replace("http://", "ws://"));
+        let (mut token_socket, _) = connect_adp_with_bearer(&token_ws_url)
+            .await
+            .expect("token adp connect");
         perform_adp_handshake_with_capabilities(
             &mut token_socket,
             vec![

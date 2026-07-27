@@ -5,7 +5,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use axum::body::Body;
 use axum::extract::ws::{Message, WebSocket, WebSocketUpgrade};
 use axum::extract::{OriginalUri, Path, State};
-use axum::http::{HeaderValue, StatusCode, header};
+use axum::http::{HeaderMap, HeaderValue, StatusCode, header};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{get, post};
 use axum::{Json, Router};
@@ -15,6 +15,7 @@ use serde::{Deserialize, Serialize};
 use tokio::net::TcpListener;
 use tokio_tungstenite::connect_async;
 use tokio_tungstenite::tungstenite::Message as UpstreamMessage;
+use tokio_tungstenite::tungstenite::client::IntoClientRequest;
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
@@ -343,6 +344,7 @@ async fn proxy_relay_daemon_http(
 async fn handle_relay_daemon_adp(
     Path(relay_host_id): Path<String>,
     State(state): State<RemoteRelayState>,
+    headers: HeaderMap,
     ws: WebSocketUpgrade,
 ) -> Response {
     let Some(record) = state
@@ -368,12 +370,27 @@ async fn handle_relay_daemon_adp(
                 );
             }
         };
-    ws.on_upgrade(move |socket| relay_adp_socket(socket, upstream_url))
+    ws.on_upgrade(move |socket| relay_adp_socket(socket, upstream_url, headers))
         .into_response()
 }
 
-async fn relay_adp_socket(client_socket: WebSocket, upstream_url: String) {
-    let (upstream_socket, _) = match connect_async(&upstream_url).await {
+async fn relay_adp_socket(
+    client_socket: WebSocket,
+    upstream_url: String,
+    client_headers: HeaderMap,
+) {
+    let mut upstream_request = match upstream_url.as_str().into_client_request() {
+        Ok(request) => request,
+        Err(_) => return,
+    };
+    for header_name in [header::AUTHORIZATION, header::COOKIE] {
+        if let Some(value) = client_headers.get(&header_name) {
+            upstream_request
+                .headers_mut()
+                .insert(header_name, value.clone());
+        }
+    }
+    let (upstream_socket, _) = match connect_async(upstream_request).await {
         Ok(socket) => socket,
         Err(_) => return,
     };
@@ -448,6 +465,11 @@ async fn proxy_http_response(upstream: reqwest::Response, relay_prefix: Option<&
         .get(reqwest::header::CACHE_CONTROL)
         .and_then(|value| value.to_str().ok())
         .and_then(|value| HeaderValue::from_str(value).ok());
+    let set_cookie = upstream
+        .headers()
+        .get(reqwest::header::SET_COOKIE)
+        .and_then(|value| value.to_str().ok())
+        .and_then(|value| HeaderValue::from_str(value).ok());
     let should_rewrite = relay_prefix.is_some()
         && content_type
             .as_ref()
@@ -460,6 +482,9 @@ async fn proxy_http_response(upstream: reqwest::Response, relay_prefix: Option<&
         }
         if let Some(cache_control) = cache_control {
             builder = builder.header(header::CACHE_CONTROL, cache_control);
+        }
+        if let Some(set_cookie) = set_cookie {
+            builder = builder.header(header::SET_COOKIE, set_cookie);
         }
         return builder
             .body(Body::from_stream(upstream.bytes_stream()))
@@ -491,6 +516,9 @@ async fn proxy_http_response(upstream: reqwest::Response, relay_prefix: Option<&
     }
     if let Some(cache_control) = cache_control {
         builder = builder.header(header::CACHE_CONTROL, cache_control);
+    }
+    if let Some(set_cookie) = set_cookie {
+        builder = builder.header(header::SET_COOKIE, set_cookie);
     }
     builder
         .body(Body::from(body))

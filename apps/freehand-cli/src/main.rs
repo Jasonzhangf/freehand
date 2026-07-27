@@ -24,8 +24,12 @@ use freehand_ui_protocol::{
 };
 use futures_util::{SinkExt, StreamExt};
 use std::collections::BTreeSet;
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::io::{Read, Write};
+use std::net::TcpStream;
+use std::time::{Duration as StdDuration, SystemTime, UNIX_EPOCH};
 use tokio::time::{Duration, timeout};
+use tokio_tungstenite::tungstenite::client::IntoClientRequest;
+use tokio_tungstenite::tungstenite::http::header;
 use tokio_tungstenite::{connect_async, tungstenite::Message};
 
 fn main() {
@@ -5047,8 +5051,78 @@ fn adp_client_capabilities() -> Vec<String> {
     capabilities
 }
 
+fn build_adp_client_request(
+    url: &str,
+) -> Result<tokio_tungstenite::tungstenite::handshake::client::Request, String> {
+    let mut request = url
+        .into_client_request()
+        .map_err(|err| format!("ADP request build failed: {err}"))?;
+    if let Ok(token) = std::env::var("FREEHAND_ADP_AUTH_TOKEN") {
+        let token = token.trim();
+        if !token.is_empty() {
+            let value = format!("Bearer {token}")
+                .parse()
+                .map_err(|err| format!("ADP auth header invalid: {err}"))?;
+            request.headers_mut().insert(header::AUTHORIZATION, value);
+            return Ok(request);
+        }
+    }
+    if let Some(cookie) = fetch_adp_auth_cookie(url)? {
+        let value = cookie
+            .parse()
+            .map_err(|err| format!("ADP auth cookie invalid: {err}"))?;
+        request.headers_mut().insert(header::COOKIE, value);
+    }
+    Ok(request)
+}
+
+fn fetch_adp_auth_cookie(url: &str) -> Result<Option<String>, String> {
+    let Some(rest) = url.strip_prefix("ws://") else {
+        return Ok(None);
+    };
+    let host_port = rest.split('/').next().unwrap_or_default();
+    if host_port.trim().is_empty() {
+        return Ok(None);
+    }
+    let connect_addr = if host_port.contains(':') {
+        host_port.to_owned()
+    } else {
+        format!("{host_port}:80")
+    };
+    let mut stream = TcpStream::connect(&connect_addr)
+        .map_err(|err| format!("ADP auth cookie connect failed {connect_addr}: {err}"))?;
+    stream
+        .set_read_timeout(Some(StdDuration::from_secs(3)))
+        .map_err(|err| format!("ADP auth cookie read-timeout setup failed: {err}"))?;
+    stream
+        .set_write_timeout(Some(StdDuration::from_secs(3)))
+        .map_err(|err| format!("ADP auth cookie write-timeout setup failed: {err}"))?;
+    let request = format!("GET / HTTP/1.1\r\nHost: {host_port}\r\nConnection: close\r\n\r\n");
+    stream
+        .write_all(request.as_bytes())
+        .map_err(|err| format!("ADP auth cookie request failed: {err}"))?;
+    let mut response = String::new();
+    stream
+        .read_to_string(&mut response)
+        .map_err(|err| format!("ADP auth cookie response failed: {err}"))?;
+    for line in response.lines() {
+        let Some((name, value)) = line.split_once(':') else {
+            continue;
+        };
+        if !name.eq_ignore_ascii_case("set-cookie") {
+            continue;
+        }
+        let cookie_pair = value.trim().split(';').next().unwrap_or_default().trim();
+        if cookie_pair.starts_with("freehand_adp_auth=") {
+            return Ok(Some(cookie_pair.to_owned()));
+        }
+    }
+    Ok(None)
+}
+
 async fn connect_adp(url: &str, client_name: &str) -> Result<AdpWebSocket, String> {
-    let (mut socket, _) = timeout(Duration::from_secs(10), connect_async(url))
+    let request = build_adp_client_request(url)?;
+    let (mut socket, _) = timeout(Duration::from_secs(10), connect_async(request))
         .await
         .map_err(|_| format!("ADP connect timeout: {url}"))?
         .map_err(|err| format!("ADP connect failed: {err}"))?;
