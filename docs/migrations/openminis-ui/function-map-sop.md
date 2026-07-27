@@ -55,9 +55,10 @@ Every unit must record these fields before implementation:
 | `source_paths` | Real OpenMinis source paths |
 | `source_semantic` | Behavior to preserve, independent of layout/color |
 | `non_migrated_source_semantics` | Local owners/runtime behavior that must not cross |
-| `source_resource` | Resource entering the Freehand path |
+| `source_resources` | Resources entering the Freehand path |
 | `target_resource` | Resource or projection produced by the path |
-| `owner_feature_id` | One Freehand feature owner |
+| `owner_feature_id` | One Freehand migration-semantic owner |
+| `touched_feature_ids` | Adjacent resource/protocol/dispatch participants; not co-owners |
 | `operation_id` | Existing resource operation, or `pending` |
 | `projection_or_query` | Owner-backed UI input, or `pending` |
 | `generated_command` | Owner-backed UI action, or `none`/`pending` |
@@ -69,7 +70,7 @@ Every unit must record these fields before implementation:
 | `function_map_docs` | Every affected feature function map |
 | `mainline_call_docs` | Every affected machine call map |
 | `test_design_docs` | Every affected test design |
-| `verification_gates` | Static, module, project, online, Android where applicable |
+| `verification_gates` | Must include `openminis_ui_migration_manifest` and the mapped static/module/project/online/Android gates |
 | `status` | One state from the lifecycle below |
 | `evidence` | Paths to tests/artifacts; empty until verified |
 

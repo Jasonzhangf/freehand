@@ -39,315 +39,2296 @@
   ],
   "nodes": [
     {
+      "migration_unit_id": "ui_migration.foundation.root",
       "node_id": "foundation.root",
       "group": "foundation",
-      "status": "owner_mapped",
-      "owner_feature_ids": ["app.webui-smoke", "ui.protocol", "runtime.ui-command-dispatch"],
-      "source_paths": ["../OpenMinis/src/ios/Views/ContentView.swift"],
+      "status": "inventoried",
+      "owner_feature_id": "app.webui-smoke",
+      "touched_feature_ids": [
+        "app.webui-smoke",
+        "ui.protocol",
+        "runtime.ui-command-dispatch"
+      ],
+      "source_paths": [
+        "src/ios/Views/ContentView.swift"
+      ],
+      "source_symbols": [
+        "ContentView"
+      ],
+      "source_semantic": "application shell, top-level navigation, sheets, and route composition",
+      "non_migrated_source_semantics": [
+        "browser",
+        "cookie",
+        "browser_profile",
+        "browser_takeover",
+        "OpenMinis_local_runtime_or_store",
+        "layout_color_typography"
+      ],
+      "source_resources": [
+        "ui_projection"
+      ],
+      "target_resource": "ui_projection",
+      "operation_id": "pending",
+      "projection_or_query": "pending",
+      "generated_command": "pending",
       "target_paths": [
         "apps/freehand-server/assets/webui/bootstrap.js",
         "apps/freehand-server/assets/webui/app-shell"
-      ]
+      ],
+      "target_symbols": [],
+      "surface_path": "apps/freehand-server/assets/webui/bootstrap.js",
+      "model_responsibility": "projection_to_render_model_only",
+      "view_responsibility": "render_only",
+      "control_responsibility": "registered_edge_or_generated_command_only",
+      "route_edge_ids": [],
+      "function_map_docs": [
+        "docs/function-maps/app.webui-smoke.md",
+        "docs/function-maps/ui.protocol.md",
+        "docs/function-maps/runtime.ui-command-dispatch.md"
+      ],
+      "mainline_call_docs": [
+        "docs/mainline-calls/app.webui-smoke.json",
+        "docs/mainline-calls/ui.protocol.json",
+        "docs/mainline-calls/runtime.ui-command-dispatch.json"
+      ],
+      "test_design_docs": [
+        "docs/testing/app.webui-smoke.md",
+        "docs/testing/ui.protocol.md",
+        "docs/testing/runtime.ui-command-dispatch.md"
+      ],
+      "verification_gates": [
+        "openminis_ui_migration_manifest",
+        "cargo_run_xtask_gates_check"
+      ],
+      "evidence": []
     },
     {
+      "migration_unit_id": "ui_migration.foundation.surface_contract",
       "node_id": "foundation.surface_contract",
       "group": "foundation",
-      "status": "contract_ready",
-      "owner_feature_ids": ["app.webui-smoke"],
-      "source_paths": ["../OpenMinis/src/ios/Views"],
-      "target_paths": ["apps/freehand-server/assets/webui/surfaces"]
+      "status": "inventoried",
+      "owner_feature_id": "app.webui-smoke",
+      "touched_feature_ids": [
+        "app.webui-smoke"
+      ],
+      "source_paths": [
+        "src/ios/Views"
+      ],
+      "source_symbols": [
+        "ContentView",
+        "AIChatView"
+      ],
+      "source_semantic": "surface assembly separated into model, view, and controls responsibilities",
+      "non_migrated_source_semantics": [
+        "browser",
+        "cookie",
+        "browser_profile",
+        "browser_takeover",
+        "OpenMinis_local_runtime_or_store",
+        "layout_color_typography"
+      ],
+      "source_resources": [
+        "ui_projection"
+      ],
+      "target_resource": "ui_projection",
+      "operation_id": "pending",
+      "projection_or_query": "pending",
+      "generated_command": "pending",
+      "target_paths": [
+        "apps/freehand-server/assets/webui/surfaces"
+      ],
+      "target_symbols": [],
+      "surface_path": "apps/freehand-server/assets/webui/surfaces",
+      "model_responsibility": "projection_to_render_model_only",
+      "view_responsibility": "render_only",
+      "control_responsibility": "registered_edge_or_generated_command_only",
+      "route_edge_ids": [],
+      "function_map_docs": [
+        "docs/function-maps/app.webui-smoke.md"
+      ],
+      "mainline_call_docs": [
+        "docs/mainline-calls/app.webui-smoke.json"
+      ],
+      "test_design_docs": [
+        "docs/testing/app.webui-smoke.md"
+      ],
+      "verification_gates": [
+        "openminis_ui_migration_manifest",
+        "cargo_run_xtask_gates_check"
+      ],
+      "evidence": []
     },
     {
+      "migration_unit_id": "ui_migration.foundation.protocol_calls",
+      "node_id": "foundation.protocol_calls",
+      "group": "foundation",
+      "status": "inventoried",
+      "owner_feature_id": "app.webui-smoke",
+      "touched_feature_ids": [
+        "app.webui-smoke"
+      ],
+      "source_paths": [
+        "src/ios/Views/ContentView.swift"
+      ],
+      "source_symbols": [
+        "ContentView"
+      ],
+      "source_semantic": "generated query and command construction with explicit receipts and failures",
+      "non_migrated_source_semantics": [
+        "browser",
+        "cookie",
+        "browser_profile",
+        "browser_takeover",
+        "OpenMinis_local_runtime_or_store",
+        "layout_color_typography"
+      ],
+      "source_resources": [
+        "ui_projection"
+      ],
+      "target_resource": "ui_projection",
+      "operation_id": "pending",
+      "projection_or_query": "pending",
+      "generated_command": "pending",
+      "target_paths": [
+        "apps/freehand-server/assets/webui/generated/adp-protocol.js",
+        "apps/freehand-server/assets/webui/app-shell/adp-client.js"
+      ],
+      "target_symbols": [],
+      "surface_path": "apps/freehand-server/assets/webui/generated/adp-protocol.js",
+      "model_responsibility": "projection_to_render_model_only",
+      "view_responsibility": "render_only",
+      "control_responsibility": "registered_edge_or_generated_command_only",
+      "route_edge_ids": [],
+      "function_map_docs": [
+        "docs/function-maps/app.webui-smoke.md"
+      ],
+      "mainline_call_docs": [
+        "docs/mainline-calls/app.webui-smoke.json"
+      ],
+      "test_design_docs": [
+        "docs/testing/app.webui-smoke.md"
+      ],
+      "verification_gates": [
+        "openminis_ui_migration_manifest",
+        "cargo_run_xtask_gates_check"
+      ],
+      "evidence": []
+    },
+    {
+      "migration_unit_id": "ui_migration.foundation.shared_states",
+      "node_id": "foundation.shared_states",
+      "group": "foundation",
+      "status": "inventoried",
+      "owner_feature_id": "app.webui-smoke",
+      "touched_feature_ids": [
+        "app.webui-smoke"
+      ],
+      "source_paths": [
+        "src/ios/Views/ContentView.swift"
+      ],
+      "source_symbols": [
+        "ContentView"
+      ],
+      "source_semantic": "shared loading, empty, error, confirmation, and sheet presentation states",
+      "non_migrated_source_semantics": [
+        "browser",
+        "cookie",
+        "browser_profile",
+        "browser_takeover",
+        "OpenMinis_local_runtime_or_store",
+        "layout_color_typography"
+      ],
+      "source_resources": [
+        "ui_projection"
+      ],
+      "target_resource": "ui_projection",
+      "operation_id": "pending",
+      "projection_or_query": "pending",
+      "generated_command": "pending",
+      "target_paths": [],
+      "target_symbols": [],
+      "surface_path": "pending",
+      "model_responsibility": "projection_to_render_model_only",
+      "view_responsibility": "render_only",
+      "control_responsibility": "registered_edge_or_generated_command_only",
+      "route_edge_ids": [],
+      "function_map_docs": [
+        "docs/function-maps/app.webui-smoke.md"
+      ],
+      "mainline_call_docs": [
+        "docs/mainline-calls/app.webui-smoke.json"
+      ],
+      "test_design_docs": [
+        "docs/testing/app.webui-smoke.md"
+      ],
+      "verification_gates": [
+        "openminis_ui_migration_manifest",
+        "cargo_run_xtask_gates_check"
+      ],
+      "evidence": []
+    },
+    {
+      "migration_unit_id": "ui_migration.home.dashboard",
       "node_id": "home.dashboard",
       "group": "session",
-      "status": "source_bound",
-      "owner_feature_ids": ["app.webui-smoke", "reason.persistence", "ui.protocol"],
-      "source_paths": [
-        "../OpenMinis/src/ios/Views/ContentView.swift",
-        "../OpenMinis/src/ios/Agent/Chat/ChatStore.swift"
+      "status": "inventoried",
+      "owner_feature_id": "app.webui-smoke",
+      "touched_feature_ids": [
+        "app.webui-smoke",
+        "reason.persistence",
+        "ui.protocol"
       ],
-      "target_paths": ["apps/freehand-server/assets/webui/surfaces/home-dashboard"]
+      "source_paths": [
+        "src/ios/Views/ContentView.swift"
+      ],
+      "source_symbols": [
+        "ContentView"
+      ],
+      "source_semantic": "session dashboard, compact status summaries, and session navigation",
+      "non_migrated_source_semantics": [
+        "browser",
+        "cookie",
+        "browser_profile",
+        "browser_takeover",
+        "OpenMinis_local_runtime_or_store",
+        "layout_color_typography"
+      ],
+      "source_resources": [
+        "session"
+      ],
+      "target_resource": "ui_projection",
+      "operation_id": "session.list_persisted",
+      "projection_or_query": "pending",
+      "generated_command": "pending",
+      "target_paths": [
+        "apps/freehand-server/assets/webui/surfaces/home-dashboard"
+      ],
+      "target_symbols": [],
+      "surface_path": "apps/freehand-server/assets/webui/surfaces/home-dashboard",
+      "model_responsibility": "projection_to_render_model_only",
+      "view_responsibility": "render_only",
+      "control_responsibility": "registered_edge_or_generated_command_only",
+      "route_edge_ids": [],
+      "function_map_docs": [
+        "docs/function-maps/app.webui-smoke.md",
+        "docs/function-maps/reason.persistence.md",
+        "docs/function-maps/ui.protocol.md"
+      ],
+      "mainline_call_docs": [
+        "docs/mainline-calls/app.webui-smoke.json",
+        "docs/mainline-calls/reason.persistence.json",
+        "docs/mainline-calls/ui.protocol.json"
+      ],
+      "test_design_docs": [
+        "docs/testing/app.webui-smoke.md",
+        "docs/testing/reason.persistence.md",
+        "docs/testing/ui.protocol.md"
+      ],
+      "verification_gates": [
+        "openminis_ui_migration_manifest",
+        "cargo_run_xtask_gates_check"
+      ],
+      "evidence": []
     },
     {
+      "migration_unit_id": "ui_migration.session_detail.root",
       "node_id": "session_detail.root",
       "group": "session",
-      "status": "implementation_in_progress",
-      "owner_feature_ids": ["app.webui-smoke", "reason.persistence", "ui.protocol"],
-      "source_paths": ["../OpenMinis/src/ios/Views/Chat/AIChatView.swift"],
-      "target_paths": ["apps/freehand-server/assets/webui/surfaces/session-detail"]
+      "status": "inventoried",
+      "owner_feature_id": "app.webui-smoke",
+      "touched_feature_ids": [
+        "app.webui-smoke",
+        "reason.persistence",
+        "ui.protocol"
+      ],
+      "source_paths": [
+        "src/ios/Views/Chat/AIChatView.swift"
+      ],
+      "source_symbols": [
+        "AIChatView"
+      ],
+      "source_semantic": "one selected session transcript, header, lifecycle state, and composer",
+      "non_migrated_source_semantics": [
+        "browser",
+        "cookie",
+        "browser_profile",
+        "browser_takeover",
+        "OpenMinis_local_runtime_or_store",
+        "layout_color_typography"
+      ],
+      "source_resources": [
+        "session",
+        "turn"
+      ],
+      "target_resource": "ui_projection",
+      "operation_id": "pending",
+      "projection_or_query": "pending",
+      "generated_command": "pending",
+      "target_paths": [
+        "apps/freehand-server/assets/webui/surfaces/session-detail"
+      ],
+      "target_symbols": [],
+      "surface_path": "apps/freehand-server/assets/webui/surfaces/session-detail",
+      "model_responsibility": "projection_to_render_model_only",
+      "view_responsibility": "render_only",
+      "control_responsibility": "registered_edge_or_generated_command_only",
+      "route_edge_ids": [],
+      "function_map_docs": [
+        "docs/function-maps/app.webui-smoke.md",
+        "docs/function-maps/reason.persistence.md",
+        "docs/function-maps/ui.protocol.md"
+      ],
+      "mainline_call_docs": [
+        "docs/mainline-calls/app.webui-smoke.json",
+        "docs/mainline-calls/reason.persistence.json",
+        "docs/mainline-calls/ui.protocol.json"
+      ],
+      "test_design_docs": [
+        "docs/testing/app.webui-smoke.md",
+        "docs/testing/reason.persistence.md",
+        "docs/testing/ui.protocol.md"
+      ],
+      "verification_gates": [
+        "openminis_ui_migration_manifest",
+        "cargo_run_xtask_gates_check"
+      ],
+      "evidence": []
     },
     {
+      "migration_unit_id": "ui_migration.session_detail.agent_sheet",
+      "node_id": "session_detail.agent_sheet",
+      "group": "session",
+      "status": "inventoried",
+      "owner_feature_id": "app.webui-smoke",
+      "touched_feature_ids": [
+        "app.webui-smoke"
+      ],
+      "source_paths": [
+        "src/ios/Views/Chat/AIChatView.swift"
+      ],
+      "source_symbols": [
+        "AIChatView"
+      ],
+      "source_semantic": "selected-session Agent and child-task presentation and navigation",
+      "non_migrated_source_semantics": [
+        "browser",
+        "cookie",
+        "browser_profile",
+        "browser_takeover",
+        "OpenMinis_local_runtime_or_store",
+        "layout_color_typography"
+      ],
+      "source_resources": [
+        "session",
+        "task",
+        "agent"
+      ],
+      "target_resource": "ui_projection",
+      "operation_id": "pending",
+      "projection_or_query": "pending",
+      "generated_command": "pending",
+      "target_paths": [
+        "apps/freehand-server/assets/webui/surfaces/session-detail"
+      ],
+      "target_symbols": [],
+      "surface_path": "apps/freehand-server/assets/webui/surfaces/session-detail",
+      "model_responsibility": "projection_to_render_model_only",
+      "view_responsibility": "render_only",
+      "control_responsibility": "registered_edge_or_generated_command_only",
+      "route_edge_ids": [],
+      "function_map_docs": [
+        "docs/function-maps/app.webui-smoke.md"
+      ],
+      "mainline_call_docs": [
+        "docs/mainline-calls/app.webui-smoke.json"
+      ],
+      "test_design_docs": [
+        "docs/testing/app.webui-smoke.md"
+      ],
+      "verification_gates": [
+        "openminis_ui_migration_manifest",
+        "cargo_run_xtask_gates_check"
+      ],
+      "evidence": []
+    },
+    {
+      "migration_unit_id": "ui_migration.session_search.root",
       "node_id": "session_search.root",
       "group": "session",
-      "status": "source_bound",
-      "owner_feature_ids": ["app.webui-smoke", "reason.persistence", "ui.protocol"],
-      "source_paths": ["../OpenMinis/src/ios/Views/ContentView.swift"],
-      "target_paths": ["apps/freehand-server/assets/webui/surfaces/session-search"]
+      "status": "inventoried",
+      "owner_feature_id": "app.webui-smoke",
+      "touched_feature_ids": [
+        "app.webui-smoke",
+        "reason.persistence",
+        "ui.protocol"
+      ],
+      "source_paths": [
+        "src/ios/Views/ContentView.swift"
+      ],
+      "source_symbols": [
+        "ContentView"
+      ],
+      "source_semantic": "persisted session search and result navigation",
+      "non_migrated_source_semantics": [
+        "browser",
+        "cookie",
+        "browser_profile",
+        "browser_takeover",
+        "OpenMinis_local_runtime_or_store",
+        "layout_color_typography"
+      ],
+      "source_resources": [
+        "session"
+      ],
+      "target_resource": "ui_projection",
+      "operation_id": "session.list_persisted",
+      "projection_or_query": "pending",
+      "generated_command": "pending",
+      "target_paths": [
+        "apps/freehand-server/assets/webui/surfaces/session-search"
+      ],
+      "target_symbols": [],
+      "surface_path": "apps/freehand-server/assets/webui/surfaces/session-search",
+      "model_responsibility": "projection_to_render_model_only",
+      "view_responsibility": "render_only",
+      "control_responsibility": "registered_edge_or_generated_command_only",
+      "route_edge_ids": [],
+      "function_map_docs": [
+        "docs/function-maps/app.webui-smoke.md",
+        "docs/function-maps/reason.persistence.md",
+        "docs/function-maps/ui.protocol.md"
+      ],
+      "mainline_call_docs": [
+        "docs/mainline-calls/app.webui-smoke.json",
+        "docs/mainline-calls/reason.persistence.json",
+        "docs/mainline-calls/ui.protocol.json"
+      ],
+      "test_design_docs": [
+        "docs/testing/app.webui-smoke.md",
+        "docs/testing/reason.persistence.md",
+        "docs/testing/ui.protocol.md"
+      ],
+      "verification_gates": [
+        "openminis_ui_migration_manifest",
+        "cargo_run_xtask_gates_check"
+      ],
+      "evidence": []
     },
     {
+      "migration_unit_id": "ui_migration.new_session.root",
       "node_id": "new_session.root",
       "group": "session",
-      "status": "source_bound",
-      "owner_feature_ids": ["app.webui-smoke", "reason.persistence", "ui.protocol"],
-      "source_paths": ["../OpenMinis/src/ios/Views/ContentView.swift"],
-      "target_paths": ["apps/freehand-server/assets/webui/surfaces/new-session"]
+      "status": "inventoried",
+      "owner_feature_id": "app.webui-smoke",
+      "touched_feature_ids": [
+        "app.webui-smoke",
+        "reason.persistence",
+        "ui.protocol"
+      ],
+      "source_paths": [
+        "src/ios/Views/ContentView.swift"
+      ],
+      "source_symbols": [
+        "ContentView"
+      ],
+      "source_semantic": "new persisted session creation and navigation",
+      "non_migrated_source_semantics": [
+        "browser",
+        "cookie",
+        "browser_profile",
+        "browser_takeover",
+        "OpenMinis_local_runtime_or_store",
+        "layout_color_typography"
+      ],
+      "source_resources": [
+        "session"
+      ],
+      "target_resource": "ui_projection",
+      "operation_id": "pending",
+      "projection_or_query": "pending",
+      "generated_command": "pending",
+      "target_paths": [
+        "apps/freehand-server/assets/webui/surfaces/new-session"
+      ],
+      "target_symbols": [],
+      "surface_path": "apps/freehand-server/assets/webui/surfaces/new-session",
+      "model_responsibility": "projection_to_render_model_only",
+      "view_responsibility": "render_only",
+      "control_responsibility": "registered_edge_or_generated_command_only",
+      "route_edge_ids": [],
+      "function_map_docs": [
+        "docs/function-maps/app.webui-smoke.md",
+        "docs/function-maps/reason.persistence.md",
+        "docs/function-maps/ui.protocol.md"
+      ],
+      "mainline_call_docs": [
+        "docs/mainline-calls/app.webui-smoke.json",
+        "docs/mainline-calls/reason.persistence.json",
+        "docs/mainline-calls/ui.protocol.json"
+      ],
+      "test_design_docs": [
+        "docs/testing/app.webui-smoke.md",
+        "docs/testing/reason.persistence.md",
+        "docs/testing/ui.protocol.md"
+      ],
+      "verification_gates": [
+        "openminis_ui_migration_manifest",
+        "cargo_run_xtask_gates_check"
+      ],
+      "evidence": []
     },
     {
+      "migration_unit_id": "ui_migration.turn_blocks.user",
       "node_id": "turn_blocks.user",
       "group": "transcript",
-      "status": "implementation_in_progress",
-      "owner_feature_ids": ["app.webui-smoke", "ui.protocol"],
-      "source_paths": ["../OpenMinis/src/ios/Views/Chat/ChatMessageViews.swift"],
-      "target_paths": ["apps/freehand-server/assets/webui/surfaces/session-detail"]
+      "status": "inventoried",
+      "owner_feature_id": "app.webui-smoke",
+      "touched_feature_ids": [
+        "app.webui-smoke",
+        "ui.protocol"
+      ],
+      "source_paths": [
+        "src/ios/Views/Chat/ChatMessageViews.swift"
+      ],
+      "source_symbols": [
+        "ChatMessageRow"
+      ],
+      "source_semantic": "chronological user message presentation",
+      "non_migrated_source_semantics": [
+        "browser",
+        "cookie",
+        "browser_profile",
+        "browser_takeover",
+        "OpenMinis_local_runtime_or_store",
+        "layout_color_typography"
+      ],
+      "source_resources": [
+        "turn"
+      ],
+      "target_resource": "ui_projection",
+      "operation_id": "pending",
+      "projection_or_query": "pending",
+      "generated_command": "none",
+      "target_paths": [
+        "apps/freehand-server/assets/webui/surfaces/session-detail"
+      ],
+      "target_symbols": [],
+      "surface_path": "apps/freehand-server/assets/webui/surfaces/session-detail",
+      "model_responsibility": "projection_to_render_model_only",
+      "view_responsibility": "render_only",
+      "control_responsibility": "registered_edge_or_generated_command_only",
+      "route_edge_ids": [],
+      "function_map_docs": [
+        "docs/function-maps/app.webui-smoke.md",
+        "docs/function-maps/ui.protocol.md"
+      ],
+      "mainline_call_docs": [
+        "docs/mainline-calls/app.webui-smoke.json",
+        "docs/mainline-calls/ui.protocol.json"
+      ],
+      "test_design_docs": [
+        "docs/testing/app.webui-smoke.md",
+        "docs/testing/ui.protocol.md"
+      ],
+      "verification_gates": [
+        "openminis_ui_migration_manifest",
+        "cargo_run_xtask_gates_check"
+      ],
+      "evidence": []
     },
     {
+      "migration_unit_id": "ui_migration.turn_blocks.assistant",
       "node_id": "turn_blocks.assistant",
       "group": "transcript",
-      "status": "implementation_in_progress",
-      "owner_feature_ids": ["app.webui-smoke", "ui.protocol", "tool.display"],
-      "source_paths": ["../OpenMinis/src/ios/Views/Chat/AssistantBlockView.swift"],
-      "target_paths": ["apps/freehand-server/assets/webui/surfaces/session-detail"]
+      "status": "inventoried",
+      "owner_feature_id": "app.webui-smoke",
+      "touched_feature_ids": [
+        "app.webui-smoke",
+        "ui.protocol",
+        "tool.display"
+      ],
+      "source_paths": [
+        "src/ios/Views/Chat/AssistantBlockView.swift"
+      ],
+      "source_symbols": [
+        "AssistantBlockView"
+      ],
+      "source_semantic": "chronological assistant text and terminal summary presentation",
+      "non_migrated_source_semantics": [
+        "browser",
+        "cookie",
+        "browser_profile",
+        "browser_takeover",
+        "OpenMinis_local_runtime_or_store",
+        "layout_color_typography"
+      ],
+      "source_resources": [
+        "turn"
+      ],
+      "target_resource": "ui_projection",
+      "operation_id": "pending",
+      "projection_or_query": "pending",
+      "generated_command": "none",
+      "target_paths": [
+        "apps/freehand-server/assets/webui/surfaces/session-detail"
+      ],
+      "target_symbols": [],
+      "surface_path": "apps/freehand-server/assets/webui/surfaces/session-detail",
+      "model_responsibility": "projection_to_render_model_only",
+      "view_responsibility": "render_only",
+      "control_responsibility": "registered_edge_or_generated_command_only",
+      "route_edge_ids": [],
+      "function_map_docs": [
+        "docs/function-maps/app.webui-smoke.md",
+        "docs/function-maps/ui.protocol.md",
+        "docs/function-maps/tool.display.md"
+      ],
+      "mainline_call_docs": [
+        "docs/mainline-calls/app.webui-smoke.json",
+        "docs/mainline-calls/ui.protocol.json",
+        "docs/mainline-calls/tool.display.json"
+      ],
+      "test_design_docs": [
+        "docs/testing/app.webui-smoke.md",
+        "docs/testing/ui.protocol.md",
+        "docs/testing/tool.display.md"
+      ],
+      "verification_gates": [
+        "openminis_ui_migration_manifest",
+        "cargo_run_xtask_gates_check"
+      ],
+      "evidence": []
     },
     {
+      "migration_unit_id": "ui_migration.turn_blocks.reasoning",
       "node_id": "turn_blocks.reasoning",
       "group": "transcript",
-      "status": "implementation_in_progress",
-      "owner_feature_ids": ["app.webui-smoke", "ui.protocol"],
-      "source_paths": ["../OpenMinis/src/ios/Views/Chat/AssistantBlockView.swift"],
-      "target_paths": ["apps/freehand-server/assets/webui/surfaces/session-detail"]
+      "status": "inventoried",
+      "owner_feature_id": "app.webui-smoke",
+      "touched_feature_ids": [
+        "app.webui-smoke",
+        "ui.protocol"
+      ],
+      "source_paths": [
+        "src/ios/Views/Chat/AssistantBlockView.swift"
+      ],
+      "source_symbols": [
+        "ThinkingBlockView",
+        "TypingIndicator"
+      ],
+      "source_semantic": "reasoning, model-wait, and continuation presentation",
+      "non_migrated_source_semantics": [
+        "browser",
+        "cookie",
+        "browser_profile",
+        "browser_takeover",
+        "OpenMinis_local_runtime_or_store",
+        "layout_color_typography"
+      ],
+      "source_resources": [
+        "turn"
+      ],
+      "target_resource": "ui_projection",
+      "operation_id": "pending",
+      "projection_or_query": "pending",
+      "generated_command": "none",
+      "target_paths": [
+        "apps/freehand-server/assets/webui/surfaces/session-detail"
+      ],
+      "target_symbols": [],
+      "surface_path": "apps/freehand-server/assets/webui/surfaces/session-detail",
+      "model_responsibility": "projection_to_render_model_only",
+      "view_responsibility": "render_only",
+      "control_responsibility": "registered_edge_or_generated_command_only",
+      "route_edge_ids": [],
+      "function_map_docs": [
+        "docs/function-maps/app.webui-smoke.md",
+        "docs/function-maps/ui.protocol.md"
+      ],
+      "mainline_call_docs": [
+        "docs/mainline-calls/app.webui-smoke.json",
+        "docs/mainline-calls/ui.protocol.json"
+      ],
+      "test_design_docs": [
+        "docs/testing/app.webui-smoke.md",
+        "docs/testing/ui.protocol.md"
+      ],
+      "verification_gates": [
+        "openminis_ui_migration_manifest",
+        "cargo_run_xtask_gates_check"
+      ],
+      "evidence": []
     },
     {
+      "migration_unit_id": "ui_migration.turn_blocks.tool_activity",
       "node_id": "turn_blocks.tool_activity",
       "group": "transcript",
-      "status": "implementation_in_progress",
-      "owner_feature_ids": ["app.webui-smoke", "ui.protocol", "tool.display"],
-      "source_paths": [
-        "../OpenMinis/src/ios/Views/Chat/ToolLiveSheet.swift",
-        "../OpenMinis/src/ios/Agent/Chat/ChatModels.swift"
+      "status": "inventoried",
+      "owner_feature_id": "app.webui-smoke",
+      "touched_feature_ids": [
+        "app.webui-smoke",
+        "ui.protocol",
+        "tool.display"
       ],
-      "target_paths": ["apps/freehand-server/assets/webui/surfaces/session-detail"]
+      "source_paths": [
+        "src/ios/Views/Chat/ToolLiveSheet.swift",
+        "src/ios/Agent/Chat/ChatModels.swift",
+        "src/ios/Views/Chat/AssistantBlockView.swift"
+      ],
+      "source_symbols": [
+        "ToolLiveSheet",
+        "ToolCapsuleView"
+      ],
+      "source_semantic": "typed tool request, running, result, failure, and cancellation presentation",
+      "non_migrated_source_semantics": [
+        "browser",
+        "cookie",
+        "browser_profile",
+        "browser_takeover",
+        "OpenMinis_local_runtime_or_store",
+        "layout_color_typography"
+      ],
+      "source_resources": [
+        "turn",
+        "tool_call"
+      ],
+      "target_resource": "ui_projection",
+      "operation_id": "pending",
+      "projection_or_query": "pending",
+      "generated_command": "none",
+      "target_paths": [
+        "apps/freehand-server/assets/webui/surfaces/session-detail"
+      ],
+      "target_symbols": [],
+      "surface_path": "apps/freehand-server/assets/webui/surfaces/session-detail",
+      "model_responsibility": "projection_to_render_model_only",
+      "view_responsibility": "render_only",
+      "control_responsibility": "registered_edge_or_generated_command_only",
+      "route_edge_ids": [],
+      "function_map_docs": [
+        "docs/function-maps/app.webui-smoke.md",
+        "docs/function-maps/ui.protocol.md",
+        "docs/function-maps/tool.display.md"
+      ],
+      "mainline_call_docs": [
+        "docs/mainline-calls/app.webui-smoke.json",
+        "docs/mainline-calls/ui.protocol.json",
+        "docs/mainline-calls/tool.display.json"
+      ],
+      "test_design_docs": [
+        "docs/testing/app.webui-smoke.md",
+        "docs/testing/ui.protocol.md",
+        "docs/testing/tool.display.md"
+      ],
+      "verification_gates": [
+        "openminis_ui_migration_manifest",
+        "cargo_run_xtask_gates_check"
+      ],
+      "evidence": []
     },
     {
+      "migration_unit_id": "ui_migration.turn_blocks.attachment",
       "node_id": "turn_blocks.attachment",
       "group": "transcript",
-      "status": "owner_mapped",
-      "owner_feature_ids": ["ui.protocol", "app.webui-smoke"],
-      "source_paths": [
-        "../OpenMinis/src/ios/Views/Chat/Media",
-        "../OpenMinis/src/ios/Agent/Chat/ChatModels.swift"
+      "status": "inventoried",
+      "owner_feature_id": "app.webui-smoke",
+      "touched_feature_ids": [
+        "ui.protocol",
+        "app.webui-smoke"
       ],
-      "target_paths": ["apps/freehand-server/assets/webui/surfaces/session-detail"]
+      "source_paths": [
+        "src/ios/Views/Chat/Media",
+        "src/ios/Agent/Chat/ChatModels.swift",
+        "src/ios/Views/Chat/ChatInputBar.swift"
+      ],
+      "source_symbols": [
+        "InputAttachmentGridView",
+        "UserAttachmentList"
+      ],
+      "source_semantic": "attachment metadata and media preview presentation",
+      "non_migrated_source_semantics": [
+        "browser",
+        "cookie",
+        "browser_profile",
+        "browser_takeover",
+        "OpenMinis_local_runtime_or_store",
+        "layout_color_typography"
+      ],
+      "source_resources": [
+        "input_attachment"
+      ],
+      "target_resource": "ui_projection",
+      "operation_id": "input_attachment.project_to_ui",
+      "projection_or_query": "pending",
+      "generated_command": "none",
+      "target_paths": [
+        "apps/freehand-server/assets/webui/surfaces/session-detail"
+      ],
+      "target_symbols": [],
+      "surface_path": "apps/freehand-server/assets/webui/surfaces/session-detail",
+      "model_responsibility": "projection_to_render_model_only",
+      "view_responsibility": "render_only",
+      "control_responsibility": "registered_edge_or_generated_command_only",
+      "route_edge_ids": [],
+      "function_map_docs": [
+        "docs/function-maps/ui.protocol.md",
+        "docs/function-maps/app.webui-smoke.md"
+      ],
+      "mainline_call_docs": [
+        "docs/mainline-calls/ui.protocol.json",
+        "docs/mainline-calls/app.webui-smoke.json"
+      ],
+      "test_design_docs": [
+        "docs/testing/ui.protocol.md",
+        "docs/testing/app.webui-smoke.md"
+      ],
+      "verification_gates": [
+        "openminis_ui_migration_manifest",
+        "cargo_run_xtask_gates_check"
+      ],
+      "evidence": []
     },
     {
+      "migration_unit_id": "ui_migration.turn_blocks.artifact",
       "node_id": "turn_blocks.artifact",
       "group": "transcript",
       "status": "blocked_resource_missing",
-      "owner_feature_ids": [],
-      "source_paths": ["../OpenMinis/src/ios/Views/Chat/Media"],
-      "target_paths": []
+      "owner_feature_id": "app.webui-smoke",
+      "touched_feature_ids": [
+        "app.webui-smoke"
+      ],
+      "source_paths": [
+        "src/ios/Views/Chat/Media"
+      ],
+      "source_symbols": [
+        "ImagePreview",
+        "AudioPreview",
+        "MinisVideoPlayerView"
+      ],
+      "source_semantic": "typed generated artifact link and preview presentation",
+      "non_migrated_source_semantics": [
+        "browser",
+        "cookie",
+        "browser_profile",
+        "browser_takeover",
+        "OpenMinis_local_runtime_or_store",
+        "layout_color_typography"
+      ],
+      "source_resources": [
+        "artifact_pending"
+      ],
+      "target_resource": "ui_projection",
+      "operation_id": "pending",
+      "projection_or_query": "pending",
+      "generated_command": "none",
+      "target_paths": [],
+      "target_symbols": [],
+      "surface_path": "pending",
+      "model_responsibility": "projection_to_render_model_only",
+      "view_responsibility": "render_only",
+      "control_responsibility": "registered_edge_or_generated_command_only",
+      "route_edge_ids": [],
+      "function_map_docs": [
+        "docs/function-maps/app.webui-smoke.md"
+      ],
+      "mainline_call_docs": [
+        "docs/mainline-calls/app.webui-smoke.json"
+      ],
+      "test_design_docs": [
+        "docs/testing/app.webui-smoke.md"
+      ],
+      "verification_gates": [
+        "openminis_ui_migration_manifest",
+        "cargo_run_xtask_gates_check"
+      ],
+      "evidence": []
     },
     {
+      "migration_unit_id": "ui_migration.turn_blocks.error",
       "node_id": "turn_blocks.error",
       "group": "transcript",
-      "status": "owner_mapped",
-      "owner_feature_ids": ["ui.protocol", "error.center", "app.webui-smoke"],
-      "source_paths": [
-        "../OpenMinis/src/ios/Views/Chat/ChatMessageViews.swift",
-        "../OpenMinis/src/ios/Views/Chat/WebLoadError.swift"
+      "status": "inventoried",
+      "owner_feature_id": "app.webui-smoke",
+      "touched_feature_ids": [
+        "ui.protocol",
+        "error.center",
+        "app.webui-smoke"
       ],
-      "target_paths": ["apps/freehand-server/assets/webui/surfaces/session-detail"]
+      "source_paths": [
+        "src/ios/Views/Chat/ChatMessageViews.swift",
+        "src/ios/Views/Chat/WebLoadError.swift"
+      ],
+      "source_symbols": [
+        "ChatMessageRow",
+        "WebLoadError"
+      ],
+      "source_semantic": "typed user-visible provider, tool, and session failure presentation",
+      "non_migrated_source_semantics": [
+        "browser",
+        "cookie",
+        "browser_profile",
+        "browser_takeover",
+        "OpenMinis_local_runtime_or_store",
+        "layout_color_typography"
+      ],
+      "source_resources": [
+        "error",
+        "turn"
+      ],
+      "target_resource": "ui_projection",
+      "operation_id": "pending",
+      "projection_or_query": "pending",
+      "generated_command": "none",
+      "target_paths": [
+        "apps/freehand-server/assets/webui/surfaces/session-detail"
+      ],
+      "target_symbols": [],
+      "surface_path": "apps/freehand-server/assets/webui/surfaces/session-detail",
+      "model_responsibility": "projection_to_render_model_only",
+      "view_responsibility": "render_only",
+      "control_responsibility": "registered_edge_or_generated_command_only",
+      "route_edge_ids": [],
+      "function_map_docs": [
+        "docs/function-maps/ui.protocol.md",
+        "docs/function-maps/error.center.md",
+        "docs/function-maps/app.webui-smoke.md"
+      ],
+      "mainline_call_docs": [
+        "docs/mainline-calls/ui.protocol.json",
+        "docs/mainline-calls/error.center.json",
+        "docs/mainline-calls/app.webui-smoke.json"
+      ],
+      "test_design_docs": [
+        "docs/testing/ui.protocol.md",
+        "docs/testing/error.center.md",
+        "docs/testing/app.webui-smoke.md"
+      ],
+      "verification_gates": [
+        "openminis_ui_migration_manifest",
+        "cargo_run_xtask_gates_check"
+      ],
+      "evidence": []
     },
     {
+      "migration_unit_id": "ui_migration.composer.text_submit",
       "node_id": "composer.text_submit",
       "group": "composer",
-      "status": "source_bound",
-      "owner_feature_ids": ["ui.protocol", "runtime.ui-command-dispatch", "app.webui-smoke"],
-      "source_paths": ["../OpenMinis/src/ios/Views/Chat/ChatInputBar.swift"],
-      "target_paths": ["apps/freehand-server/assets/webui/surfaces/session-detail"]
+      "status": "inventoried",
+      "owner_feature_id": "app.webui-smoke",
+      "touched_feature_ids": [
+        "ui.protocol",
+        "runtime.ui-command-dispatch",
+        "app.webui-smoke"
+      ],
+      "source_paths": [
+        "src/ios/Views/Chat/ChatInputBar.swift"
+      ],
+      "source_symbols": [
+        "SwipeToSendHint",
+        "PastableTextView"
+      ],
+      "source_semantic": "session-bound text draft and submit interaction",
+      "non_migrated_source_semantics": [
+        "browser",
+        "cookie",
+        "browser_profile",
+        "browser_takeover",
+        "OpenMinis_local_runtime_or_store",
+        "layout_color_typography"
+      ],
+      "source_resources": [
+        "turn"
+      ],
+      "target_resource": "ui_projection",
+      "operation_id": "pending",
+      "projection_or_query": "pending",
+      "generated_command": "pending",
+      "target_paths": [
+        "apps/freehand-server/assets/webui/surfaces/session-detail"
+      ],
+      "target_symbols": [],
+      "surface_path": "apps/freehand-server/assets/webui/surfaces/session-detail",
+      "model_responsibility": "projection_to_render_model_only",
+      "view_responsibility": "render_only",
+      "control_responsibility": "registered_edge_or_generated_command_only",
+      "route_edge_ids": [],
+      "function_map_docs": [
+        "docs/function-maps/ui.protocol.md",
+        "docs/function-maps/runtime.ui-command-dispatch.md",
+        "docs/function-maps/app.webui-smoke.md"
+      ],
+      "mainline_call_docs": [
+        "docs/mainline-calls/ui.protocol.json",
+        "docs/mainline-calls/runtime.ui-command-dispatch.json",
+        "docs/mainline-calls/app.webui-smoke.json"
+      ],
+      "test_design_docs": [
+        "docs/testing/ui.protocol.md",
+        "docs/testing/runtime.ui-command-dispatch.md",
+        "docs/testing/app.webui-smoke.md"
+      ],
+      "verification_gates": [
+        "openminis_ui_migration_manifest",
+        "cargo_run_xtask_gates_check"
+      ],
+      "evidence": []
     },
     {
+      "migration_unit_id": "ui_migration.composer.attachments",
       "node_id": "composer.attachments",
       "group": "composer",
-      "status": "source_bound",
-      "owner_feature_ids": ["ui.protocol", "runtime.ui-command-dispatch", "app.webui-smoke"],
-      "source_paths": [
-        "../OpenMinis/src/ios/Views/Chat/ChatInputBar.swift",
-        "../OpenMinis/src/ios/Agent/Chat/AIChatViewModel+Attachments.swift"
+      "status": "inventoried",
+      "owner_feature_id": "app.webui-smoke",
+      "touched_feature_ids": [
+        "ui.protocol",
+        "runtime.ui-command-dispatch",
+        "app.webui-smoke"
       ],
-      "target_paths": ["apps/freehand-server/assets/webui/surfaces/session-detail"]
+      "source_paths": [
+        "src/ios/Views/Chat/ChatInputBar.swift",
+        "src/ios/Agent/Chat/AIChatViewModel+Attachments.swift"
+      ],
+      "source_symbols": [
+        "InputAttachmentGridView",
+        "QueuedAttachmentPreview",
+        "UserAttachmentList"
+      ],
+      "source_semantic": "transient attachment draft, preview, removal, and submit interaction",
+      "non_migrated_source_semantics": [
+        "browser",
+        "cookie",
+        "browser_profile",
+        "browser_takeover",
+        "OpenMinis_local_runtime_or_store",
+        "layout_color_typography"
+      ],
+      "source_resources": [
+        "input_attachment",
+        "turn"
+      ],
+      "target_resource": "ui_projection",
+      "operation_id": "pending",
+      "projection_or_query": "pending",
+      "generated_command": "pending",
+      "target_paths": [
+        "apps/freehand-server/assets/webui/surfaces/session-detail"
+      ],
+      "target_symbols": [],
+      "surface_path": "apps/freehand-server/assets/webui/surfaces/session-detail",
+      "model_responsibility": "projection_to_render_model_only",
+      "view_responsibility": "render_only",
+      "control_responsibility": "registered_edge_or_generated_command_only",
+      "route_edge_ids": [],
+      "function_map_docs": [
+        "docs/function-maps/ui.protocol.md",
+        "docs/function-maps/runtime.ui-command-dispatch.md",
+        "docs/function-maps/app.webui-smoke.md"
+      ],
+      "mainline_call_docs": [
+        "docs/mainline-calls/ui.protocol.json",
+        "docs/mainline-calls/runtime.ui-command-dispatch.json",
+        "docs/mainline-calls/app.webui-smoke.json"
+      ],
+      "test_design_docs": [
+        "docs/testing/ui.protocol.md",
+        "docs/testing/runtime.ui-command-dispatch.md",
+        "docs/testing/app.webui-smoke.md"
+      ],
+      "verification_gates": [
+        "openminis_ui_migration_manifest",
+        "cargo_run_xtask_gates_check"
+      ],
+      "evidence": []
     },
     {
+      "migration_unit_id": "ui_migration.composer.queue",
       "node_id": "composer.queue",
       "group": "composer",
       "status": "blocked_owner_missing",
-      "owner_feature_ids": [],
-      "source_paths": ["../OpenMinis/src/ios/Agent/Chat/ChatModels.swift"],
-      "target_paths": []
+      "owner_feature_id": "app.webui-smoke",
+      "touched_feature_ids": [
+        "app.webui-smoke"
+      ],
+      "source_paths": [
+        "src/ios/Agent/Chat/ChatModels.swift"
+      ],
+      "source_symbols": [
+        "QueuedPrompt"
+      ],
+      "source_semantic": "queued follow-up prompt presentation and control",
+      "non_migrated_source_semantics": [
+        "browser",
+        "cookie",
+        "browser_profile",
+        "browser_takeover",
+        "OpenMinis_local_runtime_or_store",
+        "layout_color_typography"
+      ],
+      "source_resources": [
+        "queued_prompt_pending"
+      ],
+      "target_resource": "ui_projection",
+      "operation_id": "pending",
+      "projection_or_query": "pending",
+      "generated_command": "pending",
+      "target_paths": [],
+      "target_symbols": [],
+      "surface_path": "pending",
+      "model_responsibility": "projection_to_render_model_only",
+      "view_responsibility": "render_only",
+      "control_responsibility": "registered_edge_or_generated_command_only",
+      "route_edge_ids": [],
+      "function_map_docs": [
+        "docs/function-maps/app.webui-smoke.md"
+      ],
+      "mainline_call_docs": [
+        "docs/mainline-calls/app.webui-smoke.json"
+      ],
+      "test_design_docs": [
+        "docs/testing/app.webui-smoke.md"
+      ],
+      "verification_gates": [
+        "openminis_ui_migration_manifest",
+        "cargo_run_xtask_gates_check"
+      ],
+      "evidence": []
     },
     {
+      "migration_unit_id": "ui_migration.composer.stop_continue",
       "node_id": "composer.stop_continue",
       "group": "composer",
-      "status": "source_bound",
-      "owner_feature_ids": ["ui.protocol", "runtime.ui-command-dispatch", "app.webui-smoke"],
-      "source_paths": ["../OpenMinis/src/ios/Views/Chat/ChatInputBar.swift"],
-      "target_paths": ["apps/freehand-server/assets/webui/surfaces/session-detail"]
+      "status": "inventoried",
+      "owner_feature_id": "app.webui-smoke",
+      "touched_feature_ids": [
+        "ui.protocol",
+        "runtime.ui-command-dispatch",
+        "app.webui-smoke"
+      ],
+      "source_paths": [
+        "src/ios/Views/Chat/ChatInputBar.swift"
+      ],
+      "source_symbols": [
+        "SwipeToSendHint"
+      ],
+      "source_semantic": "owner-backed cancel, continue, and retry interaction",
+      "non_migrated_source_semantics": [
+        "browser",
+        "cookie",
+        "browser_profile",
+        "browser_takeover",
+        "OpenMinis_local_runtime_or_store",
+        "layout_color_typography"
+      ],
+      "source_resources": [
+        "turn"
+      ],
+      "target_resource": "ui_projection",
+      "operation_id": "pending",
+      "projection_or_query": "pending",
+      "generated_command": "pending",
+      "target_paths": [
+        "apps/freehand-server/assets/webui/surfaces/session-detail"
+      ],
+      "target_symbols": [],
+      "surface_path": "apps/freehand-server/assets/webui/surfaces/session-detail",
+      "model_responsibility": "projection_to_render_model_only",
+      "view_responsibility": "render_only",
+      "control_responsibility": "registered_edge_or_generated_command_only",
+      "route_edge_ids": [],
+      "function_map_docs": [
+        "docs/function-maps/ui.protocol.md",
+        "docs/function-maps/runtime.ui-command-dispatch.md",
+        "docs/function-maps/app.webui-smoke.md"
+      ],
+      "mainline_call_docs": [
+        "docs/mainline-calls/ui.protocol.json",
+        "docs/mainline-calls/runtime.ui-command-dispatch.json",
+        "docs/mainline-calls/app.webui-smoke.json"
+      ],
+      "test_design_docs": [
+        "docs/testing/ui.protocol.md",
+        "docs/testing/runtime.ui-command-dispatch.md",
+        "docs/testing/app.webui-smoke.md"
+      ],
+      "verification_gates": [
+        "openminis_ui_migration_manifest",
+        "cargo_run_xtask_gates_check"
+      ],
+      "evidence": []
     },
     {
+      "migration_unit_id": "ui_migration.composer.voice",
       "node_id": "composer.voice",
       "group": "composer",
       "status": "blocked_owner_missing",
-      "owner_feature_ids": [],
-      "source_paths": ["../OpenMinis/src/ios/Views/Chat/Voice"],
-      "target_paths": []
+      "owner_feature_id": "app.webui-smoke",
+      "touched_feature_ids": [
+        "app.webui-smoke"
+      ],
+      "source_paths": [
+        "src/ios/Views/Chat/Voice"
+      ],
+      "source_symbols": [
+        "InlineVoiceInputView",
+        "VoiceWaveformView"
+      ],
+      "source_semantic": "voice input and playback interaction",
+      "non_migrated_source_semantics": [
+        "browser",
+        "cookie",
+        "browser_profile",
+        "browser_takeover",
+        "OpenMinis_local_runtime_or_store",
+        "layout_color_typography"
+      ],
+      "source_resources": [
+        "voice_capability_pending"
+      ],
+      "target_resource": "ui_projection",
+      "operation_id": "pending",
+      "projection_or_query": "pending",
+      "generated_command": "pending",
+      "target_paths": [],
+      "target_symbols": [],
+      "surface_path": "pending",
+      "model_responsibility": "projection_to_render_model_only",
+      "view_responsibility": "render_only",
+      "control_responsibility": "registered_edge_or_generated_command_only",
+      "route_edge_ids": [],
+      "function_map_docs": [
+        "docs/function-maps/app.webui-smoke.md"
+      ],
+      "mainline_call_docs": [
+        "docs/mainline-calls/app.webui-smoke.json"
+      ],
+      "test_design_docs": [
+        "docs/testing/app.webui-smoke.md"
+      ],
+      "verification_gates": [
+        "openminis_ui_migration_manifest",
+        "cargo_run_xtask_gates_check"
+      ],
+      "evidence": []
     },
     {
+      "migration_unit_id": "ui_migration.tools.registry",
       "node_id": "tools.registry",
       "group": "tools",
-      "status": "source_bound",
-      "owner_feature_ids": ["tool.registry", "ui.protocol", "app.webui-smoke"],
-      "source_paths": ["../OpenMinis/src/ios/Agent/Chat/AIChatViewModel+ToolDefinitions.swift"],
-      "target_paths": ["apps/freehand-server/assets/webui/surfaces/tools-registry"]
+      "status": "inventoried",
+      "owner_feature_id": "app.webui-smoke",
+      "touched_feature_ids": [
+        "tool.registry",
+        "ui.protocol",
+        "app.webui-smoke"
+      ],
+      "source_paths": [
+        "src/ios/Agent/Chat/AIChatViewModel+ToolDefinitions.swift"
+      ],
+      "source_symbols": [
+        "makeAgentTools"
+      ],
+      "source_semantic": "read-only built-in tool registry presentation",
+      "non_migrated_source_semantics": [
+        "browser",
+        "cookie",
+        "browser_profile",
+        "browser_takeover",
+        "OpenMinis_local_runtime_or_store",
+        "layout_color_typography"
+      ],
+      "source_resources": [
+        "tool_call"
+      ],
+      "target_resource": "ui_projection",
+      "operation_id": "tool_call.project_registry_to_ui",
+      "projection_or_query": "pending",
+      "generated_command": "none",
+      "target_paths": [
+        "apps/freehand-server/assets/webui/surfaces/tools-registry"
+      ],
+      "target_symbols": [],
+      "surface_path": "apps/freehand-server/assets/webui/surfaces/tools-registry",
+      "model_responsibility": "projection_to_render_model_only",
+      "view_responsibility": "render_only",
+      "control_responsibility": "registered_edge_or_generated_command_only",
+      "route_edge_ids": [],
+      "function_map_docs": [
+        "docs/function-maps/tool.registry.md",
+        "docs/function-maps/ui.protocol.md",
+        "docs/function-maps/app.webui-smoke.md"
+      ],
+      "mainline_call_docs": [
+        "docs/mainline-calls/tool.registry.json",
+        "docs/mainline-calls/ui.protocol.json",
+        "docs/mainline-calls/app.webui-smoke.json"
+      ],
+      "test_design_docs": [
+        "docs/testing/tool.registry.md",
+        "docs/testing/ui.protocol.md",
+        "docs/testing/app.webui-smoke.md"
+      ],
+      "verification_gates": [
+        "openminis_ui_migration_manifest",
+        "cargo_run_xtask_gates_check"
+      ],
+      "evidence": []
     },
     {
+      "migration_unit_id": "ui_migration.tools.detail",
       "node_id": "tools.detail",
       "group": "tools",
-      "status": "source_bound",
-      "owner_feature_ids": ["tool.registry", "app.webui-smoke"],
-      "source_paths": ["../OpenMinis/src/ios/Views/Chat/ToolLiveSheet.swift"],
-      "target_paths": ["apps/freehand-server/assets/webui/surfaces/tools-registry"]
+      "status": "inventoried",
+      "owner_feature_id": "app.webui-smoke",
+      "touched_feature_ids": [
+        "tool.registry",
+        "app.webui-smoke"
+      ],
+      "source_paths": [
+        "src/ios/Views/Chat/ToolLiveSheet.swift"
+      ],
+      "source_symbols": [
+        "ToolLiveSheet"
+      ],
+      "source_semantic": "tool schema, examples, guidance, scope, and implementation detail presentation",
+      "non_migrated_source_semantics": [
+        "browser",
+        "cookie",
+        "browser_profile",
+        "browser_takeover",
+        "OpenMinis_local_runtime_or_store",
+        "layout_color_typography"
+      ],
+      "source_resources": [
+        "tool_call"
+      ],
+      "target_resource": "ui_projection",
+      "operation_id": "tool_call.project_registry_to_ui",
+      "projection_or_query": "pending",
+      "generated_command": "none",
+      "target_paths": [
+        "apps/freehand-server/assets/webui/surfaces/tools-registry"
+      ],
+      "target_symbols": [],
+      "surface_path": "apps/freehand-server/assets/webui/surfaces/tools-registry",
+      "model_responsibility": "projection_to_render_model_only",
+      "view_responsibility": "render_only",
+      "control_responsibility": "registered_edge_or_generated_command_only",
+      "route_edge_ids": [],
+      "function_map_docs": [
+        "docs/function-maps/tool.registry.md",
+        "docs/function-maps/app.webui-smoke.md"
+      ],
+      "mainline_call_docs": [
+        "docs/mainline-calls/tool.registry.json",
+        "docs/mainline-calls/app.webui-smoke.json"
+      ],
+      "test_design_docs": [
+        "docs/testing/tool.registry.md",
+        "docs/testing/app.webui-smoke.md"
+      ],
+      "verification_gates": [
+        "openminis_ui_migration_manifest",
+        "cargo_run_xtask_gates_check"
+      ],
+      "evidence": []
     },
     {
+      "migration_unit_id": "ui_migration.tools.activity",
+      "node_id": "tools.activity",
+      "group": "tools",
+      "status": "inventoried",
+      "owner_feature_id": "app.webui-smoke",
+      "touched_feature_ids": [
+        "app.webui-smoke"
+      ],
+      "source_paths": [
+        "src/ios/Views/Chat/ToolLiveSheet.swift",
+        "src/ios/Views/Chat/AssistantBlockView.swift"
+      ],
+      "source_symbols": [
+        "ToolLiveSheet",
+        "ToolCapsuleView"
+      ],
+      "source_semantic": "session-specific typed tool lifecycle presentation",
+      "non_migrated_source_semantics": [
+        "browser",
+        "cookie",
+        "browser_profile",
+        "browser_takeover",
+        "OpenMinis_local_runtime_or_store",
+        "layout_color_typography"
+      ],
+      "source_resources": [
+        "tool_call",
+        "turn"
+      ],
+      "target_resource": "ui_projection",
+      "operation_id": "pending",
+      "projection_or_query": "pending",
+      "generated_command": "none",
+      "target_paths": [
+        "apps/freehand-server/assets/webui/surfaces/session-detail"
+      ],
+      "target_symbols": [],
+      "surface_path": "apps/freehand-server/assets/webui/surfaces/session-detail",
+      "model_responsibility": "projection_to_render_model_only",
+      "view_responsibility": "render_only",
+      "control_responsibility": "registered_edge_or_generated_command_only",
+      "route_edge_ids": [],
+      "function_map_docs": [
+        "docs/function-maps/app.webui-smoke.md"
+      ],
+      "mainline_call_docs": [
+        "docs/mainline-calls/app.webui-smoke.json"
+      ],
+      "test_design_docs": [
+        "docs/testing/app.webui-smoke.md"
+      ],
+      "verification_gates": [
+        "openminis_ui_migration_manifest",
+        "cargo_run_xtask_gates_check"
+      ],
+      "evidence": []
+    },
+    {
+      "migration_unit_id": "ui_migration.tools.permissions",
       "node_id": "tools.permissions",
       "group": "tools",
       "status": "blocked_owner_missing",
-      "owner_feature_ids": [],
-      "source_paths": [
-        "../OpenMinis/src/ios/Views/Chat/OffloadPermissionDialog.swift",
-        "../OpenMinis/src/ios/Views/Settings/OffloadPermissionSettingsView.swift"
+      "owner_feature_id": "app.webui-smoke",
+      "touched_feature_ids": [
+        "app.webui-smoke"
       ],
-      "target_paths": []
+      "source_paths": [
+        "src/ios/Views/Chat/OffloadPermissionDialog.swift",
+        "src/ios/Views/Settings/OffloadPermissionSettingsView.swift"
+      ],
+      "source_symbols": [
+        "OffloadPermissionDialog",
+        "OffloadPermissionSettingsView"
+      ],
+      "source_semantic": "typed tool permission, confirmation, and rejection interaction",
+      "non_migrated_source_semantics": [
+        "browser",
+        "cookie",
+        "browser_profile",
+        "browser_takeover",
+        "OpenMinis_local_runtime_or_store",
+        "layout_color_typography"
+      ],
+      "source_resources": [
+        "tool_permission_pending"
+      ],
+      "target_resource": "ui_projection",
+      "operation_id": "pending",
+      "projection_or_query": "pending",
+      "generated_command": "pending",
+      "target_paths": [],
+      "target_symbols": [],
+      "surface_path": "pending",
+      "model_responsibility": "projection_to_render_model_only",
+      "view_responsibility": "render_only",
+      "control_responsibility": "registered_edge_or_generated_command_only",
+      "route_edge_ids": [],
+      "function_map_docs": [
+        "docs/function-maps/app.webui-smoke.md"
+      ],
+      "mainline_call_docs": [
+        "docs/mainline-calls/app.webui-smoke.json"
+      ],
+      "test_design_docs": [
+        "docs/testing/app.webui-smoke.md"
+      ],
+      "verification_gates": [
+        "openminis_ui_migration_manifest",
+        "cargo_run_xtask_gates_check"
+      ],
+      "evidence": []
     },
     {
+      "migration_unit_id": "ui_migration.settings.root",
       "node_id": "settings.root",
       "group": "settings",
-      "status": "source_bound",
-      "owner_feature_ids": ["app.webui-smoke", "config.core", "ui.protocol"],
-      "source_paths": [
-        "../OpenMinis/src/ios/Views/ContentView.swift",
-        "../OpenMinis/src/ios/Views/Settings"
+      "status": "inventoried",
+      "owner_feature_id": "app.webui-smoke",
+      "touched_feature_ids": [
+        "app.webui-smoke",
+        "config.core",
+        "ui.protocol"
       ],
-      "target_paths": ["apps/freehand-server/assets/webui/surfaces/settings"]
+      "source_paths": [
+        "src/ios/Views/ContentView.swift",
+        "src/ios/Views/Settings"
+      ],
+      "source_symbols": [
+        "ContentView"
+      ],
+      "source_semantic": "stacked settings information architecture and navigation",
+      "non_migrated_source_semantics": [
+        "browser",
+        "cookie",
+        "browser_profile",
+        "browser_takeover",
+        "OpenMinis_local_runtime_or_store",
+        "layout_color_typography"
+      ],
+      "source_resources": [
+        "config"
+      ],
+      "target_resource": "ui_projection",
+      "operation_id": "pending",
+      "projection_or_query": "pending",
+      "generated_command": "pending",
+      "target_paths": [
+        "apps/freehand-server/assets/webui/surfaces/settings"
+      ],
+      "target_symbols": [],
+      "surface_path": "apps/freehand-server/assets/webui/surfaces/settings",
+      "model_responsibility": "projection_to_render_model_only",
+      "view_responsibility": "render_only",
+      "control_responsibility": "registered_edge_or_generated_command_only",
+      "route_edge_ids": [],
+      "function_map_docs": [
+        "docs/function-maps/app.webui-smoke.md",
+        "docs/function-maps/config.core.md",
+        "docs/function-maps/ui.protocol.md"
+      ],
+      "mainline_call_docs": [
+        "docs/mainline-calls/app.webui-smoke.json",
+        "docs/mainline-calls/config.core.json",
+        "docs/mainline-calls/ui.protocol.json"
+      ],
+      "test_design_docs": [
+        "docs/testing/app.webui-smoke.md",
+        "docs/testing/config.core.md",
+        "docs/testing/ui.protocol.md"
+      ],
+      "verification_gates": [
+        "openminis_ui_migration_manifest",
+        "cargo_run_xtask_gates_check"
+      ],
+      "evidence": []
     },
     {
+      "migration_unit_id": "ui_migration.settings.models",
       "node_id": "settings.models",
       "group": "settings",
-      "status": "implementation_in_progress",
-      "owner_feature_ids": ["config.core", "ui.protocol", "runtime.ui-command-dispatch", "app.webui-smoke"],
-      "source_paths": ["../OpenMinis/src/ios/Views/Providers"],
-      "target_paths": ["apps/freehand-server/assets/webui/surfaces/settings"]
+      "status": "inventoried",
+      "owner_feature_id": "app.webui-smoke",
+      "touched_feature_ids": [
+        "config.core",
+        "ui.protocol",
+        "runtime.ui-command-dispatch",
+        "app.webui-smoke"
+      ],
+      "source_paths": [
+        "src/ios/Views/Providers"
+      ],
+      "source_symbols": [
+        "ProviderInstancesView",
+        "ProviderInstanceDetailView",
+        "AddProviderView",
+        "ModelGroupsView"
+      ],
+      "source_semantic": "provider, model, model-group, selection, validation, and restart-required configuration interaction",
+      "non_migrated_source_semantics": [
+        "browser",
+        "cookie",
+        "browser_profile",
+        "browser_takeover",
+        "OpenMinis_local_runtime_or_store",
+        "layout_color_typography"
+      ],
+      "source_resources": [
+        "config"
+      ],
+      "target_resource": "ui_projection",
+      "operation_id": "pending",
+      "projection_or_query": "pending",
+      "generated_command": "pending",
+      "target_paths": [
+        "apps/freehand-server/assets/webui/surfaces/settings"
+      ],
+      "target_symbols": [],
+      "surface_path": "apps/freehand-server/assets/webui/surfaces/settings",
+      "model_responsibility": "projection_to_render_model_only",
+      "view_responsibility": "render_only",
+      "control_responsibility": "registered_edge_or_generated_command_only",
+      "route_edge_ids": [],
+      "function_map_docs": [
+        "docs/function-maps/config.core.md",
+        "docs/function-maps/ui.protocol.md",
+        "docs/function-maps/runtime.ui-command-dispatch.md",
+        "docs/function-maps/app.webui-smoke.md"
+      ],
+      "mainline_call_docs": [
+        "docs/mainline-calls/config.core.json",
+        "docs/mainline-calls/ui.protocol.json",
+        "docs/mainline-calls/runtime.ui-command-dispatch.json",
+        "docs/mainline-calls/app.webui-smoke.json"
+      ],
+      "test_design_docs": [
+        "docs/testing/config.core.md",
+        "docs/testing/ui.protocol.md",
+        "docs/testing/runtime.ui-command-dispatch.md",
+        "docs/testing/app.webui-smoke.md"
+      ],
+      "verification_gates": [
+        "openminis_ui_migration_manifest",
+        "cargo_run_xtask_gates_check"
+      ],
+      "evidence": []
     },
     {
+      "migration_unit_id": "ui_migration.settings.agent_runtime",
       "node_id": "settings.agent_runtime",
       "group": "settings",
-      "status": "owner_mapped",
-      "owner_feature_ids": ["agent.lifecycle", "config.core", "app.webui-smoke"],
-      "source_paths": ["../OpenMinis/src/ios/Views/Settings/EnhancedBackgroundSettingsView.swift"],
-      "target_paths": ["apps/freehand-server/assets/webui/surfaces/settings"]
+      "status": "inventoried",
+      "owner_feature_id": "app.webui-smoke",
+      "touched_feature_ids": [
+        "agent.lifecycle",
+        "config.core",
+        "app.webui-smoke"
+      ],
+      "source_paths": [
+        "src/ios/Views/Settings/EnhancedBackgroundSettingsView.swift"
+      ],
+      "source_symbols": [
+        "EnhancedBackgroundSettingsView"
+      ],
+      "source_semantic": "Worker capacity and Agent runtime status/configuration presentation",
+      "non_migrated_source_semantics": [
+        "browser",
+        "cookie",
+        "browser_profile",
+        "browser_takeover",
+        "OpenMinis_local_runtime_or_store",
+        "layout_color_typography"
+      ],
+      "source_resources": [
+        "config",
+        "agent"
+      ],
+      "target_resource": "ui_projection",
+      "operation_id": "pending",
+      "projection_or_query": "pending",
+      "generated_command": "pending",
+      "target_paths": [
+        "apps/freehand-server/assets/webui/surfaces/settings"
+      ],
+      "target_symbols": [],
+      "surface_path": "apps/freehand-server/assets/webui/surfaces/settings",
+      "model_responsibility": "projection_to_render_model_only",
+      "view_responsibility": "render_only",
+      "control_responsibility": "registered_edge_or_generated_command_only",
+      "route_edge_ids": [],
+      "function_map_docs": [
+        "docs/function-maps/agent.lifecycle.md",
+        "docs/function-maps/config.core.md",
+        "docs/function-maps/app.webui-smoke.md"
+      ],
+      "mainline_call_docs": [
+        "docs/mainline-calls/agent.lifecycle.json",
+        "docs/mainline-calls/config.core.json",
+        "docs/mainline-calls/app.webui-smoke.json"
+      ],
+      "test_design_docs": [
+        "docs/testing/agent.lifecycle.md",
+        "docs/testing/config.core.md",
+        "docs/testing/app.webui-smoke.md"
+      ],
+      "verification_gates": [
+        "openminis_ui_migration_manifest",
+        "cargo_run_xtask_gates_check"
+      ],
+      "evidence": []
     },
     {
+      "migration_unit_id": "ui_migration.settings.connection",
       "node_id": "settings.connection",
       "group": "settings",
-      "status": "owner_mapped",
-      "owner_feature_ids": ["config.core", "app.android-client", "app.webui-smoke"],
-      "source_paths": [
-        "../OpenMinis/src/ios/Shared/NetworkMonitor.swift",
-        "../OpenMinis/src/ios/Views/Settings/OffloadPermissionSettingsView.swift"
+      "status": "inventoried",
+      "owner_feature_id": "app.webui-smoke",
+      "touched_feature_ids": [
+        "config.core",
+        "app.android-client",
+        "app.webui-smoke"
       ],
-      "target_paths": ["apps/freehand-server/assets/webui/surfaces/settings"]
+      "source_paths": [
+        "src/ios/Shared/NetworkMonitor.swift",
+        "src/ios/Views/Settings/OffloadPermissionSettingsView.swift"
+      ],
+      "source_symbols": [
+        "NetworkMonitor",
+        "OffloadPermissionSettingsView"
+      ],
+      "source_semantic": "daemon connection and Android platform connection presentation",
+      "non_migrated_source_semantics": [
+        "browser",
+        "cookie",
+        "browser_profile",
+        "browser_takeover",
+        "OpenMinis_local_runtime_or_store",
+        "layout_color_typography"
+      ],
+      "source_resources": [
+        "config"
+      ],
+      "target_resource": "ui_projection",
+      "operation_id": "pending",
+      "projection_or_query": "pending",
+      "generated_command": "pending",
+      "target_paths": [
+        "apps/freehand-server/assets/webui/surfaces/settings"
+      ],
+      "target_symbols": [],
+      "surface_path": "apps/freehand-server/assets/webui/surfaces/settings",
+      "model_responsibility": "projection_to_render_model_only",
+      "view_responsibility": "render_only",
+      "control_responsibility": "registered_edge_or_generated_command_only",
+      "route_edge_ids": [],
+      "function_map_docs": [
+        "docs/function-maps/config.core.md",
+        "docs/function-maps/app.android-client.md",
+        "docs/function-maps/app.webui-smoke.md"
+      ],
+      "mainline_call_docs": [
+        "docs/mainline-calls/config.core.json",
+        "docs/mainline-calls/app.android-client.json",
+        "docs/mainline-calls/app.webui-smoke.json"
+      ],
+      "test_design_docs": [
+        "docs/testing/config.core.md",
+        "docs/testing/app.android-client.md",
+        "docs/testing/app.webui-smoke.md"
+      ],
+      "verification_gates": [
+        "openminis_ui_migration_manifest",
+        "cargo_run_xtask_gates_check"
+      ],
+      "evidence": []
     },
     {
+      "migration_unit_id": "ui_migration.settings.observability",
       "node_id": "settings.observability",
       "group": "settings",
-      "status": "owner_mapped",
-      "owner_feature_ids": ["debug.core", "runtime.ui-command-dispatch", "app.webui-smoke"],
-      "source_paths": [
-        "../OpenMinis/src/ios/Views/Settings/LogManagementView.swift",
-        "../OpenMinis/src/ios/Shared/Config/Audit/ConfigAuditLog.swift"
+      "status": "inventoried",
+      "owner_feature_id": "app.webui-smoke",
+      "touched_feature_ids": [
+        "debug.core",
+        "runtime.ui-command-dispatch",
+        "app.webui-smoke"
       ],
-      "target_paths": ["apps/freehand-server/assets/webui/surfaces/settings"]
+      "source_paths": [
+        "src/ios/Views/Settings/LogManagementView.swift",
+        "src/ios/Shared/Config/Audit/ConfigAuditLog.swift"
+      ],
+      "source_symbols": [
+        "LogManagementView",
+        "ConfigAuditLog"
+      ],
+      "source_semantic": "redacted diagnostics, log metadata, and config audit presentation",
+      "non_migrated_source_semantics": [
+        "browser",
+        "cookie",
+        "browser_profile",
+        "browser_takeover",
+        "OpenMinis_local_runtime_or_store",
+        "layout_color_typography"
+      ],
+      "source_resources": [
+        "debug_trace",
+        "config"
+      ],
+      "target_resource": "ui_projection",
+      "operation_id": "pending",
+      "projection_or_query": "pending",
+      "generated_command": "pending",
+      "target_paths": [
+        "apps/freehand-server/assets/webui/surfaces/settings"
+      ],
+      "target_symbols": [],
+      "surface_path": "apps/freehand-server/assets/webui/surfaces/settings",
+      "model_responsibility": "projection_to_render_model_only",
+      "view_responsibility": "render_only",
+      "control_responsibility": "registered_edge_or_generated_command_only",
+      "route_edge_ids": [],
+      "function_map_docs": [
+        "docs/function-maps/debug.core.md",
+        "docs/function-maps/runtime.ui-command-dispatch.md",
+        "docs/function-maps/app.webui-smoke.md"
+      ],
+      "mainline_call_docs": [
+        "docs/mainline-calls/debug.core.json",
+        "docs/mainline-calls/runtime.ui-command-dispatch.json",
+        "docs/mainline-calls/app.webui-smoke.json"
+      ],
+      "test_design_docs": [
+        "docs/testing/debug.core.md",
+        "docs/testing/runtime.ui-command-dispatch.md",
+        "docs/testing/app.webui-smoke.md"
+      ],
+      "verification_gates": [
+        "openminis_ui_migration_manifest",
+        "cargo_run_xtask_gates_check"
+      ],
+      "evidence": []
     },
     {
+      "migration_unit_id": "ui_migration.settings.appearance",
       "node_id": "settings.appearance",
       "group": "settings",
       "status": "blocked_owner_missing",
-      "owner_feature_ids": [],
-      "source_paths": ["../OpenMinis/src/ios/Shared/FontSettings.swift"],
-      "target_paths": []
+      "owner_feature_id": "app.webui-smoke",
+      "touched_feature_ids": [
+        "app.webui-smoke"
+      ],
+      "source_paths": [
+        "src/ios/Shared/FontSettings.swift"
+      ],
+      "source_symbols": [
+        "FontSettings"
+      ],
+      "source_semantic": "theme and typography preference interaction",
+      "non_migrated_source_semantics": [
+        "browser",
+        "cookie",
+        "browser_profile",
+        "browser_takeover",
+        "OpenMinis_local_runtime_or_store",
+        "layout_color_typography"
+      ],
+      "source_resources": [
+        "ui_preference_pending"
+      ],
+      "target_resource": "ui_projection",
+      "operation_id": "pending",
+      "projection_or_query": "pending",
+      "generated_command": "pending",
+      "target_paths": [],
+      "target_symbols": [],
+      "surface_path": "pending",
+      "model_responsibility": "projection_to_render_model_only",
+      "view_responsibility": "render_only",
+      "control_responsibility": "registered_edge_or_generated_command_only",
+      "route_edge_ids": [],
+      "function_map_docs": [
+        "docs/function-maps/app.webui-smoke.md"
+      ],
+      "mainline_call_docs": [
+        "docs/mainline-calls/app.webui-smoke.json"
+      ],
+      "test_design_docs": [
+        "docs/testing/app.webui-smoke.md"
+      ],
+      "verification_gates": [
+        "openminis_ui_migration_manifest",
+        "cargo_run_xtask_gates_check"
+      ],
+      "evidence": []
     },
     {
+      "migration_unit_id": "ui_migration.settings.about",
       "node_id": "settings.about",
       "group": "settings",
       "status": "inventoried",
-      "owner_feature_ids": ["app.webui-smoke"],
-      "source_paths": ["../OpenMinis/src/ios/Views/Settings/AboutView.swift"],
-      "target_paths": ["apps/freehand-server/assets/webui/surfaces/settings"]
+      "owner_feature_id": "app.webui-smoke",
+      "touched_feature_ids": [
+        "app.webui-smoke"
+      ],
+      "source_paths": [
+        "src/ios/Views/Settings/AboutView.swift"
+      ],
+      "source_symbols": [
+        "AboutView"
+      ],
+      "source_semantic": "build, version, license, and product information presentation",
+      "non_migrated_source_semantics": [
+        "browser",
+        "cookie",
+        "browser_profile",
+        "browser_takeover",
+        "OpenMinis_local_runtime_or_store",
+        "layout_color_typography"
+      ],
+      "source_resources": [
+        "ui_projection"
+      ],
+      "target_resource": "ui_projection",
+      "operation_id": "pending",
+      "projection_or_query": "pending",
+      "generated_command": "none",
+      "target_paths": [
+        "apps/freehand-server/assets/webui/surfaces/settings"
+      ],
+      "target_symbols": [],
+      "surface_path": "apps/freehand-server/assets/webui/surfaces/settings",
+      "model_responsibility": "projection_to_render_model_only",
+      "view_responsibility": "render_only",
+      "control_responsibility": "registered_edge_or_generated_command_only",
+      "route_edge_ids": [],
+      "function_map_docs": [
+        "docs/function-maps/app.webui-smoke.md"
+      ],
+      "mainline_call_docs": [
+        "docs/mainline-calls/app.webui-smoke.json"
+      ],
+      "test_design_docs": [
+        "docs/testing/app.webui-smoke.md"
+      ],
+      "verification_gates": [
+        "openminis_ui_migration_manifest",
+        "cargo_run_xtask_gates_check"
+      ],
+      "evidence": []
     },
     {
+      "migration_unit_id": "ui_migration.timer.dashboard",
       "node_id": "timer.dashboard",
       "group": "secondary",
-      "status": "source_bound",
-      "owner_feature_ids": ["runtime.master-worker-loop", "ui.protocol", "app.webui-smoke"],
-      "source_paths": ["../OpenMinis/src/ios/Views/Alarms/AlarmListView.swift"],
-      "target_paths": ["apps/freehand-server/assets/webui/surfaces/timer-dashboard"]
+      "status": "inventoried",
+      "owner_feature_id": "app.webui-smoke",
+      "touched_feature_ids": [
+        "runtime.master-worker-loop",
+        "ui.protocol",
+        "app.webui-smoke"
+      ],
+      "source_paths": [
+        "src/ios/Views/Alarms/AlarmListView.swift"
+      ],
+      "source_symbols": [
+        "AlarmListView"
+      ],
+      "source_semantic": "timer schedule, status, history, create, and cancel interaction",
+      "non_migrated_source_semantics": [
+        "browser",
+        "cookie",
+        "browser_profile",
+        "browser_takeover",
+        "OpenMinis_local_runtime_or_store",
+        "layout_color_typography"
+      ],
+      "source_resources": [
+        "timer"
+      ],
+      "target_resource": "ui_projection",
+      "operation_id": "timer.list",
+      "projection_or_query": "pending",
+      "generated_command": "pending",
+      "target_paths": [
+        "apps/freehand-server/assets/webui/surfaces/timer-dashboard"
+      ],
+      "target_symbols": [],
+      "surface_path": "apps/freehand-server/assets/webui/surfaces/timer-dashboard",
+      "model_responsibility": "projection_to_render_model_only",
+      "view_responsibility": "render_only",
+      "control_responsibility": "registered_edge_or_generated_command_only",
+      "route_edge_ids": [],
+      "function_map_docs": [
+        "docs/function-maps/runtime.master-worker-loop.md",
+        "docs/function-maps/ui.protocol.md",
+        "docs/function-maps/app.webui-smoke.md"
+      ],
+      "mainline_call_docs": [
+        "docs/mainline-calls/runtime.master-worker-loop.json",
+        "docs/mainline-calls/ui.protocol.json",
+        "docs/mainline-calls/app.webui-smoke.json"
+      ],
+      "test_design_docs": [
+        "docs/testing/runtime.master-worker-loop.md",
+        "docs/testing/ui.protocol.md",
+        "docs/testing/app.webui-smoke.md"
+      ],
+      "verification_gates": [
+        "openminis_ui_migration_manifest",
+        "cargo_run_xtask_gates_check"
+      ],
+      "evidence": []
     },
     {
+      "migration_unit_id": "ui_migration.files_artifacts.root",
       "node_id": "files_artifacts.root",
       "group": "secondary",
       "status": "blocked_resource_missing",
-      "owner_feature_ids": [],
-      "source_paths": [
-        "../OpenMinis/src/ios/Views/Rootfs/FileBrowserView.swift",
-        "../OpenMinis/src/ios/Views/Chat/Media"
+      "owner_feature_id": "app.webui-smoke",
+      "touched_feature_ids": [
+        "app.webui-smoke"
       ],
-      "target_paths": []
+      "source_paths": [
+        "src/ios/Views/Rootfs/FileBrowserView.swift",
+        "src/ios/Views/Chat/Media"
+      ],
+      "source_symbols": [
+        "FileBrowserView",
+        "ImagePreview",
+        "AudioPreview"
+      ],
+      "source_semantic": "workspace file and generated artifact list, preview, and download interaction",
+      "non_migrated_source_semantics": [
+        "browser",
+        "cookie",
+        "browser_profile",
+        "browser_takeover",
+        "OpenMinis_local_runtime_or_store",
+        "layout_color_typography"
+      ],
+      "source_resources": [
+        "artifact_pending",
+        "workspace_path"
+      ],
+      "target_resource": "ui_projection",
+      "operation_id": "pending",
+      "projection_or_query": "pending",
+      "generated_command": "pending",
+      "target_paths": [],
+      "target_symbols": [],
+      "surface_path": "pending",
+      "model_responsibility": "projection_to_render_model_only",
+      "view_responsibility": "render_only",
+      "control_responsibility": "registered_edge_or_generated_command_only",
+      "route_edge_ids": [],
+      "function_map_docs": [
+        "docs/function-maps/app.webui-smoke.md"
+      ],
+      "mainline_call_docs": [
+        "docs/mainline-calls/app.webui-smoke.json"
+      ],
+      "test_design_docs": [
+        "docs/testing/app.webui-smoke.md"
+      ],
+      "verification_gates": [
+        "openminis_ui_migration_manifest",
+        "cargo_run_xtask_gates_check"
+      ],
+      "evidence": []
     },
     {
+      "migration_unit_id": "ui_migration.skills.root",
       "node_id": "skills.root",
       "group": "secondary",
       "status": "blocked_protocol_missing",
-      "owner_feature_ids": ["instruction.capability-loader"],
-      "source_paths": [
-        "../OpenMinis/src/ios/Views/Skills/SkillsManagementView.swift",
-        "../OpenMinis/src/ios/Views/Chat/SessionSkillsView.swift"
+      "owner_feature_id": "app.webui-smoke",
+      "touched_feature_ids": [
+        "app.webui-smoke",
+        "instruction.capability-loader"
       ],
-      "target_paths": []
+      "source_paths": [
+        "src/ios/Views/Skills/SkillsManagementView.swift",
+        "src/ios/Views/Chat/SessionSkillsView.swift"
+      ],
+      "source_symbols": [
+        "SkillsManagementView",
+        "SessionSkillsView"
+      ],
+      "source_semantic": "Skill capability registry, detail, and session relation presentation",
+      "non_migrated_source_semantics": [
+        "browser",
+        "cookie",
+        "browser_profile",
+        "browser_takeover",
+        "OpenMinis_local_runtime_or_store",
+        "layout_color_typography"
+      ],
+      "source_resources": [
+        "instruction_capability"
+      ],
+      "target_resource": "ui_projection",
+      "operation_id": "pending",
+      "projection_or_query": "pending",
+      "generated_command": "pending",
+      "target_paths": [],
+      "target_symbols": [],
+      "surface_path": "pending",
+      "model_responsibility": "projection_to_render_model_only",
+      "view_responsibility": "render_only",
+      "control_responsibility": "registered_edge_or_generated_command_only",
+      "route_edge_ids": [],
+      "function_map_docs": [
+        "docs/function-maps/app.webui-smoke.md",
+        "docs/function-maps/instruction.capability-loader.md"
+      ],
+      "mainline_call_docs": [
+        "docs/mainline-calls/app.webui-smoke.json",
+        "docs/mainline-calls/instruction.capability-loader.json"
+      ],
+      "test_design_docs": [
+        "docs/testing/app.webui-smoke.md",
+        "docs/testing/instruction.capability-loader.md"
+      ],
+      "verification_gates": [
+        "openminis_ui_migration_manifest",
+        "cargo_run_xtask_gates_check"
+      ],
+      "evidence": []
     },
     {
+      "migration_unit_id": "ui_migration.memory.root",
       "node_id": "memory.root",
       "group": "secondary",
       "status": "blocked_resource_missing",
-      "owner_feature_ids": [],
-      "source_paths": [
-        "../OpenMinis/src/ios/Views/Settings/MemoryManagementView.swift",
-        "../OpenMinis/src/ios/Views/Chat/SessionMemoryView.swift"
+      "owner_feature_id": "app.webui-smoke",
+      "touched_feature_ids": [
+        "app.webui-smoke"
       ],
-      "target_paths": []
+      "source_paths": [
+        "src/ios/Views/Settings/MemoryManagementView.swift",
+        "src/ios/Views/Chat/SessionMemoryView.swift"
+      ],
+      "source_symbols": [
+        "MemoryManagementView",
+        "SessionMemoryView"
+      ],
+      "source_semantic": "Memory registry, detail, and session relation presentation",
+      "non_migrated_source_semantics": [
+        "browser",
+        "cookie",
+        "browser_profile",
+        "browser_takeover",
+        "OpenMinis_local_runtime_or_store",
+        "layout_color_typography"
+      ],
+      "source_resources": [
+        "memory_pending"
+      ],
+      "target_resource": "ui_projection",
+      "operation_id": "pending",
+      "projection_or_query": "pending",
+      "generated_command": "pending",
+      "target_paths": [],
+      "target_symbols": [],
+      "surface_path": "pending",
+      "model_responsibility": "projection_to_render_model_only",
+      "view_responsibility": "render_only",
+      "control_responsibility": "registered_edge_or_generated_command_only",
+      "route_edge_ids": [],
+      "function_map_docs": [
+        "docs/function-maps/app.webui-smoke.md"
+      ],
+      "mainline_call_docs": [
+        "docs/mainline-calls/app.webui-smoke.json"
+      ],
+      "test_design_docs": [
+        "docs/testing/app.webui-smoke.md"
+      ],
+      "verification_gates": [
+        "openminis_ui_migration_manifest",
+        "cargo_run_xtask_gates_check"
+      ],
+      "evidence": []
     },
     {
+      "migration_unit_id": "ui_migration.integrations.root",
       "node_id": "integrations.root",
       "group": "secondary",
       "status": "blocked_resource_missing",
-      "owner_feature_ids": [],
-      "source_paths": ["../OpenMinis/src/ios/Views/MCP"],
-      "target_paths": []
+      "owner_feature_id": "app.webui-smoke",
+      "touched_feature_ids": [
+        "app.webui-smoke"
+      ],
+      "source_paths": [
+        "src/ios/Views/MCP"
+      ],
+      "source_symbols": [
+        "MCPIntegrationsView",
+        "MCPFormSheet",
+        "MCPJSONImportSheet"
+      ],
+      "source_semantic": "integration registry, configuration, authorization status, and tool presentation",
+      "non_migrated_source_semantics": [
+        "browser",
+        "cookie",
+        "browser_profile",
+        "browser_takeover",
+        "OpenMinis_local_runtime_or_store",
+        "layout_color_typography"
+      ],
+      "source_resources": [
+        "integration_pending"
+      ],
+      "target_resource": "ui_projection",
+      "operation_id": "pending",
+      "projection_or_query": "pending",
+      "generated_command": "pending",
+      "target_paths": [],
+      "target_symbols": [],
+      "surface_path": "pending",
+      "model_responsibility": "projection_to_render_model_only",
+      "view_responsibility": "render_only",
+      "control_responsibility": "registered_edge_or_generated_command_only",
+      "route_edge_ids": [],
+      "function_map_docs": [
+        "docs/function-maps/app.webui-smoke.md"
+      ],
+      "mainline_call_docs": [
+        "docs/mainline-calls/app.webui-smoke.json"
+      ],
+      "test_design_docs": [
+        "docs/testing/app.webui-smoke.md"
+      ],
+      "verification_gates": [
+        "openminis_ui_migration_manifest",
+        "cargo_run_xtask_gates_check"
+      ],
+      "evidence": []
     },
     {
+      "migration_unit_id": "ui_migration.platform.android_bridge",
       "node_id": "platform.android_bridge",
       "group": "platform",
-      "status": "owner_mapped",
-      "owner_feature_ids": ["app.android-client", "app.webui-smoke"],
-      "source_paths": ["../OpenMinis/src/ios/AppDelegate.swift"],
-      "target_paths": ["apps/freehand-android/app/src/main"]
+      "status": "inventoried",
+      "owner_feature_id": "app.android-client",
+      "touched_feature_ids": [
+        "app.android-client",
+        "app.webui-smoke"
+      ],
+      "source_paths": [
+        "src/ios/AppDelegate.swift"
+      ],
+      "source_symbols": [
+        "AppDelegate"
+      ],
+      "source_semantic": "Android file picker, notification, download/open, back, keyboard, insets, and update bridges",
+      "non_migrated_source_semantics": [
+        "browser",
+        "cookie",
+        "browser_profile",
+        "browser_takeover",
+        "OpenMinis_local_runtime_or_store",
+        "layout_color_typography"
+      ],
+      "source_resources": [
+        "ui_projection"
+      ],
+      "target_resource": "ui_projection",
+      "operation_id": "pending",
+      "projection_or_query": "pending",
+      "generated_command": "pending",
+      "target_paths": [
+        "apps/freehand-android/app/src/main"
+      ],
+      "target_symbols": [],
+      "surface_path": "apps/freehand-android/app/src/main",
+      "model_responsibility": "projection_to_render_model_only",
+      "view_responsibility": "render_only",
+      "control_responsibility": "registered_edge_or_generated_command_only",
+      "route_edge_ids": [],
+      "function_map_docs": [
+        "docs/function-maps/app.android-client.md",
+        "docs/function-maps/app.webui-smoke.md"
+      ],
+      "mainline_call_docs": [
+        "docs/mainline-calls/app.android-client.json",
+        "docs/mainline-calls/app.webui-smoke.json"
+      ],
+      "test_design_docs": [
+        "docs/testing/app.android-client.md",
+        "docs/testing/app.webui-smoke.md"
+      ],
+      "verification_gates": [
+        "openminis_ui_migration_manifest",
+        "cargo_run_xtask_gates_check"
+      ],
+      "evidence": []
     }
   ],
   "excluded_nodes": [
@@ -375,5 +2356,61 @@
     "No owner truth is stored in browser local state or Android.",
     "Browser and cookie scope remain excluded.",
     "Duplicate legacy implementations are physically retired after dependency and online proof."
-  ]
+  ],
+  "required_node_ids": [
+    "foundation.root",
+    "foundation.surface_contract",
+    "foundation.protocol_calls",
+    "foundation.shared_states",
+    "home.dashboard",
+    "session_detail.root",
+    "session_detail.agent_sheet",
+    "session_search.root",
+    "new_session.root",
+    "turn_blocks.user",
+    "turn_blocks.assistant",
+    "turn_blocks.reasoning",
+    "turn_blocks.tool_activity",
+    "turn_blocks.attachment",
+    "turn_blocks.artifact",
+    "turn_blocks.error",
+    "composer.text_submit",
+    "composer.attachments",
+    "composer.queue",
+    "composer.stop_continue",
+    "composer.voice",
+    "tools.registry",
+    "tools.detail",
+    "tools.activity",
+    "tools.permissions",
+    "settings.root",
+    "settings.models",
+    "settings.agent_runtime",
+    "settings.connection",
+    "settings.observability",
+    "settings.appearance",
+    "settings.about",
+    "timer.dashboard",
+    "files_artifacts.root",
+    "skills.root",
+    "memory.root",
+    "integrations.root",
+    "platform.android_bridge"
+  ],
+  "excluded_source_symbols": [
+    "BrowserSheetView",
+    "BrowserManagementView",
+    "BrowserUseManager",
+    "BrowserTabPool",
+    "BrowserUseOffloadBridge",
+    "browserTool",
+    "browserSnapshot",
+    "cookieStore",
+    "CookieBackupStore"
+  ],
+  "source_repository": {
+    "repository_id": "OpenMinis",
+    "path_hint": "../OpenMinis",
+    "commit": "9cf3a855fecd27bb5735b84cacbd56852a3ab8dd"
+  }
 }

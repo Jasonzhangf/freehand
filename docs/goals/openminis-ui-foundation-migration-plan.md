@@ -83,9 +83,9 @@ and tool interaction while preserving Freehand daemon ownership.
 
 ### Phase 0 — Migration governance
 
-- validate the migration manifest against the SOP
-- add a repository gate for node ids, statuses, canonical file existence, and
-  browser exclusion
+- keep the existing `xtask gates check` migration-manifest gate green
+- advance node status only after the gate-required operation, target symbol,
+  map, test, and evidence fields exist
 - link the migration registry from design/function-map indexes
 - reconcile current product UI tree with migration target nodes
 

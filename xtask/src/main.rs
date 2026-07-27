@@ -4,6 +4,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 
 fn main() {
     let mut args = env::args().skip(1);
@@ -197,6 +198,11 @@ fn run_gates_check() -> Result<(), String> {
             "docs/design/runtime-command-dispatch-design.md",
             "docs/design/runtime-checkpoint-rewind-design.md",
             "docs/design/runtime-daemon-design.md",
+            "docs/migrations/openminis-ui/README.md",
+            "docs/migrations/openminis-ui/function-map-sop.md",
+            "docs/migrations/openminis-ui/ui-tree.md",
+            "docs/migrations/openminis-ui/ui-tree.manifest.json",
+            "docs/goals/openminis-ui-foundation-migration-plan.md",
             "docs/references/provider-protocols/README.md",
             "docs/references/provider-protocols/openai-responses.md",
             "docs/references/provider-protocols/openai-chat-completions.md",
@@ -228,7 +234,433 @@ fn run_gates_check() -> Result<(), String> {
     verify_dependency_graph(&root)?;
     verify_task_status_single_writer(&root)?;
     verify_adp_protocol_artifacts(&root)?;
+    verify_openminis_ui_migration_manifest(&root)?;
     Ok(())
+}
+
+const OPENMINIS_UI_MIGRATION_NODE_IDS: &[&str] = &[
+    "foundation.root",
+    "foundation.surface_contract",
+    "foundation.protocol_calls",
+    "foundation.shared_states",
+    "home.dashboard",
+    "session_detail.root",
+    "session_detail.agent_sheet",
+    "session_search.root",
+    "new_session.root",
+    "turn_blocks.user",
+    "turn_blocks.assistant",
+    "turn_blocks.reasoning",
+    "turn_blocks.tool_activity",
+    "turn_blocks.attachment",
+    "turn_blocks.artifact",
+    "turn_blocks.error",
+    "composer.text_submit",
+    "composer.attachments",
+    "composer.queue",
+    "composer.stop_continue",
+    "composer.voice",
+    "tools.registry",
+    "tools.detail",
+    "tools.activity",
+    "tools.permissions",
+    "settings.root",
+    "settings.models",
+    "settings.agent_runtime",
+    "settings.connection",
+    "settings.observability",
+    "settings.appearance",
+    "settings.about",
+    "timer.dashboard",
+    "files_artifacts.root",
+    "skills.root",
+    "memory.root",
+    "integrations.root",
+    "platform.android_bridge",
+];
+
+const OPENMINIS_UI_MIGRATION_NODE_PREFIXES: &[&str] = &[
+    "foundation.",
+    "home.",
+    "session_detail.",
+    "session_search.",
+    "new_session.",
+    "turn_blocks.",
+    "composer.",
+    "tools.",
+    "settings.",
+    "timer.",
+    "files_artifacts.",
+    "skills.",
+    "memory.",
+    "integrations.",
+    "platform.",
+];
+
+const OPENMINIS_UI_EXCLUDED_SOURCE_TOKENS: &[&str] = &[
+    "browseruse",
+    "browsersheet",
+    "browsermanagement",
+    "browsertab",
+    "browsertool",
+    "browsersnapshot",
+    "cookie",
+    "takeover",
+    "profile",
+];
+
+const OPENMINIS_UI_REQUIRED_EXCLUDED_SOURCE_SYMBOLS: &[&str] = &[
+    "BrowserSheetView",
+    "BrowserManagementView",
+    "BrowserUseManager",
+    "BrowserTabPool",
+    "BrowserUseOffloadBridge",
+    "browserTool",
+    "browserSnapshot",
+    "cookieStore",
+    "CookieBackupStore",
+];
+
+fn verify_openminis_ui_migration_manifest(root: &Path) -> Result<(), String> {
+    let manifest_path = root.join("docs/migrations/openminis-ui/ui-tree.manifest.json");
+    let raw = fs::read_to_string(&manifest_path)
+        .map_err(|err| format!("{}: {err}", manifest_path.display()))?;
+    let manifest: Value =
+        serde_json::from_str(&raw).map_err(|err| format!("{}: {err}", manifest_path.display()))?;
+    verify_openminis_ui_migration_manifest_value(root, &manifest)
+}
+
+fn verify_openminis_ui_migration_manifest_value(
+    root: &Path,
+    manifest: &Value,
+) -> Result<(), String> {
+    let object = manifest
+        .as_object()
+        .ok_or_else(|| "OpenMinis UI migration manifest must be an object".to_owned())?;
+    if object.get("status").and_then(Value::as_str) != Some("design_baseline") {
+        return Err(
+            "OpenMinis UI migration manifest status must remain design_baseline until the registry gate and per-node bindings are updated"
+                .to_owned(),
+        );
+    }
+    if object.get("browser_included").and_then(Value::as_bool) != Some(false) {
+        return Err("OpenMinis UI migration manifest must exclude browser scope".to_owned());
+    }
+    let source_repository = object
+        .get("source_repository")
+        .and_then(Value::as_object)
+        .ok_or_else(|| "OpenMinis UI migration manifest missing source_repository".to_owned())?;
+    if source_repository
+        .get("repository_id")
+        .and_then(Value::as_str)
+        != Some("OpenMinis")
+    {
+        return Err("OpenMinis UI migration source_repository id must be OpenMinis".to_owned());
+    }
+    let source_commit = source_repository
+        .get("commit")
+        .and_then(Value::as_str)
+        .ok_or_else(|| "OpenMinis UI migration source_repository missing commit".to_owned())?;
+    if source_commit.len() != 40 || !source_commit.chars().all(|ch| ch.is_ascii_hexdigit()) {
+        return Err(
+            "OpenMinis UI migration source_repository commit must be a full 40-character git SHA"
+                .to_owned(),
+        );
+    }
+    let excluded_source_symbols = string_array(
+        object.get("excluded_source_symbols"),
+        "OpenMinis UI migration excluded_source_symbols",
+    )?;
+    let required_excluded_source_symbols = OPENMINIS_UI_REQUIRED_EXCLUDED_SOURCE_SYMBOLS
+        .iter()
+        .map(|value| (*value).to_owned())
+        .collect::<BTreeSet<_>>();
+    if excluded_source_symbols != required_excluded_source_symbols {
+        return Err(format!(
+            "OpenMinis UI migration excluded_source_symbols drift: expected {required_excluded_source_symbols:?}, got {excluded_source_symbols:?}"
+        ));
+    }
+
+    let declared_required = string_array(
+        object.get("required_node_ids"),
+        "OpenMinis UI migration required_node_ids",
+    )?;
+    let expected_required = OPENMINIS_UI_MIGRATION_NODE_IDS
+        .iter()
+        .map(|value| (*value).to_owned())
+        .collect::<BTreeSet<_>>();
+    if declared_required != expected_required {
+        return Err(format!(
+            "OpenMinis UI migration required_node_ids drift: expected {expected_required:?}, got {declared_required:?}"
+        ));
+    }
+
+    let nodes = object
+        .get("nodes")
+        .and_then(Value::as_array)
+        .ok_or_else(|| "OpenMinis UI migration manifest missing nodes".to_owned())?;
+    let feature_map = fs::read_to_string(root.join("docs/architecture/feature-map.md"))
+        .map_err(|err| format!("read feature map for OpenMinis UI migration gate: {err}"))?;
+    let resource_map = fs::read_to_string(root.join("docs/resource-maps/core.json"))
+        .map_err(|err| format!("read resource map for OpenMinis UI migration gate: {err}"))?;
+    let mut node_ids = BTreeSet::new();
+    for node in nodes {
+        let node = node
+            .as_object()
+            .ok_or_else(|| "OpenMinis UI migration nodes must contain only objects".to_owned())?;
+        let node_id = required_string(node, "node_id", "OpenMinis UI migration node")?;
+        if !node_ids.insert(node_id.to_owned()) {
+            return Err(format!(
+                "OpenMinis UI migration manifest has duplicate node_id `{node_id}`"
+            ));
+        }
+        let migration_unit_id = required_string(
+            node,
+            "migration_unit_id",
+            &format!("migration node {node_id}"),
+        )?;
+        if migration_unit_id != format!("ui_migration.{node_id}") {
+            return Err(format!(
+                "OpenMinis UI migration node `{node_id}` has invalid migration_unit_id `{migration_unit_id}`"
+            ));
+        }
+        let status = required_string(node, "status", &format!("migration node {node_id}"))?;
+        let blocked = status.starts_with("blocked_");
+        if status != "inventoried" && !blocked {
+            for field in ["operation_id", "projection_or_query", "surface_path"] {
+                if required_string(node, field, &format!("migration node {node_id}"))? == "pending"
+                {
+                    return Err(format!(
+                        "OpenMinis UI migration node `{node_id}` cannot be `{status}` while `{field}` is pending"
+                    ));
+                }
+            }
+            if string_array(
+                node.get("target_symbols"),
+                &format!("migration node {node_id} target_symbols"),
+            )?
+            .is_empty()
+            {
+                return Err(format!(
+                    "OpenMinis UI migration node `{node_id}` cannot be `{status}` without target_symbols"
+                ));
+            }
+        }
+        if matches!(status, "online_verified" | "legacy_retired")
+            && string_array(
+                node.get("evidence"),
+                &format!("migration node {node_id} evidence"),
+            )?
+            .is_empty()
+        {
+            return Err(format!(
+                "OpenMinis UI migration node `{node_id}` cannot be `{status}` without evidence"
+            ));
+        }
+
+        let owner_feature_id = required_string(
+            node,
+            "owner_feature_id",
+            &format!("migration node {node_id}"),
+        )?;
+        if !feature_map.contains(&format!("`{owner_feature_id}`")) {
+            return Err(format!(
+                "OpenMinis UI migration node `{node_id}` references unknown owner feature `{owner_feature_id}`"
+            ));
+        }
+        let touched_features = string_array(
+            node.get("touched_feature_ids"),
+            &format!("migration node {node_id} touched_feature_ids"),
+        )?;
+        if !touched_features.contains(owner_feature_id) {
+            return Err(format!(
+                "OpenMinis UI migration node `{node_id}` owner `{owner_feature_id}` is missing from touched_feature_ids"
+            ));
+        }
+        for feature_id in touched_features {
+            if !feature_map.contains(&format!("`{feature_id}`")) {
+                return Err(format!(
+                    "OpenMinis UI migration node `{node_id}` references unknown touched feature `{feature_id}`"
+                ));
+            }
+        }
+
+        let source_paths = string_array(
+            node.get("source_paths"),
+            &format!("migration node {node_id} source_paths"),
+        )?;
+        if source_paths.is_empty()
+            || source_paths
+                .iter()
+                .any(|path| !path.starts_with("src/ios/") || path.contains(".."))
+        {
+            return Err(format!(
+                "OpenMinis UI migration node `{node_id}` source_paths must be OpenMinis-repository-relative src/ios paths"
+            ));
+        }
+        let source_symbols = string_array(
+            node.get("source_symbols"),
+            &format!("migration node {node_id} source_symbols"),
+        )?;
+        if source_symbols.is_empty() {
+            return Err(format!(
+                "OpenMinis UI migration node `{node_id}` must name non-browser source symbols"
+            ));
+        }
+        for symbol in source_symbols {
+            let lower = symbol.to_ascii_lowercase();
+            if OPENMINIS_UI_EXCLUDED_SOURCE_TOKENS
+                .iter()
+                .any(|token| lower.contains(token))
+            {
+                return Err(format!(
+                    "OpenMinis UI migration node `{node_id}` includes excluded source symbol `{symbol}`"
+                ));
+            }
+        }
+        let source_semantic = required_string(
+            node,
+            "source_semantic",
+            &format!("migration node {node_id}"),
+        )?;
+        if source_semantic.trim().is_empty() {
+            return Err(format!(
+                "OpenMinis UI migration node `{node_id}` has empty source_semantic"
+            ));
+        }
+        let excluded_semantics = string_array(
+            node.get("non_migrated_source_semantics"),
+            &format!("migration node {node_id} non_migrated_source_semantics"),
+        )?;
+        for required in ["browser", "cookie", "browser_profile", "browser_takeover"] {
+            if !excluded_semantics.contains(required) {
+                return Err(format!(
+                    "OpenMinis UI migration node `{node_id}` does not explicitly exclude `{required}`"
+                ));
+            }
+        }
+
+        for field in [
+            "function_map_docs",
+            "mainline_call_docs",
+            "test_design_docs",
+        ] {
+            let paths = string_array(
+                node.get(field),
+                &format!("migration node {node_id} {field}"),
+            )?;
+            if paths.is_empty() {
+                return Err(format!(
+                    "OpenMinis UI migration node `{node_id}` has no `{field}` candidates"
+                ));
+            }
+            for path in paths {
+                if !root.join(&path).is_file() {
+                    return Err(format!(
+                        "OpenMinis UI migration node `{node_id}` references missing `{field}` path `{path}`"
+                    ));
+                }
+            }
+        }
+        for path in string_array(
+            node.get("target_paths"),
+            &format!("migration node {node_id} target_paths"),
+        )? {
+            if !root.join(&path).exists() {
+                return Err(format!(
+                    "OpenMinis UI migration node `{node_id}` references missing target path `{path}`"
+                ));
+            }
+        }
+        let verification_gates = string_array(
+            node.get("verification_gates"),
+            &format!("migration node {node_id} verification_gates"),
+        )?;
+        if !verification_gates.contains("openminis_ui_migration_manifest")
+            || !verification_gates.contains("cargo_run_xtask_gates_check")
+        {
+            return Err(format!(
+                "OpenMinis UI migration node `{node_id}` is not bound to the repository gate"
+            ));
+        }
+        let operation_id =
+            required_string(node, "operation_id", &format!("migration node {node_id}"))?;
+        if operation_id != "pending"
+            && !resource_map.contains(&format!("\"operation_id\": \"{operation_id}\""))
+        {
+            return Err(format!(
+                "OpenMinis UI migration node `{node_id}` references unregistered operation `{operation_id}`"
+            ));
+        }
+    }
+    if node_ids != expected_required {
+        return Err(format!(
+            "OpenMinis UI migration node set drift: expected {expected_required:?}, got {node_ids:?}"
+        ));
+    }
+
+    let human_tree = fs::read_to_string(root.join("docs/migrations/openminis-ui/ui-tree.md"))
+        .map_err(|err| format!("read OpenMinis UI migration human tree: {err}"))?;
+    let human_node_ids = inline_migration_node_ids(&human_tree);
+    if human_node_ids != node_ids {
+        return Err(format!(
+            "OpenMinis UI migration human/machine node drift: manifest={node_ids:?}, human={human_node_ids:?}"
+        ));
+    }
+    let dev_gates = fs::read_to_string(root.join("docs/architecture/dev-gates.md"))
+        .map_err(|err| format!("read dev gates for OpenMinis UI migration gate: {err}"))?;
+    require_contains(
+        &dev_gates,
+        "## OpenMinis UI Migration Manifest Gate",
+        "docs/architecture/dev-gates.md",
+    )?;
+    Ok(())
+}
+
+fn required_string<'a>(
+    object: &'a serde_json::Map<String, Value>,
+    field: &str,
+    context: &str,
+) -> Result<&'a str, String> {
+    object
+        .get(field)
+        .and_then(Value::as_str)
+        .filter(|value| !value.trim().is_empty())
+        .ok_or_else(|| format!("{context} missing non-empty string `{field}`"))
+}
+
+fn string_array(value: Option<&Value>, context: &str) -> Result<BTreeSet<String>, String> {
+    let values = value
+        .and_then(Value::as_array)
+        .ok_or_else(|| format!("{context} must be an array"))?;
+    let mut output = BTreeSet::new();
+    for value in values {
+        let value = value
+            .as_str()
+            .filter(|value| !value.trim().is_empty())
+            .ok_or_else(|| format!("{context} must contain only non-empty strings"))?;
+        if !output.insert(value.to_owned()) {
+            return Err(format!("{context} contains duplicate `{value}`"));
+        }
+    }
+    Ok(output)
+}
+
+fn inline_migration_node_ids(markdown: &str) -> BTreeSet<String> {
+    markdown
+        .split('`')
+        .enumerate()
+        .filter_map(|(index, value)| (index % 2 == 1).then_some(value))
+        .filter(|value| {
+            OPENMINIS_UI_MIGRATION_NODE_PREFIXES
+                .iter()
+                .any(|prefix| value.starts_with(prefix))
+                && value.chars().all(|ch| {
+                    ch.is_ascii_lowercase() || ch.is_ascii_digit() || ch == '_' || ch == '.'
+                })
+        })
+        .map(ToOwned::to_owned)
+        .collect()
 }
 
 fn require_files(root: &Path, rel_paths: &[&str]) -> Result<(), String> {
@@ -3667,6 +4099,70 @@ fn verify_task_status_single_writer(root: &Path) -> Result<(), String> {
 mod tests {
     use super::*;
     use std::time::{SystemTime, UNIX_EPOCH};
+
+    #[test]
+    fn openminis_ui_migration_manifest_accepts_current_design_baseline() {
+        let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .expect("workspace root")
+            .to_path_buf();
+        verify_openminis_ui_migration_manifest(&root)
+            .expect("current OpenMinis UI migration registry should pass");
+    }
+
+    #[test]
+    fn openminis_ui_migration_manifest_rejects_unbound_advanced_status() {
+        let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .expect("workspace root")
+            .to_path_buf();
+        let raw =
+            fs::read_to_string(root.join("docs/migrations/openminis-ui/ui-tree.manifest.json"))
+                .expect("read migration manifest");
+        let mut manifest: Value = serde_json::from_str(&raw).expect("parse migration manifest");
+        manifest["nodes"][0]["status"] = Value::String("source_bound".to_owned());
+
+        let err = verify_openminis_ui_migration_manifest_value(&root, &manifest)
+            .expect_err("unbound advanced state must fail");
+        assert!(err.contains("while `operation_id` is pending"), "{err}");
+    }
+
+    #[test]
+    fn openminis_ui_migration_manifest_rejects_missing_machine_node() {
+        let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .expect("workspace root")
+            .to_path_buf();
+        let raw =
+            fs::read_to_string(root.join("docs/migrations/openminis-ui/ui-tree.manifest.json"))
+                .expect("read migration manifest");
+        let mut manifest: Value = serde_json::from_str(&raw).expect("parse migration manifest");
+        manifest["nodes"]
+            .as_array_mut()
+            .expect("nodes array")
+            .retain(|node| node["node_id"] != "tools.activity");
+
+        let err = verify_openminis_ui_migration_manifest_value(&root, &manifest)
+            .expect_err("missing machine node must fail");
+        assert!(err.contains("node set drift"), "{err}");
+    }
+
+    #[test]
+    fn openminis_ui_migration_manifest_rejects_browser_source_symbol() {
+        let root = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .expect("workspace root")
+            .to_path_buf();
+        let raw =
+            fs::read_to_string(root.join("docs/migrations/openminis-ui/ui-tree.manifest.json"))
+                .expect("read migration manifest");
+        let mut manifest: Value = serde_json::from_str(&raw).expect("parse migration manifest");
+        manifest["nodes"][0]["source_symbols"][0] = Value::String("BrowserSheetView".to_owned());
+
+        let err = verify_openminis_ui_migration_manifest_value(&root, &manifest)
+            .expect_err("browser source symbol must fail");
+        assert!(err.contains("excluded source symbol"), "{err}");
+    }
 
     #[test]
     fn mainline_manifest_links_accept_aligned_docs() {

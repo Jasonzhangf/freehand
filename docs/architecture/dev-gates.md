@@ -80,6 +80,21 @@ If a layer is intentionally not yet present for a feature, that absence must be 
 
 This keeps generated wiki artifacts as compiled review surfaces over one machine-readable truth instead of independent hand-maintained docs.
 
+## OpenMinis UI Migration Manifest Gate
+
+`xtask gates check` validates the non-browser OpenMinis UI migration registry:
+
+- the machine manifest and human migration tree contain the exact same required node ids
+- the source repository is pinned to a full OpenMinis commit SHA
+- every migration unit has one owner feature and separates touched features
+- all OpenMinis source paths are repository-relative and every unit names explicit source symbols
+- browser, Cookie, profile, and takeover symbols are excluded from included source bindings
+- map, mainline, test-design, target-path, resource-operation, and gate references exist
+- design-baseline nodes cannot claim bound/verified status without operation, target-symbol, and evidence fields
+- every node is bound to this gate through `verification_gates`
+
+The gate is part of `xtask gates check`, which is invoked by `make ci`, CI, release, pre-commit, and pre-push. The migration registry is therefore a design baseline until its nodes advance with code-bound evidence; it is not implementation truth merely because the JSON parses.
+
 
 ## ADP Protocol Artifact Gate
 

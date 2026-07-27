@@ -12,6 +12,7 @@
 - machine-readable tree: `docs/migrations/openminis-ui/ui-tree.manifest.json`
 - migration function-map SOP: `docs/migrations/openminis-ui/function-map-sop.md`
 - execution plan: `docs/goals/openminis-ui-foundation-migration-plan.md`
+- architecture gate: `cargo run -p xtask -- gates check`
 
 This directory defines what “migrate the OpenMinis UI foundation to Freehand”
 means before implementation starts. It does not make OpenMinis local stores,
@@ -72,3 +73,8 @@ Excluded:
 Nodes whose Freehand resource owner or protocol path does not exist remain
 `blocked_owner_missing`; their UI controls must not be implemented as fake
 local state.
+
+`xtask gates check` enforces the human/machine node set, unique migration
+owner, source commit and symbol scope, browser exclusion, path/map references,
+status evidence, and per-node gate binding. The manifest remains a design
+baseline; `inventoried` does not mean implemented.

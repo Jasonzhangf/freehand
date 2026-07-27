@@ -8,9 +8,12 @@
 - SOP: `docs/migrations/openminis-ui/function-map-sop.md`
 - target product tree: `docs/design/mobile-webui-ui-tree.md`
 - browser: explicitly excluded
+- architecture gate: `cargo run -p xtask -- gates check`
 
 This tree describes the complete non-browser UI migration scope. It describes
 semantic parity and Freehand target ownership, not visual parity.
+All current non-blocked nodes start at `inventoried`; no implementation or
+online-verification claim is made by this baseline.
 
 ## Tree
 
@@ -102,61 +105,61 @@ Layer 7  Android platform bridge
 
 | Node | Source reference | Freehand target | Initial status |
 | --- | --- | --- | --- |
-| `foundation.root` | `Views/ContentView.swift` | app shell, route controller, edge registry | `owner_mapped` |
-| `foundation.surface_contract` | OpenMinis view hierarchy as semantic input | `surfaces/*/{index,model,view,controls}` | `contract_ready` |
-| `foundation.protocol_calls` | OpenMinis local action wiring, semantics only | generated ADP command/query path | `owner_mapped` |
+| `foundation.root` | `Views/ContentView.swift` | app shell, route controller, edge registry | `inventoried` |
+| `foundation.surface_contract` | OpenMinis view hierarchy as semantic input | `surfaces/*/{index,model,view,controls}` | `inventoried` |
+| `foundation.protocol_calls` | OpenMinis local action wiring, semantics only | generated ADP command/query path | `inventoried` |
 | `foundation.shared_states` | loading/empty/error/sheet patterns | shared render contracts | `inventoried` |
 
 ### Home and session navigation
 
 | Node | Source reference | Freehand target | Initial status |
 | --- | --- | --- | --- |
-| `home.dashboard` | `Views/ContentView.swift`, Chat store UI usage | `surfaces/home-dashboard` | `source_bound` |
-| `session_detail.root` | `Views/Chat/AIChatView.swift` | `surfaces/session-detail` | `implementation_in_progress` |
-| `session_search.root` | session navigation/search behavior | `surfaces/session-search` | `source_bound` |
-| `new_session.root` | new-chat/session actions | `surfaces/new-session` | `source_bound` |
-| `session_detail.agent_sheet` | session-scoped tool/agent detail patterns | SessionDetail scoped Agent sheet | `implementation_in_progress` |
+| `home.dashboard` | `Views/ContentView.swift`, Chat store UI usage | `surfaces/home-dashboard` | `inventoried` |
+| `session_detail.root` | `Views/Chat/AIChatView.swift` | `surfaces/session-detail` | `inventoried` |
+| `session_search.root` | session navigation/search behavior | `surfaces/session-search` | `inventoried` |
+| `new_session.root` | new-chat/session actions | `surfaces/new-session` | `inventoried` |
+| `session_detail.agent_sheet` | session-scoped tool/agent detail patterns | SessionDetail scoped Agent sheet | `inventoried` |
 
 ### Transcript and turn blocks
 
 | Node | Source reference | Required target semantic | Initial status |
 | --- | --- | --- | --- |
-| `turn_blocks.user` | `ChatMessageViews.swift` | chronological user row | `implementation_in_progress` |
-| `turn_blocks.assistant` | `AssistantBlockView.swift` | assistant text/final rows | `implementation_in_progress` |
-| `turn_blocks.reasoning` | `AssistantBlockView.swift` | nonterminal reasoning/model wait | `implementation_in_progress` |
-| `turn_blocks.tool_activity` | `ToolLiveSheet.swift`, `ChatModels.swift` | waiting/running/completed/failed/cancelled tool rows | `implementation_in_progress` |
-| `turn_blocks.attachment` | `Views/Chat/Media/*`, `ChatModels.swift` | metadata-only persisted attachment display | `owner_mapped` |
+| `turn_blocks.user` | `ChatMessageViews.swift` | chronological user row | `inventoried` |
+| `turn_blocks.assistant` | `AssistantBlockView.swift` | assistant text/final rows | `inventoried` |
+| `turn_blocks.reasoning` | `AssistantBlockView.swift` | nonterminal reasoning/model wait | `inventoried` |
+| `turn_blocks.tool_activity` | `ToolLiveSheet.swift`, `ChatModels.swift` | waiting/running/completed/failed/cancelled tool rows | `inventoried` |
+| `turn_blocks.attachment` | `Views/Chat/Media/*`, `ChatModels.swift` | metadata-only persisted attachment display | `inventoried` |
 | `turn_blocks.artifact` | file/media preview semantics | typed artifact link/preview | `blocked_resource_missing` |
-| `turn_blocks.error` | provider/tool/chat visible errors | typed visible failure block | `owner_mapped` |
+| `turn_blocks.error` | provider/tool/chat visible errors | typed visible failure block | `inventoried` |
 
 ### Composer
 
 | Node | Source reference | Required target semantic | Initial status |
 | --- | --- | --- | --- |
-| `composer.text_submit` | `ChatInputBar.swift` | session-bound submit | `source_bound` |
-| `composer.attachments` | `AIChatViewModel+Attachments.swift`, `ChatInputBar.swift` | transient draft + metadata persistence | `source_bound` |
+| `composer.text_submit` | `ChatInputBar.swift` | session-bound submit | `inventoried` |
+| `composer.attachments` | `AIChatViewModel+Attachments.swift`, `ChatInputBar.swift` | transient draft + metadata persistence | `inventoried` |
 | `composer.queue` | `ChatModels.swift::QueuedPrompt` | queued prompt projection/control | `blocked_owner_missing` |
-| `composer.stop_continue` | chat cancellation/retry controls | owner-backed cancel/continue | `source_bound` |
+| `composer.stop_continue` | chat cancellation/retry controls | owner-backed cancel/continue | `inventoried` |
 | `composer.voice` | `Views/Chat/Voice/*` | deferred platform capability | `blocked_owner_missing` |
 
 ### Tools
 
 | Node | Source reference | Required target semantic | Initial status |
 | --- | --- | --- | --- |
-| `tools.registry` | `AIChatViewModel+ToolDefinitions.swift` as source inventory only | owner-safe built-in registry | `source_bound` |
-| `tools.detail` | OpenMinis tool detail/live presentation | schema/examples/guidance and lifecycle detail | `source_bound` |
-| `tools.activity` | `ToolLiveSheet.swift`, assistant tool blocks | session-specific Tool Call/Result blocks | `implementation_in_progress` |
+| `tools.registry` | `AIChatViewModel+ToolDefinitions.swift` as source inventory only | owner-safe built-in registry | `inventoried` |
+| `tools.detail` | OpenMinis tool detail/live presentation | schema/examples/guidance and lifecycle detail | `inventoried` |
+| `tools.activity` | `ToolLiveSheet.swift`, assistant tool blocks | session-specific Tool Call/Result blocks | `inventoried` |
 | `tools.permissions` | `OffloadPermissionDialog.swift` and permission settings | typed permission/confirmation model | `blocked_owner_missing` |
 
 ### Settings and basic configuration
 
 | Node | OpenMinis source family | Freehand target | Initial status |
 | --- | --- | --- | --- |
-| `settings.root` | `Views/Settings/*`, `Views/ContentView.swift` | Settings stack | `source_bound` |
-| `settings.models` | `Views/Providers/*` | provider list/detail, model selection/groups | `implementation_in_progress` |
-| `settings.agent_runtime` | agent loop/background settings semantics | Worker/runtime owner projection | `owner_mapped` |
-| `settings.connection` | network/offload/config semantics | daemon connection and Android bridge status | `owner_mapped` |
-| `settings.observability` | logs/audit/storage diagnostic views | safe diagnostics projection | `owner_mapped` |
+| `settings.root` | `Views/Settings/*`, `Views/ContentView.swift` | Settings stack | `inventoried` |
+| `settings.models` | `Views/Providers/*` | provider list/detail, model selection/groups | `inventoried` |
+| `settings.agent_runtime` | agent loop/background settings semantics | Worker/runtime owner projection | `inventoried` |
+| `settings.connection` | network/offload/config semantics | daemon connection and Android bridge status | `inventoried` |
+| `settings.observability` | logs/audit/storage diagnostic views | safe diagnostics projection | `inventoried` |
 | `settings.appearance` | font/theme preferences | transient/persisted UI preference owner | `blocked_owner_missing` |
 | `settings.about` | `AboutView.swift` | build/version/about | `inventoried` |
 
@@ -164,7 +167,7 @@ Layer 7  Android platform bridge
 
 | Node | OpenMinis source family | Freehand target | Initial status |
 | --- | --- | --- | --- |
-| `timer.dashboard` | alarm/background activity views | owner-backed Timer dashboard | `source_bound` |
+| `timer.dashboard` | alarm/background activity views | owner-backed Timer dashboard | `inventoried` |
 | `files_artifacts.root` | `FileBrowserView.swift`, media previews | files/artifacts list and preview | `blocked_resource_missing` |
 | `skills.root` | `SkillsManagementView.swift`, `SessionSkillsView.swift` | capability/Skills registry and detail | `blocked_protocol_missing` |
 | `memory.root` | `MemoryManagementView.swift`, `SessionMemoryView.swift` | Memory registry/session relation | `blocked_resource_missing` |
@@ -174,7 +177,7 @@ Layer 7  Android platform bridge
 
 | Node | Source reference | Freehand target | Initial status |
 | --- | --- | --- | --- |
-| `platform.android_bridge` | OpenMinis platform integrations as behavior references only | file picker, notification, download/open, back/keyboard/insets/update | `owner_mapped` |
+| `platform.android_bridge` | OpenMinis platform integrations as behavior references only | file picker, notification, download/open, back/keyboard/insets/update | `inventoried` |
 
 ## Shared State Contract
 
