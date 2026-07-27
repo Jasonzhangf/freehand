@@ -5031,6 +5031,22 @@ async fn run_adp_smoke_async(url: String) -> Result<String, String> {
 type AdpWebSocket =
     tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>>;
 
+fn adp_client_capabilities() -> Vec<String> {
+    let mut capabilities = vec![freehand_ui_protocol::UI_ADP_HANDSHAKE_CAPABILITY.to_owned()];
+    let send_internal_token = std::env::var("FREEHAND_ADP_SEND_INTERNAL_COMMAND_TOKEN")
+        .ok()
+        .is_some_and(|value| value == "1" || value.eq_ignore_ascii_case("true"));
+    if send_internal_token
+        && let Ok(token) = std::env::var("FREEHAND_ADP_INTERNAL_COMMAND_TOKEN")
+        && !token.trim().is_empty()
+    {
+        capabilities.push(freehand_ui_protocol::adp_internal_command_capability(
+            &token,
+        ));
+    }
+    capabilities
+}
+
 async fn connect_adp(url: &str, client_name: &str) -> Result<AdpWebSocket, String> {
     let (mut socket, _) = timeout(Duration::from_secs(10), connect_async(url))
         .await
@@ -5042,7 +5058,7 @@ async fn connect_adp(url: &str, client_name: &str) -> Result<AdpWebSocket, Strin
         UiAdpRequest::Handshake {
             request_id: request_id.clone(),
             client_name: client_name.to_owned(),
-            capabilities: vec![freehand_ui_protocol::UI_ADP_HANDSHAKE_CAPABILITY.to_owned()],
+            capabilities: adp_client_capabilities(),
         },
     )
     .await?;

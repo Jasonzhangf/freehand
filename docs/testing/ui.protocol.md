@@ -29,9 +29,9 @@
   - ADP query frames return the same snapshot truth without requiring WebUI DOM
   - task list/history ADP query frames use protocol-owned commands and UI-safe DTOs while runtime owner code supplies persisted task truth
   - Phase 1 TaskBoard/AgentBoard/AgentLifecycle ADP query frames use protocol-owned commands and UI-safe DTOs while runtime owner code supplies owner truth; task DTOs carry parent/observing session scope, canonical Worker session id, and task-owner `created_at`
-  - task mutation ADP command frames use protocol-owned command DTOs while runtime/task owners perform create/create_agent/assign/claim/review/reject/approve/close mutation and persistence
-  - Phase 1 ApplyExecutionFact/RunSchedulerTick ADP command frames use protocol-owned command DTOs while runtime/task owners perform execution-fact sync and scheduler fact emission
-  - Phase 2B QueryEventInbox/RunMasterPoll/QueryMasterPoll ADP frames use protocol-owned DTOs
+  - public task mutation ADP command frames use protocol-owned command DTOs while runtime/task owners perform create/create_agent/assign/review/reject/approve/close mutation and persistence; direct worker claim and scheduler/execution-fact commands are internal-only and rejected on public ADP command ingress
+  - Phase 1 ApplyExecutionFact/RunSchedulerTick use protocol-owned DTOs for internal runtime/task execution-fact sync and scheduler fact emission, but are excluded from public ADP command frames
+  - Phase 2B QueryEventInbox/QueryMasterPoll public ADP query frames and internal RunMasterPoll DTOs use protocol-owned DTOs
     while runtime/task owners supply event rows, cursor truth, and
     classifications
   - RunMasterPoll cursor mode is explicit: `replay_from_start=true` is allowed
@@ -111,17 +111,17 @@
   - duplicate same-`tool_call_id` tool-call projection upserts one activity and one public tool card
   - debug-event ingestion and receiver-drain behavior
   - ADP frame serialization, handshake frame shape, and missing/unsupported protocol-version rejection
-  - ADP protocol manifest exhaustiveness covers every `UiCommand` descriptor, frame class, owner routing, generated JSON manifest, and generated WebUI constructor module
+  - ADP protocol manifest exhaustiveness covers every public `UiCommand` descriptor, frame class, owner routing, generated JSON manifest, generated WebUI constructor module, and absence of internal scheduler/worker commands
   - task query command validation covers empty history id and command-ingress rejection for query-route misuse
   - Phase 1 board/lifecycle query commands cover runtime-route-only behavior and protocol-state mismatch rejection
-  - task mutation command validation covers empty task id/title/content/goal/review summary, worker agent id/capabilities, claim execution id, review rejection reason/requirements, and owner-routing to `task.orchestration`
+  - task mutation command validation covers empty task id/title/content/goal/review summary, worker agent id/capabilities, claim execution id, review rejection reason/requirements, owner-routing to `task.orchestration`, and public ADP rejection for direct claim
   - Phase 2A task command validation covers `CreateTaskAgent`, `AssignTask`, `ClaimNextTask`, `RejectTaskReview`, and `UiTaskDispatchCommand`
-  - Phase 1 execution fact and scheduler tick command validation covers owner-routing to `task.orchestration` and malformed command rejection
+  - Phase 1 execution fact and scheduler tick command validation covers internal owner-routing to `task.orchestration`, malformed command rejection, and public ADP rejection before runtime dispatch
   - Phase 2B EventInbox/MasterPoll validation covers owner-routing to
     `task.orchestration`, empty cursor rejection, JSON roundtrip, and
     protocol-state mismatch rejection
-  - Phase 2B RunMasterPoll validation covers replay-from-start plus explicit
-    cursor conflict rejection
+  - Phase 2B internal RunMasterPoll validation covers replay-from-start plus explicit
+    cursor conflict rejection; public ADP command ingress rejects RunMasterPoll
   - Phase 2C WorkerControl validation covers owner-routing to
     `worker.control`, query-route misuse, unknown op rejection, and
     op-specific `question`/`constraint` required fields
@@ -248,17 +248,17 @@
   - tool activity status is now preserved in `UiTurnProjection.tool_activities` and public conversation tool summaries, including failed status for still-waiting tools when terminal truth is failed
   - tool summaries now expose `tool_call_id`, duplicate same-id tool calls are regression-locked to one public card, and completed/failed public tool bodies include tool result detail
   - tool summaries now expose `display` from the `tool.display` owner, and public bodies prefer structured result summaries over raw detail text
-  - ADP request/response frames are versioned (`protocol_version=2`), carry handshake/handshake_accepted variants, and are regression-locked by JSON roundtrip plus missing/unsupported-version tests
+  - ADP request/response frames are versioned (`protocol_version=3`), carry handshake/handshake_accepted variants, and are regression-locked by JSON roundtrip plus missing/unsupported-version tests
   - ADP generated manifest and WebUI constructor module are landed; `xtask gates check` regenerates both artifacts and fails stale or missing committed outputs
   - session cwd summary/transcript projection is landed and regression-locked
   - session management command/query projection is implemented for `CreateSession`, `RenameSession`, `ArchiveSession`, `RestoreSession`, `DeleteSession`, and `RollbackLatestSessionTurn` routing through runtime to `reason.persistence`; `CreateSession.cwd` empty-string rejection and rollback empty-session rejection are regression-locked at the protocol boundary
   - task list/history query commands and DTOs are landed; runtime-backed ADP task query is regression-locked in daemon tests
   - Phase 1 TaskBoard/AgentBoard/AgentLifecycle query commands and DTOs are landed and are runtime-route-only
-  - Phase 1 ApplyExecutionFact/RunSchedulerTick command DTOs are landed and route to `task.orchestration` through runtime
-  - task mutation command DTOs are landed for `CreateTask`, `CreateTaskAgent`, `AssignTask`, `ClaimNextTask`, `SubmitTaskReview`, `RejectTaskReview`, `ApproveTaskReview`, and `CloseTask`; protocol validation rejects empty required fields and runtime owns mutation dispatch
+  - Phase 1 ApplyExecutionFact/RunSchedulerTick command DTOs are landed for internal runtime dispatch, route to `task.orchestration`, and are rejected on public ADP command ingress
+  - task mutation command DTOs are landed for `CreateTask`, `CreateTaskAgent`, `AssignTask`, internal `ClaimNextTask`, `SubmitTaskReview`, `RejectTaskReview`, `ApproveTaskReview`, and `CloseTask`; protocol validation rejects empty required fields, runtime owns mutation dispatch, and public ADP excludes direct worker claim
   - Phase 2A task command validation and owner routing are regression-locked by `phase2a_task_commands_validate_and_route_to_task_orchestration` and `phase2a_task_commands_reject_missing_worker_execution_and_review_fields`
-  - Phase 2B EventInbox/MasterPoll DTOs are landed and regression-locked by
-    `phase2b_event_inbox_and_master_poll_validate_and_route_to_task_orchestration`
+  - Phase 2B EventInbox/public QueryMasterPoll/internal RunMasterPoll DTOs are landed and regression-locked by
+    `phase2b_event_inbox_and_master_poll_validate_and_route_to_task_orchestration`; server public ADP rejects RunMasterPoll command ingress
   - Phase 2C WorkerControl command/query DTOs are landed and regression-locked
     by `worker_control_command_validates_and_routes_to_worker_control`,
     `worker_control_command_rejects_missing_fields`, and
@@ -277,5 +277,6 @@
     `cargo test -p freehand-ui-protocol session_search -- --nocapture --test-threads=1`
 
   - `accept_query_ingress` accepts QueryMasterPoll and rejects RunMasterPoll/ApplyExecutionFact/SubmitUserInput on the ADP query route with `direct_task_mutation_forbidden`
+  - public ADP command-surface proof: `cargo test -p freehand-server adp_query_frame_rejects_mutations_before_runtime_query_port -- --test-threads=1` rejects `ApplyExecutionFact` command ingress with `adp_command_not_public`; `cargo test -p freehand-ui-protocol adp_protocol_manifest_covers_all_command_variants -- --test-threads=1` proves `ClaimNextTask`, `ApplyExecutionFact`, `RunSchedulerTick`, and `RunMasterPoll` are absent from public generated artifacts while `QueryMasterPoll` remains public
   - focused proof: `CARGO_TARGET_DIR=/tmp/freehand-target-adp-version cargo test -p freehand-ui-protocol adp -- --test-threads=1` covers versioned request/response/handshake roundtrip and version rejection
   - generated-artifact proof: `CARGO_TARGET_DIR=/tmp/freehand-target-adp-schema cargo test -p freehand-ui-protocol adp -- --test-threads=1` covers the manifest/constructor exporter test; `cargo run -p xtask -- gates check` re-exports and diffs the committed generated artifacts

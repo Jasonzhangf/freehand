@@ -3511,12 +3511,12 @@ fn verify_adp_protocol_artifacts(root: &Path) -> Result<(), String> {
 
     require_contains(
         &expected_json_body,
-        "\"protocol_version\": 2",
+        "\"protocol_version\": 3",
         "crates/freehand-ui-protocol/generated/adp-protocol.schema.json",
     )?;
     require_contains(
         &expected_json_body,
-        "\"handshake_capability\": \"adp.v2.handshake\"",
+        "\"handshake_capability\": \"adp.v3.handshake\"",
         "crates/freehand-ui-protocol/generated/adp-protocol.schema.json",
     )?;
     require_contains(

@@ -55,6 +55,7 @@
   ],
   "error_mainline": [
     "invalid command shape returns explicit usage",
+    "CLI Phase 1/2B foundation samples that send internal scheduler/worker commands over /adp require matching server FREEHAND_ADP_INTERNAL_COMMAND_TOKEN plus explicit CLI FREEHAND_ADP_SEND_INTERNAL_COMMAND_TOKEN=1 before the CLI sends its local token, otherwise fail explicitly with adp_command_not_public",
     "missing config or missing agent selection returns explicit config errors",
     "smoke runtime failures return explicit reason or runtime errors",
     "ADP connect, send, receive, and decode timeouts return explicit terminal errors",
@@ -243,10 +244,10 @@
       "symbol_path": "run_phase1_foundation_sample / run_phase1_foundation_sample_async / run_phase1_foundation_verify_async",
       "file_path": "apps/freehand-cli/src/main.rs",
       "responsibility": "drive Phase 1 TaskBoard, AgentBoard, ExecutionFact, SchedulerTick, and same-id restart verification through ADP",
-      "input_semantic": "ADP WebSocket URL plus optional verify ids",
+      "input_semantic": "ADP WebSocket URL plus optional verify ids plus ADP handshake",
       "output_semantic": "terminal-facing Phase 1 foundation evidence or explicit ADP/query failure",
-      "caller": "CLI dispatcher",
-      "callee": "daemon /adp",
+      "caller": "CLI dispatcher using ADP client",
+      "callee": "daemon /adp public query/command path for public commands plus server-token-gated internal harness command path",
       "binding_status": "bound"
     },
     {
@@ -254,10 +255,10 @@
       "symbol_path": "run_master_worker_foundation_sample / run_master_worker_foundation_sample_async / verify_master_worker_foundation_truth",
       "file_path": "apps/freehand-cli/src/main.rs",
       "responsibility": "drive Phase 2A master/worker task execution loop and same-id restart verification through ADP",
-      "input_semantic": "ADP WebSocket URL plus optional verify ids",
+      "input_semantic": "ADP WebSocket URL plus optional verify ids plus ADP handshake",
       "output_semantic": "terminal-facing worker lifecycle evidence or explicit ADP/query failure",
-      "caller": "CLI dispatcher",
-      "callee": "daemon /adp",
+      "caller": "CLI dispatcher using ADP client",
+      "callee": "daemon /adp public query/command path for public commands plus server-token-gated internal harness command path",
       "binding_status": "bound"
     },
     {
@@ -298,10 +299,10 @@
       "symbol_path": "run_master_poll_foundation_sample / run_master_poll_foundation_sample_async / verify_master_poll_foundation_truth",
       "file_path": "apps/freehand-cli/src/main.rs",
       "responsibility": "drive Phase 2B EventInbox and MasterPoll loop, reread owner-backed final cursor after command poll, and perform same-cursor restart verification through ADP",
-      "input_semantic": "ADP WebSocket URL plus optional verify cursor/task/execution/agent ids",
+      "input_semantic": "ADP WebSocket URL plus optional verify cursor/task/execution/agent ids plus ADP handshake",
       "output_semantic": "terminal-facing master poll evidence or explicit ADP/query failure",
-      "caller": "CLI dispatcher",
-      "callee": "daemon /adp",
+      "caller": "CLI dispatcher using ADP client",
+      "callee": "daemon /adp public query/command path for public commands plus server-token-gated internal harness command path",
       "binding_status": "bound"
     },
     {
@@ -397,10 +398,10 @@
       "symbol_path": "run_worker_control_foundation_sample / run_worker_control_foundation_sample_async / verify_worker_control_foundation_truth",
       "file_path": "apps/freehand-cli/src/main.rs",
       "responsibility": "drive Phase 2C worker-control query/safe-point/pause/resume/cancel loop and same-id restart verification through ADP",
-      "input_semantic": "ADP URL plus optional verify control/task/execution/agent ids",
+      "input_semantic": "ADP URL plus optional verify control/task/execution/agent ids plus ADP handshake",
       "output_semantic": "terminal-facing worker-control evidence or explicit ADP/query failure",
-      "caller": "CLI dispatcher",
-      "callee": "daemon /adp",
+      "caller": "CLI dispatcher using ADP client",
+      "callee": "daemon /adp public query/command path for public commands plus server-token-gated internal harness command path",
       "binding_status": "bound"
     }
   ],

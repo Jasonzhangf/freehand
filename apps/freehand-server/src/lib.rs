@@ -29,8 +29,9 @@ use freehand_ui_protocol::{
     UiClientKind, UiCommand, UiCommandDispatchFailure, UiCommandDispatchPort,
     UiCommandDispatchReceipt, UiProjection, UiProtocolState, UiPublicTurnProjection, UiQueryResult,
     UiRuntimeQueryPort, UiSubscriptionEvent, UiTurnProjection, accept_query_ingress,
-    adp_server_capabilities, build_command_dispatch_envelope,
-    checkpoint_projection_from_runtime_summary, dispatch_port_failure, protocol_rejection,
+    adp_internal_command_token_from_capability, adp_server_capabilities,
+    build_command_dispatch_envelope, checkpoint_projection_from_runtime_summary,
+    dispatch_port_failure, is_internal_adp_command, is_public_adp_command, protocol_rejection,
     public_turn_projection, subscription_matches, subscription_selector,
     turn_projection_for_client, turn_projection_from_events,
 };
@@ -51,6 +52,7 @@ struct WebUiState {
     protocol_state: Arc<Mutex<UiProtocolState>>,
     command_dispatch_port: Arc<dyn UiCommandDispatchPort>,
     runtime_query_port: Arc<dyn UiRuntimeQueryPort>,
+    internal_adp_command_token: Option<String>,
 }
 
 pub fn usage(binary_name: &str) -> String {
@@ -82,6 +84,22 @@ pub fn build_webui_router(
     command_dispatch_port: Arc<dyn UiCommandDispatchPort>,
     runtime_query_port: Arc<dyn UiRuntimeQueryPort>,
 ) -> Router {
+    build_webui_router_with_internal_adp_command_token(
+        protocol_state,
+        command_dispatch_port,
+        runtime_query_port,
+        std::env::var("FREEHAND_ADP_INTERNAL_COMMAND_TOKEN")
+            .ok()
+            .filter(|token| !token.trim().is_empty()),
+    )
+}
+
+fn build_webui_router_with_internal_adp_command_token(
+    protocol_state: Arc<Mutex<UiProtocolState>>,
+    command_dispatch_port: Arc<dyn UiCommandDispatchPort>,
+    runtime_query_port: Arc<dyn UiRuntimeQueryPort>,
+    internal_adp_command_token: Option<String>,
+) -> Router {
     Router::new()
         .route("/", get(handle_root))
         .route("/android/update.json", get(handle_android_update_manifest))
@@ -111,6 +129,7 @@ pub fn build_webui_router(
             protocol_state,
             command_dispatch_port,
             runtime_query_port,
+            internal_adp_command_token,
         })
 }
 
@@ -292,6 +311,16 @@ async fn handle_command_ingress(
     (StatusCode, Json<UiCommandDispatchReceipt>),
     (StatusCode, Json<UiCommandDispatchFailure>),
 > {
+    if !is_public_adp_command(&command) {
+        return Err((
+            StatusCode::BAD_REQUEST,
+            Json(UiCommandDispatchFailure {
+                code: "adp_command_not_public".to_owned(),
+                message: "command frame is not exposed on the public command surface".to_owned(),
+                retryable: false,
+            }),
+        ));
+    }
     let envelope = build_command_dispatch_envelope(&command).map_err(|err| {
         let rejection = protocol_rejection(err);
         (
@@ -452,6 +481,7 @@ async fn handle_adp_connection(socket: WebSocket, state: WebUiState) {
 
     let mut subscriptions: Vec<(String, SubscriptionSelector)> = Vec::new();
     let mut adp_handshake_accepted = false;
+    let mut adp_internal_commands_accepted = false;
     let mut protocol_receiver = state
         .protocol_state
         .lock()
@@ -473,6 +503,7 @@ async fn handle_adp_connection(socket: WebSocket, state: WebUiState) {
                             &outbound_tx,
                             &mut subscriptions,
                             &mut adp_handshake_accepted,
+                            &mut adp_internal_commands_accepted,
                             text.to_string(),
                         )
                         .await
@@ -532,12 +563,17 @@ async fn handle_adp_text_message(
     outbound_tx: &mpsc::UnboundedSender<UiAdpResponse>,
     subscriptions: &mut Vec<(String, SubscriptionSelector)>,
     adp_handshake_accepted: &mut bool,
+    adp_internal_commands_accepted: &mut bool,
     text: String,
 ) -> Result<(), String> {
     let request: UiAdpRequest =
         serde_json::from_str(&text).map_err(|err| format!("invalid ADP JSON: {err}"))?;
     match request {
-        UiAdpRequest::Handshake { request_id, .. } => {
+        UiAdpRequest::Handshake {
+            request_id,
+            capabilities,
+            ..
+        } => {
             if *adp_handshake_accepted {
                 let _ = outbound_tx.send(UiAdpResponse::Failure {
                     request_id,
@@ -551,6 +587,10 @@ async fn handle_adp_text_message(
                 return Ok(());
             }
             *adp_handshake_accepted = true;
+            *adp_internal_commands_accepted = adp_internal_commands_allowed(
+                state.internal_adp_command_token.as_deref(),
+                &capabilities,
+            );
             let _ = outbound_tx.send(UiAdpResponse::HandshakeAccepted {
                 request_id,
                 server_capabilities: adp_server_capabilities(),
@@ -565,7 +605,14 @@ async fn handle_adp_text_message(
                 send_adp_handshake_required(outbound_tx, request_id);
                 return Ok(());
             }
-            handle_adp_command(state, outbound_tx, request_id, command).await;
+            handle_adp_command(
+                state,
+                outbound_tx,
+                request_id,
+                command,
+                *adp_internal_commands_accepted,
+            )
+            .await;
             Ok(())
         }
         UiAdpRequest::Query { request_id, query } => {
@@ -592,6 +639,15 @@ async fn handle_adp_text_message(
     }
 }
 
+fn adp_internal_commands_allowed(server_token: Option<&str>, capabilities: &[String]) -> bool {
+    let Some(expected_token) = server_token else {
+        return false;
+    };
+    capabilities.iter().any(|capability| {
+        adp_internal_command_token_from_capability(capability.as_str()) == Some(expected_token)
+    })
+}
+
 fn send_adp_handshake_required(
     outbound_tx: &mpsc::UnboundedSender<UiAdpResponse>,
     request_id: String,
@@ -611,7 +667,22 @@ async fn handle_adp_command(
     outbound_tx: &mpsc::UnboundedSender<UiAdpResponse>,
     request_id: String,
     command: UiCommand,
+    internal_commands_allowed: bool,
 ) {
+    if !(is_public_adp_command(&command)
+        || internal_commands_allowed && is_internal_adp_command(&command))
+    {
+        let _ = outbound_tx.send(UiAdpResponse::Failure {
+            request_id,
+            failure: UiAdpFailure {
+                code: "adp_command_not_public".to_owned(),
+                message: "command frame is not exposed on the public ADP command surface"
+                    .to_owned(),
+                retryable: false,
+            },
+        });
+        return;
+    }
     let envelope = match build_command_dispatch_envelope(&command) {
         Ok(envelope) => envelope,
         Err(err) => {
@@ -1118,6 +1189,21 @@ mod tests {
             command_dispatch_port: Arc<dyn UiCommandDispatchPort>,
             runtime_query_port: Arc<dyn UiRuntimeQueryPort>,
         ) -> Self {
+            Self::spawn_with_state_port_query_and_internal_token(
+                initial_state,
+                command_dispatch_port,
+                runtime_query_port,
+                None,
+            )
+            .await
+        }
+
+        async fn spawn_with_state_port_query_and_internal_token(
+            initial_state: UiProtocolState,
+            command_dispatch_port: Arc<dyn UiCommandDispatchPort>,
+            runtime_query_port: Arc<dyn UiRuntimeQueryPort>,
+            internal_adp_command_token: Option<String>,
+        ) -> Self {
             let listener = TcpListener::bind("127.0.0.1:0").await.expect("bind");
             let addr = listener.local_addr().expect("local addr");
             let protocol_state = Arc::new(Mutex::new(initial_state));
@@ -1129,13 +1215,16 @@ mod tests {
                 let shutdown = async move {
                     let _ = shutdown_rx.await;
                 };
-                serve_webui_listener(
+                axum::serve(
                     listener,
-                    protocol_state_for_task,
-                    command_dispatch_port_for_task,
-                    runtime_query_port_for_task,
-                    shutdown,
+                    build_webui_router_with_internal_adp_command_token(
+                        protocol_state_for_task,
+                        command_dispatch_port_for_task,
+                        runtime_query_port_for_task,
+                        internal_adp_command_token,
+                    ),
                 )
+                .with_graceful_shutdown(shutdown)
                 .await
                 .expect("serve");
             });
@@ -1307,12 +1396,25 @@ mod tests {
             tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>,
         >,
     ) {
+        perform_adp_handshake_with_capabilities(
+            socket,
+            vec![freehand_ui_protocol::UI_ADP_HANDSHAKE_CAPABILITY.to_owned()],
+        )
+        .await;
+    }
+
+    async fn perform_adp_handshake_with_capabilities(
+        socket: &mut tokio_tungstenite::WebSocketStream<
+            tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>,
+        >,
+        capabilities: Vec<String>,
+    ) {
         send_adp_request(
             socket,
             UiAdpRequest::Handshake {
                 request_id: "test-handshake".to_owned(),
                 client_name: "freehand-server-test".to_owned(),
-                capabilities: vec![freehand_ui_protocol::UI_ADP_HANDSHAKE_CAPABILITY.to_owned()],
+                capabilities,
             },
         )
         .await;
@@ -1732,6 +1834,95 @@ mod tests {
             1,
             "mutating query frames must be rejected before runtime query port"
         );
+
+        send_adp_request(
+            &mut socket,
+            UiAdpRequest::Command {
+                request_id: "execution-fact-command".to_owned(),
+                command: UiCommand::ApplyExecutionFact {
+                    fact: freehand_ui_protocol::UiExecutionFactCommand {
+                        execution_id: "exec-2".to_owned(),
+                        task_id: "task-2".to_owned(),
+                        agent_id: AgentId::new("worker-2"),
+                        turn_id: None,
+                        kind: freehand_ui_protocol::UiExecutionFactKind::ReviewReady {
+                            summary: "internal command must not be public ADP".to_owned(),
+                            deliverables: Vec::new(),
+                            evidence: Vec::new(),
+                        },
+                    },
+                },
+            },
+        )
+        .await;
+        match next_adp_response(&mut socket).await {
+            UiAdpResponse::Failure {
+                request_id,
+                failure,
+            } => {
+                assert_eq!(request_id, "execution-fact-command");
+                assert_eq!(failure.code, "adp_command_not_public");
+                assert!(!failure.retryable);
+            }
+            other => panic!("internal command frame should be rejected: {other:?}"),
+        }
+
+        let token_query_port = Arc::new(CountingRuntimeQueryPort::default());
+        let token_server = TestServer::spawn_with_state_port_query_and_internal_token(
+            UiProtocolState::default(),
+            Arc::new(StaticUiCommandDispatchPort::default()),
+            token_query_port,
+            Some("server-owned-internal-token".to_owned()),
+        )
+        .await;
+        let (mut token_socket, _) = connect_async(format!(
+            "{}/adp",
+            token_server.base_url.replace("http://", "ws://")
+        ))
+        .await
+        .expect("token adp connect");
+        perform_adp_handshake_with_capabilities(
+            &mut token_socket,
+            vec![
+                freehand_ui_protocol::UI_ADP_HANDSHAKE_CAPABILITY.to_owned(),
+                freehand_ui_protocol::adp_internal_command_capability(
+                    "server-owned-internal-token",
+                ),
+            ],
+        )
+        .await;
+        send_adp_request(
+            &mut token_socket,
+            UiAdpRequest::Command {
+                request_id: "execution-fact-token-command".to_owned(),
+                command: UiCommand::ApplyExecutionFact {
+                    fact: freehand_ui_protocol::UiExecutionFactCommand {
+                        execution_id: "exec-3".to_owned(),
+                        task_id: "task-3".to_owned(),
+                        agent_id: AgentId::new("worker-3"),
+                        turn_id: None,
+                        kind: freehand_ui_protocol::UiExecutionFactKind::ReviewReady {
+                            summary: "server-owned token admits internal ADP".to_owned(),
+                            deliverables: Vec::new(),
+                            evidence: Vec::new(),
+                        },
+                    },
+                },
+            },
+        )
+        .await;
+        match next_adp_response(&mut token_socket).await {
+            UiAdpResponse::CommandReceipt {
+                request_id,
+                receipt,
+            } => {
+                assert_eq!(request_id, "execution-fact-token-command");
+                assert_eq!(receipt.target_feature_id, "task.orchestration");
+            }
+            other => panic!("server-owned token should admit internal command: {other:?}"),
+        }
+        let _ = token_socket.close(None).await;
+        token_server.stop().await;
 
         let _ = socket.close(None).await;
         server.stop().await;
@@ -2447,7 +2638,7 @@ mod tests {
         let adp_protocol_body = adp_protocol.text().await.expect("adp-protocol body");
         assert!(adp_protocol_body.contains("export function adpQueryOf"));
         assert!(adp_protocol_body.contains("export function adpCommandOf"));
-        assert!(adp_protocol_body.contains("\"protocol_version\": 2"));
+        assert!(adp_protocol_body.contains("\"protocol_version\": 3"));
         assert!(adp_protocol_body.contains("QueryConfigStatus"));
         assert!(adp_protocol_body.contains("CreateSession"));
 
@@ -2920,6 +3111,32 @@ mod tests {
         let rejected: UiCommandDispatchFailure = rejected.json().await.expect("reject json");
         assert_eq!(rejected.code, "ingress_command_kind_mismatch");
         assert!(!rejected.retryable);
+
+        let internal_rejected = client
+            .post(format!("{}/ui/command", server.base_url))
+            .json(&UiCommand::ApplyExecutionFact {
+                fact: freehand_ui_protocol::UiExecutionFactCommand {
+                    execution_id: "legacy-http-exec".to_owned(),
+                    task_id: "legacy-http-task".to_owned(),
+                    agent_id: AgentId::new("worker-legacy-http"),
+                    turn_id: None,
+                    kind: freehand_ui_protocol::UiExecutionFactKind::ReviewReady {
+                        summary: "legacy HTTP must not bypass public command surface".to_owned(),
+                        deliverables: Vec::new(),
+                        evidence: Vec::new(),
+                    },
+                },
+            })
+            .send()
+            .await
+            .expect("internal reject response");
+        assert_eq!(internal_rejected.status(), StatusCode::BAD_REQUEST);
+        let internal_rejected: UiCommandDispatchFailure = internal_rejected
+            .json()
+            .await
+            .expect("internal reject json");
+        assert_eq!(internal_rejected.code, "adp_command_not_public");
+        assert!(!internal_rejected.retryable);
 
         server.stop().await;
     }

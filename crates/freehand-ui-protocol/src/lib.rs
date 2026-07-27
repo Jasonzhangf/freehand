@@ -1414,8 +1414,20 @@ pub struct UiAdpFailure {
     pub retryable: bool,
 }
 
-pub const UI_ADP_PROTOCOL_VERSION: u32 = 2;
-pub const UI_ADP_HANDSHAKE_CAPABILITY: &str = "adp.v2.handshake";
+pub const UI_ADP_PROTOCOL_VERSION: u32 = 3;
+pub const UI_ADP_HANDSHAKE_CAPABILITY: &str = "adp.v3.handshake";
+pub const UI_ADP_INTERNAL_COMMAND_CAPABILITY: &str = "adp.v3.internal_command_ingress";
+
+pub fn adp_internal_command_capability(token: &str) -> String {
+    format!("{}:{}", UI_ADP_INTERNAL_COMMAND_CAPABILITY, token)
+}
+
+pub fn adp_internal_command_token_from_capability(capability: &str) -> Option<&str> {
+    capability
+        .strip_prefix(UI_ADP_INTERNAL_COMMAND_CAPABILITY)?
+        .strip_prefix(':')
+        .filter(|token| !token.trim().is_empty())
+}
 
 pub fn adp_protocol_version() -> u32 {
     UI_ADP_PROTOCOL_VERSION
@@ -1445,6 +1457,7 @@ pub struct UiAdpCommandManifestEntry {
 pub fn adp_command_manifest_entries() -> Vec<UiAdpCommandManifestEntry> {
     UI_COMMAND_DESCRIPTORS
         .iter()
+        .filter(|descriptor| is_public_adp_command_descriptor(descriptor))
         .map(|descriptor| UiAdpCommandManifestEntry {
             serde_name: descriptor.serde_name.to_owned(),
             semantic_kind: descriptor.semantic_kind.to_owned(),
@@ -3831,6 +3844,13 @@ struct UiCommandDescriptor {
     frame_class: UiCommandFrameClass,
     target_owner_feature: &'static str,
     target_owner_module: &'static str,
+    exposure: UiAdpCommandExposure,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum UiAdpCommandExposure {
+    Public,
+    Internal,
 }
 
 const UI_COMMAND_DESCRIPTORS: &[UiCommandDescriptor] = &[
@@ -3840,6 +3860,7 @@ const UI_COMMAND_DESCRIPTORS: &[UiCommandDescriptor] = &[
         frame_class: UiCommandFrameClass::Mutation,
         target_owner_feature: "reason.persistence",
         target_owner_module: "crates/freehand-reason",
+        exposure: UiAdpCommandExposure::Public,
     },
     UiCommandDescriptor {
         serde_name: "RenameSession",
@@ -3847,6 +3868,7 @@ const UI_COMMAND_DESCRIPTORS: &[UiCommandDescriptor] = &[
         frame_class: UiCommandFrameClass::Mutation,
         target_owner_feature: "reason.persistence",
         target_owner_module: "crates/freehand-reason",
+        exposure: UiAdpCommandExposure::Public,
     },
     UiCommandDescriptor {
         serde_name: "ArchiveSession",
@@ -3854,6 +3876,7 @@ const UI_COMMAND_DESCRIPTORS: &[UiCommandDescriptor] = &[
         frame_class: UiCommandFrameClass::Mutation,
         target_owner_feature: "reason.persistence",
         target_owner_module: "crates/freehand-reason",
+        exposure: UiAdpCommandExposure::Public,
     },
     UiCommandDescriptor {
         serde_name: "RestoreSession",
@@ -3861,6 +3884,7 @@ const UI_COMMAND_DESCRIPTORS: &[UiCommandDescriptor] = &[
         frame_class: UiCommandFrameClass::Mutation,
         target_owner_feature: "reason.persistence",
         target_owner_module: "crates/freehand-reason",
+        exposure: UiAdpCommandExposure::Public,
     },
     UiCommandDescriptor {
         serde_name: "DeleteSession",
@@ -3868,6 +3892,7 @@ const UI_COMMAND_DESCRIPTORS: &[UiCommandDescriptor] = &[
         frame_class: UiCommandFrameClass::Mutation,
         target_owner_feature: "reason.persistence",
         target_owner_module: "crates/freehand-reason",
+        exposure: UiAdpCommandExposure::Public,
     },
     UiCommandDescriptor {
         serde_name: "RollbackLatestSessionTurn",
@@ -3875,6 +3900,7 @@ const UI_COMMAND_DESCRIPTORS: &[UiCommandDescriptor] = &[
         frame_class: UiCommandFrameClass::Mutation,
         target_owner_feature: "reason.persistence",
         target_owner_module: "crates/freehand-reason",
+        exposure: UiAdpCommandExposure::Public,
     },
     UiCommandDescriptor {
         serde_name: "SubmitUserInput",
@@ -3882,6 +3908,7 @@ const UI_COMMAND_DESCRIPTORS: &[UiCommandDescriptor] = &[
         frame_class: UiCommandFrameClass::Mutation,
         target_owner_feature: "reason.turn",
         target_owner_module: "crates/freehand-reason",
+        exposure: UiAdpCommandExposure::Public,
     },
     UiCommandDescriptor {
         serde_name: "SubscribeLatestActiveTurn",
@@ -3889,6 +3916,7 @@ const UI_COMMAND_DESCRIPTORS: &[UiCommandDescriptor] = &[
         frame_class: UiCommandFrameClass::Subscribe,
         target_owner_feature: "ui.protocol",
         target_owner_module: "crates/freehand-ui-protocol",
+        exposure: UiAdpCommandExposure::Public,
     },
     UiCommandDescriptor {
         serde_name: "SubscribeTurn",
@@ -3896,6 +3924,7 @@ const UI_COMMAND_DESCRIPTORS: &[UiCommandDescriptor] = &[
         frame_class: UiCommandFrameClass::Subscribe,
         target_owner_feature: "ui.protocol",
         target_owner_module: "crates/freehand-ui-protocol",
+        exposure: UiAdpCommandExposure::Public,
     },
     UiCommandDescriptor {
         serde_name: "SubscribeNodeStatus",
@@ -3903,6 +3932,7 @@ const UI_COMMAND_DESCRIPTORS: &[UiCommandDescriptor] = &[
         frame_class: UiCommandFrameClass::Subscribe,
         target_owner_feature: "ui.protocol",
         target_owner_module: "crates/freehand-ui-protocol",
+        exposure: UiAdpCommandExposure::Public,
     },
     UiCommandDescriptor {
         serde_name: "SubscribeProgress",
@@ -3910,6 +3940,7 @@ const UI_COMMAND_DESCRIPTORS: &[UiCommandDescriptor] = &[
         frame_class: UiCommandFrameClass::Subscribe,
         target_owner_feature: "ui.protocol",
         target_owner_module: "crates/freehand-ui-protocol",
+        exposure: UiAdpCommandExposure::Public,
     },
     UiCommandDescriptor {
         serde_name: "SubscribeTaskList",
@@ -3917,6 +3948,7 @@ const UI_COMMAND_DESCRIPTORS: &[UiCommandDescriptor] = &[
         frame_class: UiCommandFrameClass::Subscribe,
         target_owner_feature: "ui.protocol",
         target_owner_module: "crates/freehand-ui-protocol",
+        exposure: UiAdpCommandExposure::Public,
     },
     UiCommandDescriptor {
         serde_name: "SubscribeErrorCenterEvents",
@@ -3924,6 +3956,7 @@ const UI_COMMAND_DESCRIPTORS: &[UiCommandDescriptor] = &[
         frame_class: UiCommandFrameClass::Subscribe,
         target_owner_feature: "ui.protocol",
         target_owner_module: "crates/freehand-ui-protocol",
+        exposure: UiAdpCommandExposure::Public,
     },
     UiCommandDescriptor {
         serde_name: "SubscribeDebugState",
@@ -3931,6 +3964,7 @@ const UI_COMMAND_DESCRIPTORS: &[UiCommandDescriptor] = &[
         frame_class: UiCommandFrameClass::Subscribe,
         target_owner_feature: "ui.protocol",
         target_owner_module: "crates/freehand-ui-protocol",
+        exposure: UiAdpCommandExposure::Public,
     },
     UiCommandDescriptor {
         serde_name: "QueryLatestActiveTurn",
@@ -3938,6 +3972,7 @@ const UI_COMMAND_DESCRIPTORS: &[UiCommandDescriptor] = &[
         frame_class: UiCommandFrameClass::Query,
         target_owner_feature: "ui.protocol",
         target_owner_module: "crates/freehand-ui-protocol",
+        exposure: UiAdpCommandExposure::Public,
     },
     UiCommandDescriptor {
         serde_name: "QueryTurn",
@@ -3945,6 +3980,7 @@ const UI_COMMAND_DESCRIPTORS: &[UiCommandDescriptor] = &[
         frame_class: UiCommandFrameClass::Query,
         target_owner_feature: "ui.protocol",
         target_owner_module: "crates/freehand-ui-protocol",
+        exposure: UiAdpCommandExposure::Public,
     },
     UiCommandDescriptor {
         serde_name: "QuerySessionList",
@@ -3952,6 +3988,7 @@ const UI_COMMAND_DESCRIPTORS: &[UiCommandDescriptor] = &[
         frame_class: UiCommandFrameClass::Query,
         target_owner_feature: "ui.protocol",
         target_owner_module: "crates/freehand-ui-protocol",
+        exposure: UiAdpCommandExposure::Public,
     },
     UiCommandDescriptor {
         serde_name: "QueryArchivedSessionList",
@@ -3959,6 +3996,7 @@ const UI_COMMAND_DESCRIPTORS: &[UiCommandDescriptor] = &[
         frame_class: UiCommandFrameClass::Query,
         target_owner_feature: "ui.protocol",
         target_owner_module: "crates/freehand-ui-protocol",
+        exposure: UiAdpCommandExposure::Public,
     },
     UiCommandDescriptor {
         serde_name: "QuerySessionTurns",
@@ -3966,6 +4004,7 @@ const UI_COMMAND_DESCRIPTORS: &[UiCommandDescriptor] = &[
         frame_class: UiCommandFrameClass::Query,
         target_owner_feature: "ui.protocol",
         target_owner_module: "crates/freehand-ui-protocol",
+        exposure: UiAdpCommandExposure::Public,
     },
     UiCommandDescriptor {
         serde_name: "QuerySessionSearch",
@@ -3973,6 +4012,7 @@ const UI_COMMAND_DESCRIPTORS: &[UiCommandDescriptor] = &[
         frame_class: UiCommandFrameClass::Query,
         target_owner_feature: "ui.protocol",
         target_owner_module: "crates/freehand-ui-protocol",
+        exposure: UiAdpCommandExposure::Public,
     },
     UiCommandDescriptor {
         serde_name: "QueryConfigStatus",
@@ -3980,6 +4020,7 @@ const UI_COMMAND_DESCRIPTORS: &[UiCommandDescriptor] = &[
         frame_class: UiCommandFrameClass::Query,
         target_owner_feature: "ui.protocol",
         target_owner_module: "crates/freehand-ui-protocol",
+        exposure: UiAdpCommandExposure::Public,
     },
     UiCommandDescriptor {
         serde_name: "QueryTaskList",
@@ -3987,6 +4028,7 @@ const UI_COMMAND_DESCRIPTORS: &[UiCommandDescriptor] = &[
         frame_class: UiCommandFrameClass::Query,
         target_owner_feature: "ui.protocol",
         target_owner_module: "crates/freehand-ui-protocol",
+        exposure: UiAdpCommandExposure::Public,
     },
     UiCommandDescriptor {
         serde_name: "QueryTaskBoard",
@@ -3994,6 +4036,7 @@ const UI_COMMAND_DESCRIPTORS: &[UiCommandDescriptor] = &[
         frame_class: UiCommandFrameClass::Query,
         target_owner_feature: "ui.protocol",
         target_owner_module: "crates/freehand-ui-protocol",
+        exposure: UiAdpCommandExposure::Public,
     },
     UiCommandDescriptor {
         serde_name: "QueryEventInbox",
@@ -4001,6 +4044,7 @@ const UI_COMMAND_DESCRIPTORS: &[UiCommandDescriptor] = &[
         frame_class: UiCommandFrameClass::Query,
         target_owner_feature: "ui.protocol",
         target_owner_module: "crates/freehand-ui-protocol",
+        exposure: UiAdpCommandExposure::Public,
     },
     UiCommandDescriptor {
         serde_name: "QueryAgentBoard",
@@ -4008,6 +4052,7 @@ const UI_COMMAND_DESCRIPTORS: &[UiCommandDescriptor] = &[
         frame_class: UiCommandFrameClass::Query,
         target_owner_feature: "ui.protocol",
         target_owner_module: "crates/freehand-ui-protocol",
+        exposure: UiAdpCommandExposure::Public,
     },
     UiCommandDescriptor {
         serde_name: "QueryAgentLifecycle",
@@ -4015,6 +4060,7 @@ const UI_COMMAND_DESCRIPTORS: &[UiCommandDescriptor] = &[
         frame_class: UiCommandFrameClass::Query,
         target_owner_feature: "ui.protocol",
         target_owner_module: "crates/freehand-ui-protocol",
+        exposure: UiAdpCommandExposure::Public,
     },
     UiCommandDescriptor {
         serde_name: "QueryTaskHistory",
@@ -4022,6 +4068,7 @@ const UI_COMMAND_DESCRIPTORS: &[UiCommandDescriptor] = &[
         frame_class: UiCommandFrameClass::Query,
         target_owner_feature: "ui.protocol",
         target_owner_module: "crates/freehand-ui-protocol",
+        exposure: UiAdpCommandExposure::Public,
     },
     UiCommandDescriptor {
         serde_name: "QueryWorkerControl",
@@ -4029,6 +4076,7 @@ const UI_COMMAND_DESCRIPTORS: &[UiCommandDescriptor] = &[
         frame_class: UiCommandFrameClass::Query,
         target_owner_feature: "ui.protocol",
         target_owner_module: "crates/freehand-ui-protocol",
+        exposure: UiAdpCommandExposure::Public,
     },
     UiCommandDescriptor {
         serde_name: "QueryTimerList",
@@ -4036,6 +4084,7 @@ const UI_COMMAND_DESCRIPTORS: &[UiCommandDescriptor] = &[
         frame_class: UiCommandFrameClass::Query,
         target_owner_feature: "ui.protocol",
         target_owner_module: "crates/freehand-ui-protocol",
+        exposure: UiAdpCommandExposure::Public,
     },
     UiCommandDescriptor {
         serde_name: "QueryToolRegistry",
@@ -4043,6 +4092,7 @@ const UI_COMMAND_DESCRIPTORS: &[UiCommandDescriptor] = &[
         frame_class: UiCommandFrameClass::Query,
         target_owner_feature: "ui.protocol",
         target_owner_module: "crates/freehand-ui-protocol",
+        exposure: UiAdpCommandExposure::Public,
     },
     UiCommandDescriptor {
         serde_name: "QueryDiagnostics",
@@ -4050,6 +4100,7 @@ const UI_COMMAND_DESCRIPTORS: &[UiCommandDescriptor] = &[
         frame_class: UiCommandFrameClass::Query,
         target_owner_feature: "ui.protocol",
         target_owner_module: "crates/freehand-ui-protocol",
+        exposure: UiAdpCommandExposure::Public,
     },
     UiCommandDescriptor {
         serde_name: "QueryErrorCenterEvents",
@@ -4057,6 +4108,7 @@ const UI_COMMAND_DESCRIPTORS: &[UiCommandDescriptor] = &[
         frame_class: UiCommandFrameClass::Query,
         target_owner_feature: "ui.protocol",
         target_owner_module: "crates/freehand-ui-protocol",
+        exposure: UiAdpCommandExposure::Public,
     },
     UiCommandDescriptor {
         serde_name: "UpdateProviderConfig",
@@ -4064,6 +4116,7 @@ const UI_COMMAND_DESCRIPTORS: &[UiCommandDescriptor] = &[
         frame_class: UiCommandFrameClass::Mutation,
         target_owner_feature: "config.core",
         target_owner_module: "crates/freehand-config",
+        exposure: UiAdpCommandExposure::Public,
     },
     UiCommandDescriptor {
         serde_name: "UpsertProviderConfig",
@@ -4071,6 +4124,7 @@ const UI_COMMAND_DESCRIPTORS: &[UiCommandDescriptor] = &[
         frame_class: UiCommandFrameClass::Mutation,
         target_owner_feature: "config.core",
         target_owner_module: "crates/freehand-config",
+        exposure: UiAdpCommandExposure::Public,
     },
     UiCommandDescriptor {
         serde_name: "UpsertModelGroupConfig",
@@ -4078,6 +4132,7 @@ const UI_COMMAND_DESCRIPTORS: &[UiCommandDescriptor] = &[
         frame_class: UiCommandFrameClass::Mutation,
         target_owner_feature: "config.core",
         target_owner_module: "crates/freehand-config",
+        exposure: UiAdpCommandExposure::Public,
     },
     UiCommandDescriptor {
         serde_name: "UpdateAgentModelGroupSelection",
@@ -4085,6 +4140,7 @@ const UI_COMMAND_DESCRIPTORS: &[UiCommandDescriptor] = &[
         frame_class: UiCommandFrameClass::Mutation,
         target_owner_feature: "config.core",
         target_owner_module: "crates/freehand-config",
+        exposure: UiAdpCommandExposure::Public,
     },
     UiCommandDescriptor {
         serde_name: "TestProviderWebSearch",
@@ -4092,6 +4148,7 @@ const UI_COMMAND_DESCRIPTORS: &[UiCommandDescriptor] = &[
         frame_class: UiCommandFrameClass::Mutation,
         target_owner_feature: "provider.reason-live-bridge",
         target_owner_module: "crates/freehand-runtime",
+        exposure: UiAdpCommandExposure::Public,
     },
     UiCommandDescriptor {
         serde_name: "ScheduleTimer",
@@ -4099,6 +4156,7 @@ const UI_COMMAND_DESCRIPTORS: &[UiCommandDescriptor] = &[
         frame_class: UiCommandFrameClass::Mutation,
         target_owner_feature: "runtime.master-worker-loop",
         target_owner_module: "crates/freehand-runtime",
+        exposure: UiAdpCommandExposure::Public,
     },
     UiCommandDescriptor {
         serde_name: "CancelTimer",
@@ -4106,6 +4164,7 @@ const UI_COMMAND_DESCRIPTORS: &[UiCommandDescriptor] = &[
         frame_class: UiCommandFrameClass::Mutation,
         target_owner_feature: "runtime.master-worker-loop",
         target_owner_module: "crates/freehand-runtime",
+        exposure: UiAdpCommandExposure::Public,
     },
     UiCommandDescriptor {
         serde_name: "UpdateAgentProviderSelection",
@@ -4113,6 +4172,7 @@ const UI_COMMAND_DESCRIPTORS: &[UiCommandDescriptor] = &[
         frame_class: UiCommandFrameClass::Mutation,
         target_owner_feature: "config.core",
         target_owner_module: "crates/freehand-config",
+        exposure: UiAdpCommandExposure::Public,
     },
     UiCommandDescriptor {
         serde_name: "UpdateAgentResourceConfig",
@@ -4120,6 +4180,7 @@ const UI_COMMAND_DESCRIPTORS: &[UiCommandDescriptor] = &[
         frame_class: UiCommandFrameClass::Mutation,
         target_owner_feature: "config.core",
         target_owner_module: "crates/freehand-config",
+        exposure: UiAdpCommandExposure::Public,
     },
     UiCommandDescriptor {
         serde_name: "CreateTask",
@@ -4127,6 +4188,7 @@ const UI_COMMAND_DESCRIPTORS: &[UiCommandDescriptor] = &[
         frame_class: UiCommandFrameClass::Mutation,
         target_owner_feature: "task.orchestration",
         target_owner_module: "crates/freehand-task",
+        exposure: UiAdpCommandExposure::Public,
     },
     UiCommandDescriptor {
         serde_name: "CreateTaskAgent",
@@ -4134,6 +4196,7 @@ const UI_COMMAND_DESCRIPTORS: &[UiCommandDescriptor] = &[
         frame_class: UiCommandFrameClass::Mutation,
         target_owner_feature: "task.orchestration",
         target_owner_module: "crates/freehand-task",
+        exposure: UiAdpCommandExposure::Public,
     },
     UiCommandDescriptor {
         serde_name: "AssignTask",
@@ -4141,6 +4204,7 @@ const UI_COMMAND_DESCRIPTORS: &[UiCommandDescriptor] = &[
         frame_class: UiCommandFrameClass::Mutation,
         target_owner_feature: "task.orchestration",
         target_owner_module: "crates/freehand-task",
+        exposure: UiAdpCommandExposure::Public,
     },
     UiCommandDescriptor {
         serde_name: "ClaimNextTask",
@@ -4148,6 +4212,7 @@ const UI_COMMAND_DESCRIPTORS: &[UiCommandDescriptor] = &[
         frame_class: UiCommandFrameClass::Mutation,
         target_owner_feature: "task.orchestration",
         target_owner_module: "crates/freehand-task",
+        exposure: UiAdpCommandExposure::Internal,
     },
     UiCommandDescriptor {
         serde_name: "SubmitTaskReview",
@@ -4155,6 +4220,7 @@ const UI_COMMAND_DESCRIPTORS: &[UiCommandDescriptor] = &[
         frame_class: UiCommandFrameClass::Mutation,
         target_owner_feature: "task.orchestration",
         target_owner_module: "crates/freehand-task",
+        exposure: UiAdpCommandExposure::Public,
     },
     UiCommandDescriptor {
         serde_name: "RejectTaskReview",
@@ -4162,6 +4228,7 @@ const UI_COMMAND_DESCRIPTORS: &[UiCommandDescriptor] = &[
         frame_class: UiCommandFrameClass::Mutation,
         target_owner_feature: "task.orchestration",
         target_owner_module: "crates/freehand-task",
+        exposure: UiAdpCommandExposure::Public,
     },
     UiCommandDescriptor {
         serde_name: "ApproveTaskReview",
@@ -4169,6 +4236,7 @@ const UI_COMMAND_DESCRIPTORS: &[UiCommandDescriptor] = &[
         frame_class: UiCommandFrameClass::Mutation,
         target_owner_feature: "task.orchestration",
         target_owner_module: "crates/freehand-task",
+        exposure: UiAdpCommandExposure::Public,
     },
     UiCommandDescriptor {
         serde_name: "CloseTask",
@@ -4176,6 +4244,7 @@ const UI_COMMAND_DESCRIPTORS: &[UiCommandDescriptor] = &[
         frame_class: UiCommandFrameClass::Mutation,
         target_owner_feature: "task.orchestration",
         target_owner_module: "crates/freehand-task",
+        exposure: UiAdpCommandExposure::Public,
     },
     UiCommandDescriptor {
         serde_name: "ApplyExecutionFact",
@@ -4183,6 +4252,7 @@ const UI_COMMAND_DESCRIPTORS: &[UiCommandDescriptor] = &[
         frame_class: UiCommandFrameClass::Mutation,
         target_owner_feature: "task.orchestration",
         target_owner_module: "crates/freehand-task",
+        exposure: UiAdpCommandExposure::Internal,
     },
     UiCommandDescriptor {
         serde_name: "RunSchedulerTick",
@@ -4190,6 +4260,7 @@ const UI_COMMAND_DESCRIPTORS: &[UiCommandDescriptor] = &[
         frame_class: UiCommandFrameClass::Mutation,
         target_owner_feature: "task.orchestration",
         target_owner_module: "crates/freehand-task",
+        exposure: UiAdpCommandExposure::Internal,
     },
     UiCommandDescriptor {
         serde_name: "RunMasterPoll",
@@ -4197,6 +4268,7 @@ const UI_COMMAND_DESCRIPTORS: &[UiCommandDescriptor] = &[
         frame_class: UiCommandFrameClass::Mutation,
         target_owner_feature: "task.orchestration",
         target_owner_module: "crates/freehand-task",
+        exposure: UiAdpCommandExposure::Internal,
     },
     UiCommandDescriptor {
         serde_name: "QueryMasterPoll",
@@ -4204,6 +4276,7 @@ const UI_COMMAND_DESCRIPTORS: &[UiCommandDescriptor] = &[
         frame_class: UiCommandFrameClass::Query,
         target_owner_feature: "task.orchestration",
         target_owner_module: "crates/freehand-task",
+        exposure: UiAdpCommandExposure::Public,
     },
     UiCommandDescriptor {
         serde_name: "WorkerControl",
@@ -4211,6 +4284,7 @@ const UI_COMMAND_DESCRIPTORS: &[UiCommandDescriptor] = &[
         frame_class: UiCommandFrameClass::Mutation,
         target_owner_feature: "worker.control",
         target_owner_module: "crates/freehand-task",
+        exposure: UiAdpCommandExposure::Public,
     },
     UiCommandDescriptor {
         serde_name: "QueryNodeStatus",
@@ -4218,6 +4292,7 @@ const UI_COMMAND_DESCRIPTORS: &[UiCommandDescriptor] = &[
         frame_class: UiCommandFrameClass::Query,
         target_owner_feature: "ui.protocol",
         target_owner_module: "crates/freehand-ui-protocol",
+        exposure: UiAdpCommandExposure::Public,
     },
     UiCommandDescriptor {
         serde_name: "QueryTaskProgress",
@@ -4225,6 +4300,7 @@ const UI_COMMAND_DESCRIPTORS: &[UiCommandDescriptor] = &[
         frame_class: UiCommandFrameClass::Query,
         target_owner_feature: "ui.protocol",
         target_owner_module: "crates/freehand-ui-protocol",
+        exposure: UiAdpCommandExposure::Public,
     },
     UiCommandDescriptor {
         serde_name: "QueryDebugState",
@@ -4232,6 +4308,7 @@ const UI_COMMAND_DESCRIPTORS: &[UiCommandDescriptor] = &[
         frame_class: UiCommandFrameClass::Query,
         target_owner_feature: "ui.protocol",
         target_owner_module: "crates/freehand-ui-protocol",
+        exposure: UiAdpCommandExposure::Public,
     },
     UiCommandDescriptor {
         serde_name: "QueryCheckpoints",
@@ -4239,6 +4316,7 @@ const UI_COMMAND_DESCRIPTORS: &[UiCommandDescriptor] = &[
         frame_class: UiCommandFrameClass::Query,
         target_owner_feature: "ui.protocol",
         target_owner_module: "crates/freehand-ui-protocol",
+        exposure: UiAdpCommandExposure::Public,
     },
     UiCommandDescriptor {
         serde_name: "SendDirectMessageToSlave",
@@ -4246,6 +4324,7 @@ const UI_COMMAND_DESCRIPTORS: &[UiCommandDescriptor] = &[
         frame_class: UiCommandFrameClass::Mutation,
         target_owner_feature: "node.master-slave",
         target_owner_module: "crates/freehand-node",
+        exposure: UiAdpCommandExposure::Public,
     },
     UiCommandDescriptor {
         serde_name: "RewindCheckpoint",
@@ -4253,6 +4332,7 @@ const UI_COMMAND_DESCRIPTORS: &[UiCommandDescriptor] = &[
         frame_class: UiCommandFrameClass::Mutation,
         target_owner_feature: "runtime.checkpoint-rewind",
         target_owner_module: "crates/freehand-runtime",
+        exposure: UiAdpCommandExposure::Public,
     },
     UiCommandDescriptor {
         serde_name: "CancelTurn",
@@ -4260,6 +4340,7 @@ const UI_COMMAND_DESCRIPTORS: &[UiCommandDescriptor] = &[
         frame_class: UiCommandFrameClass::Mutation,
         target_owner_feature: "reason.turn",
         target_owner_module: "crates/freehand-reason",
+        exposure: UiAdpCommandExposure::Public,
     },
     UiCommandDescriptor {
         serde_name: "CancelLatestActiveTurn",
@@ -4267,6 +4348,7 @@ const UI_COMMAND_DESCRIPTORS: &[UiCommandDescriptor] = &[
         frame_class: UiCommandFrameClass::Mutation,
         target_owner_feature: "reason.turn",
         target_owner_module: "crates/freehand-reason",
+        exposure: UiAdpCommandExposure::Public,
     },
     UiCommandDescriptor {
         serde_name: "ResumeTurn",
@@ -4274,6 +4356,7 @@ const UI_COMMAND_DESCRIPTORS: &[UiCommandDescriptor] = &[
         frame_class: UiCommandFrameClass::Mutation,
         target_owner_feature: "reason.turn",
         target_owner_module: "crates/freehand-reason",
+        exposure: UiAdpCommandExposure::Public,
     },
 ];
 
@@ -4423,6 +4506,21 @@ pub enum UiCommandFrameClass {
 
 pub fn command_frame_class(command: &UiCommand) -> UiCommandFrameClass {
     command_descriptor(command).frame_class
+}
+
+fn is_public_adp_command_descriptor(descriptor: &UiCommandDescriptor) -> bool {
+    matches!(descriptor.exposure, UiAdpCommandExposure::Public)
+}
+
+pub fn is_public_adp_command(command: &UiCommand) -> bool {
+    is_public_adp_command_descriptor(command_descriptor(command))
+}
+
+pub fn is_internal_adp_command(command: &UiCommand) -> bool {
+    matches!(
+        command_descriptor(command).exposure,
+        UiAdpCommandExposure::Internal
+    )
 }
 
 /// Gate for the ADP query route: rejects any command whose frame class is not
@@ -7810,7 +7908,7 @@ mod tests {
             query: UiCommand::QueryConfigStatus,
         };
         let request_json = serde_json::to_string(&request).expect("request json");
-        assert!(request_json.contains("\"protocol_version\":2"));
+        assert!(request_json.contains("\"protocol_version\":3"));
         assert!(request_json.contains("\"kind\":\"query\""));
         assert!(request_json.contains("QueryConfigStatus"));
         let decoded_request: UiAdpRequest =
@@ -7838,7 +7936,7 @@ mod tests {
             },
         };
         let response_json = serde_json::to_string(&response).expect("response json");
-        assert!(response_json.contains("\"protocol_version\":2"));
+        assert!(response_json.contains("\"protocol_version\":3"));
         assert!(response_json.contains("\"kind\":\"failure\""));
         let decoded_response: UiAdpResponse =
             serde_json::from_str(&response_json).expect("decoded response");
@@ -7891,18 +7989,32 @@ mod tests {
                 .iter()
                 .any(|kind| kind == "handshake_accepted")
         );
-        assert_eq!(manifest.commands.len(), UI_COMMAND_DESCRIPTORS.len());
+        assert_eq!(
+            manifest.commands.len(),
+            UI_COMMAND_DESCRIPTORS
+                .iter()
+                .filter(|descriptor| is_public_adp_command_descriptor(descriptor))
+                .count()
+        );
         let names: std::collections::BTreeSet<_> = manifest
             .commands
             .iter()
             .map(|entry| entry.serde_name.as_str())
             .collect();
         for descriptor in UI_COMMAND_DESCRIPTORS {
-            assert!(
-                names.contains(descriptor.serde_name),
-                "missing command {}",
-                descriptor.serde_name
-            );
+            if is_public_adp_command_descriptor(descriptor) {
+                assert!(
+                    names.contains(descriptor.serde_name),
+                    "missing command {}",
+                    descriptor.serde_name
+                );
+            } else {
+                assert!(
+                    !names.contains(descriptor.serde_name),
+                    "internal command {} must not be public ADP",
+                    descriptor.serde_name
+                );
+            }
         }
         let query_master = manifest
             .commands
@@ -7910,16 +8022,14 @@ mod tests {
             .find(|entry| entry.serde_name == "QueryMasterPoll")
             .expect("QueryMasterPoll");
         assert_eq!(query_master.frame_class, UiCommandFrameClass::Query);
-        let run_master = manifest
-            .commands
-            .iter()
-            .find(|entry| entry.serde_name == "RunMasterPoll")
-            .expect("RunMasterPoll");
-        assert_eq!(run_master.frame_class, UiCommandFrameClass::Mutation);
+        assert!(!names.contains("ClaimNextTask"));
+        assert!(!names.contains("ApplyExecutionFact"));
+        assert!(!names.contains("RunSchedulerTick"));
+        assert!(!names.contains("RunMasterPoll"));
         let js = adp_protocol_webui_module();
         assert!(js.contains("export function adpQueryOf"));
         assert!(js.contains("export function adpCommandOf"));
-        assert!(js.contains("\"protocol_version\": 2"));
+        assert!(js.contains("\"protocol_version\": 3"));
         assert!(js.contains("QueryConfigStatus"));
         assert!(!js.contains("target_owner_module"));
         assert!(!adp_protocol_manifest_json().contains("target_owner_module"));

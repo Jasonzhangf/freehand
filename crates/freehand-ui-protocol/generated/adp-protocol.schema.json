@@ -1,6 +1,6 @@
 {
-  "protocol_version": 2,
-  "handshake_capability": "adp.v2.handshake",
+  "protocol_version": 3,
+  "handshake_capability": "adp.v3.handshake",
   "request_kinds": [
     "handshake",
     "command",
@@ -281,12 +281,6 @@
       "target_owner_feature": "task.orchestration"
     },
     {
-      "serde_name": "ClaimNextTask",
-      "semantic_kind": "claim_next_task",
-      "frame_class": "mutation",
-      "target_owner_feature": "task.orchestration"
-    },
-    {
       "serde_name": "SubmitTaskReview",
       "semantic_kind": "submit_task_review",
       "frame_class": "mutation",
@@ -307,24 +301,6 @@
     {
       "serde_name": "CloseTask",
       "semantic_kind": "close_task",
-      "frame_class": "mutation",
-      "target_owner_feature": "task.orchestration"
-    },
-    {
-      "serde_name": "ApplyExecutionFact",
-      "semantic_kind": "apply_execution_fact",
-      "frame_class": "mutation",
-      "target_owner_feature": "task.orchestration"
-    },
-    {
-      "serde_name": "RunSchedulerTick",
-      "semantic_kind": "run_scheduler_tick",
-      "frame_class": "mutation",
-      "target_owner_feature": "task.orchestration"
-    },
-    {
-      "serde_name": "RunMasterPoll",
-      "semantic_kind": "run_master_poll",
       "frame_class": "mutation",
       "target_owner_feature": "task.orchestration"
     },

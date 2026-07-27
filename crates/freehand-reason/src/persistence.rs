@@ -3323,7 +3323,7 @@ mod tests {
     }
 
     #[test]
-    fn ui_restore_keeps_active_incomplete_authoritative_snapshot_as_hard_error_without_ledger() {
+    fn ui_restore_surfaces_active_incomplete_authoritative_snapshot_without_ledger_with_warning() {
         let runtime_home = temp_runtime_home();
         let coordinator = ReasonPersistence::new(&runtime_home, AgentId::new("agent-1"));
         let mut history = session_history();
@@ -3340,15 +3340,24 @@ mod tests {
         fs::remove_file(coordinator.reason_ledger_path(history.session_id()))
             .expect("simulate missing ledger");
 
-        let err = coordinator
+        let ui_turns = coordinator
             .restore_turn_snapshots_for_ui(history.session_id())
-            .expect_err("active incomplete restore without ledger must stay a hard error");
+            .expect(
+                "active incomplete restore without ledger must surface partial authoritative truth",
+            );
         assert_eq!(
-            err,
-            ReasonPersistenceError::InvalidCursorCoherence(
-                "authoritative UI snapshots are missing earlier round truth and reason ledger is empty"
-                    .to_owned(),
-            )
+            ui_turns
+                .iter()
+                .map(|turn| turn.request.turn_id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["runtime-turn-1-r2"]
+        );
+        assert!(
+            ui_turns[0].error_events.iter().any(|event| {
+                event.error.code == "reason_persistence_partial_ui_restore"
+                    && event.error.message.contains("历史会话轮次不完整")
+            }),
+            "active incomplete missing-ledger restore must carry an explicit partial transcript warning"
         );
 
         fs::remove_dir_all(runtime_home).expect("cleanup");

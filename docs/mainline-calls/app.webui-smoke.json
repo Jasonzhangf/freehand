@@ -112,6 +112,7 @@
   ],
   "error_mainline": [
     "ADP command/query/subscribe frames sent before handshake completion return explicit failure and do not reach dispatch or runtime query ports",
+    "public ADP command frames for internal scheduler/worker commands return adp_command_not_public before runtime dispatch unless a server-owned FREEHAND_ADP_INTERNAL_COMMAND_TOKEN matches the client internal-command capability",
     "invalid smoke input or missing projection returns explicit app error",
     "transport or render wiring failures are surfaced explicitly",
     "ADP transport failures, decode failures, and protocol failure frames are rendered as visible failure cards and status text",
@@ -281,13 +282,13 @@
     },
     {
       "step": "09",
-      "symbol_path": "handle_adp_socket / handle_adp_connection / handle_adp_text_message",
+      "symbol_path": "handle_adp_socket / handle_adp_connection / handle_adp_text_message / handle_adp_command",
       "file_path": "apps/freehand-server/src/lib.rs",
-      "responsibility": "expose protocol-owned versioned ADP WebSocket frames, require first-frame handshake, and then route WebUI default query/subscribe/command control",
+      "responsibility": "expose protocol-owned versioned ADP WebSocket frames, require first-frame handshake, reject internal scheduler/worker commands on public command ingress, and then route public query/subscribe/command control",
       "input_semantic": "versioned ADP WebSocket frames plus protocol state plus dispatch port plus 运行时 query port",
-      "output_semantic": "handshake accepted/failure, ADP response frames, and subscription events",
+      "output_semantic": "handshake accepted/failure, public command receipt/failure frames, internal-command rejection or server-token-admitted internal receipt, query results, and subscription events",
       "caller": "WebUI shell",
-      "callee": "shared protocol transport",
+      "callee": "shared protocol transport plus protocol-owned command exposure gate",
       "binding_status": "bound"
     },
     {
@@ -672,7 +673,7 @@
     "app boundary now renders a usable WebUI shell instead of a minimal text-only smoke",
     "theme code is split into `assets/theme.css` and `assets/theme.js`",
     "WebUI layout and protocol-consumer code is split into `assets/webui.css` and `assets/webui.js`",
-    "WebUI shell now advertises data-adp-endpoint=\"/adp\"; the front-end opens a WebSocket, sends protocol_version=2 handshake first, waits for handshake_accepted, and uses user-facing 连接/服务 wording for failures",
+    "WebUI shell now advertises data-adp-endpoint=\"/adp\"; the front-end opens a WebSocket, sends protocol_version=3 handshake first, waits for handshake_accepted, and uses user-facing 连接/服务 wording for failures",
     "WebUI success/failure diagnostic prompts remain available through slash commands and shortcuts, while persistent Success/Failure composer buttons are intentionally absent",
     "WebUI shell now exposes composer controls for file, image, video, preview, selected-session refresh, and read-only model selection",
     "WebUI layout shape classifier and CSS shape rules are landed for phone portrait, tall phone, phone landscape, tablet portrait, tablet landscape, foldable unfolded, and desktop large",
