@@ -1,0 +1,379 @@
+{
+  "migration_tree_id": "openminis-ui-foundation-to-freehand",
+  "status": "design_baseline",
+  "browser_included": false,
+  "canonical_doc": "docs/migrations/openminis-ui/ui-tree.md",
+  "sop_doc": "docs/migrations/openminis-ui/function-map-sop.md",
+  "target_product_tree_doc": "docs/design/mobile-webui-ui-tree.md",
+  "target_product_tree_manifest": "docs/design/mobile-webui-ui-tree.manifest.json",
+  "execution_plan": "docs/goals/openminis-ui-foundation-migration-plan.md",
+  "allowed_statuses": [
+    "inventoried",
+    "owner_mapped",
+    "contract_ready",
+    "implementation_in_progress",
+    "source_bound",
+    "online_verified",
+    "legacy_retired",
+    "blocked_resource_missing",
+    "blocked_owner_missing",
+    "blocked_protocol_missing",
+    "blocked_verification_missing"
+  ],
+  "owner_chain": [
+    "resource_owner",
+    "ui.protocol",
+    "runtime.ui-command-dispatch",
+    "app.webui-smoke",
+    "app.android-client_platform_bridge_only"
+  ],
+  "required_layers": [
+    "resource_owner",
+    "protocol_contract",
+    "app_shell",
+    "surface_controller",
+    "surface_model",
+    "view",
+    "controls",
+    "platform_bridge"
+  ],
+  "nodes": [
+    {
+      "node_id": "foundation.root",
+      "group": "foundation",
+      "status": "owner_mapped",
+      "owner_feature_ids": ["app.webui-smoke", "ui.protocol", "runtime.ui-command-dispatch"],
+      "source_paths": ["../OpenMinis/src/ios/Views/ContentView.swift"],
+      "target_paths": [
+        "apps/freehand-server/assets/webui/bootstrap.js",
+        "apps/freehand-server/assets/webui/app-shell"
+      ]
+    },
+    {
+      "node_id": "foundation.surface_contract",
+      "group": "foundation",
+      "status": "contract_ready",
+      "owner_feature_ids": ["app.webui-smoke"],
+      "source_paths": ["../OpenMinis/src/ios/Views"],
+      "target_paths": ["apps/freehand-server/assets/webui/surfaces"]
+    },
+    {
+      "node_id": "home.dashboard",
+      "group": "session",
+      "status": "source_bound",
+      "owner_feature_ids": ["app.webui-smoke", "reason.persistence", "ui.protocol"],
+      "source_paths": [
+        "../OpenMinis/src/ios/Views/ContentView.swift",
+        "../OpenMinis/src/ios/Agent/Chat/ChatStore.swift"
+      ],
+      "target_paths": ["apps/freehand-server/assets/webui/surfaces/home-dashboard"]
+    },
+    {
+      "node_id": "session_detail.root",
+      "group": "session",
+      "status": "implementation_in_progress",
+      "owner_feature_ids": ["app.webui-smoke", "reason.persistence", "ui.protocol"],
+      "source_paths": ["../OpenMinis/src/ios/Views/Chat/AIChatView.swift"],
+      "target_paths": ["apps/freehand-server/assets/webui/surfaces/session-detail"]
+    },
+    {
+      "node_id": "session_search.root",
+      "group": "session",
+      "status": "source_bound",
+      "owner_feature_ids": ["app.webui-smoke", "reason.persistence", "ui.protocol"],
+      "source_paths": ["../OpenMinis/src/ios/Views/ContentView.swift"],
+      "target_paths": ["apps/freehand-server/assets/webui/surfaces/session-search"]
+    },
+    {
+      "node_id": "new_session.root",
+      "group": "session",
+      "status": "source_bound",
+      "owner_feature_ids": ["app.webui-smoke", "reason.persistence", "ui.protocol"],
+      "source_paths": ["../OpenMinis/src/ios/Views/ContentView.swift"],
+      "target_paths": ["apps/freehand-server/assets/webui/surfaces/new-session"]
+    },
+    {
+      "node_id": "turn_blocks.user",
+      "group": "transcript",
+      "status": "implementation_in_progress",
+      "owner_feature_ids": ["app.webui-smoke", "ui.protocol"],
+      "source_paths": ["../OpenMinis/src/ios/Views/Chat/ChatMessageViews.swift"],
+      "target_paths": ["apps/freehand-server/assets/webui/surfaces/session-detail"]
+    },
+    {
+      "node_id": "turn_blocks.assistant",
+      "group": "transcript",
+      "status": "implementation_in_progress",
+      "owner_feature_ids": ["app.webui-smoke", "ui.protocol", "tool.display"],
+      "source_paths": ["../OpenMinis/src/ios/Views/Chat/AssistantBlockView.swift"],
+      "target_paths": ["apps/freehand-server/assets/webui/surfaces/session-detail"]
+    },
+    {
+      "node_id": "turn_blocks.reasoning",
+      "group": "transcript",
+      "status": "implementation_in_progress",
+      "owner_feature_ids": ["app.webui-smoke", "ui.protocol"],
+      "source_paths": ["../OpenMinis/src/ios/Views/Chat/AssistantBlockView.swift"],
+      "target_paths": ["apps/freehand-server/assets/webui/surfaces/session-detail"]
+    },
+    {
+      "node_id": "turn_blocks.tool_activity",
+      "group": "transcript",
+      "status": "implementation_in_progress",
+      "owner_feature_ids": ["app.webui-smoke", "ui.protocol", "tool.display"],
+      "source_paths": [
+        "../OpenMinis/src/ios/Views/Chat/ToolLiveSheet.swift",
+        "../OpenMinis/src/ios/Agent/Chat/ChatModels.swift"
+      ],
+      "target_paths": ["apps/freehand-server/assets/webui/surfaces/session-detail"]
+    },
+    {
+      "node_id": "turn_blocks.attachment",
+      "group": "transcript",
+      "status": "owner_mapped",
+      "owner_feature_ids": ["ui.protocol", "app.webui-smoke"],
+      "source_paths": [
+        "../OpenMinis/src/ios/Views/Chat/Media",
+        "../OpenMinis/src/ios/Agent/Chat/ChatModels.swift"
+      ],
+      "target_paths": ["apps/freehand-server/assets/webui/surfaces/session-detail"]
+    },
+    {
+      "node_id": "turn_blocks.artifact",
+      "group": "transcript",
+      "status": "blocked_resource_missing",
+      "owner_feature_ids": [],
+      "source_paths": ["../OpenMinis/src/ios/Views/Chat/Media"],
+      "target_paths": []
+    },
+    {
+      "node_id": "turn_blocks.error",
+      "group": "transcript",
+      "status": "owner_mapped",
+      "owner_feature_ids": ["ui.protocol", "error.center", "app.webui-smoke"],
+      "source_paths": [
+        "../OpenMinis/src/ios/Views/Chat/ChatMessageViews.swift",
+        "../OpenMinis/src/ios/Views/Chat/WebLoadError.swift"
+      ],
+      "target_paths": ["apps/freehand-server/assets/webui/surfaces/session-detail"]
+    },
+    {
+      "node_id": "composer.text_submit",
+      "group": "composer",
+      "status": "source_bound",
+      "owner_feature_ids": ["ui.protocol", "runtime.ui-command-dispatch", "app.webui-smoke"],
+      "source_paths": ["../OpenMinis/src/ios/Views/Chat/ChatInputBar.swift"],
+      "target_paths": ["apps/freehand-server/assets/webui/surfaces/session-detail"]
+    },
+    {
+      "node_id": "composer.attachments",
+      "group": "composer",
+      "status": "source_bound",
+      "owner_feature_ids": ["ui.protocol", "runtime.ui-command-dispatch", "app.webui-smoke"],
+      "source_paths": [
+        "../OpenMinis/src/ios/Views/Chat/ChatInputBar.swift",
+        "../OpenMinis/src/ios/Agent/Chat/AIChatViewModel+Attachments.swift"
+      ],
+      "target_paths": ["apps/freehand-server/assets/webui/surfaces/session-detail"]
+    },
+    {
+      "node_id": "composer.queue",
+      "group": "composer",
+      "status": "blocked_owner_missing",
+      "owner_feature_ids": [],
+      "source_paths": ["../OpenMinis/src/ios/Agent/Chat/ChatModels.swift"],
+      "target_paths": []
+    },
+    {
+      "node_id": "composer.stop_continue",
+      "group": "composer",
+      "status": "source_bound",
+      "owner_feature_ids": ["ui.protocol", "runtime.ui-command-dispatch", "app.webui-smoke"],
+      "source_paths": ["../OpenMinis/src/ios/Views/Chat/ChatInputBar.swift"],
+      "target_paths": ["apps/freehand-server/assets/webui/surfaces/session-detail"]
+    },
+    {
+      "node_id": "composer.voice",
+      "group": "composer",
+      "status": "blocked_owner_missing",
+      "owner_feature_ids": [],
+      "source_paths": ["../OpenMinis/src/ios/Views/Chat/Voice"],
+      "target_paths": []
+    },
+    {
+      "node_id": "tools.registry",
+      "group": "tools",
+      "status": "source_bound",
+      "owner_feature_ids": ["tool.registry", "ui.protocol", "app.webui-smoke"],
+      "source_paths": ["../OpenMinis/src/ios/Agent/Chat/AIChatViewModel+ToolDefinitions.swift"],
+      "target_paths": ["apps/freehand-server/assets/webui/surfaces/tools-registry"]
+    },
+    {
+      "node_id": "tools.detail",
+      "group": "tools",
+      "status": "source_bound",
+      "owner_feature_ids": ["tool.registry", "app.webui-smoke"],
+      "source_paths": ["../OpenMinis/src/ios/Views/Chat/ToolLiveSheet.swift"],
+      "target_paths": ["apps/freehand-server/assets/webui/surfaces/tools-registry"]
+    },
+    {
+      "node_id": "tools.permissions",
+      "group": "tools",
+      "status": "blocked_owner_missing",
+      "owner_feature_ids": [],
+      "source_paths": [
+        "../OpenMinis/src/ios/Views/Chat/OffloadPermissionDialog.swift",
+        "../OpenMinis/src/ios/Views/Settings/OffloadPermissionSettingsView.swift"
+      ],
+      "target_paths": []
+    },
+    {
+      "node_id": "settings.root",
+      "group": "settings",
+      "status": "source_bound",
+      "owner_feature_ids": ["app.webui-smoke", "config.core", "ui.protocol"],
+      "source_paths": [
+        "../OpenMinis/src/ios/Views/ContentView.swift",
+        "../OpenMinis/src/ios/Views/Settings"
+      ],
+      "target_paths": ["apps/freehand-server/assets/webui/surfaces/settings"]
+    },
+    {
+      "node_id": "settings.models",
+      "group": "settings",
+      "status": "implementation_in_progress",
+      "owner_feature_ids": ["config.core", "ui.protocol", "runtime.ui-command-dispatch", "app.webui-smoke"],
+      "source_paths": ["../OpenMinis/src/ios/Views/Providers"],
+      "target_paths": ["apps/freehand-server/assets/webui/surfaces/settings"]
+    },
+    {
+      "node_id": "settings.agent_runtime",
+      "group": "settings",
+      "status": "owner_mapped",
+      "owner_feature_ids": ["agent.lifecycle", "config.core", "app.webui-smoke"],
+      "source_paths": ["../OpenMinis/src/ios/Views/Settings/EnhancedBackgroundSettingsView.swift"],
+      "target_paths": ["apps/freehand-server/assets/webui/surfaces/settings"]
+    },
+    {
+      "node_id": "settings.connection",
+      "group": "settings",
+      "status": "owner_mapped",
+      "owner_feature_ids": ["config.core", "app.android-client", "app.webui-smoke"],
+      "source_paths": [
+        "../OpenMinis/src/ios/Shared/NetworkMonitor.swift",
+        "../OpenMinis/src/ios/Views/Settings/OffloadPermissionSettingsView.swift"
+      ],
+      "target_paths": ["apps/freehand-server/assets/webui/surfaces/settings"]
+    },
+    {
+      "node_id": "settings.observability",
+      "group": "settings",
+      "status": "owner_mapped",
+      "owner_feature_ids": ["debug.core", "runtime.ui-command-dispatch", "app.webui-smoke"],
+      "source_paths": [
+        "../OpenMinis/src/ios/Views/Settings/LogManagementView.swift",
+        "../OpenMinis/src/ios/Shared/Config/Audit/ConfigAuditLog.swift"
+      ],
+      "target_paths": ["apps/freehand-server/assets/webui/surfaces/settings"]
+    },
+    {
+      "node_id": "settings.appearance",
+      "group": "settings",
+      "status": "blocked_owner_missing",
+      "owner_feature_ids": [],
+      "source_paths": ["../OpenMinis/src/ios/Shared/FontSettings.swift"],
+      "target_paths": []
+    },
+    {
+      "node_id": "settings.about",
+      "group": "settings",
+      "status": "inventoried",
+      "owner_feature_ids": ["app.webui-smoke"],
+      "source_paths": ["../OpenMinis/src/ios/Views/Settings/AboutView.swift"],
+      "target_paths": ["apps/freehand-server/assets/webui/surfaces/settings"]
+    },
+    {
+      "node_id": "timer.dashboard",
+      "group": "secondary",
+      "status": "source_bound",
+      "owner_feature_ids": ["runtime.master-worker-loop", "ui.protocol", "app.webui-smoke"],
+      "source_paths": ["../OpenMinis/src/ios/Views/Alarms/AlarmListView.swift"],
+      "target_paths": ["apps/freehand-server/assets/webui/surfaces/timer-dashboard"]
+    },
+    {
+      "node_id": "files_artifacts.root",
+      "group": "secondary",
+      "status": "blocked_resource_missing",
+      "owner_feature_ids": [],
+      "source_paths": [
+        "../OpenMinis/src/ios/Views/Rootfs/FileBrowserView.swift",
+        "../OpenMinis/src/ios/Views/Chat/Media"
+      ],
+      "target_paths": []
+    },
+    {
+      "node_id": "skills.root",
+      "group": "secondary",
+      "status": "blocked_protocol_missing",
+      "owner_feature_ids": ["instruction.capability-loader"],
+      "source_paths": [
+        "../OpenMinis/src/ios/Views/Skills/SkillsManagementView.swift",
+        "../OpenMinis/src/ios/Views/Chat/SessionSkillsView.swift"
+      ],
+      "target_paths": []
+    },
+    {
+      "node_id": "memory.root",
+      "group": "secondary",
+      "status": "blocked_resource_missing",
+      "owner_feature_ids": [],
+      "source_paths": [
+        "../OpenMinis/src/ios/Views/Settings/MemoryManagementView.swift",
+        "../OpenMinis/src/ios/Views/Chat/SessionMemoryView.swift"
+      ],
+      "target_paths": []
+    },
+    {
+      "node_id": "integrations.root",
+      "group": "secondary",
+      "status": "blocked_resource_missing",
+      "owner_feature_ids": [],
+      "source_paths": ["../OpenMinis/src/ios/Views/MCP"],
+      "target_paths": []
+    },
+    {
+      "node_id": "platform.android_bridge",
+      "group": "platform",
+      "status": "owner_mapped",
+      "owner_feature_ids": ["app.android-client", "app.webui-smoke"],
+      "source_paths": ["../OpenMinis/src/ios/AppDelegate.swift"],
+      "target_paths": ["apps/freehand-android/app/src/main"]
+    }
+  ],
+  "excluded_nodes": [
+    "browser",
+    "browser_profile",
+    "cookie_store",
+    "browser_takeover",
+    "openminis_local_agent_loop",
+    "openminis_chat_store_as_freehand_truth",
+    "openminis_provider_factory_on_client",
+    "swiftui_layout_and_color_copy"
+  ],
+  "required_docs_per_implemented_node": [
+    "resource_map",
+    "feature_map",
+    "function_map",
+    "mainline_call_map",
+    "test_design",
+    "product_ui_tree"
+  ],
+  "completion_requirements": [
+    "Every included node is online_verified before total migration completion is claimed.",
+    "Blocked nodes first receive a registered resource owner and protocol path.",
+    "All user mutations use generated commands and owner re-query.",
+    "No owner truth is stored in browser local state or Android.",
+    "Browser and cookie scope remain excluded.",
+    "Duplicate legacy implementations are physically retired after dependency and online proof."
+  ]
+}
