@@ -676,3 +676,11 @@ Tags: #lifecycle #bootstrap #session-waiting #taskboard-residual
 Tags: #architecture #gap5 #node #ui-protocol #dependency-edge
 
 - 2026-07-26: Incomplete multi-round authoritative history with empty reason ledger must not fail whole-daemon bootstrap. `restore_turn_snapshots_for_ui` annotates partial UI restore and returns remaining authoritative turns; `restore_all_persisted_sessions_into_ui` skips missing/poisoned/incomplete historical sessions. Production proof: after install/restart, ADP session list projects the two residual sessions as blocked rather than leaving the daemon dead or re-showing waiting.
+
+## 2026-07-27 — ADP versioned handshake baseline
+
+- ADP transport is now explicitly versioned at the protocol owner: `UiAdpRequest` and `UiAdpResponse` require top-level `protocol_version=1`; missing or unsupported versions reject during serde before route handling.
+- `/adp` WebSocket lifecycle requires first-frame handshake: clients send `UiAdpRequest::Handshake`, server responds with `UiAdpResponse::HandshakeAccepted` and server capabilities; command/query/subscribe frames before handshake fail with `adp_handshake_required`, and duplicate handshake fails with `adp_handshake_already_accepted`.
+- WebUI `app-shell/adp-client.js` owns browser ADP connection lifecycle: send versioned handshake on open, wait for `handshake_accepted`, stamp outgoing requests, validate response `protocol_version`, and keep user-visible copy to connection/service wording instead of raw ADP.
+- Focused proof used `CARGO_TARGET_DIR=/tmp/freehand-target-adp-version`: `cargo test -p freehand-ui-protocol adp`, `cargo test -p freehand-server adp`, `cargo test -p freehand-cli --test config_startup`, `cargo test -p freehand-daemon`, focused clippy for protocol/server/cli/daemon, `node --check apps/freehand-server/assets/webui/app-shell/adp-client.js`, `xtask mainlines check`, `xtask gates check`, and `git diff --check`.
+- Gap 6 is not closed by this baseline: schema/TS generation, ui-protocol crate split, `target_owner_module` debug-only projection, `/adp` auth, and command surface contraction remain open.

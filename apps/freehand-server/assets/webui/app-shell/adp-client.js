@@ -1,3 +1,10 @@
+const ADP_PROTOCOL_VERSION = 1;
+const ADP_HANDSHAKE_CAPABILITY = 'adp.v1.handshake';
+
+function versionedAdpFrame(frame) {
+  return { protocol_version: ADP_PROTOCOL_VERSION, ...frame };
+}
+
 export function createAdpClient({
   state,
   windowRef,
@@ -13,11 +20,11 @@ export function createAdpClient({
   requestTimeoutMs,
 }) {
   function ensureSocket() {
-    if (state.adpSocket && state.adpSocket.readyState === WebSocketCtor.OPEN) {
-      return Promise.resolve(state.adpSocket);
-    }
     if (state.adpOpened) {
       return state.adpOpened;
+    }
+    if (state.adpSocket && state.adpSocket.readyState === WebSocketCtor.OPEN) {
+      return Promise.resolve(state.adpSocket);
     }
 
     const socket = new WebSocketCtor(url());
@@ -27,25 +34,81 @@ export function createAdpClient({
 
     state.adpOpened = new Promise((resolve, reject) => {
       socket.addEventListener('open', () => {
-        state.adpStatus = 'connected';
-        state.adpFailure = null;
-        state.adpReconnectAttempt = 0;
-        clearReconnectTimer();
-        setCommandStatus('已连接，等待更新...');
-        renderAll();
-        resolve(socket);
+        const handshakeId = nextRequestId('hello');
+        state.adpHandshakeRequestId = handshakeId;
+        try {
+          socket.send(JSON.stringify(versionedAdpFrame({
+            kind: 'handshake',
+            request_id: handshakeId,
+            client_name: 'freehand-webui',
+            capabilities: [ADP_HANDSHAKE_CAPABILITY],
+          })));
+        } catch (error) {
+          state.adpStatus = 'error';
+          state.adpOpened = null;
+          state.adpHandshakeRequestId = null;
+          state.adpFailure = `连接握手失败：${error.message}`;
+          setCommandStatus(state.adpFailure);
+          renderAll();
+          reject(error);
+          try {
+            socket.close();
+          } catch (_) {}
+        }
       });
       socket.addEventListener('message', (event) => {
         try {
-          handleFrame(JSON.parse(event.data));
+          const frame = JSON.parse(event.data);
+          if (frame.protocol_version !== ADP_PROTOCOL_VERSION) {
+            throw new Error(`服务协议版本不匹配：${frame.protocol_version ?? '缺失'}`);
+          }
+          if (state.adpHandshakeRequestId) {
+            if (frame.kind === 'handshake_accepted' && frame.request_id === state.adpHandshakeRequestId) {
+              state.adpHandshakeRequestId = null;
+              state.adpStatus = 'connected';
+              state.adpFailure = null;
+              state.adpReconnectAttempt = 0;
+              clearReconnectTimer();
+              setCommandStatus('已连接，等待更新...');
+              renderAll();
+              resolve(socket);
+              return;
+            }
+            if (frame.kind === 'failure' && frame.request_id === state.adpHandshakeRequestId) {
+              state.adpHandshakeRequestId = null;
+              state.adpOpened = null;
+              state.adpStatus = 'error';
+              state.adpFailure = '连接握手失败：服务拒绝连接';
+              setCommandStatus(state.adpFailure);
+              renderAll();
+              reject(new Error(state.adpFailure));
+              try {
+                socket.close();
+              } catch (_) {}
+              return;
+            }
+            throw new Error(`连接握手失败：收到 ${frame.kind || '未知'} 响应`);
+          }
+          handleFrame(frame);
         } catch (error) {
           state.adpFailure = `连接解码失败：${error.message}`;
+          if (state.adpHandshakeRequestId) {
+            state.adpStatus = 'error';
+            state.adpOpened = null;
+            state.adpHandshakeRequestId = null;
+            reject(error);
+            try {
+              socket.close();
+            } catch (_) {}
+          }
           setCommandStatus(state.adpFailure);
           renderAll();
         }
       });
       socket.addEventListener('error', () => {
         state.adpStatus = 'error';
+        state.adpOpened = null;
+        state.adpHandshakeRequestId = null;
         setCommandStatus('连接错误');
         renderAll();
         reject(new Error('连接错误'));
@@ -55,6 +118,7 @@ export function createAdpClient({
         setCommandStatus('连接已关闭');
         state.adpSocket = null;
         state.adpOpened = null;
+        state.adpHandshakeRequestId = null;
         state.adpSubscriptions.clear();
         for (const { reject: rejectRequest } of state.adpRequests.values()) {
           rejectRequest(new Error('连接已关闭'));
@@ -73,7 +137,7 @@ export function createAdpClient({
 
   async function send(frame) {
     const socket = await ensureSocket();
-    socket.send(JSON.stringify(frame));
+    socket.send(JSON.stringify(versionedAdpFrame(frame)));
   }
 
   function request(kind, payloadKey, payload, prefix) {

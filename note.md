@@ -8791,3 +8791,27 @@ Current real root cause split:
 - root cause: `ReasonPersistence::restore_turn_snapshots_for_ui` returned `InvalidCursorCoherence` when only final-round authoritative snapshots remained and ledger was empty; `restore_all_persisted_sessions_into_ui` propagated any session restore error and poisoned whole daemon bootstrap.
 - fix: incomplete authoritative history with empty ledger now annotates partial UI restore and returns remaining turns; whole-daemon restore skips missing/poisoned/incomplete historical sessions instead of hard-failing.
 - verification: `CARGO_TARGET_DIR=/tmp/freehand-target-stale-cleanup cargo test -p freehand-runtime live_bootstrap -- --test-threads=1` => 8 ok; installed new freehand-daemon; service-scoped restart of `com.freehand.daemon`; `freehand-cli adp-session-query --url ws://100.66.1.82:4041/adp` shows `webui-path-diagnostic-state-sync-fixed:2:blocked` and `webui-session-20260723001509-bd98e156:8:blocked`.
+
+## 2026-07-27 — Gap6 ADP versioned handshake slice
+
+- Scope: close Gap 6 step 2 only, not whole Gap 6. Kept remaining schema generation, ui-protocol split, debug-only `target_owner_module`, `/adp` auth, and command-surface contraction open in `docs/architecture/architecture-gaps.md`.
+- Implementation:
+  - `crates/freehand-ui-protocol`: `UiAdpRequest` / `UiAdpResponse` now serialize/deserialize through protocol-owned `protocol_version=1`; added `Handshake` / `HandshakeAccepted`, `adp_protocol_version`, and `adp_server_capabilities`; missing/unsupported version rejects during serde.
+  - `apps/freehand-server`: `/adp` connection now requires first-frame handshake before command/query/subscribe; pre-handshake frames return `adp_handshake_required`; duplicate handshake returns `adp_handshake_already_accepted`.
+  - `apps/freehand-server/assets/webui/app-shell/adp-client.js`: WebUI sends versioned handshake on open, waits for `handshake_accepted`, stamps every request, validates response `protocol_version`, and uses user-facing connection/service wording.
+  - `apps/freehand-cli` and daemon/server tests now perform ADP handshake before request frames; mock WebSocket tests accept handshake.
+  - Bumped `WEBUI_ASSET_VERSION` to `20260727-adp-version-handshake`.
+- Docs/maps updated: architecture Gap 6, function maps/test designs/mainline JSON/generated wiki for `ui.protocol` and `app.webui-smoke`, and local `freehand-dev` skill ADP route rule.
+- Verification passed:
+  - `cargo fmt --check`
+  - `CARGO_TARGET_DIR=/tmp/freehand-target-adp-version cargo test -p freehand-ui-protocol adp -- --test-threads=1` (4/4)
+  - `CARGO_TARGET_DIR=/tmp/freehand-target-adp-version cargo test -p freehand-server adp -- --test-threads=1` (3/3)
+  - `CARGO_TARGET_DIR=/tmp/freehand-target-adp-version cargo test -p freehand-cli --test config_startup -- --test-threads=1` (24/24)
+  - `CARGO_TARGET_DIR=/tmp/freehand-target-adp-version cargo test -p freehand-daemon -- --test-threads=1` (21/21)
+  - `node --check apps/freehand-server/assets/webui/app-shell/adp-client.js`
+  - `CARGO_TARGET_DIR=/tmp/freehand-target-adp-version cargo clippy -p freehand-ui-protocol -p freehand-server -p freehand-cli -p freehand-daemon --all-targets -- -D warnings`
+  - `CARGO_TARGET_DIR=/tmp/freehand-target-adp-version cargo run -p xtask -- mainlines generate`
+  - `CARGO_TARGET_DIR=/tmp/freehand-target-adp-version cargo run -p xtask -- mainlines check`
+  - `CARGO_TARGET_DIR=/tmp/freehand-target-adp-version cargo run -p xtask -- gates check`
+  - `git diff --check`
+- Remaining: commit this slice, then continue Gap 6 schema/auth/command surface or Gap 8. Full Phase 1-3 goal is not complete.

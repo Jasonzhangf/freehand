@@ -16,7 +16,7 @@ use freehand_control::strip_control_status_block;
 pub use freehand_debug::{
     DebugEvent, DebugScenePosition, DebugSemanticPosition, DebugStateSnapshot, DebugTraceEnvelope,
 };
-use serde::{Deserialize, Serialize};
+use serde::{Deserialize, Deserializer, Serialize, Serializer};
 use thiserror::Error;
 use tokio::sync::broadcast;
 
@@ -1415,9 +1415,24 @@ pub struct UiAdpFailure {
     pub retryable: bool,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(tag = "kind", rename_all = "snake_case")]
+pub const UI_ADP_PROTOCOL_VERSION: u32 = 1;
+pub const UI_ADP_HANDSHAKE_CAPABILITY: &str = "adp.v1.handshake";
+
+pub fn adp_protocol_version() -> u32 {
+    UI_ADP_PROTOCOL_VERSION
+}
+
+pub fn adp_server_capabilities() -> Vec<String> {
+    vec![UI_ADP_HANDSHAKE_CAPABILITY.to_owned()]
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum UiAdpRequest {
+    Handshake {
+        request_id: String,
+        client_name: String,
+        capabilities: Vec<String>,
+    },
     Command {
         request_id: String,
         command: UiCommand,
@@ -1432,9 +1447,12 @@ pub enum UiAdpRequest {
     },
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(tag = "kind", rename_all = "snake_case")]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub enum UiAdpResponse {
+    HandshakeAccepted {
+        request_id: String,
+        server_capabilities: Vec<String>,
+    },
     CommandReceipt {
         request_id: String,
         receipt: UiCommandDispatchReceipt,
@@ -1455,6 +1473,282 @@ pub enum UiAdpResponse {
         request_id: String,
         failure: UiAdpFailure,
     },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+enum UiAdpRequestWire {
+    Handshake {
+        request_id: String,
+        client_name: String,
+        capabilities: Vec<String>,
+    },
+    Command {
+        request_id: String,
+        command: UiCommand,
+    },
+    Query {
+        request_id: String,
+        query: UiCommand,
+    },
+    Subscribe {
+        request_id: String,
+        subscription: UiCommand,
+    },
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "snake_case")]
+enum UiAdpResponseWire {
+    HandshakeAccepted {
+        request_id: String,
+        server_capabilities: Vec<String>,
+    },
+    CommandReceipt {
+        request_id: String,
+        receipt: UiCommandDispatchReceipt,
+    },
+    QueryResult {
+        request_id: String,
+        result: UiQueryResult,
+    },
+    SubscriptionEvent {
+        request_id: String,
+        event: UiSubscriptionEvent,
+    },
+    SubscriptionAccepted {
+        request_id: String,
+        selector: SubscriptionSelector,
+    },
+    Failure {
+        request_id: String,
+        failure: UiAdpFailure,
+    },
+}
+
+impl From<&UiAdpRequest> for UiAdpRequestWire {
+    fn from(request: &UiAdpRequest) -> Self {
+        match request {
+            UiAdpRequest::Handshake {
+                request_id,
+                client_name,
+                capabilities,
+            } => Self::Handshake {
+                request_id: request_id.clone(),
+                client_name: client_name.clone(),
+                capabilities: capabilities.clone(),
+            },
+            UiAdpRequest::Command {
+                request_id,
+                command,
+            } => Self::Command {
+                request_id: request_id.clone(),
+                command: command.clone(),
+            },
+            UiAdpRequest::Query { request_id, query } => Self::Query {
+                request_id: request_id.clone(),
+                query: query.clone(),
+            },
+            UiAdpRequest::Subscribe {
+                request_id,
+                subscription,
+            } => Self::Subscribe {
+                request_id: request_id.clone(),
+                subscription: subscription.clone(),
+            },
+        }
+    }
+}
+
+impl From<UiAdpRequestWire> for UiAdpRequest {
+    fn from(wire: UiAdpRequestWire) -> Self {
+        match wire {
+            UiAdpRequestWire::Handshake {
+                request_id,
+                client_name,
+                capabilities,
+            } => Self::Handshake {
+                request_id,
+                client_name,
+                capabilities,
+            },
+            UiAdpRequestWire::Command {
+                request_id,
+                command,
+            } => Self::Command {
+                request_id,
+                command,
+            },
+            UiAdpRequestWire::Query { request_id, query } => Self::Query { request_id, query },
+            UiAdpRequestWire::Subscribe {
+                request_id,
+                subscription,
+            } => Self::Subscribe {
+                request_id,
+                subscription,
+            },
+        }
+    }
+}
+
+impl From<&UiAdpResponse> for UiAdpResponseWire {
+    fn from(response: &UiAdpResponse) -> Self {
+        match response {
+            UiAdpResponse::HandshakeAccepted {
+                request_id,
+                server_capabilities,
+            } => Self::HandshakeAccepted {
+                request_id: request_id.clone(),
+                server_capabilities: server_capabilities.clone(),
+            },
+            UiAdpResponse::CommandReceipt {
+                request_id,
+                receipt,
+            } => Self::CommandReceipt {
+                request_id: request_id.clone(),
+                receipt: receipt.clone(),
+            },
+            UiAdpResponse::QueryResult { request_id, result } => Self::QueryResult {
+                request_id: request_id.clone(),
+                result: result.clone(),
+            },
+            UiAdpResponse::SubscriptionEvent { request_id, event } => Self::SubscriptionEvent {
+                request_id: request_id.clone(),
+                event: event.clone(),
+            },
+            UiAdpResponse::SubscriptionAccepted {
+                request_id,
+                selector,
+            } => Self::SubscriptionAccepted {
+                request_id: request_id.clone(),
+                selector: selector.clone(),
+            },
+            UiAdpResponse::Failure {
+                request_id,
+                failure,
+            } => Self::Failure {
+                request_id: request_id.clone(),
+                failure: failure.clone(),
+            },
+        }
+    }
+}
+
+impl From<UiAdpResponseWire> for UiAdpResponse {
+    fn from(wire: UiAdpResponseWire) -> Self {
+        match wire {
+            UiAdpResponseWire::HandshakeAccepted {
+                request_id,
+                server_capabilities,
+            } => Self::HandshakeAccepted {
+                request_id,
+                server_capabilities,
+            },
+            UiAdpResponseWire::CommandReceipt {
+                request_id,
+                receipt,
+            } => Self::CommandReceipt {
+                request_id,
+                receipt,
+            },
+            UiAdpResponseWire::QueryResult { request_id, result } => {
+                Self::QueryResult { request_id, result }
+            }
+            UiAdpResponseWire::SubscriptionEvent { request_id, event } => {
+                Self::SubscriptionEvent { request_id, event }
+            }
+            UiAdpResponseWire::SubscriptionAccepted {
+                request_id,
+                selector,
+            } => Self::SubscriptionAccepted {
+                request_id,
+                selector,
+            },
+            UiAdpResponseWire::Failure {
+                request_id,
+                failure,
+            } => Self::Failure {
+                request_id,
+                failure,
+            },
+        }
+    }
+}
+
+fn adp_versioned_value<T: Serialize, E: serde::ser::Error>(
+    wire: T,
+) -> Result<serde_json::Value, E> {
+    let mut value = serde_json::to_value(wire).map_err(E::custom)?;
+    let Some(object) = value.as_object_mut() else {
+        return Err(E::custom("ADP frame must serialize to JSON object"));
+    };
+    object.insert(
+        "protocol_version".to_owned(),
+        serde_json::Value::from(UI_ADP_PROTOCOL_VERSION),
+    );
+    Ok(value)
+}
+
+fn adp_checked_value<E: serde::de::Error>(
+    mut value: serde_json::Value,
+) -> Result<serde_json::Value, E> {
+    let Some(object) = value.as_object_mut() else {
+        return Err(E::custom("ADP frame must be a JSON object"));
+    };
+    let Some(protocol_version) = object.remove("protocol_version") else {
+        return Err(E::custom("missing ADP protocol_version"));
+    };
+    let Some(protocol_version) = protocol_version.as_u64() else {
+        return Err(E::custom("ADP protocol_version must be an integer"));
+    };
+    if protocol_version != u64::from(UI_ADP_PROTOCOL_VERSION) {
+        return Err(E::custom(format!(
+            "unsupported ADP protocol_version {protocol_version}; expected {UI_ADP_PROTOCOL_VERSION}"
+        )));
+    }
+    Ok(value)
+}
+
+impl Serialize for UiAdpRequest {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        adp_versioned_value::<_, S::Error>(UiAdpRequestWire::from(self))?.serialize(serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for UiAdpRequest {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let value = serde_json::Value::deserialize(deserializer)?;
+        let value = adp_checked_value::<D::Error>(value)?;
+        let wire = UiAdpRequestWire::deserialize(value).map_err(serde::de::Error::custom)?;
+        Ok(wire.into())
+    }
+}
+
+impl Serialize for UiAdpResponse {
+    fn serialize<S>(&self, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        adp_versioned_value::<_, S::Error>(UiAdpResponseWire::from(self))?.serialize(serializer)
+    }
+}
+
+impl<'de> Deserialize<'de> for UiAdpResponse {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        let value = serde_json::Value::deserialize(deserializer)?;
+        let value = adp_checked_value::<D::Error>(value)?;
+        let wire = UiAdpResponseWire::deserialize(value).map_err(serde::de::Error::custom)?;
+        Ok(wire.into())
+    }
 }
 
 pub trait UiCommandDispatchPort: Send + Sync {
@@ -6998,11 +7292,24 @@ mod tests {
             query: UiCommand::QueryConfigStatus,
         };
         let request_json = serde_json::to_string(&request).expect("request json");
+        assert!(request_json.contains("\"protocol_version\":1"));
         assert!(request_json.contains("\"kind\":\"query\""));
         assert!(request_json.contains("QueryConfigStatus"));
         let decoded_request: UiAdpRequest =
             serde_json::from_str(&request_json).expect("decoded request");
         assert_eq!(decoded_request, request);
+
+        let handshake = UiAdpRequest::Handshake {
+            request_id: "hello-1".to_owned(),
+            client_name: "test-client".to_owned(),
+            capabilities: vec![UI_ADP_HANDSHAKE_CAPABILITY.to_owned()],
+        };
+        let handshake_json = serde_json::to_string(&handshake).expect("handshake json");
+        assert!(handshake_json.contains("\"kind\":\"handshake\""));
+        assert_eq!(
+            serde_json::from_str::<UiAdpRequest>(&handshake_json).expect("handshake decode"),
+            handshake
+        );
 
         let response = UiAdpResponse::Failure {
             request_id: "req-1".to_owned(),
@@ -7013,9 +7320,39 @@ mod tests {
             },
         };
         let response_json = serde_json::to_string(&response).expect("response json");
+        assert!(response_json.contains("\"protocol_version\":1"));
         assert!(response_json.contains("\"kind\":\"failure\""));
         let decoded_response: UiAdpResponse =
             serde_json::from_str(&response_json).expect("decoded response");
         assert_eq!(decoded_response, response);
+
+        let accepted = UiAdpResponse::HandshakeAccepted {
+            request_id: "hello-1".to_owned(),
+            server_capabilities: adp_server_capabilities(),
+        };
+        let accepted_json = serde_json::to_string(&accepted).expect("accepted json");
+        assert!(accepted_json.contains("\"kind\":\"handshake_accepted\""));
+        assert_eq!(
+            serde_json::from_str::<UiAdpResponse>(&accepted_json).expect("accepted decode"),
+            accepted
+        );
+    }
+
+    #[test]
+    fn adp_frames_require_supported_protocol_version() {
+        let missing_version =
+            r#"{"kind":"query","request_id":"req-1","query":"QueryConfigStatus"}"#;
+        let missing_error = serde_json::from_str::<UiAdpRequest>(missing_version)
+            .expect_err("missing protocol_version must fail");
+        assert!(missing_error.to_string().contains("protocol_version"));
+
+        let wrong_version = r#"{"kind":"query","protocol_version":99,"request_id":"req-1","query":"QueryConfigStatus"}"#;
+        let wrong_error = serde_json::from_str::<UiAdpRequest>(wrong_version)
+            .expect_err("wrong protocol_version must fail");
+        assert!(
+            wrong_error
+                .to_string()
+                .contains("unsupported ADP protocol_version")
+        );
     }
 }

@@ -137,6 +137,18 @@ fn spawn_adp_mock_server() -> (String, thread::JoinHandle<()>) {
                 };
                 let request: UiAdpRequest = serde_json::from_str(&text).expect("adp request");
                 match request {
+                    UiAdpRequest::Handshake { request_id, .. } => {
+                        send_adp_response(
+                            &mut socket,
+                            UiAdpResponse::HandshakeAccepted {
+                                request_id,
+                                server_capabilities: vec![
+                                    freehand_ui_protocol::UI_ADP_HANDSHAKE_CAPABILITY.to_owned(),
+                                ],
+                            },
+                        )
+                        .await;
+                    }
                     UiAdpRequest::Subscribe { request_id, .. } => {
                         send_adp_response(
                             &mut socket,
@@ -240,6 +252,19 @@ fn spawn_adp_sample_mock_server(kind: MockAdpSampleKind) -> (String, thread::Joi
                     };
                     let request: UiAdpRequest = serde_json::from_str(&text).expect("adp request");
                     match request {
+                        UiAdpRequest::Handshake { request_id, .. } => {
+                            send_adp_response(
+                                &mut socket,
+                                UiAdpResponse::HandshakeAccepted {
+                                    request_id,
+                                    server_capabilities: vec![
+                                        freehand_ui_protocol::UI_ADP_HANDSHAKE_CAPABILITY
+                                            .to_owned(),
+                                    ],
+                                },
+                            )
+                            .await;
+                        }
                         UiAdpRequest::Subscribe { request_id, .. } => {
                             subscription_id = Some(request_id.clone());
                             send_adp_response(
@@ -422,6 +447,18 @@ fn spawn_adp_session_mock_server() -> (String, thread::JoinHandle<()>) {
                 };
                 let request: UiAdpRequest = serde_json::from_str(&text).expect("adp request");
                 match request {
+                    UiAdpRequest::Handshake { request_id, .. } => {
+                        send_adp_response(
+                            &mut socket,
+                            UiAdpResponse::HandshakeAccepted {
+                                request_id,
+                                server_capabilities: vec![
+                                    freehand_ui_protocol::UI_ADP_HANDSHAKE_CAPABILITY.to_owned(),
+                                ],
+                            },
+                        )
+                        .await;
+                    }
                     UiAdpRequest::Query {
                         request_id,
                         query: UiCommand::QuerySessionList,
@@ -562,6 +599,19 @@ fn spawn_adp_session_continue_mock_server() -> (String, thread::JoinHandle<()>) 
                     };
                     let request: UiAdpRequest = serde_json::from_str(&text).expect("adp request");
                     match request {
+                        UiAdpRequest::Handshake { request_id, .. } => {
+                            send_adp_response(
+                                &mut socket,
+                                UiAdpResponse::HandshakeAccepted {
+                                    request_id,
+                                    server_capabilities: vec![
+                                        freehand_ui_protocol::UI_ADP_HANDSHAKE_CAPABILITY
+                                            .to_owned(),
+                                    ],
+                                },
+                            )
+                            .await;
+                        }
                         UiAdpRequest::Command {
                             request_id,
                             command:
@@ -693,6 +743,19 @@ fn spawn_adp_task_lifecycle_mock_server() -> (String, thread::JoinHandle<()>) {
                     };
                     let request: UiAdpRequest = serde_json::from_str(&text).expect("adp request");
                     match request {
+                        UiAdpRequest::Handshake { request_id, .. } => {
+                            send_adp_response(
+                                &mut socket,
+                                UiAdpResponse::HandshakeAccepted {
+                                    request_id,
+                                    server_capabilities: vec![
+                                        freehand_ui_protocol::UI_ADP_HANDSHAKE_CAPABILITY
+                                            .to_owned(),
+                                    ],
+                                },
+                            )
+                            .await;
+                        }
                         UiAdpRequest::Command {
                             request_id,
                             command: UiCommand::CreateTask { task },
@@ -899,6 +962,19 @@ fn spawn_adp_phase1_foundation_mock_server() -> (String, thread::JoinHandle<()>)
                     };
                     let request: UiAdpRequest = serde_json::from_str(&text).expect("adp request");
                     match request {
+                        UiAdpRequest::Handshake { request_id, .. } => {
+                            send_adp_response(
+                                &mut socket,
+                                UiAdpResponse::HandshakeAccepted {
+                                    request_id,
+                                    server_capabilities: vec![
+                                        freehand_ui_protocol::UI_ADP_HANDSHAKE_CAPABILITY
+                                            .to_owned(),
+                                    ],
+                                },
+                            )
+                            .await;
+                        }
                         UiAdpRequest::Command {
                             request_id,
                             command: UiCommand::CreateTask { task },
@@ -1107,6 +1183,19 @@ fn spawn_adp_master_worker_foundation_mock_server_with_connections(
                     };
                     let request: UiAdpRequest = serde_json::from_str(&text).expect("adp request");
                     match request {
+                        UiAdpRequest::Handshake { request_id, .. } => {
+                            send_adp_response(
+                                &mut socket,
+                                UiAdpResponse::HandshakeAccepted {
+                                    request_id,
+                                    server_capabilities: vec![
+                                        freehand_ui_protocol::UI_ADP_HANDSHAKE_CAPABILITY
+                                            .to_owned(),
+                                    ],
+                                },
+                            )
+                            .await;
+                        }
                         UiAdpRequest::Command {
                             request_id,
                             command: UiCommand::CreateTaskAgent { agent },
@@ -1457,6 +1546,16 @@ fn spawn_adp_master_worker_autonomy_mock_server_with_connections(
                     };
                     let request: UiAdpRequest = serde_json::from_str(&text).expect("adp request");
                     match request {
+                        UiAdpRequest::Handshake { request_id, .. } => {
+                            send_adp_response(
+                                &mut socket,
+                                UiAdpResponse::HandshakeAccepted {
+                                    request_id,
+                                    server_capabilities: vec![freehand_ui_protocol::UI_ADP_HANDSHAKE_CAPABILITY.to_owned()],
+                                },
+                            )
+                            .await;
+                        }
                         UiAdpRequest::Subscribe { request_id, .. } => {
                             subscription_id = Some(request_id.clone());
                             send_adp_response(
@@ -1727,6 +1826,16 @@ fn spawn_adp_master_poll_foundation_mock_server_with_connections(
                     };
                     let request: UiAdpRequest = serde_json::from_str(&text).expect("adp request");
                     match request {
+                        UiAdpRequest::Handshake { request_id, .. } => {
+                            send_adp_response(
+                                &mut socket,
+                                UiAdpResponse::HandshakeAccepted {
+                                    request_id,
+                                    server_capabilities: vec![freehand_ui_protocol::UI_ADP_HANDSHAKE_CAPABILITY.to_owned()],
+                                },
+                            )
+                            .await;
+                        }
                         UiAdpRequest::Command {
                             request_id,
                             command: UiCommand::CreateTaskAgent { agent },
@@ -2070,6 +2179,19 @@ fn spawn_adp_worker_control_foundation_mock_server_with_connections(
                     };
                     let request: UiAdpRequest = serde_json::from_str(&text).expect("adp request");
                     match request {
+                        UiAdpRequest::Handshake { request_id, .. } => {
+                            send_adp_response(
+                                &mut socket,
+                                UiAdpResponse::HandshakeAccepted {
+                                    request_id,
+                                    server_capabilities: vec![
+                                        freehand_ui_protocol::UI_ADP_HANDSHAKE_CAPABILITY
+                                            .to_owned(),
+                                    ],
+                                },
+                            )
+                            .await;
+                        }
                         UiAdpRequest::Command {
                             request_id,
                             command: UiCommand::CreateTaskAgent { agent },

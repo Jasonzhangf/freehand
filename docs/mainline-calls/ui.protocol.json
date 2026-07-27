@@ -18,7 +18,7 @@
     "accepted command ingress is wrapped into a dispatch envelope that declares the target owner feature/module before leaving the protocol boundary",
     "runtime-owned mutation commands such as checkpoint rewind stay explicit at the protocol envelope layer and do not become UI-owned semantics",
     "query and subscribe stay separate",
-    "ADP WebSocket clients use protocol-owned typed frames for command, query, and subscribe requests instead of app-local JSON envelopes",
+    "ADP WebSocket clients use protocol-owned typed frames with top-level protocol_version=1; the first client frame must be Handshake, and command/query/subscribe frames are valid only after a server HandshakeAccepted capability response",
     "task list/history query commands are protocol-owned read-only ADP/query shapes while task truth remains runtime/task-owner supplied",
     "Phase 1 TaskBoard, AgentBoard, and AgentLifecycle queries are protocol-owned ADP/query command shapes while runtime/task owners supply truth",
     "task mutation commands (`CreateTask`, `CreateTaskAgent`, `AssignTask`, `ClaimNextTask`, `SubmitTaskReview`, `RejectTaskReview`, `ApproveTaskReview`, `CloseTask`) are protocol-owned mutation intents that validate required fields and route to task.orchestration through runtime; protocol does not write task truth",
@@ -53,7 +53,7 @@
     "checkpoint query returns read-only checkpoint summary projections supplied by runtime owner code",
     "command ingress returns explicit dispatch receipt without claiming truth mutation success",
     "subscribe returns an initial snapshot followed by continuous incremental projections through a protocol-owned subscription channel, or waits for the first turn when the latest-turn stream is subscribed before any turn exists",
-    "ADP subscribe returns an explicit SubscriptionAccepted frame before later SubscriptionEvent frames so UI-less clients can distinguish waiting from transport failure",
+    "ADP handshake returns an explicit HandshakeAccepted frame with server capabilities before any command/query/subscribe response; ADP subscribe returns an explicit SubscriptionAccepted frame before later SubscriptionEvent frames so UI-less clients can distinguish waiting from transport failure",
     "projections are read-only views over owner-written truth",
     "model request lifecycle is projected as UiModelRequestActivity inside UiTurnProjection for ordinary thinking, schema retry, and tool-result continuation; provider retry/failover are transport substate on the same activity, not separate reasoning-flow phases, and the activity clears when response/tool/usage/terminal/error projection arrives",
     "terminal completion shows only final projected text",
@@ -97,6 +97,7 @@
   "error_mainline": [
     "invalid command, invalid stream selection, or unavailable source projection return explicit protocol errors",
     "query/subscribe commands sent to command-ingress route are explicit protocol misuse errors",
+    "ADP request/response frames missing protocol_version or carrying an unsupported version are rejected during protocol deserialization before route handling",
     "query commands sent as ADP command frames are explicit protocol misuse errors, not mutation attempts",
     "empty checkpoint rewind ids are rejected at the protocol boundary before runtime dispatch",
     "checkpoint query misses return an empty read-only snapshot, not an implicit recovery or filesystem fallback",
@@ -218,17 +219,34 @@
     {
       "symbol": "UiAdpRequest",
       "owner": "crates/freehand-ui-protocol/src/lib.rs",
-      "purpose": "define protocol-owned WebSocket ADP frames for command, query, subscribe, event, and failure automation",
+      "purpose": "define protocol-owned versioned WebSocket ADP frames for handshake, command, query, subscribe, event, and failure automation",
       "allowed_callers": [
         "WebUI transport adapters",
         "Android transport adapters",
         "CLI automation transports"
       ],
       "related_tests": [
-        "ADP frame roundtrip smoke",
+        "adp_request_and_response_frames_roundtrip",
+        "adp_frames_require_supported_protocol_version",
         "daemon ADP command/query/subscribe smoke"
       ],
       "why_shared": "all UI and headless clients need one typed control/status frame shape instead of per-client transport envelopes"
+    },
+    {
+      "symbol": "adp_protocol_version / adp_server_capabilities",
+      "owner": "crates/freehand-ui-protocol/src/lib.rs",
+      "purpose": "single-source the current ADP wire version and handshake capability list",
+      "allowed_callers": [
+        "WebUI/daemon ADP transport",
+        "CLI automation",
+        "tests"
+      ],
+      "related_tests": [
+        "adp_request_and_response_frames_roundtrip",
+        "adp_frames_require_supported_protocol_version",
+        "server ADP handshake tests"
+      ],
+      "why_shared": "every UI/control client must negotiate the same versioned transport contract before command/query/subscribe frames are accepted"
     },
     {
       "symbol": "UiRuntimeQueryPort::query_runtime",
@@ -567,11 +585,11 @@
     },
     {
       "step": "18",
-      "symbol_path": "UiAdpRequest",
+      "symbol_path": "UiAdpRequest / UiAdpResponse / adp_protocol_version / adp_server_capabilities",
       "file_path": "crates/freehand-ui-protocol/src/lib.rs",
-      "responsibility": "define protocol-owned WebSocket ADP request frames for command/query/subscribe automation",
-      "input_semantic": "ADP JSON frame",
-      "output_semantic": "typed command/query/subscription request",
+      "responsibility": "define protocol-owned versioned WebSocket ADP frames and handshake capability metadata for command/query/subscribe automation",
+      "input_semantic": "ADP JSON frame with top-level protocol_version and first-frame handshake",
+      "output_semantic": "typed handshake, command/query/subscription response, event, or failure",
       "caller": "WebUI/Android/CLI automation transports",
       "callee": "protocol owner",
       "binding_status": "bound"
@@ -851,7 +869,7 @@
     "tool activity status and result detail are now preserved in UiTurnProjection.tool_activities and public conversation status mapping",
     "public tool summaries preserve tool_call_id, duplicate same-id tool calls upsert into one public card, and completed/failed public tool bodies expose tool result detail",
     "CancelLatestActiveTurn is now accepted by command ingress and routed to reason.turn",
-    "ADP request and response frames are now protocol-owned and JSON roundtrip tested for UI-less automation clients",
+    "ADP request and response frames are protocol-owned, versioned with protocol_version=1, include handshake/handshake_accepted variants, and are JSON roundtrip/negative-version tested for UI-less automation clients",
     "task list/history query command DTOs and runtime query-port shape are landed",
     "Phase 1 TaskBoard, AgentBoard, and AgentLifecycle query DTOs are landed and route only through runtime-backed query ports",
     "Phase 1 ApplyExecutionFact and RunSchedulerTick command DTOs are landed and route only through runtime-backed task.orchestration dispatch",

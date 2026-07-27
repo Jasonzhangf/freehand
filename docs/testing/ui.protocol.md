@@ -110,7 +110,7 @@
   - public tool body projection covers failed result detail when structured display is present
   - duplicate same-`tool_call_id` tool-call projection upserts one activity and one public tool card
   - debug-event ingestion and receiver-drain behavior
-  - ADP frame serialization and failure-frame shape
+  - ADP frame serialization, handshake frame shape, and missing/unsupported protocol-version rejection
   - task query command validation covers empty history id and command-ingress rejection for query-route misuse
   - Phase 1 board/lifecycle query commands cover runtime-route-only behavior and protocol-state mismatch rejection
   - task mutation command validation covers empty task id/title/content/goal/review summary, worker agent id/capabilities, claim execution id, review rejection reason/requirements, and owner-routing to `task.orchestration`
@@ -169,7 +169,7 @@
   - duplicate tool-call projection smoke covers one public card per `tool_call_id`
   - cancelled/failed/ToolPending terminal status projection smoke
   - blank latest-turn subscribe waits until a turn exists instead of failing early
-  - ADP command/query/subscribe frame roundtrip smoke
+  - ADP command/query/subscribe/handshake frame roundtrip smoke plus protocol-version negative smoke
   - ADP task list/history query smoke proves the protocol frame can carry task read models supplied by runtime
   - ADP Phase 1 board/lifecycle query smoke proves the protocol frame can carry board and lifecycle read models supplied by runtime
   - ADP task mutation command smoke proves the protocol frame can carry task create/create_agent/assign/claim/review/reject/approve/close mutation intents without protocol-owned task storage
@@ -246,7 +246,7 @@
   - tool activity status is now preserved in `UiTurnProjection.tool_activities` and public conversation tool summaries, including failed status for still-waiting tools when terminal truth is failed
   - tool summaries now expose `tool_call_id`, duplicate same-id tool calls are regression-locked to one public card, and completed/failed public tool bodies include tool result detail
   - tool summaries now expose `display` from the `tool.display` owner, and public bodies prefer structured result summaries over raw detail text
-  - ADP request/response frames are landed and regression-locked by JSON roundtrip coverage
+  - ADP request/response frames are versioned (`protocol_version=1`), carry handshake/handshake_accepted variants, and are regression-locked by JSON roundtrip plus missing/unsupported-version tests
   - session cwd summary/transcript projection is landed and regression-locked
   - session management command/query projection is implemented for `CreateSession`, `RenameSession`, `ArchiveSession`, `RestoreSession`, `DeleteSession`, and `RollbackLatestSessionTurn` routing through runtime to `reason.persistence`; `CreateSession.cwd` empty-string rejection and rollback empty-session rejection are regression-locked at the protocol boundary
   - task list/history query commands and DTOs are landed; runtime-backed ADP task query is regression-locked in daemon tests
@@ -274,3 +274,4 @@
     `cargo test -p freehand-ui-protocol session_search -- --nocapture --test-threads=1`
 
   - `accept_query_ingress` accepts QueryMasterPoll and rejects RunMasterPoll/ApplyExecutionFact/SubmitUserInput on the ADP query route with `direct_task_mutation_forbidden`
+  - focused proof: `CARGO_TARGET_DIR=/tmp/freehand-target-adp-version cargo test -p freehand-ui-protocol adp -- --test-threads=1` covers versioned request/response/handshake roundtrip and version rejection

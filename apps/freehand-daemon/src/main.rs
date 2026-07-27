@@ -427,6 +427,33 @@ mod tests {
         }
     }
 
+    async fn perform_adp_handshake(
+        socket: &mut tokio_tungstenite::WebSocketStream<
+            tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>,
+        >,
+    ) {
+        socket
+            .send(Message::Text(
+                serde_json::to_string(&UiAdpRequest::Handshake {
+                    request_id: "daemon-test-handshake".to_owned(),
+                    client_name: "freehand-daemon-test".to_owned(),
+                    capabilities: vec![
+                        freehand_ui_protocol::UI_ADP_HANDSHAKE_CAPABILITY.to_owned(),
+                    ],
+                })
+                .expect("handshake json")
+                .into(),
+            ))
+            .await
+            .expect("send handshake");
+        match next_adp_response(socket, "handshake accepted").await {
+            UiAdpResponse::HandshakeAccepted { request_id, .. } => {
+                assert_eq!(request_id, "daemon-test-handshake");
+            }
+            other => panic!("unexpected ADP handshake response: {other:?}"),
+        }
+    }
+
     async fn next_adp_response_matching(
         socket: &mut tokio_tungstenite::WebSocketStream<
             tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>,
@@ -655,6 +682,7 @@ mod tests {
         let server = TestServer::spawn(master_config_text(&provider_url)).await;
         let ws_url = server.base_url.replace("http://", "ws://") + "/adp";
         let (mut socket, _) = connect_async(ws_url).await.expect("connect adp");
+        perform_adp_handshake(&mut socket).await;
 
         socket
             .send(Message::Text(
@@ -789,6 +817,7 @@ mod tests {
         let server = TestServer::spawn(master_config_text(&provider_url)).await;
         let ws_url = server.base_url.replace("http://", "ws://") + "/adp";
         let (mut socket, _) = connect_async(ws_url).await.expect("connect adp");
+        perform_adp_handshake(&mut socket).await;
         let session_id = SessionId::new("daemon-adp-session-crud-rollback");
 
         let create = send_adp_command_and_wait_receipt(
@@ -982,6 +1011,7 @@ mod tests {
         let server = TestServer::spawn(master_config_text(&provider_url)).await;
         let ws_url = server.base_url.replace("http://", "ws://") + "/adp";
         let (mut socket, _) = connect_async(ws_url).await.expect("connect adp");
+        perform_adp_handshake(&mut socket).await;
 
         socket
             .send(Message::Text(
@@ -1057,6 +1087,7 @@ mod tests {
         let server = TestServer::spawn_existing_home(home, true).await;
         let ws_url = server.base_url.replace("http://", "ws://") + "/adp";
         let (mut socket, _) = connect_async(ws_url).await.expect("connect adp");
+        perform_adp_handshake(&mut socket).await;
 
         socket
             .send(Message::Text(
@@ -1237,6 +1268,7 @@ mod tests {
         let server = TestServer::spawn_existing_home(home, true).await;
         let ws_url = server.base_url.replace("http://", "ws://") + "/adp";
         let (mut socket, _) = connect_async(ws_url).await.expect("connect adp");
+        perform_adp_handshake(&mut socket).await;
 
         socket
             .send(Message::Text(
@@ -1301,6 +1333,7 @@ mod tests {
         let server = TestServer::spawn(master_config_text(&provider_url)).await;
         let ws_url = server.base_url.replace("http://", "ws://") + "/adp";
         let (mut socket, _) = connect_async(ws_url).await.expect("connect adp");
+        perform_adp_handshake(&mut socket).await;
 
         socket
             .send(Message::Text(

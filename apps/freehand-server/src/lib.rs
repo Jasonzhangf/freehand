@@ -29,9 +29,10 @@ use freehand_ui_protocol::{
     UiClientKind, UiCommand, UiCommandDispatchFailure, UiCommandDispatchPort,
     UiCommandDispatchReceipt, UiProjection, UiProtocolState, UiPublicTurnProjection, UiQueryResult,
     UiRuntimeQueryPort, UiSubscriptionEvent, UiTurnProjection, accept_query_ingress,
-    build_command_dispatch_envelope, checkpoint_projection_from_runtime_summary,
-    dispatch_port_failure, protocol_rejection, public_turn_projection, subscription_matches,
-    subscription_selector, turn_projection_for_client, turn_projection_from_events,
+    adp_server_capabilities, build_command_dispatch_envelope,
+    checkpoint_projection_from_runtime_summary, dispatch_port_failure, protocol_rejection,
+    public_turn_projection, subscription_matches, subscription_selector,
+    turn_projection_for_client, turn_projection_from_events,
 };
 use futures_util::stream;
 use futures_util::{SinkExt, StreamExt};
@@ -450,6 +451,7 @@ async fn handle_adp_connection(socket: WebSocket, state: WebUiState) {
     });
 
     let mut subscriptions: Vec<(String, SubscriptionSelector)> = Vec::new();
+    let mut adp_handshake_accepted = false;
     let mut protocol_receiver = state
         .protocol_state
         .lock()
@@ -470,6 +472,7 @@ async fn handle_adp_connection(socket: WebSocket, state: WebUiState) {
                             &state,
                             &outbound_tx,
                             &mut subscriptions,
+                            &mut adp_handshake_accepted,
                             text.to_string(),
                         )
                         .await
@@ -528,19 +531,48 @@ async fn handle_adp_text_message(
     state: &WebUiState,
     outbound_tx: &mpsc::UnboundedSender<UiAdpResponse>,
     subscriptions: &mut Vec<(String, SubscriptionSelector)>,
+    adp_handshake_accepted: &mut bool,
     text: String,
 ) -> Result<(), String> {
     let request: UiAdpRequest =
         serde_json::from_str(&text).map_err(|err| format!("invalid ADP JSON: {err}"))?;
     match request {
+        UiAdpRequest::Handshake { request_id, .. } => {
+            if *adp_handshake_accepted {
+                let _ = outbound_tx.send(UiAdpResponse::Failure {
+                    request_id,
+                    failure: UiAdpFailure {
+                        code: "adp_handshake_already_accepted".to_owned(),
+                        message: "ADP handshake has already been accepted for this connection"
+                            .to_owned(),
+                        retryable: false,
+                    },
+                });
+                return Ok(());
+            }
+            *adp_handshake_accepted = true;
+            let _ = outbound_tx.send(UiAdpResponse::HandshakeAccepted {
+                request_id,
+                server_capabilities: adp_server_capabilities(),
+            });
+            Ok(())
+        }
         UiAdpRequest::Command {
             request_id,
             command,
         } => {
+            if !*adp_handshake_accepted {
+                send_adp_handshake_required(outbound_tx, request_id);
+                return Ok(());
+            }
             handle_adp_command(state, outbound_tx, request_id, command).await;
             Ok(())
         }
         UiAdpRequest::Query { request_id, query } => {
+            if !*adp_handshake_accepted {
+                send_adp_handshake_required(outbound_tx, request_id);
+                return Ok(());
+            }
             let _ = handle_adp_query(state, outbound_tx, request_id, query).await;
             Ok(())
         }
@@ -548,12 +580,30 @@ async fn handle_adp_text_message(
             request_id,
             subscription,
         } => {
+            if !*adp_handshake_accepted {
+                send_adp_handshake_required(outbound_tx, request_id);
+                return Ok(());
+            }
             let _ =
                 handle_adp_subscribe(state, outbound_tx, subscriptions, request_id, subscription)
                     .await;
             Ok(())
         }
     }
+}
+
+fn send_adp_handshake_required(
+    outbound_tx: &mpsc::UnboundedSender<UiAdpResponse>,
+    request_id: String,
+) {
+    let _ = outbound_tx.send(UiAdpResponse::Failure {
+        request_id,
+        failure: UiAdpFailure {
+            code: "adp_handshake_required".to_owned(),
+            message: "ADP handshake is required before command/query/subscribe frames".to_owned(),
+            retryable: false,
+        },
+    });
 }
 
 async fn handle_adp_command(
@@ -1252,6 +1302,27 @@ mod tests {
             .await
             .expect("send adp request");
     }
+    async fn perform_adp_handshake(
+        socket: &mut tokio_tungstenite::WebSocketStream<
+            tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>,
+        >,
+    ) {
+        send_adp_request(
+            socket,
+            UiAdpRequest::Handshake {
+                request_id: "test-handshake".to_owned(),
+                client_name: "freehand-server-test".to_owned(),
+                capabilities: vec![freehand_ui_protocol::UI_ADP_HANDSHAKE_CAPABILITY.to_owned()],
+            },
+        )
+        .await;
+        match next_adp_response(socket).await {
+            UiAdpResponse::HandshakeAccepted { request_id, .. } => {
+                assert_eq!(request_id, "test-handshake");
+            }
+            other => panic!("unexpected ADP handshake response: {other:?}"),
+        }
+    }
 
     async fn read_next_sse_event(response: &mut reqwest::Response, buffer: &mut String) -> String {
         loop {
@@ -1415,6 +1486,7 @@ mod tests {
         let (mut socket, _) = connect_async(relay.ws_url("/relay/daemon/studio-host/adp"))
             .await
             .expect("relay adp connect");
+        perform_adp_handshake(&mut socket).await;
         socket
             .send(WsMessage::Text(
                 serde_json::to_string(&UiAdpRequest::Query {
@@ -1471,6 +1543,99 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn adp_requires_handshake_before_query_and_accepts_after_handshake() {
+        let runtime_query_port = Arc::new(CountingRuntimeQueryPort::default());
+        let server = TestServer::spawn_with_state_port_and_query(
+            seed_webui_protocol_state(),
+            Arc::new(StaticUiCommandDispatchPort::default()),
+            runtime_query_port.clone(),
+        )
+        .await;
+        let ws_url = server.base_url.replacen("http://", "ws://", 1) + "/adp";
+        let (mut socket, _) = connect_async(ws_url).await.expect("adp connect");
+
+        send_adp_request(
+            &mut socket,
+            UiAdpRequest::Query {
+                request_id: "pre-handshake-query".to_owned(),
+                query: UiCommand::QueryMasterPoll {
+                    after_cursor: None,
+                    limit: Some(1),
+                    include_terminal: false,
+                    replay_from_start: false,
+                },
+            },
+        )
+        .await;
+        match next_adp_response(&mut socket).await {
+            UiAdpResponse::Failure {
+                request_id,
+                failure,
+            } => {
+                assert_eq!(request_id, "pre-handshake-query");
+                assert_eq!(failure.code, "adp_handshake_required");
+                assert!(!failure.retryable);
+            }
+            other => panic!("query before ADP handshake must fail: {other:?}"),
+        }
+        assert_eq!(
+            runtime_query_port.queries.lock().expect("query log").len(),
+            0,
+            "pre-handshake query must not reach runtime query port"
+        );
+
+        perform_adp_handshake(&mut socket).await;
+        send_adp_request(
+            &mut socket,
+            UiAdpRequest::Query {
+                request_id: "post-handshake-query".to_owned(),
+                query: UiCommand::QueryMasterPoll {
+                    after_cursor: None,
+                    limit: Some(1),
+                    include_terminal: false,
+                    replay_from_start: false,
+                },
+            },
+        )
+        .await;
+        match next_adp_response(&mut socket).await {
+            UiAdpResponse::QueryResult { request_id, .. } => {
+                assert_eq!(request_id, "post-handshake-query");
+            }
+            other => panic!("query after ADP handshake should pass: {other:?}"),
+        }
+        assert_eq!(
+            runtime_query_port.queries.lock().expect("query log").len(),
+            1,
+            "post-handshake query reaches runtime query port"
+        );
+
+        send_adp_request(
+            &mut socket,
+            UiAdpRequest::Handshake {
+                request_id: "duplicate-handshake".to_owned(),
+                client_name: "freehand-server-test".to_owned(),
+                capabilities: vec![freehand_ui_protocol::UI_ADP_HANDSHAKE_CAPABILITY.to_owned()],
+            },
+        )
+        .await;
+        match next_adp_response(&mut socket).await {
+            UiAdpResponse::Failure {
+                request_id,
+                failure,
+            } => {
+                assert_eq!(request_id, "duplicate-handshake");
+                assert_eq!(failure.code, "adp_handshake_already_accepted");
+                assert!(!failure.retryable);
+            }
+            other => panic!("duplicate ADP handshake must fail: {other:?}"),
+        }
+
+        let _ = socket.close(None).await;
+        server.stop().await;
+    }
+
+    #[tokio::test]
     async fn adp_query_frame_rejects_mutations_before_runtime_query_port() {
         let runtime_query_port = Arc::new(CountingRuntimeQueryPort::default());
         let server = TestServer::spawn_with_state_port_and_query(
@@ -1481,6 +1646,7 @@ mod tests {
         .await;
         let ws_url = server.base_url.replacen("http://", "ws://", 1) + "/adp";
         let (mut socket, _) = connect_async(ws_url).await.expect("adp connect");
+        perform_adp_handshake(&mut socket).await;
 
         send_adp_request(
             &mut socket,

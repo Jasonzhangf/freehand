@@ -1213,10 +1213,7 @@ async fn run_adp_session_query_async(
     url: String,
     session_id: Option<SessionId>,
 ) -> Result<String, String> {
-    let (mut socket, _) = timeout(Duration::from_secs(10), connect_async(&url))
-        .await
-        .map_err(|_| format!("ADP connect timeout: {url}"))?
-        .map_err(|err| format!("ADP connect failed: {err}"))?;
+    let mut socket = connect_adp(&url, "freehand-cli").await?;
 
     let list_request_id = "cli-session-list-1".to_owned();
     send_adp(
@@ -1348,10 +1345,7 @@ async fn run_adp_session_query_async(
 }
 
 async fn run_adp_session_manage_async(url: String, command: UiCommand) -> Result<String, String> {
-    let (mut socket, _) = timeout(Duration::from_secs(10), connect_async(&url))
-        .await
-        .map_err(|_| format!("ADP connect timeout: {url}"))?
-        .map_err(|err| format!("ADP connect failed: {err}"))?;
+    let mut socket = connect_adp(&url, "freehand-cli").await?;
     let request_id = "cli-session-manage-1".to_owned();
     let command_kind = match &command {
         UiCommand::CreateSession { .. } => "create",
@@ -1406,10 +1400,7 @@ async fn run_adp_session_manage_async(url: String, command: UiCommand) -> Result
 }
 
 async fn run_adp_task_query_async(url: String, query: UiCommand) -> Result<String, String> {
-    let (mut socket, _) = timeout(Duration::from_secs(10), connect_async(&url))
-        .await
-        .map_err(|_| format!("ADP connect timeout: {url}"))?
-        .map_err(|err| format!("ADP connect failed: {err}"))?;
+    let mut socket = connect_adp(&url, "freehand-cli").await?;
     let request_id = "cli-task-query-1".to_owned();
     send_adp(
         &mut socket,
@@ -1453,10 +1444,7 @@ async fn run_adp_task_query_async(url: String, query: UiCommand) -> Result<Strin
 }
 
 async fn run_adp_config_query_async(url: String) -> Result<String, String> {
-    let (mut socket, _) = timeout(Duration::from_secs(10), connect_async(&url))
-        .await
-        .map_err(|_| format!("ADP connect timeout: {url}"))?
-        .map_err(|err| format!("ADP connect failed: {err}"))?;
+    let mut socket = connect_adp(&url, "freehand-cli").await?;
     let request_id = "cli-config-query-1".to_owned();
     send_adp(
         &mut socket,
@@ -1503,10 +1491,7 @@ async fn run_adp_config_update_async(
     url: String,
     update: UiProviderConfigUpdate,
 ) -> Result<String, String> {
-    let (mut socket, _) = timeout(Duration::from_secs(10), connect_async(&url))
-        .await
-        .map_err(|_| format!("ADP connect timeout: {url}"))?
-        .map_err(|err| format!("ADP connect failed: {err}"))?;
+    let mut socket = connect_adp(&url, "freehand-cli").await?;
     let request_id = "cli-config-update-1".to_owned();
     send_adp(
         &mut socket,
@@ -1594,10 +1579,7 @@ async fn run_adp_provider_web_search_test_async(
     provider_id: String,
     query: Option<String>,
 ) -> Result<String, String> {
-    let (mut socket, _) = timeout(Duration::from_secs(10), connect_async(&url))
-        .await
-        .map_err(|_| format!("ADP connect timeout: {url}"))?
-        .map_err(|err| format!("ADP connect failed: {err}"))?;
+    let mut socket = connect_adp(&url, "freehand-cli").await?;
     let request_id = "cli-provider-web-search-test-1".to_owned();
     send_adp(
         &mut socket,
@@ -1653,10 +1635,7 @@ async fn run_adp_provider_web_search_test_async(
 }
 
 async fn run_adp_error_query_async(url: String, query: UiCommand) -> Result<String, String> {
-    let (mut socket, _) = timeout(Duration::from_secs(10), connect_async(&url))
-        .await
-        .map_err(|_| format!("ADP connect timeout: {url}"))?
-        .map_err(|err| format!("ADP connect failed: {err}"))?;
+    let mut socket = connect_adp(&url, "freehand-cli").await?;
     let request_id = "cli-error-query-1".to_owned();
     send_adp(
         &mut socket,
@@ -1704,10 +1683,7 @@ async fn run_adp_task_subscribe_async(
     status: Option<String>,
     agent_id: Option<String>,
 ) -> Result<String, String> {
-    let (mut socket, _) = timeout(Duration::from_secs(10), connect_async(&url))
-        .await
-        .map_err(|_| format!("ADP connect timeout: {url}"))?
-        .map_err(|err| format!("ADP connect failed: {err}"))?;
+    let mut socket = connect_adp(&url, "freehand-cli").await?;
     let request_id = "cli-task-subscribe-1".to_owned();
     send_adp(
         &mut socket,
@@ -1905,10 +1881,7 @@ fn summarize_error_query_result(
 }
 
 async fn run_adp_turn_sample_async(url: String, sample: AdpTurnSample) -> Result<String, String> {
-    let (mut socket, _) = timeout(Duration::from_secs(10), connect_async(&url))
-        .await
-        .map_err(|_| format!("ADP connect timeout: {url}"))?
-        .map_err(|err| format!("ADP connect failed: {err}"))?;
+    let mut socket = connect_adp(&url, "freehand-cli").await?;
     let sub_id = format!("cli-sample-{}-sub", sample.label());
     let cmd_id = format!("cli-sample-{}-cmd", sample.label());
     let query_id = format!("cli-sample-{}-query", sample.label());
@@ -1968,6 +1941,9 @@ async fn run_adp_turn_sample_async(url: String, sample: AdpTurnSample) -> Result
                 )
             })??;
         match response {
+            UiAdpResponse::HandshakeAccepted { request_id, .. } => {
+                seen.push(format!("handshake_accepted:{request_id}"));
+            }
             UiAdpResponse::SubscriptionAccepted { request_id, .. } => {
                 seen.push(format!("subscription_accepted:{request_id}"));
                 if request_id == sub_id {
@@ -4241,10 +4217,7 @@ async fn send_adp_command_receipt(
     request_id: &str,
     command: UiCommand,
 ) -> Result<String, String> {
-    let (mut socket, _) = timeout(Duration::from_secs(10), connect_async(url))
-        .await
-        .map_err(|_| format!("ADP command connect timeout: {url}"))?
-        .map_err(|err| format!("ADP command connect failed: {err}"))?;
+    let mut socket = connect_adp(url, "freehand-cli").await?;
     send_adp(
         &mut socket,
         UiAdpRequest::Command {
@@ -4292,10 +4265,7 @@ async fn query_task_list_find_token(
     url: &str,
     token: &str,
 ) -> Result<freehand_ui_protocol::UiTaskSnapshotProjection, String> {
-    let (mut socket, _) = timeout(Duration::from_secs(10), connect_async(url))
-        .await
-        .map_err(|_| format!("ADP task list connect timeout: {url}"))?
-        .map_err(|err| format!("ADP task list connect failed: {err}"))?;
+    let mut socket = connect_adp(url, "freehand-cli").await?;
     let request_id = "cli-task-lifecycle-list".to_owned();
     send_adp(
         &mut socket,
@@ -4358,10 +4328,7 @@ async fn query_task_history(
     url: &str,
     task_id: &str,
 ) -> Result<freehand_ui_protocol::UiTaskHistoryProjection, String> {
-    let (mut socket, _) = timeout(Duration::from_secs(10), connect_async(url))
-        .await
-        .map_err(|_| format!("ADP task history connect timeout: {url}"))?
-        .map_err(|err| format!("ADP task history connect failed: {err}"))?;
+    let mut socket = connect_adp(url, "freehand-cli").await?;
     let request_id = "cli-task-lifecycle-history".to_owned();
     send_adp(
         &mut socket,
@@ -4562,10 +4529,7 @@ async fn query_adp_once(
     query: UiCommand,
     label: &str,
 ) -> Result<UiQueryResult, String> {
-    let (mut socket, _) = timeout(Duration::from_secs(10), connect_async(url))
-        .await
-        .map_err(|_| format!("ADP {label} connect timeout: {url}"))?
-        .map_err(|err| format!("ADP {label} connect failed: {err}"))?;
+    let mut socket = connect_adp(url, "freehand-cli").await?;
     send_adp(
         &mut socket,
         UiAdpRequest::Query {
@@ -4640,10 +4604,7 @@ async fn submit_adp_sample_prompt_with_timeout(
     text: String,
     wait_duration: Duration,
 ) -> Result<Vec<String>, String> {
-    let (mut socket, _) = timeout(Duration::from_secs(10), connect_async(url))
-        .await
-        .map_err(|_| format!("ADP connect timeout: {url}"))?
-        .map_err(|err| format!("ADP connect failed: {err}"))?;
+    let mut socket = connect_adp(url, "freehand-cli").await?;
     let request_id = format!("cli-{label}-cmd");
     send_adp(
         &mut socket,
@@ -4670,6 +4631,9 @@ async fn submit_adp_sample_prompt_with_timeout(
             .await
             .map_err(|_| format!("{label} submit timeout seen={}", seen.join(",")))??;
         match response {
+            UiAdpResponse::HandshakeAccepted { request_id, .. } => {
+                seen.push(format!("handshake_accepted:{request_id}"));
+            }
             UiAdpResponse::CommandReceipt {
                 request_id: response_id,
                 receipt,
@@ -4741,10 +4705,7 @@ async fn query_session_transcript(
     request_id: &str,
     timeout_duration: Duration,
 ) -> Result<freehand_ui_protocol::UiSessionTranscriptProjection, String> {
-    let (mut socket, _) = timeout(Duration::from_secs(10), connect_async(url))
-        .await
-        .map_err(|_| format!("ADP transcript connect timeout: {url}"))?
-        .map_err(|err| format!("ADP transcript connect failed: {err}"))?;
+    let mut socket = connect_adp(url, "freehand-cli").await?;
     send_adp(
         &mut socket,
         UiAdpRequest::Query {
@@ -4976,10 +4937,7 @@ fn run_adp_smoke(args: Vec<String>) -> Result<String, String> {
 }
 
 async fn run_adp_smoke_async(url: String) -> Result<String, String> {
-    let (mut socket, _) = timeout(Duration::from_secs(10), connect_async(&url))
-        .await
-        .map_err(|_| format!("ADP connect timeout: {url}"))?
-        .map_err(|err| format!("ADP connect failed: {err}"))?;
+    let mut socket = connect_adp(&url, "freehand-cli").await?;
 
     send_adp(
         &mut socket,
@@ -5023,6 +4981,9 @@ async fn run_adp_smoke_async(url: String) -> Result<String, String> {
             .await
             .map_err(|_| format!("ADP smoke timeout seen={}", seen.join(",")))??;
         match response {
+            UiAdpResponse::HandshakeAccepted { request_id, .. } => {
+                seen.push(format!("handshake_accepted:{request_id}"));
+            }
             UiAdpResponse::SubscriptionAccepted { request_id, .. } => {
                 seen.push(format!("subscription_accepted:{request_id}"));
                 if request_id == "cli-sub-1" {
@@ -5067,12 +5028,44 @@ async fn run_adp_smoke_async(url: String) -> Result<String, String> {
     Ok(format!("adp_smoke_ok url={} seen={}", url, seen.join(",")))
 }
 
-async fn send_adp(
-    socket: &mut tokio_tungstenite::WebSocketStream<
-        tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>,
-    >,
-    request: UiAdpRequest,
-) -> Result<(), String> {
+type AdpWebSocket =
+    tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>>;
+
+async fn connect_adp(url: &str, client_name: &str) -> Result<AdpWebSocket, String> {
+    let (mut socket, _) = timeout(Duration::from_secs(10), connect_async(url))
+        .await
+        .map_err(|_| format!("ADP connect timeout: {url}"))?
+        .map_err(|err| format!("ADP connect failed: {err}"))?;
+    let request_id = format!("{client_name}-handshake-1");
+    send_adp(
+        &mut socket,
+        UiAdpRequest::Handshake {
+            request_id: request_id.clone(),
+            client_name: client_name.to_owned(),
+            capabilities: vec![freehand_ui_protocol::UI_ADP_HANDSHAKE_CAPABILITY.to_owned()],
+        },
+    )
+    .await?;
+    match timeout(Duration::from_secs(10), next_adp(&mut socket))
+        .await
+        .map_err(|_| "ADP handshake timeout".to_owned())??
+    {
+        UiAdpResponse::HandshakeAccepted {
+            request_id: response_id,
+            ..
+        } if response_id == request_id => Ok(socket),
+        UiAdpResponse::Failure {
+            request_id: response_id,
+            failure,
+        } if response_id == request_id => Err(format!(
+            "ADP handshake failure {}: {}",
+            failure.code, failure.message
+        )),
+        other => Err(format!("unexpected ADP handshake response: {other:?}")),
+    }
+}
+
+async fn send_adp(socket: &mut AdpWebSocket, request: UiAdpRequest) -> Result<(), String> {
     let body = serde_json::to_string(&request).map_err(|err| err.to_string())?;
     socket
         .send(Message::Text(body.into()))
@@ -5080,11 +5073,7 @@ async fn send_adp(
         .map_err(|err| format!("ADP send failed: {err}"))
 }
 
-async fn next_adp(
-    socket: &mut tokio_tungstenite::WebSocketStream<
-        tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>,
-    >,
-) -> Result<UiAdpResponse, String> {
+async fn next_adp(socket: &mut AdpWebSocket) -> Result<UiAdpResponse, String> {
     let Some(message) = socket.next().await else {
         return Err("ADP socket closed".to_owned());
     };

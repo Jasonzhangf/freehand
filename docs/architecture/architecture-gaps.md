@@ -56,13 +56,13 @@ Non-violation pending items. Not regressions. Not false positives. Each gap has 
 
 | Field | Value |
 |---|---|
-| feature_id | `runtime.ui-command-dispatch`, `app.webui-smoke` |
+| feature_id | `ui.protocol`, `runtime.ui-command-dispatch`, `app.webui-smoke` |
 | owner crate | `crates/freehand-ui-protocol`, `apps/freehand-server` |
-| gap kind | 2026-07-26 审计确认：① `UiAdpRequest`/`UiAdpResponse` 无 protocol version/capability 协商字段，三端独立发布无兼容缓冲 ② WebUI 以约 40 处手写 PascalCase 字符串镜像 serde 编码，无 JSON Schema/TS 生成物 ③ `/adp` 无鉴权且暴露 `ApplyExecutionFact`/`ClaimNextTask` 等调度内部命令 ④ ui-protocol 混装服务端状态机 `UiProtocolState` 与投影引擎（单文件 6882 行、依赖 tokio/blocks/control）⑤ `target_owner_module` 把仓库内部路径序列化进线协议 |
-| why not violation | Query 通道 mutation 旁路已收口：`UiCommandFrameClass` 穷举 + `accept_query_ingress` + 服务端 `handle_adp_query` 前置校验，`RunMasterPoll` 与只读 `QueryMasterPoll` 已拆分，且服务端 WebSocket 测试锁定 mutation 在 runtime query port 前被拒。剩余 gap 是协议版本/schema 生成物、crate 瘦身与鉴权收缩，不是当前线上事故。 |
-| risk | 旧客户端对枚举变更只能收到反序列化失败；任意 WebSocket 客户端仍可走 Command 帧驱动内部调度；协议 crate 仍无法被非 Rust 端做 schema 提取 |
-| gate | Query 读写分类与服务端白名单已有协议/服务端测试锁定；版本化与 schema 生成物尚无 gate |
-| closure path | 1) ~~读写分类 + Query 通道白名单 + `direct_task_mutation_forbidden` 提升进 `UiProtocolError`~~ 已落地 2) 帧加 protocol_version 与首帧握手 3) schemars 导出 schema，WebUI 从生成物导入 4) `UiProtocolState`/投影引擎迁出至独立 crate，`target_owner_module` 降级 debug-only 5) `/adp` 鉴权并收缩命令面 |
+| gap kind | 2026-07-27 状态：① `UiAdpRequest`/`UiAdpResponse` 已强制顶层 `protocol_version=1`，`/adp` 已要求首帧 handshake 并返回 capability；剩余 gap 是 WebUI 仍以手写字符串镜像 serde 编码、无 JSON Schema/TS 生成物，`/adp` 无鉴权且暴露 `ApplyExecutionFact`/`ClaimNextTask` 等调度内部命令，ui-protocol 仍混装服务端状态机 `UiProtocolState` 与投影引擎，`target_owner_module` 仍把仓库内部路径序列化进线协议 |
+| why not violation | Query 通道 mutation 旁路已收口：`UiCommandFrameClass` 穷举 + `accept_query_ingress` + 服务端 `handle_adp_query` 前置校验，`RunMasterPoll` 与只读 `QueryMasterPoll` 已拆分，且服务端 WebSocket 测试锁定 mutation 在 runtime query port 前被拒。ADP version/handshake 已由协议 serde roundtrip/negative test、服务端 pre-handshake rejection/duplicate-handshake test、CLI/WebUI/daemon handshakes 锁定。剩余 gap 是 schema 生成物、crate 瘦身、鉴权和命令面收缩。 |
+| risk | 旧客户端会被显式 `protocol_version` 反序列化失败或 handshake failure 拒绝，必须同步升级；任意 WebSocket 客户端在完成 handshake 后仍可走 Command 帧驱动内部调度；协议 crate 仍无法被非 Rust 端做 schema 提取 |
+| gate | Query 读写分类与服务端白名单已有协议/服务端测试锁定；版本化/首帧握手已有协议、服务端、CLI、daemon 和 JS 语法验证；schema 生成物、`/adp` 鉴权和命令面收缩尚无 gate |
+| closure path | 1) ~~读写分类 + Query 通道白名单 + `direct_task_mutation_forbidden` 提升进 `UiProtocolError`~~ 已落地 2) ~~帧加 protocol_version 与首帧握手~~ 已落地 3) schemars 导出 schema，WebUI 从生成物导入 4) `UiProtocolState`/投影引擎迁出至独立 crate，`target_owner_module` 降级 debug-only 5) `/adp` 鉴权并收缩命令面 |
 | priority | 高 — 多端独立发布节奏已经存在（Android APK / CLI 二进制 / 内嵌 WebUI） |
 
 

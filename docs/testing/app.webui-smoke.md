@@ -54,7 +54,7 @@
   - the mobile Agents 运行时 sheet is read-only navigation/current-session progress and must not expose Worker-limit mutation; the config-owned Worker limit is edited only in the system Config surface while the Header may keep a read-only Worker-limit projection
   - WebUI lifecycle projections scope task counts, task cards, Worker cards, 智能体面板 rows, 事件收件箱 rows, task-history targets, and Worker-control targets to the selected parent session; an empty selected session must render zero current lifecycle rows instead of falling back to global 任务面板 history
   - opening or closing the mobile Agent sheet is presentation-only and preserves selected session, transcript, composer draft, pending submit, scroll anchor, and lifecycle clocks
-  - WebUI default command/query/status path uses ADP WebSocket `/adp`; latest-turn SSE is consumed as a display-refresh mirror
+  - WebUI default command/query/status path uses ADP WebSocket `/adp`; the client sends a versioned first-frame handshake, waits for `handshake_accepted`, and only then sends query/subscribe/command frames; latest-turn SSE is consumed as a display-refresh mirror
   - WebUI exposes hidden success/failure diagnostic prompts through slash commands and keyboard shortcuts while preserving the normal ADP submit path; persistent Success/Failure composer buttons must not render
 - WebUI control strip and session rail expose session switching, `/new` New dialog, `/task` task mode in that dialog, refresh, cwd selection, model selection, attachment upload, file/image/video preview, slash commands, and keyboard shortcuts as input-layer affordances
 - WebUI settings shell exposes only coarse top-level entries for 模型, 智能体运行时, 连接, 可观测性, 外观, and 关于 on initial open. Provider rows, registry cards, forms, primary/fallback selectors, model-group controls, Worker-limit controls, APK controls, and Diagnostics rows must all remain hidden until the matching owner page is opened through explicit drilldown navigation.
@@ -109,9 +109,9 @@
     `QueryDiagnostics`, `renderSettingsDiagnostics`,
     `renderDiagnosticLogRow`, and `refreshDiagnosticsStatus`
   - Android update route smoke for env/sidecar manifest JSON, explicit missing-sidecar failure, and explicit missing-APK 404
-  - WebUI JS asset smoke locks ADP WebSocket command/query usage, rejects `fetch` as a live path, and requires `EventSource` only for latest-turn SSE display refresh
+  - WebUI JS asset smoke locks ADP WebSocket command/query usage, protocol_version stamping, first-frame handshake gating, rejects `fetch` as a live path, and requires `EventSource` only for latest-turn SSE display refresh
   - WebUI ADP subscription accepted/等待中 status rendering smoke
-  - WebUI ADP failure frame visible-card/status smoke
+  - WebUI ADP failure frame visible-card/status smoke, with user-facing 连接/服务 wording instead of raw `ADP`
   - WebUI ADP request timeout visible-failure smoke
 - WebUI ADP failure card ordering smoke: failure card must not render ahead of the current conversation items
 - WebUI asset and online smoke must prove user-visible status text, failure cards, and verifier-submitted diagnostic prompts do not expose `ADP`; protocol naming is allowed only in internal code, docs, CLI, and test harness output
@@ -137,7 +137,7 @@
   - WebUI command ingress dispatch failure projection smoke
   - WebUI command ingress dispatch join-failure projection smoke
   - WebUI command ingress query-route-misuse rejection smoke
-  - WebUI ADP query-as-command failure does not mutate state and renders failure
+  - WebUI ADP pre-handshake query is rejected before runtime query port; query-as-command failure does not mutate state and renders failure
   - WebUI ADP 运行时-query-port failure frame smoke
   - WebUI ADP task list subscription initial snapshot smoke
   - WebUI ADP error-center subscription initial snapshot smoke
@@ -306,7 +306,7 @@
   - split theme/WebUI static assets are landed
   - HTTP query and continuous SSE subscribe transport smoke is landed
   - HTTP command ingress dispatch-receipt/failure smoke is landed
-  - WebUI root shell now exposes `/adp`, and WebUI JS uses ADP WebSocket for command/query/subscription truth plus EventSource for latest-turn SSE display refresh
+  - WebUI root shell now exposes `/adp`, and WebUI JS uses protocol_version=1 first-frame handshake plus ADP WebSocket for command/query/subscription truth, while EventSource remains latest-turn SSE display refresh
 - WebUI layout shape classifier and CSS shape rules are landed; `scripts/verify-webui-layout-shapes.mjs` locks the pure classifier, and `scripts/webui_verify_online.mjs` captures the online viewport matrix against S profile
 - WebUI Android WebView first paint is server-pinned through the root `client=android-webview` query so the app enters directly in portrait drawer layout instead of flashing the desktop grid before JS recalculates
 - WebUI mobile portrait drawer layout is landed: phone/tall-phone/tablet-portrait default to a phone-first conversation workspace, while session CRUD/list and debug/config detail panels open through mobile overlay controls without changing ADP/session truth
@@ -388,4 +388,6 @@
 - Server asset smoke: `CARGO_TARGET_DIR=/tmp/freehand-target-mobile-modular cargo test -p freehand-server webui -- --nocapture --test-threads=1` now checks the thin `webui.js`, bootstrap, `legacy-monolith.js`, app-shell modules, and split surface modules including `session-detail/controls.js`, `session-search/view.js`, `new-session/controls.js`, `settings/view.js`, `settings/diagnostics.js`, `tools-registry/controls.js`, and `timer-dashboard/controls.js`.
 - Online gate: `node scripts/verify-webui-mobile-ui-tree-online.mjs` now fetches the expanded module asset list and must prove Home/SessionDetail mutual exclusion, one-row/two-panel Home dashboard, fixed history buckets, Settings drilldown, Header Worker rail status/duration rows plus click-to-expand details from fixed TaskBoard truth, and no portrait overflow.
 
-  - freehand-server ADP query frame test locks QueryMasterPoll reach runtime query port while RunMasterPoll/ApplyExecutionFact are rejected before owner query with `direct_task_mutation_forbidden`
+  - freehand-server ADP tests lock first-frame handshake (`adp_handshake_required`, duplicate-handshake rejection, post-handshake query success) and QueryMasterPoll reaching runtime query port while RunMasterPoll/ApplyExecutionFact are rejected before owner query with `direct_task_mutation_forbidden`
+
+- Focused ADP transport proof: `CARGO_TARGET_DIR=/tmp/freehand-target-adp-version cargo test -p freehand-server adp -- --test-threads=1` covers first-frame handshake gating, duplicate handshake rejection, post-handshake query success, relay ADP, and query mutation rejection; `node --check apps/freehand-server/assets/webui/app-shell/adp-client.js` covers split client syntax.

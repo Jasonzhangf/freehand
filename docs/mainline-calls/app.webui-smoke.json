@@ -16,7 +16,7 @@
     "app boundary may render query snapshot, debug snapshot, and separate slave-card projection without owning protocol semantics",
     "app boundary serves a real WebUI shell that loads protocol-consumer JS and split CSS assets",
     "app boundary keeps theme assets separate from WebUI layout assets",
-    "front-end default control/status path is ADP WebSocket `/adp` for query, subscribe, and command frames",
+    "front-end default command/query/status path is ADP WebSocket `/adp`; WebUI sends a versioned first-frame handshake and waits for handshake_accepted before query/subscribe/command requests; latest-turn SSE is also consumed as a display-refresh mirror",
     "front-end Home session lists expose multi-select and remove via `DeleteSession`, while SessionDetail exposes protocol-owned current-session rename and double-Esc rollback controls without storing session truth locally; archive/restore are intentionally absent from WebUI",
     "front-end selected empty-session rendering binds empty `SessionTurns` to the selected session, clears previous active turn and debug state, and suppresses generic 等待中-data system cards so new sessions do not leak prior session content",
     "front-end keeps success and failure scenario prompts as hidden slash/keyboard diagnostic affordances without rendering persistent sample buttons in the composer",
@@ -37,7 +37,7 @@
     "transport-facing app routes expose HTTP query for 最新活跃轮次 and per-turn debug snapshot",
     "transport-facing app routes expose HTTP query for 运行时-owned checkpoint summary projection",
     "transport-facing app routes expose 守护进程托管 Android update distribution: /android/update.json consumes explicit 运行时 env override or compiled dist/android/update.json sidecar truth, and /android/freehand-android.apk serves the staged APK artifact",
-    "transport-facing ADP query route can call an injected protocol-owned 运行时 query port for read-only owner projections such as task list/history and error-center 元数据 before using protocol-state snapshots",
+    "transport-facing ADP query route accepts only versioned connections that completed the first-frame handshake, then calls an injected protocol-owned 运行时 query port for read-only owner projections such as task list/history and error-center 元数据 before using protocol-state snapshots",
     "front-end Phase 2D status drawer queries TaskBoard, AgentBoard, EventInbox, TaskHistory, and WorkerControl through the existing ADP/运行时 query path; the browser only caches transient render data and must not persist task/control truth",
     "front-end 定时任务面板 queries QueryTimerList through ADP/运行时 权威真源, submits ScheduleTimer and CancelTimer only as protocol commands, and must not store timer schedules, infer timer status, or encode timer state as task/browser truth",
     "front-end 工具面板 queries QueryToolRegistry through ADP/运行时 权威真源 and renders only 权威投影 schema, examples, guidance, execution scope, and Master/Worker exposure without executing tools, rendering session-specific tool turns, synthesizing a local web_search tool, or storing browser-local registry truth",
@@ -109,6 +109,7 @@
     "WebUI 可观测性 诊断 detail renders 权威投影 QueryDiagnostics rows; repeated refreshes replace only the 诊断 projection and never create sessions, tasks, timers, tool executions, or unredacted log dumps."
   ],
   "error_mainline": [
+    "ADP command/query/subscribe frames sent before handshake completion return explicit failure and do not reach dispatch or runtime query ports",
     "invalid smoke input or missing projection returns explicit app error",
     "transport or render wiring failures are surfaced explicitly",
     "ADP transport failures, decode failures, and protocol failure frames are rendered as visible failure cards and status text",
@@ -266,11 +267,11 @@
     },
     {
       "step": "09",
-      "symbol_path": "handle_adp_socket / handle_adp_connection",
+      "symbol_path": "handle_adp_socket / handle_adp_connection / handle_adp_text_message",
       "file_path": "apps/freehand-server/src/lib.rs",
-      "responsibility": "expose protocol-owned ADP WebSocket frames for WebUI default query, subscribe, and command control",
-      "input_semantic": "ADP WebSocket frames plus protocol state plus dispatch port plus 运行时 query port",
-      "output_semantic": "ADP response frames and subscription events",
+      "responsibility": "expose protocol-owned versioned ADP WebSocket frames, require first-frame handshake, and then route WebUI default query/subscribe/command control",
+      "input_semantic": "versioned ADP WebSocket frames plus protocol state plus dispatch port plus 运行时 query port",
+      "output_semantic": "handshake accepted/failure, ADP response frames, and subscription events",
       "caller": "WebUI shell",
       "callee": "shared protocol transport",
       "binding_status": "bound"
@@ -288,11 +289,11 @@
     },
     {
       "step": "10",
-      "symbol_path": "ensureAdpSocket / requestAdp / handleAdpFrame",
-      "file_path": "apps/freehand-server/assets/webui/legacy-monolith.js",
-      "responsibility": "maintain the default WebUI ADP connection and route query_result, subscription_accepted, subscription_event, command_receipt, and failure frames",
-      "input_semantic": "`UiAdpResponse` JSON frames",
-      "output_semantic": "visible WebUI state updates or failure cards",
+      "symbol_path": "createAdpClient / ensureSocket / request / send",
+      "file_path": "apps/freehand-server/assets/webui/app-shell/adp-client.js",
+      "responsibility": "maintain the default WebUI ADP connection, send versioned handshake before requests, validate response protocol_version, and route query_result, subscription_accepted, subscription_event, command_receipt, and failure frames through the shell handler",
+      "input_semantic": "versioned UiAdpResponse JSON frames",
+      "output_semantic": "visible WebUI state updates or user-safe connection/service failure cards",
       "caller": "WebUI shell",
       "callee": "daemon `/adp`",
       "binding_status": "bound"
@@ -646,7 +647,7 @@
     "app boundary now renders a usable WebUI shell instead of a minimal text-only smoke",
     "theme code is split into `assets/theme.css` and `assets/theme.js`",
     "WebUI layout and protocol-consumer code is split into `assets/webui.css` and `assets/webui.js`",
-    "WebUI shell now advertises `data-adp-endpoint=\"/adp\"` and the front-end opens a WebSocket to that endpoint by default",
+    "WebUI shell now advertises data-adp-endpoint=\"/adp\"; the front-end opens a WebSocket, sends protocol_version=1 handshake first, waits for handshake_accepted, and uses user-facing 连接/服务 wording for failures",
     "WebUI success/failure diagnostic prompts remain available through slash commands and shortcuts, while persistent Success/Failure composer buttons are intentionally absent",
     "WebUI shell now exposes composer controls for file, image, video, preview, selected-session refresh, and read-only model selection",
     "WebUI layout shape classifier and CSS shape rules are landed for phone portrait, tall phone, phone landscape, tablet portrait, tablet landscape, foldable unfolded, and desktop large",
@@ -656,7 +657,7 @@
     "WebUI Android notification bridge fires only for observed live nonterminal-to-terminal turn transitions and is covered by fixed-session browser proof",
     "app boundary now serves protocol-only HTTP query and SSE subscribe smoke routes from a reusable protocol-only library surface",
     "app boundary now serves protocol-only POST command ingress dispatch-receipt or failure smoke route from that shared transport surface",
-    "HTTP/POST routes remain compatibility transport surfaces; WebUI JS uses ADP for command/query/subscription truth and EventSource for latest-turn SSE display refresh",
+    "HTTP/POST routes remain compatibility transport surfaces; WebUI JS uses versioned ADP handshake plus command/query/subscription truth and EventSource for latest-turn SSE display refresh",
     "app boundary now surfaces explicit command-ingress dispatch-port failures and dispatch-task join failures instead of collapsing them into success",
     "app boundary now serves static embedded assets through an explicit 404ing route",
     "运行时 host reuse now happens through injected state and dispatch port, not by duplicating transport behavior",
@@ -666,7 +667,7 @@
     "WebUI submit path still explicitly refreshes latest turn truth over ADP after a successful command receipt",
     "WebUI checkpoint panel now refreshes protocol checkpoint summaries and sends explicit rewind commands without parsing 运行时 files",
     "app dependency boundary is intended to remain protocol-only and must not import reason, provider, node, or config semantics",
-    "app query transport now accepts an injected UiRuntimeQueryPort while remaining free of 运行时/task/error-center imports",
+    "app query transport now requires accepted ADP handshake before query frames, accepts an injected UiRuntimeQueryPort, and still does not import 运行时/task/error-center semantics",
     "app subscription transport now uses the injected UiRuntimeQueryPort for task list and error-center initial snapshots while keeping app dependency boundary protocol-only",
     "WebUI Home now exposes multi-select/remove via DeleteSession while SessionDetail owns current-session RenameSession and double-Esc rollback as ADP commands; archive/restore controls are intentionally absent",
     "WebUI Phase 2D status drawer now renders TaskBoard, AgentBoard, EventInbox, TaskHistory, and WorkerControl from 运行时 owner query results; it does not write browser-persisted task/control truth",
@@ -695,6 +696,7 @@
     "WebUI settings 诊断 owner projection wiring is landed and covered by node scripts/verify-webui-诊断-online.mjs.",
     "WebUI session-unlock online verifier covers production QuerySessionTurns partial restore warning, ToolPending waiting-user classification, session-local refresh-failure card actions, Android Back exit, and new-conversation exit",
     "WebUI mobile modular split now serves and delegates SessionDetail, Tools, Timer, Settings, SessionSearch, and NewSession surface modules while legacy-monolith remains a compatibility shell for transcript/owner-projection wiring.",
-    "Home running classification now excludes blocked-only child tasks through taskKeepsSessionLifecycleRunning and session-unlock/mobile verifiers cover waiting-user behavior"
+    "Home running classification now excludes blocked-only child tasks through taskKeepsSessionLifecycleRunning and session-unlock/mobile verifiers cover waiting-user behavior",
+    "freehand-server ADP tests lock first-frame handshake gating, duplicate-handshake rejection, post-handshake query success, relay ADP, and query mutation rejection; WebUI split ADP client syntax is checked with node --check"
   ]
 }
