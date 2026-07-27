@@ -18,6 +18,7 @@
   - `verify_data_control_boundaries`
   - `verify_feature_map_unique_entries`
   - `verify_resource_map`
+  - `verify_adp_protocol_artifacts`
   - `docs/loops/freehand-framework-loop/LOOP.md`
 
 ## Request Mainline
@@ -29,6 +30,7 @@
 - gate runner verifies migrated mainline JSON cross-links back to feature map, function map, test design, and generated wiki path
 - gate runner verifies feature-map seed entries stay unique per `feature_id`
 - gate runner verifies resource-map ownership, operation bindings, direct/indirect/forbidden relation consistency, source-edge registry backlinks, function-map backlinks, and test-design resource-operation coverage
+- gate runner verifies generated ADP protocol artifacts are present, deterministic against the Rust exporter, served by WebUI assets, and consumed through generated constructors
 - gate runner verifies migrated mainline call-table `bound` rows still point to existing files and discoverable source symbols
 - gate runner verifies `make ci`, pre-push, CI, and release paths include the canonical full gate with mainline freshness
 - gate runner verifies launchd defaults the master daemon workdir to `$HOME/.freehand`, creates that directory before bootstrap, and rejects the former repository-root default
@@ -63,6 +65,7 @@
 - gate returns success when migrated mainline manifests are deterministic and cross-linked to their owner docs
 - gate returns success when feature-map seed entries stay unique and owner routing has one seed entry per `feature_id`
 - gate returns success when resource-map ownership, relation rules, forbidden direct relations, source-edge registry rows, and operation test coverage are internally consistent
+- gate returns success when committed ADP manifest and WebUI constructor artifacts match a fresh Rust export
 - gate returns success when migrated mainline call-table bindings resolve to source files and symbols
 - gate returns success when local and remote automation routes through the same full gate stack
 - gate returns success when `.ignore`, `scripts/source-search.sh`, debug docs, and local skill keep generated/runtime output excluded from implementation search, including wrapper-level rejection of unsafe `rg` ignore bypass options
@@ -110,6 +113,7 @@
 - ad hoc metadata owner types outside `freehand-metadata` or metadata owner structs that introduce request or control payload fields surface as gate failure
 - invalid JSON mainline source surfaces as generation/check failure
 - stale generated wiki surfaces as explicit freshness failure
+- missing or stale ADP protocol manifest/constructor artifacts surface as gate failure with the exact exporter command to rerun
 - no fallback path exists
 - loop overreach, missing owner mapping, active kill switch, or exhausted budget surfaces as escalation/no-op instead of automated action
 
@@ -140,6 +144,7 @@
 | 17 | `verify_data_control_boundaries` | `xtask/src/main.rs` | validate static data/control isolation rules on source-owned request and metadata types | Rust source files for contracts and metadata owners | pass/fail | `run_gates_check` | source scanners | bound |
 | 18 | `verify_feature_map_unique_entries` | `xtask/src/main.rs` | validate that `docs/architecture/feature-map.md` keeps one seed entry per `feature_id` | feature-map markdown | pass/fail | `run_gates_check` | feature-map scanner | bound |
 | 19 | `verify_resource_map` | `xtask/src/main.rs` | validate global resource ownership, resource relation rules, operation bindings, source-edge registry, and resource-operation test coverage | `docs/resource-maps/core.json` plus feature map, function maps, mainline call maps, and test designs | pass/fail | `run_gates_check` | resource-map verifier | bound |
+| 19a | `verify_adp_protocol_artifacts` | `xtask/src/main.rs` | validate generated ADP manifest and WebUI constructor artifacts against a fresh Rust export and ensure WebUI serves/uses them | committed ADP generated artifacts plus Rust exporter and WebUI assets | pass/fail with stale-artifact or missing-constructor diagnostics | `run_gates_check` | `cargo export-adp-protocol` and filesystem scanners | bound |
 | 20 | `run_release` | `scripts/release.sh` | run release regressions and build/stage host + Android artifacts | repo root state | `dist/` artifacts | operator / GitHub release workflow | `make ci`, Cargo, Gradle | bound |
 | 21 | `run_verify_webui_online` | `scripts/verify-webui-online.sh` | run fixed-port S-profile real browser WebUI + ADP alpha proof, including temporary verifier credential env injection and config/env restoration | running S-profile daemon on `127.0.0.1:4042` | screenshots, summary JSON, ADP session alignment, restored S-profile config/env | operator / `make verify-webui-online` | curl, `scripts/webui_verify_online.mjs`, Chrome CDP, WebUI, `freehand-cliS adp-session-query` | bound |
 | 21a | `run` | `scripts/verify-adp-fixed-session-observability-online.py` | submit one fixed-session ADP command and query selected session plus task/agent owner truth while the turn is pending and after receipt/timeout | S-profile ADP URL + fixed session id | JSON proof with pending/final turns and Worker/blocked-task truth | operator / online debug workflow | ADP WebSocket | bound |

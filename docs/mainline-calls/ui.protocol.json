@@ -19,6 +19,7 @@
     "runtime-owned mutation commands such as checkpoint rewind stay explicit at the protocol envelope layer and do not become UI-owned semantics",
     "query and subscribe stay separate",
     "ADP WebSocket clients use protocol-owned typed frames with top-level protocol_version=1; the first client frame must be Handshake, and command/query/subscribe frames are valid only after a server HandshakeAccepted capability response",
+    "ADP command/frame metadata is single-sourced from the protocol-owned UI_COMMAND_DESCRIPTORS table; generated JSON manifest and WebUI constructors must be exported from Rust instead of handwritten in JavaScript",
     "task list/history query commands are protocol-owned read-only ADP/query shapes while task truth remains runtime/task-owner supplied",
     "Phase 1 TaskBoard, AgentBoard, and AgentLifecycle queries are protocol-owned ADP/query command shapes while runtime/task owners supply truth",
     "task mutation commands (`CreateTask`, `CreateTaskAgent`, `AssignTask`, `ClaimNextTask`, `SubmitTaskReview`, `RejectTaskReview`, `ApproveTaskReview`, `CloseTask`) are protocol-owned mutation intents that validate required fields and route to task.orchestration through runtime; protocol does not write task truth",
@@ -54,6 +55,7 @@
     "command ingress returns explicit dispatch receipt without claiming truth mutation success",
     "subscribe returns an initial snapshot followed by continuous incremental projections through a protocol-owned subscription channel, or waits for the first turn when the latest-turn stream is subscribed before any turn exists",
     "ADP handshake returns an explicit HandshakeAccepted frame with server capabilities before any command/query/subscribe response; ADP subscribe returns an explicit SubscriptionAccepted frame before later SubscriptionEvent frames so UI-less clients can distinguish waiting from transport failure",
+    "ADP protocol export returns a deterministic manifest with protocol_version, handshake capability, request/response kinds, command serde names, frame classes, and owner-routing metadata, plus a WebUI module exposing adpQueryOf, adpCommandOf, and adpSubscribeOf constructors",
     "projections are read-only views over owner-written truth",
     "model request lifecycle is projected as UiModelRequestActivity inside UiTurnProjection for ordinary thinking, schema retry, and tool-result continuation; provider retry/failover are transport substate on the same activity, not separate reasoning-flow phases, and the activity clears when response/tool/usage/terminal/error projection arrives",
     "terminal completion shows only final projected text",
@@ -98,6 +100,7 @@
     "invalid command, invalid stream selection, or unavailable source projection return explicit protocol errors",
     "query/subscribe commands sent to command-ingress route are explicit protocol misuse errors",
     "ADP request/response frames missing protocol_version or carrying an unsupported version are rejected during protocol deserialization before route handling",
+    "stale or missing generated ADP manifest/constructor artifacts are gate failures; WebUI frame-class misuse throws before a request leaves the browser constructor helper",
     "query commands sent as ADP command frames are explicit protocol misuse errors, not mutation attempts",
     "empty checkpoint rewind ids are rejected at the protocol boundary before runtime dispatch",
     "checkpoint query misses return an empty read-only snapshot, not an implicit recovery or filesystem fallback",
@@ -335,6 +338,22 @@
         "worker_control_adp_roundtrip_carries_projection"
       ],
       "why_shared": "WebUI, Android, CLI, and headless tests need one worker-control frame shape while worker.control owns semantics"
+    },
+    {
+      "symbol": "adp_protocol_manifest / adp_command_manifest_entries / adp_protocol_manifest_json / adp_protocol_webui_module",
+      "owner": "crates/freehand-ui-protocol/src/lib.rs",
+      "purpose": "single-source ADP protocol version, handshake capability, command serde names, frame classes, and owner-routing metadata into deterministic JSON and WebUI constructor artifacts",
+      "allowed_callers": [
+        "export-adp-protocol bin",
+        "xtask gates check",
+        "WebUI asset smoke",
+        "protocol tests"
+      ],
+      "related_tests": [
+        "adp_protocol_manifest_covers_all_command_variants",
+        "verify_adp_protocol_artifacts"
+      ],
+      "why_shared": "all Rust and WebUI ADP clients need one command/frame contract instead of handwritten JavaScript mirrors or duplicated command classification logic"
     }
   ],
   "call_table": [
@@ -848,6 +867,28 @@
       "output_semantic": "runtime-backed UI-safe diagnostics projection or protocol-state route rejection",
       "caller": "ADP query transport",
       "callee": "runtime.ui-command-dispatch",
+      "binding_status": "bound"
+    },
+    {
+      "step": "18a",
+      "symbol_path": "UI_COMMAND_DESCRIPTORS / command_descriptor / adp_protocol_manifest / adp_protocol_webui_module",
+      "file_path": "crates/freehand-ui-protocol/src/lib.rs",
+      "responsibility": "derive the ADP manifest and WebUI constructor module from the exhaustive protocol command descriptor table",
+      "input_semantic": "UiCommand variants plus protocol version and handshake capability constants",
+      "output_semantic": "deterministic command manifest entries, frame classes, owner-routing metadata, and JavaScript constructor helpers",
+      "caller": "export-adp-protocol / protocol tests / xtask gate",
+      "callee": "protocol owner descriptor table",
+      "binding_status": "bound"
+    },
+    {
+      "step": "18b",
+      "symbol_path": "write_output / main",
+      "file_path": "crates/freehand-ui-protocol/src/bin/export-adp-protocol.rs",
+      "responsibility": "write the generated ADP JSON manifest or WebUI constructor module to the requested artifact path",
+      "input_semantic": "--json or --js output path",
+      "output_semantic": "generated adp-protocol.schema.json or adp-protocol.js artifact",
+      "caller": "developer / xtask gate",
+      "callee": "freehand-ui-protocol manifest exporters",
       "binding_status": "bound"
     }
   ],

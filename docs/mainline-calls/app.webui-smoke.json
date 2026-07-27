@@ -17,6 +17,7 @@
     "app boundary serves a real WebUI shell that loads protocol-consumer JS and split CSS assets",
     "app boundary keeps theme assets separate from WebUI layout assets",
     "front-end default command/query/status path is ADP WebSocket `/adp`; WebUI sends a versioned first-frame handshake and waits for handshake_accepted before query/subscribe/command requests; latest-turn SSE is also consumed as a display-refresh mirror",
+    "front-end command/query/subscribe payloads use the generated ADP constructor module, so JavaScript cannot handwrite command serde strings on the wrong frame class",
     "front-end Home session lists expose multi-select and remove via `DeleteSession`, while SessionDetail exposes protocol-owned current-session rename and double-Esc rollback controls without storing session truth locally; archive/restore are intentionally absent from WebUI",
     "front-end selected empty-session rendering binds empty `SessionTurns` to the selected session, clears previous active turn and debug state, and suppresses generic 等待中-data system cards so new sessions do not leak prior session content",
     "front-end keeps success and failure scenario prompts as hidden slash/keyboard diagnostic affordances without rendering persistent sample buttons in the composer",
@@ -106,7 +107,8 @@
     "terminal cards use protocol-projected status strings so cancelled and failed terminal states do not render as success",
     "front-end cancel handling uses CancelTurn when turn_id is known and CancelLatestActiveTurn during submit-in-flight pre-SSE window",
     "ADP task list subscription returns accepted plus initial 运行时 task list projection and later 运行时-published task list events",
-    "WebUI 可观测性 诊断 detail renders 权威投影 QueryDiagnostics rows; repeated refreshes replace only the 诊断 projection and never create sessions, tasks, timers, tool executions, or unredacted log dumps."
+    "WebUI 可观测性 诊断 detail renders 权威投影 QueryDiagnostics rows; repeated refreshes replace only the 诊断 projection and never create sessions, tasks, timers, tool executions, or unredacted log dumps.",
+    "app boundary serves /assets/webui/generated/adp-protocol.js and the WebUI imports ADP_PROTOCOL_VERSION, ADP_HANDSHAKE_CAPABILITY, adpQueryOf, adpCommandOf, and adpSubscribeOf from that generated module"
   ],
   "error_mainline": [
     "ADP command/query/subscribe frames sent before handshake completion return explicit failure and do not reach dispatch or runtime query ports",
@@ -119,6 +121,7 @@
     "blank latest-turn subscribe does not fail early; it keeps 等待中 for the first matching turn",
     "dispatch port failures and spawn-blocking join failures both surface explicit HTTP 500 failure payloads",
     "运行时 query port failures surface explicit ADP failure frames and do not become app-owned fallback state",
+    "generated ADP constructors throw explicit client-side errors for unknown command serde names or frame-class mismatches before dispatching an invalid WebSocket frame",
     "selected-session refresh failures render session-local transcript error cards with 新建会话, 返回会话列表, and 忽略错误 exits; they must not set global adpFailure or trap Android Back in the failed transcript",
     "direct reason, provider, node, or config coupling is a policy violation, not a fallback path",
     "cancel without an active turn clears only local input and does not invent a 运行时 mutation",
@@ -208,6 +211,17 @@
       "output_semantic": "validated update manifest JSON, APK bytes, or explicit 404/500 for missing or invalid distribution truth",
       "caller": "Android updater or operator",
       "callee": "process env and filesystem",
+      "binding_status": "bound"
+    },
+    {
+      "step": "03b",
+      "symbol_path": "WEBUI_ADP_PROTOCOL_JS / asset_response",
+      "file_path": "apps/freehand-server/src/assets.rs",
+      "responsibility": "serve the generated ADP protocol constructor module as a version-stamped no-store WebUI asset",
+      "input_semantic": "/assets/webui/generated/adp-protocol.js request",
+      "output_semantic": "generated ADP constructor module body with the current WebUI asset version stamp",
+      "caller": "browser WebUI module loader",
+      "callee": "embedded asset table",
       "binding_status": "bound"
     },
     {
@@ -640,6 +654,17 @@
       "output_semantic": "NewSession route/dialog state, cwd validation, and new.created edge after owner receipt",
       "caller": "WebUI New entry and New dialog handlers",
       "callee": "CreateSession through ADP callback",
+      "binding_status": "bound"
+    },
+    {
+      "step": "11h-adp-generated",
+      "symbol_path": "ADP_PROTOCOL_MANIFEST / adpQueryOf / adpCommandOf / adpSubscribeOf",
+      "file_path": "apps/freehand-server/assets/webui/generated/adp-protocol.js",
+      "responsibility": "provide generated WebUI constructors that validate ADP frame class before legacy and split surface modules send query, command, or subscribe payloads",
+      "input_semantic": "serde command name plus optional payload",
+      "output_semantic": "protocol-shaped query, command, or subscribe payload accepted by createAdpClient",
+      "caller": "legacy-monolith.js and split WebUI surface controls",
+      "callee": "ADP WebSocket client",
       "binding_status": "bound"
     }
   ],

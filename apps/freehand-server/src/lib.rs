@@ -2308,6 +2308,9 @@ mod tests {
         assert!(legacy_body.contains("openNewSessionSurface"));
         assert!(legacy_body.contains("switchConversationSessionInSurface"));
         assert!(legacy_body.contains("createAdpClient"));
+        assert!(legacy_body.contains("adpQueryOf"));
+        assert!(legacy_body.contains("adpCommandOf"));
+        assert!(legacy_body.contains("generated/adp-protocol.js"));
         assert!(legacy_body.contains("dispatchWebUiEdge"));
 
         let layout_shape = client
@@ -2427,13 +2430,26 @@ mod tests {
             .await
             .expect("adp-client response");
         assert_eq!(adp_client.status(), StatusCode::OK);
-        assert!(
-            adp_client
-                .text()
-                .await
-                .expect("adp-client body")
-                .contains("export function createAdpClient")
-        );
+        let adp_client_body = adp_client.text().await.expect("adp-client body");
+        assert!(adp_client_body.contains("export function createAdpClient"));
+        assert!(adp_client_body.contains("generated/adp-protocol.js"));
+        assert!(adp_client_body.contains("ADP_PROTOCOL_VERSION"));
+
+        let adp_protocol = client
+            .get(format!(
+                "{}/assets/webui/generated/adp-protocol.js",
+                server.base_url
+            ))
+            .send()
+            .await
+            .expect("adp-protocol response");
+        assert_eq!(adp_protocol.status(), StatusCode::OK);
+        let adp_protocol_body = adp_protocol.text().await.expect("adp-protocol body");
+        assert!(adp_protocol_body.contains("export function adpQueryOf"));
+        assert!(adp_protocol_body.contains("export function adpCommandOf"));
+        assert!(adp_protocol_body.contains("\"protocol_version\": 1"));
+        assert!(adp_protocol_body.contains("QueryConfigStatus"));
+        assert!(adp_protocol_body.contains("CreateSession"));
 
         let session_detail_surface = client
             .get(format!(
@@ -2462,8 +2478,10 @@ mod tests {
                 "renderSettingsDiagnosticsSurface",
             ),
             ("tools-registry/controls.js", "refreshToolsRegistrySurface"),
+            ("tools-registry/controls.js", "adpQueryOf"),
             ("tools-registry/controls.js", "QueryToolRegistry"),
             ("timer-dashboard/controls.js", "scheduleTimerFromSurface"),
+            ("timer-dashboard/controls.js", "adpQueryOf"),
             ("timer-dashboard/controls.js", "QueryTimerList"),
         ];
         for (asset, symbol) in modular_surface_assets {

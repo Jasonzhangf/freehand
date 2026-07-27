@@ -8815,3 +8815,15 @@ Current real root cause split:
   - `CARGO_TARGET_DIR=/tmp/freehand-target-adp-version cargo run -p xtask -- gates check`
   - `git diff --check`
 - Remaining: commit this slice, then continue Gap 6 schema/auth/command surface or Gap 8. Full Phase 1-3 goal is not complete.
+
+## 2026-07-27 — Gap6 ADP schema/constructor single-source closeout in progress
+
+- Continued stale handoff claim for `gap6::adp_schema_single_source`; previous PID absent, new run `20260727T013344Z-Macstudio.local-4996-gap6-adp-schema-closeout` owns only this slice.
+- Scope remains Gap 6 step 3: Rust `UI_COMMAND_DESCRIPTORS` -> deterministic ADP manifest JSON + WebUI constructor module, WebUI generated imports, server asset route, xtask stale-artifact gate, maps/docs sync. Gap 6 stays open for payload schema/types, ui-protocol split, `target_owner_module` debug-only, `/adp` auth, and command-surface contraction.
+- Fixed compile-breaking string literals in `xtask/src/main.rs` and server asset smoke after handoff left raw quoted JSON snippets unescaped.
+- Synced architecture gap, function maps, test designs, mainline JSON, dev-gates, and foundation gate docs for generated ADP artifact ownership.
+
+## 2026-07-27 — Gap6 ADP schema/constructor verification green
+
+- Final local verification green: `cargo fmt --check`; `cargo test -p freehand-ui-protocol adp -- --test-threads=1` (5 passed); `cargo test -p freehand-server adp -- --test-threads=1` (3 passed); `cargo test -p freehand-server webui -- --test-threads=1` (3 passed); node syntax checks for `adp-client.js`, `legacy-monolith.js`, generated ADP protocol JS, tools/timer controls; targeted clippy; `cargo test -p xtask -- --test-threads=1` (50 passed); `xtask mainlines check`; `xtask gates check`; `git diff --check`.
+- Generated artifact summary: protocol_version=1, handshake_capability=`adp.v1.handshake`, command count=63, `QueryMasterPoll` frame=query, `RunMasterPoll` frame=mutation, JS constructors present.

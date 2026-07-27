@@ -1,5 +1,7 @@
-const ADP_PROTOCOL_VERSION = 1;
-const ADP_HANDSHAKE_CAPABILITY = 'adp.v1.handshake';
+import {
+  ADP_HANDSHAKE_CAPABILITY,
+  ADP_PROTOCOL_VERSION,
+} from "../generated/adp-protocol.js?v=__WEBUI_ASSET_VERSION__";
 
 function versionedAdpFrame(frame) {
   return { protocol_version: ADP_PROTOCOL_VERSION, ...frame };

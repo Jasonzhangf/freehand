@@ -21,6 +21,7 @@ Generated from `docs/mainline-calls/app.webui-smoke.json`. Do not edit by hand.
 - app boundary serves a real WebUI shell that loads protocol-consumer JS and split CSS assets
 - app boundary keeps theme assets separate from WebUI layout assets
 - front-end default command/query/status path is ADP WebSocket `/adp`; WebUI sends a versioned first-frame handshake and waits for handshake_accepted before query/subscribe/command requests; latest-turn SSE is also consumed as a display-refresh mirror
+- front-end command/query/subscribe payloads use the generated ADP constructor module, so JavaScript cannot handwrite command serde strings on the wrong frame class
 - front-end Home session lists expose multi-select and remove via `DeleteSession`, while SessionDetail exposes protocol-owned current-session rename and double-Esc rollback controls without storing session truth locally; archive/restore are intentionally absent from WebUI
 - front-end selected empty-session rendering binds empty `SessionTurns` to the selected session, clears previous active turn and debug state, and suppresses generic 等待中-data system cards so new sessions do not leak prior session content
 - front-end keeps success and failure scenario prompts as hidden slash/keyboard diagnostic affordances without rendering persistent sample buttons in the composer
@@ -112,6 +113,7 @@ Generated from `docs/mainline-calls/app.webui-smoke.json`. Do not edit by hand.
 - front-end cancel handling uses CancelTurn when turn_id is known and CancelLatestActiveTurn during submit-in-flight pre-SSE window
 - ADP task list subscription returns accepted plus initial 运行时 task list projection and later 运行时-published task list events
 - WebUI 可观测性 诊断 detail renders 权威投影 QueryDiagnostics rows; repeated refreshes replace only the 诊断 projection and never create sessions, tasks, timers, tool executions, or unredacted log dumps.
+- app boundary serves /assets/webui/generated/adp-protocol.js and the WebUI imports ADP_PROTOCOL_VERSION, ADP_HANDSHAKE_CAPABILITY, adpQueryOf, adpCommandOf, and adpSubscribeOf from that generated module
 
 ## Error Mainline
 
@@ -125,6 +127,7 @@ Generated from `docs/mainline-calls/app.webui-smoke.json`. Do not edit by hand.
 - blank latest-turn subscribe does not fail early; it keeps 等待中 for the first matching turn
 - dispatch port failures and spawn-blocking join failures both surface explicit HTTP 500 failure payloads
 - 运行时 query port failures surface explicit ADP failure frames and do not become app-owned fallback state
+- generated ADP constructors throw explicit client-side errors for unknown command serde names or frame-class mismatches before dispatching an invalid WebSocket frame
 - selected-session refresh failures render session-local transcript error cards with 新建会话, 返回会话列表, and 忽略错误 exits; they must not set global adpFailure or trap Android Back in the failed transcript
 - direct reason, provider, node, or config coupling is a policy violation, not a fallback path
 - cancel without an active turn clears only local input and does not invent a 运行时 mutation
@@ -165,6 +168,7 @@ Generated from `docs/mainline-calls/app.webui-smoke.json`. Do not edit by hand.
 | 02 | `assets::asset_response` | `apps/freehand-server/src/assets.rs` | serve version-addressed split CSS, JS, and shared logo assets with explicit content type and no-store cache policy so Android WebView cannot retain stale dashboard code or stale branding | asset path | CSS, JS, or logo response or 404 | app asset route | embedded assets |  |  |  | bound |
 | 03 | `build_webui_router` | `apps/freehand-server/src/lib.rs` | define shared protocol-only HTTP, SSE, ADP, and static asset surface | protocol state plus dispatch port plus 运行时 query port | router with root, assets, query, subscribe, command, and ADP routes | app entrypoint, tests, or 运行时 host | app router |  |  |  | bound |
 | 03a | `handle_android_update_manifest / android_update_manifest_body / read_android_update_manifest_file / handle_android_update_apk / android_update_apk_path` | `apps/freehand-server/src/lib.rs` | serve 安卓 APK 升级 distribution from explicit 运行时 env override or compiled sidecar truth plus staged APK artifact truth | GET /android/update.json or GET /android/freehand-android.apk plus FREEHAND_ANDROID_* env and dist/android/update.json or staged APK path | validated update manifest JSON, APK bytes, or explicit 404/500 for missing or invalid distribution truth | Android updater or operator | process env and filesystem |  |  |  | bound |
+| 03b | `WEBUI_ADP_PROTOCOL_JS / asset_response` | `apps/freehand-server/src/assets.rs` | serve the generated ADP protocol constructor module as a version-stamped no-store WebUI asset | /assets/webui/generated/adp-protocol.js request | generated ADP constructor module body with the current WebUI asset version stamp | browser WebUI module loader | embedded asset table |  |  |  | bound |
 | 04 | `handle_command_ingress` | `apps/freehand-server/src/lib.rs` | expose protocol-owned command-ingress transport endpoint backed by an injected dispatch port | HTTP JSON command | HTTP dispatch receipt or failure payload | WebUI transport | protocol owner |  |  |  | bound |
 | 05 | `serve_webui_listener` | `apps/freehand-server/src/lib.rs` | serve shared protocol-only router on a listener | TCP listener plus protocol state plus dispatch port plus 运行时 query port plus shutdown future | live HTTP, SSE, and ADP transport boundary | app entrypoint, tests, or 运行时 host | app server |  |  |  | bound |
 | 06 | `turn_projection_for_client` | `crates/freehand-ui-protocol/src/lib.rs` | gate slave-card visibility by client kind | turn projection plus client kind | client-specific projection | app boundary | protocol owner |  |  |  | bound |
@@ -204,6 +208,7 @@ Generated from `docs/mainline-calls/app.webui-smoke.json`. Do not edit by hand.
 | 11m-module-settings-view | `renderSettingsShellSurface / renderSettingsNavigationSurface` | `apps/freehand-server/assets/webui/surfaces/settings/view.js` | render Settings shell and page-stack visibility from ConfigStatus plus surface-local page state | ConfigStatus projection, settings page_id, provider/model-group render callbacks | coarse root, split model pages, active page DOM state | WebUI Settings surface index | config owner projections through ADP callbacks |  |  |  | bound |
 | 11m-module-settings-diagnostics | `renderSettingsDiagnosticsSurface / renderDiagnosticLogRow` | `apps/freehand-server/assets/webui/surfaces/settings/diagnostics.js` | render diagnostics detail from owner projection without browser-local log reads | Diagnostics projection | diagnostics summary, redacted log rows, explicit query error | settings view module and Diagnostics refresh path | QueryDiagnostics projection |  |  |  | bound |
 | 11o-module-new-session-controls | `openNewSessionSurface / closeNewSessionSurface / selectedNewSessionKind / syncNewSessionDialogMode / submitNewSessionSurface / chooseNewTaskDirectory` | `apps/freehand-server/assets/webui/surfaces/new-session/controls.js` | own NewSession dialog mode/submit controls while CreateSession remains an owner command | new-session kind/cwd UI state and CreateSession callbacks | NewSession route/dialog state, cwd validation, and new.created edge after owner receipt | WebUI New entry and New dialog handlers | CreateSession through ADP callback |  |  |  | bound |
+| 11h-adp-generated | `ADP_PROTOCOL_MANIFEST / adpQueryOf / adpCommandOf / adpSubscribeOf` | `apps/freehand-server/assets/webui/generated/adp-protocol.js` | provide generated WebUI constructors that validate ADP frame class before legacy and split surface modules send query, command, or subscribe payloads | serde command name plus optional payload | protocol-shaped query, command, or subscribe payload accepted by createAdpClient | legacy-monolith.js and split WebUI surface controls | ADP WebSocket client |  |  |  | bound |
 
 ## Sync Status Against Mainline Call
 

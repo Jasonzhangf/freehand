@@ -16,6 +16,7 @@ Generated from `docs/mainline-calls/foundation.workspace.json`. Do not edit by h
 - gate runner verifies required files, workspace members, policy doc snippets, and generated wiki freshness
 - gate runner verifies feature-map seed entries stay unique per feature_id
 - gate runner verifies resource-map ownership, operation binding, direct/indirect/forbidden relation, source-edge registry, function-map backlink, and test-design coverage consistency before code refactor
+- gate runner verifies generated ADP protocol artifacts are present, deterministic against the Rust exporter, served by WebUI assets, and consumed through generated constructors
 - gate runner verifies migrated mainline manifest cross-links between JSON truth, feature map, function map, test design, and generated wiki path
 - gate runner verifies migrated mainline call-table `bound` rows still point to existing files and discoverable source symbols
 - gate runner verifies `make ci`, pre-push, CI, and release paths include the canonical full gate with mainline freshness
@@ -40,6 +41,7 @@ Generated from `docs/mainline-calls/foundation.workspace.json`. Do not edit by h
 - gate returns success when required repo truth, workspace structure, and generated wiki freshness are present
 - gate returns success when feature-map seed entries stay unique and owner routing has one seed entry per feature_id
 - gate returns success when resource-map ownership, relation rules, forbidden direct relations, source-edge registry rows, and operation test coverage are internally consistent
+- gate returns success when committed ADP manifest and WebUI constructor artifacts match a fresh Rust export
 - gate returns success when migrated mainline manifests are deterministically linked to their owner docs
 - gate returns success when migrated mainline call-table bindings resolve to source files and source symbols
 - gate returns success when local and remote automation routes through the same full gate stack
@@ -78,6 +80,7 @@ Generated from `docs/mainline-calls/foundation.workspace.json`. Do not edit by h
 - ad hoc metadata owner types outside `freehand-metadata` or metadata owner structs that introduce request or control payload fields surface as gate failure
 - invalid JSON mainline source surfaces as generation/check failure
 - stale generated wiki surfaces as explicit freshness failure
+- missing or stale ADP protocol manifest/constructor artifacts surface as gate failure with the exact exporter command to rerun
 - no fallback path exists
 - loop overreach, missing owner mapping, active kill switch, or exhausted budget surfaces as escalation/no-op instead of automated action
 
@@ -115,6 +118,7 @@ Generated from `docs/mainline-calls/foundation.workspace.json`. Do not edit by h
 | 23a | `run_file_permission_preflight` | `scripts/install-launchd.sh` | invoke first-launch macOS file permission preflight before launchd bootstrap or restart | runtime home plus launchd workdir | ok status file or explicit permission failure | install/restart launchd command paths | scripts/freehand-file-permission-preflight.sh |  |  |  | bound |
 | 24 | `run_uninstall_launchd` | `scripts/uninstall-launchd.sh` | stop and remove the macOS user LaunchAgent plist | launchd label | service removed | operator | launchctl |  |  |  | bound |
 | 25 | `run_install_symlink` | `scripts/install-symlink.sh` | build debug host binaries and expose S-suffixed symlinks for development | repo root state | installed symlink commands | operator | Cargo, symlink creation |  |  |  | bound |
+| 19a | `verify_adp_protocol_artifacts` | `xtask/src/main.rs` | validate generated ADP manifest and WebUI constructor artifacts against a fresh Rust export and ensure WebUI serves/uses them | committed ADP generated artifacts plus Rust exporter and WebUI assets | pass/fail with stale-artifact or missing-constructor diagnostics | run_gates_check | cargo export-adp-protocol and filesystem scanners |  |  |  | bound |
 
 ## Sync Status Against Mainline Call
 

@@ -1,3 +1,4 @@
+import { adpCommandOf, adpQueryOf } from "../../generated/adp-protocol.js?v=__WEBUI_ASSET_VERSION__";
 export async function openTimerDashboardSurface(context) {
   context.dispatchEdge('root.open_timer');
   if (context.dom.dialog && typeof context.dom.dialog.showModal === 'function' && !context.dom.dialog.open) {
@@ -10,7 +11,7 @@ export async function openTimerDashboardSurface(context) {
 export async function refreshTimerDashboardSurface(context) {
   context.dispatchEdge('timer.refresh');
   try {
-    const result = await context.adpQuery({ QueryTimerList: { include_terminal: true } });
+    const result = await context.adpQuery(adpQueryOf("QueryTimerList", { include_terminal: true }));
     context.applyPhase2QueryResult(result);
     context.setCommandStatus('定时器投影已刷新。');
   } catch (error) {
@@ -26,7 +27,7 @@ export async function scheduleTimerFromSurface(context) {
   context.state.timerCommandInFlight = true;
   context.renderTimerDashboard();
   try {
-    const receipt = await context.adpCommand({ ScheduleTimer: { timer } });
+    const receipt = await context.adpCommand(adpCommandOf("ScheduleTimer", { timer }));
     const message = context.timerScheduleReceiptStatus(receipt);
     context.setCommandStatus(message, { stickyMs: 8000 });
     await context.refreshTimerDashboard();
@@ -45,7 +46,7 @@ export async function cancelTimerFromSurface(context, timerId) {
   context.state.timerCommandInFlight = true;
   context.renderTimerDashboard();
   try {
-    const receipt = await context.adpCommand({ CancelTimer: { timer_id: timerId } });
+    const receipt = await context.adpCommand(adpCommandOf("CancelTimer", { timer_id: timerId }));
     const message = context.timerCancelReceiptStatus(receipt);
     context.setCommandStatus(message, { stickyMs: 8000 });
     await context.refreshTimerDashboard();

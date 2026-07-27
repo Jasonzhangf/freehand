@@ -111,6 +111,7 @@
   - duplicate same-`tool_call_id` tool-call projection upserts one activity and one public tool card
   - debug-event ingestion and receiver-drain behavior
   - ADP frame serialization, handshake frame shape, and missing/unsupported protocol-version rejection
+  - ADP protocol manifest exhaustiveness covers every `UiCommand` descriptor, frame class, owner routing, generated JSON manifest, and generated WebUI constructor module
   - task query command validation covers empty history id and command-ingress rejection for query-route misuse
   - Phase 1 board/lifecycle query commands cover runtime-route-only behavior and protocol-state mismatch rejection
   - task mutation command validation covers empty task id/title/content/goal/review summary, worker agent id/capabilities, claim execution id, review rejection reason/requirements, and owner-routing to `task.orchestration`
@@ -170,6 +171,7 @@
   - cancelled/failed/ToolPending terminal status projection smoke
   - blank latest-turn subscribe waits until a turn exists instead of failing early
   - ADP command/query/subscribe/handshake frame roundtrip smoke plus protocol-version negative smoke
+  - ADP manifest/export smoke proves `export-adp-protocol` regenerates deterministic JSON and WebUI constructor artifacts from Rust truth
   - ADP task list/history query smoke proves the protocol frame can carry task read models supplied by runtime
   - ADP Phase 1 board/lifecycle query smoke proves the protocol frame can carry board and lifecycle read models supplied by runtime
   - ADP task mutation command smoke proves the protocol frame can carry task create/create_agent/assign/claim/review/reject/approve/close mutation intents without protocol-owned task storage
@@ -247,6 +249,7 @@
   - tool summaries now expose `tool_call_id`, duplicate same-id tool calls are regression-locked to one public card, and completed/failed public tool bodies include tool result detail
   - tool summaries now expose `display` from the `tool.display` owner, and public bodies prefer structured result summaries over raw detail text
   - ADP request/response frames are versioned (`protocol_version=1`), carry handshake/handshake_accepted variants, and are regression-locked by JSON roundtrip plus missing/unsupported-version tests
+  - ADP generated manifest and WebUI constructor module are landed; `xtask gates check` regenerates both artifacts and fails stale or missing committed outputs
   - session cwd summary/transcript projection is landed and regression-locked
   - session management command/query projection is implemented for `CreateSession`, `RenameSession`, `ArchiveSession`, `RestoreSession`, `DeleteSession`, and `RollbackLatestSessionTurn` routing through runtime to `reason.persistence`; `CreateSession.cwd` empty-string rejection and rollback empty-session rejection are regression-locked at the protocol boundary
   - task list/history query commands and DTOs are landed; runtime-backed ADP task query is regression-locked in daemon tests
@@ -275,3 +278,4 @@
 
   - `accept_query_ingress` accepts QueryMasterPoll and rejects RunMasterPoll/ApplyExecutionFact/SubmitUserInput on the ADP query route with `direct_task_mutation_forbidden`
   - focused proof: `CARGO_TARGET_DIR=/tmp/freehand-target-adp-version cargo test -p freehand-ui-protocol adp -- --test-threads=1` covers versioned request/response/handshake roundtrip and version rejection
+  - generated-artifact proof: `CARGO_TARGET_DIR=/tmp/freehand-target-adp-schema cargo test -p freehand-ui-protocol adp -- --test-threads=1` covers the manifest/constructor exporter test; `cargo run -p xtask -- gates check` re-exports and diffs the committed generated artifacts

@@ -649,6 +649,7 @@ If any line is not true, do not claim completion.
 ## ADP Query Route Rule
 
 - ADP frames must be versioned with protocol-owned `protocol_version` and complete the first-frame handshake before command/query/subscribe routing. Rust clients use `UiAdpRequest::Handshake`; WebUI must wait for `handshake_accepted`; server pre-handshake command/query/subscribe frames must fail before dispatch/query ports.
+- ADP command surface for WebUI is single-source: Rust `UI_COMMAND_DESCRIPTORS` / `adp_protocol_manifest()` exports JSON + JS constructors via `export-adp-protocol`; WebUI must call `adpQueryOf`/`adpCommandOf`/`adpSubscribeOf` from `apps/freehand-server/assets/webui/generated/adp-protocol.js`. After command-set changes, regenerate both artifacts and keep `xtask gates check` green.
 - ADP Query frames may only carry `UiCommandFrameClass::Query`. Server `handle_adp_query` must call `accept_query_ingress` before any runtime query port.
 - Master poll split is rigid: `RunMasterPoll` is Command-frame mutation (`run_master_poll`); `QueryMasterPoll` is Query-frame read-only (`preview_master_poll`). Never re-admit `RunMasterPoll` on Query.
 - WebUI asset cache-busting has one owner: `apps/freehand-server/src/assets.rs::WEBUI_ASSET_VERSION`. Authoring files use `__WEBUI_ASSET_VERSION__`; server stamps at serve time. Online verifiers must compare against the served stamp, not hardcode a second source of truth forever.

@@ -80,6 +80,18 @@ If a layer is intentionally not yet present for a feature, that absence must be 
 
 This keeps generated wiki artifacts as compiled review surfaces over one machine-readable truth instead of independent hand-maintained docs.
 
+
+## ADP Protocol Artifact Gate
+
+`xtask gates check` validates generated ADP protocol artifacts:
+
+- `crates/freehand-ui-protocol/generated/adp-protocol.schema.json` must exist and match a fresh `export-adp-protocol --json` run
+- `apps/freehand-server/assets/webui/generated/adp-protocol.js` must exist and match a fresh `export-adp-protocol --js` run
+- the served WebUI asset table must include the generated module
+- WebUI ADP client/legacy shell must import and use generated constructors instead of maintaining a handwritten command-frame mirror
+
+This keeps ADP command frame class, version, handshake capability, and owner routing single-sourced from Rust protocol truth while Gap 6 continues toward full payload schema/types, auth, and command-surface contraction.
+
 ## Feature-Map Uniqueness Gate
 
 `xtask gates check` validates that `docs/architecture/feature-map.md` does not carry duplicate seed entries:

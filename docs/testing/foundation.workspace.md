@@ -24,6 +24,7 @@
     master daemon to the repository root
   - gate command can validate policy locks
   - gate command validates resource-map ownership, operation binding, direct/indirect/forbidden relation, source-edge registry, function-map backlink, and test-design coverage consistency before code refactor
+  - gate command validates generated ADP protocol manifest/constructor artifacts are deterministic against the Rust exporter and consumed by WebUI assets
   - source-only search policy keeps implementation search out of generated/runtime outputs and rejects unsafe `rg` ignore-bypass options
   - gate command can reject data/control boundary leaks at the repo source level
   - mainline generation command can render wiki from JSON truth
@@ -35,6 +36,7 @@
   - generated-wiki freshness logic
   - feature-map duplicate seed-entry detection
   - resource-map parser and consistency checks, including required core resources, unique owner backlinks, operation binding completeness, source-edge registry backlinks, forbidden/direct relation conflict rejection, forbidden direct relations backed by matching indirect relation rules, source shortcut gates, and precise source-edge gates
+  - ADP protocol artifact gate regenerates JSON and JS outputs through `export-adp-protocol`, diffs committed artifacts, and scans WebUI consumers for generated constructor usage
   - mainline manifest cross-link logic between JSON, feature map, function map, test design, and generated wiki path
   - mainline call-table file and symbol binding logic for migrated `bound` rows
   - CI/CD and local hook command-alignment logic
@@ -54,7 +56,7 @@
   - data/control boundary leak logic for request-node contracts and metadata-owner uniqueness
   - loop governance docs include required L1 report-only files and deny automated action until explicit L2 approval
 - module black-box plan:
-  - `xtask gates check` smoke from repo root
+  - `xtask gates check` smoke from repo root, including ADP generated artifact freshness
   - `xtask mainlines check` smoke from repo root
   - `cargo test -p xtask` manifest-link positive and negative tests
   - `cargo test -p xtask` call-table binding positive and negative tests
@@ -109,5 +111,6 @@
   - release/global-install operator docs live in `docs/release.md`
   - data/control leak gate must stay implemented in `xtask`
   - resource-map gate must stay implemented in `xtask`
+  - ADP generated artifact freshness gate must stay implemented in `xtask`
   - initial loop governance docs are landed under `docs/loops/freehand-framework-loop`
   - migrated mainline-call source and generated wiki are kept in sync with this test design

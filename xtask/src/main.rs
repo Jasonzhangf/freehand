@@ -227,6 +227,7 @@ fn run_gates_check() -> Result<(), String> {
     verify_runtime_daemon_boundary(&root)?;
     verify_dependency_graph(&root)?;
     verify_task_status_single_writer(&root)?;
+    verify_adp_protocol_artifacts(&root)?;
     Ok(())
 }
 
@@ -3413,6 +3414,160 @@ fn cargo_dependencies_section(cargo: &str) -> String {
         }
     }
     section
+}
+
+fn verify_adp_protocol_artifacts(root: &Path) -> Result<(), String> {
+    use std::process::Command;
+
+    let expected_json = root.join("crates/freehand-ui-protocol/generated/adp-protocol.schema.json");
+    let expected_js = root.join("apps/freehand-server/assets/webui/generated/adp-protocol.js");
+    let regenerated_json = env::temp_dir().join(format!(
+        "freehand-adp-protocol-{}.schema.json",
+        std::process::id()
+    ));
+    let regenerated_js =
+        env::temp_dir().join(format!("freehand-adp-protocol-{}.js", std::process::id()));
+    if !expected_json.is_file() {
+        return Err(format!(
+            "missing ADP protocol schema artifact: {}",
+            expected_json.display()
+        ));
+    }
+    if !expected_js.is_file() {
+        return Err(format!(
+            "missing ADP protocol WebUI constructor artifact: {}",
+            expected_js.display()
+        ));
+    }
+
+    let status = Command::new("cargo")
+        .args([
+            "run",
+            "-q",
+            "-p",
+            "freehand-ui-protocol",
+            "--bin",
+            "export-adp-protocol",
+            "--",
+            "--json",
+            regenerated_json
+                .to_str()
+                .ok_or("regenerated ADP schema path must be UTF-8")?,
+        ])
+        .current_dir(root)
+        .status()
+        .map_err(|err| format!("run export-adp-protocol --json: {err}"))?;
+    if !status.success() {
+        return Err("export-adp-protocol --json failed".to_owned());
+    }
+    let status = Command::new("cargo")
+        .args([
+            "run",
+            "-q",
+            "-p",
+            "freehand-ui-protocol",
+            "--bin",
+            "export-adp-protocol",
+            "--",
+            "--js",
+            regenerated_js
+                .to_str()
+                .ok_or("regenerated ADP WebUI module path must be UTF-8")?,
+        ])
+        .current_dir(root)
+        .status()
+        .map_err(|err| format!("run export-adp-protocol --js: {err}"))?;
+    if !status.success() {
+        return Err("export-adp-protocol --js failed".to_owned());
+    }
+
+    let expected_json_body = fs::read_to_string(&expected_json)
+        .map_err(|err| format!("read {}: {err}", expected_json.display()))?;
+    let expected_js_body = fs::read_to_string(&expected_js)
+        .map_err(|err| format!("read {}: {err}", expected_js.display()))?;
+    let actual_json_body = fs::read_to_string(&regenerated_json)
+        .map_err(|err| format!("read regenerated ADP schema: {err}"))?;
+    let actual_js_body = fs::read_to_string(&regenerated_js)
+        .map_err(|err| format!("read regenerated ADP WebUI module: {err}"))?;
+    if expected_json_body != actual_json_body {
+        return Err(
+            "ADP protocol schema artifact is stale; run `cargo run -p freehand-ui-protocol --bin export-adp-protocol -- --json crates/freehand-ui-protocol/generated/adp-protocol.schema.json`"
+                .to_owned(),
+        );
+    }
+    if expected_js_body != actual_js_body {
+        return Err(
+            "ADP protocol WebUI constructor artifact is stale; run `cargo run -p freehand-ui-protocol --bin export-adp-protocol -- --js apps/freehand-server/assets/webui/generated/adp-protocol.js`"
+                .to_owned(),
+        );
+    }
+
+    require_contains(
+        &expected_json_body,
+        "\"protocol_version\": 1",
+        "crates/freehand-ui-protocol/generated/adp-protocol.schema.json",
+    )?;
+    require_contains(
+        &expected_json_body,
+        "\"handshake_capability\": \"adp.v1.handshake\"",
+        "crates/freehand-ui-protocol/generated/adp-protocol.schema.json",
+    )?;
+    require_contains(
+        &expected_json_body,
+        "\"serde_name\": \"QueryConfigStatus\"",
+        "crates/freehand-ui-protocol/generated/adp-protocol.schema.json",
+    )?;
+    require_contains(
+        &expected_js_body,
+        "export function adpQueryOf",
+        "apps/freehand-server/assets/webui/generated/adp-protocol.js",
+    )?;
+    require_contains(
+        &expected_js_body,
+        "export function adpCommandOf",
+        "apps/freehand-server/assets/webui/generated/adp-protocol.js",
+    )?;
+
+    let assets = fs::read_to_string(root.join("apps/freehand-server/src/assets.rs"))
+        .map_err(|err| format!("read apps/freehand-server/src/assets.rs: {err}"))?;
+    require_contains(
+        &assets,
+        "webui/generated/adp-protocol.js",
+        "apps/freehand-server/src/assets.rs",
+    )?;
+    require_contains(
+        &assets,
+        "include_str!(\"../assets/webui/generated/adp-protocol.js\")",
+        "apps/freehand-server/src/assets.rs",
+    )?;
+
+    let adp_client =
+        fs::read_to_string(root.join("apps/freehand-server/assets/webui/app-shell/adp-client.js"))
+            .map_err(|err| {
+                format!("read apps/freehand-server/assets/webui/app-shell/adp-client.js: {err}")
+            })?;
+    require_contains(
+        &adp_client,
+        "generated/adp-protocol.js",
+        "apps/freehand-server/assets/webui/app-shell/adp-client.js",
+    )?;
+
+    let legacy =
+        fs::read_to_string(root.join("apps/freehand-server/assets/webui/legacy-monolith.js"))
+            .map_err(|err| {
+                format!("read apps/freehand-server/assets/webui/legacy-monolith.js: {err}")
+            })?;
+    require_contains(
+        &legacy,
+        "adpQueryOf",
+        "apps/freehand-server/assets/webui/legacy-monolith.js",
+    )?;
+    require_contains(
+        &legacy,
+        "adpCommandOf",
+        "apps/freehand-server/assets/webui/legacy-monolith.js",
+    )?;
+    Ok(())
 }
 
 fn verify_dependency_graph(root: &Path) -> Result<(), String> {

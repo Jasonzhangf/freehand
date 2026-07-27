@@ -9,6 +9,7 @@ import { renderDiagnosticLogRow as renderDiagnosticLogRowSurface, renderSurface 
 import { chooseNewTaskDirectory as chooseNewTaskDirectoryFromSurface, openNewSessionSurface, closeNewSessionSurface, selectedNewSessionKind as selectedNewSessionKindFromSurface, submitNewSessionSurface, syncNewSessionDialogMode as syncNewSessionDialogModeFromSurface } from "./surfaces/new-session/index.js?v=__WEBUI_ASSET_VERSION__";
 import { setSelectedSessionId as setSelectedSessionIdInSurface, clearConversationForSessionSwitch as clearConversationForSessionSwitchInSurface, switchConversationSession as switchConversationSessionInSurface } from "./surfaces/session-detail/index.js?v=__WEBUI_ASSET_VERSION__";
 import { createAdpClient } from "./app-shell/adp-client.js?v=__WEBUI_ASSET_VERSION__";
+import { adpCommandOf, adpQueryOf, adpSubscribeOf } from "./generated/adp-protocol.js?v=__WEBUI_ASSET_VERSION__";
 
 export const classifyLayoutShape = window.__freehandLayout.classifyLayoutShape;
 export const classifyLayoutShapeForClient = window.__freehandLayout.classifyLayoutShapeForClient;
@@ -1929,7 +1930,7 @@ async function rollbackEffectiveTranscriptThroughTurn(turnId) {
     if (!hasTarget) {
       return;
     }
-    await adpCommand({ RollbackLatestSessionTurn: { session_id: state.selectedSessionId } });
+    await adpCommand(adpCommandOf("RollbackLatestSessionTurn", { session_id: state.selectedSessionId }));
     await refreshSessions();
     await refreshSelectedSession();
   }
@@ -3828,12 +3829,7 @@ async function startNewConversation() {
   setSelectedCwd("");
   setCommandStatus("正在创建会话...", { stickyMs: 5000 });
   try {
-    await adpCommand({
-      CreateSession: {
-        session_id: sessionId,
-        title: "新会话",
-      },
-    });
+    await adpCommand(adpCommandOf("CreateSession", { session_id: sessionId, title: "新会话" }));
     dispatchWebUiEdge("new.created", { session_id: sessionId });
     state.draftSessionId = null;
     await refreshSessions();
@@ -3856,13 +3852,7 @@ async function startNewTask(options = {}) {
   setSelectedCwd(cwd);
   setCommandStatus(`正在创建任务会话 · cwd ${cwd}`, { stickyMs: 5000 });
   try {
-    await adpCommand({
-      CreateSession: {
-        session_id: sessionId,
-        title: `任务 · ${cwd}`,
-        cwd,
-      },
-    });
+    await adpCommand(adpCommandOf("CreateSession", { session_id: sessionId, title: `任务 · ${cwd}`, cwd }));
     dispatchWebUiEdge("new.created", { session_id: sessionId });
     await refreshSessions();
     await refreshSelectedSession();
@@ -3969,7 +3959,7 @@ async function deleteSelectedSessions() {
   try {
     for (const sessionId of sessionIds) {
       dispatchWebUiEdge("home.delete_session", { session_id: sessionId });
-      await adpCommand({ DeleteSession: { session_id: sessionId } });
+      await adpCommand(adpCommandOf("DeleteSession", { session_id: sessionId }));
     }
     const deletedSelected = sessionIds.includes(state.selectedSessionId);
     state.selectedSessionIds.clear();
@@ -4005,7 +3995,7 @@ async function renameCurrentSession() {
   setCommandStatus("正在重命名会话...", { stickyMs: 5000 });
   try {
     dispatchWebUiEdge("session.rename_session", { session_id: sessionId, title });
-    await adpCommand({ RenameSession: { session_id: sessionId, title } });
+    await adpCommand(adpCommandOf("RenameSession", { session_id: sessionId, title }));
     await refreshSessions();
     await refreshSelectedSession();
     setCommandStatus(`会话已重命名 · ${title}`, { stickyMs: 5000 });
@@ -4028,7 +4018,7 @@ async function rollbackLatestSessionTurn() {
   const userText = latestRollbackUserText();
   setCommandStatus("正在回滚最新会话轮次...", { stickyMs: 8000 });
   try {
-    await adpCommand({ RollbackLatestSessionTurn: { session_id: state.selectedSessionId } });
+    await adpCommand(adpCommandOf("RollbackLatestSessionTurn", { session_id: state.selectedSessionId }));
     await refreshSessions();
     await refreshSelectedSession();
     if (userText) {
@@ -5641,7 +5631,7 @@ async function deleteSessionFromHome(sessionId) {
   dispatchWebUiEdge("home.delete_session", { session_id: sessionId });
   setCommandStatus("正在移除会话...", { stickyMs: 5000 });
   try {
-    await adpCommand({ DeleteSession: { session_id: sessionId } });
+    await adpCommand(adpCommandOf("DeleteSession", { session_id: sessionId }));
     state.selectedSessionIds.delete(sessionId);
     if (state.selectedSessionId === sessionId) {
       setSelectedSessionId(null);
@@ -5978,14 +5968,12 @@ async function submitAgentResourceConfigUpdate() {
   state.agentResourceSaveError = null;
   renderSettingsShell();
   try {
-    const receipt = await adpCommand({
-      UpdateAgentResourceConfig: {
+    const receipt = await adpCommand(adpCommandOf("UpdateAgentResourceConfig", {
         update: {
           agent_name: status.agent_name,
           resource_count: resourceCount,
         },
-      },
-    });
+      }));
     setCommandStatus(agentResourceConfigReceiptStatus(receipt, resourceCount), { stickyMs: 5000 });
     await refreshConfigStatus();
     state.agentResourceSaveMessage = "已保存。重启并启动 Worker 进程后生效。";
@@ -6429,19 +6417,17 @@ function openWorkerTaskSession(task) {
   switchConversationSession(sessionId, { edgeId: "session.open_worker_session", payload: { worker_session_id: sessionId } });
   state.taskHistory = null;
   state.workerControl = null;
-  adpQuery({ QueryTaskHistory: { task_id: task.task_id } })
+  adpQuery(adpQueryOf("QueryTaskHistory", { task_id: task.task_id }))
     .then((result) => applyPhase2QueryResult(result))
     .catch((error) => {
       state.phase2StatusError = error.message;
       renderPhase2Dashboard();
     });
   if (task.active_execution_id) {
-    adpQuery({
-      QueryWorkerControl: {
+    adpQuery(adpQueryOf("QueryWorkerControl", {
         task_id: task.task_id,
         execution_id: task.active_execution_id,
-      },
-    })
+      }))
       .then((result) => applyPhase2QueryResult(result))
       .catch((error) => {
         state.phase2StatusError = error.message;
@@ -7379,7 +7365,7 @@ async function submitSessionSearch(event) {
   state.sessionSearchError = null;
   renderSessionSearchDashboard();
   try {
-    const result = await adpQuery({ QuerySessionSearch: { query, limit: 20 } });
+    const result = await adpQuery(adpQueryOf("QuerySessionSearch", { query, limit: 20 }));
     applyPhase2QueryResult(result);
     setCommandStatus("持久化会话搜索已刷新。");
   } catch (error) {
@@ -7393,24 +7379,19 @@ async function submitSessionSearch(event) {
 
 async function refreshPhase2Status() {
   try {
-    applyPhase2QueryResult(await adpQuery({ QueryTaskBoard: { include_terminal: true } }));
-    applyPhase2QueryResult(await adpQuery("QueryAgentBoard"));
-    applyPhase2QueryResult(await adpQuery({ QueryEventInbox: { limit: 30 } }));
-    applyPhase2QueryResult(await adpQuery({ QueryTimerList: { include_terminal: true } }));
+    applyPhase2QueryResult(await adpQuery(adpQueryOf("QueryTaskBoard", { include_terminal: true })));
+    applyPhase2QueryResult(await adpQuery(adpQueryOf("QueryAgentBoard")));
+    applyPhase2QueryResult(await adpQuery(adpQueryOf("QueryEventInbox", { limit: 30 })));
+    applyPhase2QueryResult(await adpQuery(adpQueryOf("QueryTimerList", { include_terminal: true })));
     const historyTarget = currentTaskHistoryTarget();
     if (historyTarget && historyTarget.task_id) {
-      applyPhase2QueryResult(await adpQuery({ QueryTaskHistory: { task_id: historyTarget.task_id } }));
+      applyPhase2QueryResult(await adpQuery(adpQueryOf("QueryTaskHistory", { task_id: historyTarget.task_id })));
     } else {
       state.taskHistory = null;
     }
     const target = currentWorkerControlTarget();
     if (target && target.task_id && target.execution_id) {
-      applyPhase2QueryResult(await adpQuery({
-        QueryWorkerControl: {
-          task_id: target.task_id,
-          execution_id: target.execution_id,
-        },
-      }));
+      applyPhase2QueryResult(await adpQuery(adpQueryOf("QueryWorkerControl", { task_id: target.task_id, execution_id: target.execution_id })));
     } else {
       state.workerControl = null;
     }
@@ -7443,7 +7424,7 @@ async function sendWorkerControl(op) {
       agent_id: target.agent_id,
       op,
     };
-    const result = await adpCommand({ WorkerControl: { control } });
+    const result = await adpCommand(adpCommandOf("WorkerControl", { control }));
     const statusText = `${result.dispatch_status || "accepted"}`.toLowerCase().replace(/_/g, " ");
     setCommandStatus(`工作器控制 ${statusText}`, { stickyMs: 6000 });
     await refreshPhase2Status();
@@ -7928,7 +7909,7 @@ async function submitProviderConfigUpdate(event) {
   setText("settings-provider-save-status", "正在保存配置...");
   renderSettingsShell();
   try {
-    const receipt = await adpCommand({ UpsertProviderConfig: { update } });
+    const receipt = await adpCommand(adpCommandOf("UpsertProviderConfig", { update }));
     setCommandStatus(providerConfigUpsertReceiptStatus(receipt), { stickyMs: 5000 });
     await refreshConfigStatus();
     setText("settings-provider-save-status", "模型服务定义已保存。重启后活动运行时才会生效。");
@@ -7952,12 +7933,10 @@ async function testProviderWebSearch(providerId) {
   setText("settings-provider-web-search-test-status", `正在测试 ${targetProviderId} 的模型服务托管联网搜索...`);
   renderSettingsShell();
   try {
-    const receipt = await adpCommand({
-      TestProviderWebSearch: {
+    const receipt = await adpCommand(adpCommandOf("TestProviderWebSearch", {
         provider_id: targetProviderId,
         query: "Use web_search to find the current UTC date and one current news headline from openai.com today. Do not answer from memory.",
-      },
-    });
+      }));
     const status = providerWebSearchTestReceiptStatus(receipt);
     setText("settings-provider-web-search-test-status", status);
     setCommandStatus(status, { stickyMs: 8000 });
@@ -7987,7 +7966,7 @@ async function submitProviderSelectionUpdate() {
   setText("settings-provider-switch-status", "正在保存模型服务选择...");
   renderSettingsShell();
   try {
-    const receipt = await adpCommand({ UpdateAgentProviderSelection: { selection } });
+    const receipt = await adpCommand(adpCommandOf("UpdateAgentProviderSelection", { selection }));
     setCommandStatus(providerSelectionReceiptStatus(receipt), { stickyMs: 5000 });
     await refreshConfigStatus();
     state.providerSelectionDraft = null;
@@ -8304,7 +8283,7 @@ async function submitModelGroupConfigUpdate(event) {
   setText("settings-model-group-save-status", "正在保存模型组...");
   renderSettingsShell();
   try {
-    const receipt = await adpCommand({ UpsertModelGroupConfig: { group } });
+    const receipt = await adpCommand(adpCommandOf("UpsertModelGroupConfig", { group }));
     setCommandStatus(modelGroupUpsertReceiptStatus(receipt), { stickyMs: 5000 });
     await refreshConfigStatus();
     setText("settings-model-group-save-status", "模型组已保存。重启后活动运行时才会生效。");
@@ -8331,7 +8310,7 @@ async function submitModelGroupSelectionUpdate() {
   setText("settings-model-group-switch-status", "正在保存模型组选择...");
   renderSettingsShell();
   try {
-    const receipt = await adpCommand({ UpdateAgentModelGroupSelection: { selection } });
+    const receipt = await adpCommand(adpCommandOf("UpdateAgentModelGroupSelection", { selection }));
     setCommandStatus(modelGroupSelectionReceiptStatus(receipt), { stickyMs: 5000 });
     await refreshConfigStatus();
     state.modelGroupSelectionDraft = null;
@@ -8472,13 +8451,13 @@ function renderAll() {
 }
 
 async function refreshTurn() {
-  const result = await adpQuery("QueryLatestActiveTurn");
+  const result = await adpQuery(adpQueryOf("QueryLatestActiveTurn"));
   applyAdpQueryResult(result);
   await refreshCheckpoints();
 }
 
 async function refreshSessions() {
-  const result = await adpQuery("QuerySessionList");
+  const result = await adpQuery(adpQueryOf("QuerySessionList"));
   setSessionList(variantPayload(result, "SessionList") || { sessions: [] });
   renderAll();
 }
@@ -8493,9 +8472,7 @@ async function refreshSelectedSession() {
   }
   const requestedSessionId = state.selectedSessionId;
   state.sessionRefreshInFlight = requestedSessionId;
-  const result = await adpQuery({
-    QuerySessionTurns: { session_id: requestedSessionId },
-  });
+  const result = await adpQuery(adpQueryOf("QuerySessionTurns", { session_id: requestedSessionId }));
   if (state.selectedSessionId !== requestedSessionId) {
     return;
   }
@@ -8514,19 +8491,19 @@ async function refreshDebug() {
     renderDebug();
     return;
   }
-  const result = await adpQuery({ QueryDebugState: { turn_id: state.turn.turn_id } });
+  const result = await adpQuery(adpQueryOf("QueryDebugState", { turn_id: state.turn.turn_id }));
   applyAdpQueryResult(result);
 }
 
 async function refreshCheckpoints() {
-  const result = await adpQuery("QueryCheckpoints");
+  const result = await adpQuery(adpQueryOf("QueryCheckpoints"));
   applyAdpQueryResult(result);
   renderAll();
 }
 
 async function refreshConfigStatus() {
   try {
-    const result = await adpQuery("QueryConfigStatus");
+    const result = await adpQuery(adpQueryOf("QueryConfigStatus"));
     applyAdpQueryResult(result);
   } catch (error) {
     state.configStatus = null;
@@ -8540,7 +8517,7 @@ async function refreshDiagnosticsStatus() {
   state.diagnosticsInFlight = true;
   renderSettingsDiagnostics();
   try {
-    const result = await adpQuery("QueryDiagnostics");
+    const result = await adpQuery(adpQueryOf("QueryDiagnostics"));
     applyPhase2QueryResult(result);
   } catch (error) {
     state.diagnosticsError = error.message;
@@ -8676,10 +8653,7 @@ function ensureTurnSubscription() {
     return;
   }
   state.adpSubscriptions.add("latest-turn");
-  adpSubscribe(
-    { SubscribeLatestActiveTurn: { client: adpClientKind() } },
-    "sub-turn",
-  ).catch((error) => {
+  adpSubscribe(adpSubscribeOf("SubscribeLatestActiveTurn", { client: adpClientKind() }), "sub-turn").catch((error) => {
     setCommandStatus(`turn subscription failed: ${error.message}`);
   });
 }
@@ -8747,10 +8721,7 @@ function ensureDebugSubscription() {
       };
       renderDebug();
   }
-  adpSubscribe(
-    { SubscribeDebugState: { client: adpClientKind(), turn_id: state.turn.turn_id } },
-    "sub-debug",
-  ).catch((error) => {
+  adpSubscribe(adpSubscribeOf("SubscribeDebugState", { client: adpClientKind(), turn_id: state.turn.turn_id }), "sub-debug").catch((error) => {
     state.debug = {
       status_text: "调试流失败",
       detail_lines: [error.message],
@@ -8760,18 +8731,18 @@ function ensureDebugSubscription() {
 }
 
 async function submitUserInput(text, submitMetadata = null) {
-  const command = { SubmitUserInput: { text } };
+  const submitPayload = { text };
   if (state.selectedSessionId) {
-    command.SubmitUserInput.session_id = state.selectedSessionId;
+    submitPayload.session_id = state.selectedSessionId;
   }
   const cwd = normalizeCwd(state.selectedCwd);
   if (cwd) {
-    command.SubmitUserInput.cwd = cwd;
+    submitPayload.cwd = cwd;
   }
   if (submitMetadata && Array.isArray(submitMetadata.attachments) && submitMetadata.attachments.length > 0) {
-    command.SubmitUserInput.metadata = submitMetadata;
+    submitPayload.metadata = submitMetadata;
   }
-  const payload = await adpCommand(command);
+  const payload = await adpCommand(adpCommandOf("SubmitUserInput", submitPayload));
   setCommandStatus(commandReceiptStatus(payload));
   return payload;
 }
@@ -8810,8 +8781,8 @@ async function cancelActiveTurn() {
     return;
   }
   const command = turnId
-    ? { CancelTurn: { turn_id: turnId } }
-    : { CancelLatestActiveTurn: {} };
+    ? adpCommandOf("CancelTurn", { turn_id: turnId })
+    : adpCommandOf("CancelLatestActiveTurn", {});
   setCommandStatus(`正在取消 ${turnId || "最新活跃轮次"}...`);
   if (turnId) {
     state.pendingCancelTurnId = turnId;
@@ -8849,7 +8820,7 @@ async function rewindCheckpoint(checkpointId) {
   setCommandStatus(`rewinding ${checkpointId}...`);
   let payload;
   try {
-    payload = await adpCommand({ RewindCheckpoint: { checkpoint_id: checkpointId } });
+    payload = await adpCommand(adpCommandOf("RewindCheckpoint", { checkpoint_id: checkpointId }));
   } catch (error) {
     setCommandStatus(`rewind failed: ${error.message}`);
     return;

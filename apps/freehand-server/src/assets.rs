@@ -5,7 +5,7 @@ use axum::response::{IntoResponse, Response};
 /// Single source of truth for the WebUI cache-busting version. Asset files and
 /// the page template reference `__WEBUI_ASSET_VERSION__`; the server stamps
 /// this value at serve time, so bumping the version is a one-line change here.
-pub const WEBUI_ASSET_VERSION: &str = "20260727-adp-version-handshake";
+pub const WEBUI_ASSET_VERSION: &str = "20260727-adp-schema-single-source";
 
 const WEBUI_ASSET_VERSION_TOKEN: &str = "__WEBUI_ASSET_VERSION__";
 
@@ -66,6 +66,11 @@ const WEBUI_ROUTE_CONTROLLER_JS: Asset = Asset {
 const WEBUI_ADP_CLIENT_JS: Asset = Asset {
     content_type: "application/javascript; charset=utf-8",
     body: include_str!("../assets/webui/app-shell/adp-client.js"),
+};
+
+const WEBUI_ADP_PROTOCOL_JS: Asset = Asset {
+    content_type: "application/javascript; charset=utf-8",
+    body: include_str!("../assets/webui/generated/adp-protocol.js"),
 };
 
 const WEBUI_SURFACE_HOME_DASHBOARD_JS: Asset = Asset {
@@ -177,6 +182,7 @@ pub fn asset_response(path: &str) -> Result<Response, StatusCode> {
         "webui/app-shell/edge-registry.js" => &WEBUI_EDGE_REGISTRY_JS,
         "webui/app-shell/route-controller.js" => &WEBUI_ROUTE_CONTROLLER_JS,
         "webui/app-shell/adp-client.js" => &WEBUI_ADP_CLIENT_JS,
+        "webui/generated/adp-protocol.js" => &WEBUI_ADP_PROTOCOL_JS,
         "webui/surfaces/home-dashboard/index.js" => &WEBUI_SURFACE_HOME_DASHBOARD_JS,
         "webui/surfaces/home-dashboard/model.js" => &WEBUI_SURFACE_HOME_DASHBOARD_MODEL_JS,
         "webui/surfaces/home-dashboard/view.js" => &WEBUI_SURFACE_HOME_DASHBOARD_VIEW_JS,
