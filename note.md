@@ -8796,7 +8796,7 @@ Current real root cause split:
 
 - Scope: close Gap 6 step 2 only, not whole Gap 6. Kept remaining schema generation, ui-protocol split, debug-only `target_owner_module`, `/adp` auth, and command-surface contraction open in `docs/architecture/architecture-gaps.md`.
 - Implementation:
-  - `crates/freehand-ui-protocol`: `UiAdpRequest` / `UiAdpResponse` now serialize/deserialize through protocol-owned `protocol_version=1`; added `Handshake` / `HandshakeAccepted`, `adp_protocol_version`, and `adp_server_capabilities`; missing/unsupported version rejects during serde.
+  - `crates/freehand-ui-protocol`: `UiAdpRequest` / `UiAdpResponse` now serialize/deserialize through protocol-owned `protocol_version=2`; added `Handshake` / `HandshakeAccepted`, `adp_protocol_version`, and `adp_server_capabilities`; missing/unsupported version rejects during serde.
   - `apps/freehand-server`: `/adp` connection now requires first-frame handshake before command/query/subscribe; pre-handshake frames return `adp_handshake_required`; duplicate handshake returns `adp_handshake_already_accepted`.
   - `apps/freehand-server/assets/webui/app-shell/adp-client.js`: WebUI sends versioned handshake on open, waits for `handshake_accepted`, stamps every request, validates response `protocol_version`, and uses user-facing connection/service wording.
   - `apps/freehand-cli` and daemon/server tests now perform ADP handshake before request frames; mock WebSocket tests accept handshake.
@@ -8826,4 +8826,11 @@ Current real root cause split:
 ## 2026-07-27 — Gap6 ADP schema/constructor verification green
 
 - Final local verification green: `cargo fmt --check`; `cargo test -p freehand-ui-protocol adp -- --test-threads=1` (5 passed); `cargo test -p freehand-server adp -- --test-threads=1` (3 passed); `cargo test -p freehand-server webui -- --test-threads=1` (3 passed); node syntax checks for `adp-client.js`, `legacy-monolith.js`, generated ADP protocol JS, tools/timer controls; targeted clippy; `cargo test -p xtask -- --test-threads=1` (50 passed); `xtask mainlines check`; `xtask gates check`; `git diff --check`.
-- Generated artifact summary: protocol_version=1, handshake_capability=`adp.v1.handshake`, command count=63, `QueryMasterPoll` frame=query, `RunMasterPoll` frame=mutation, JS constructors present.
+- Generated artifact summary: protocol_version=2, handshake_capability=`adp.v2.handshake`, command count=63, `QueryMasterPoll` frame=query, `RunMasterPoll` frame=mutation, JS constructors present.
+
+## 2026-07-27 — Gap6 ADP public manifest internal path leak slice
+
+- Scope: close the `target_owner_module` public-wire leak portion of Gap 6 only. Runtime dispatch envelopes still keep `target_owner_module` internally for owner routing; public ADP manifest/WebUI generated module now expose only `target_owner_feature` plus frame/serde metadata, and public ADP `CommandReceipt` responses no longer serialize internal owner module paths; this wire-contract break bumps ADP to `protocol_version=2` / `adp.v2.handshake` so old clients fail at version negotiation instead of receipt decoding.
+- Implementation: removed `target_owner_module` from `UiAdpCommandManifestEntry` and `UiCommandDispatchReceipt`; regenerated `crates/freehand-ui-protocol/generated/adp-protocol.schema.json` and `apps/freehand-server/assets/webui/generated/adp-protocol.js`; `xtask verify_adp_protocol_artifacts` now rejects `target_owner_module` and `crates/freehand-*` in generated JSON/served WebUI JS artifacts; protocol serialization test rejects `target_owner_module` / `crates/freehand-*` in public command receipts.
+- Docs/maps: Gap 6 updated to mark public artifact internal-path leak closed while leaving ui-protocol projection split, `/adp` auth, payload DTO schema/types, and command-surface contraction open; ui.protocol function map/test design/mainline/wiki synced.
+- Verification so far after v2 bump: `cargo fmt --check`; `cargo test -p freehand-ui-protocol adp -- --test-threads=1` 5 ok; `cargo test -p xtask -- --test-threads=1` 50 ok; `cargo run -p xtask -- mainlines check`; `cargo run -p xtask -- gates check`; server ADP/webui tests 3+3 ok; Node syntax checks for generated/adp-client/legacy; grep confirms no `target_owner_module` or `crates/freehand-*` in public generated artifacts.

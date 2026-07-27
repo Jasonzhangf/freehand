@@ -2730,6 +2730,13 @@ fn require_contains(text: &str, snippet: &str, rel_path: &str) -> Result<(), Str
     Ok(())
 }
 
+fn require_absent(text: &str, snippet: &str, rel_path: &str) -> Result<(), String> {
+    if text.contains(snippet) {
+        return Err(format!("{rel_path} must not contain `{snippet}`"));
+    }
+    Ok(())
+}
+
 fn resource_map_binding_section<'a>(
     function_map: &'a str,
     rel_path: &str,
@@ -3504,12 +3511,12 @@ fn verify_adp_protocol_artifacts(root: &Path) -> Result<(), String> {
 
     require_contains(
         &expected_json_body,
-        "\"protocol_version\": 1",
+        "\"protocol_version\": 2",
         "crates/freehand-ui-protocol/generated/adp-protocol.schema.json",
     )?;
     require_contains(
         &expected_json_body,
-        "\"handshake_capability\": \"adp.v1.handshake\"",
+        "\"handshake_capability\": \"adp.v2.handshake\"",
         "crates/freehand-ui-protocol/generated/adp-protocol.schema.json",
     )?;
     require_contains(
@@ -3525,6 +3532,26 @@ fn verify_adp_protocol_artifacts(root: &Path) -> Result<(), String> {
     require_contains(
         &expected_js_body,
         "export function adpCommandOf",
+        "apps/freehand-server/assets/webui/generated/adp-protocol.js",
+    )?;
+    require_absent(
+        &expected_json_body,
+        "target_owner_module",
+        "crates/freehand-ui-protocol/generated/adp-protocol.schema.json",
+    )?;
+    require_absent(
+        &expected_json_body,
+        "crates/freehand-",
+        "crates/freehand-ui-protocol/generated/adp-protocol.schema.json",
+    )?;
+    require_absent(
+        &expected_js_body,
+        "target_owner_module",
+        "apps/freehand-server/assets/webui/generated/adp-protocol.js",
+    )?;
+    require_absent(
+        &expected_js_body,
+        "crates/freehand-",
         "apps/freehand-server/assets/webui/generated/adp-protocol.js",
     )?;
 

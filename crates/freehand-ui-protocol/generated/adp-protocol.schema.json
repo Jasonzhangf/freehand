@@ -1,6 +1,6 @@
 {
-  "protocol_version": 1,
-  "handshake_capability": "adp.v1.handshake",
+  "protocol_version": 2,
+  "handshake_capability": "adp.v2.handshake",
   "request_kinds": [
     "handshake",
     "command",
@@ -20,442 +20,379 @@
       "serde_name": "CreateSession",
       "semantic_kind": "create_session",
       "frame_class": "mutation",
-      "target_owner_feature": "reason.persistence",
-      "target_owner_module": "crates/freehand-reason"
+      "target_owner_feature": "reason.persistence"
     },
     {
       "serde_name": "RenameSession",
       "semantic_kind": "rename_session",
       "frame_class": "mutation",
-      "target_owner_feature": "reason.persistence",
-      "target_owner_module": "crates/freehand-reason"
+      "target_owner_feature": "reason.persistence"
     },
     {
       "serde_name": "ArchiveSession",
       "semantic_kind": "archive_session",
       "frame_class": "mutation",
-      "target_owner_feature": "reason.persistence",
-      "target_owner_module": "crates/freehand-reason"
+      "target_owner_feature": "reason.persistence"
     },
     {
       "serde_name": "RestoreSession",
       "semantic_kind": "restore_session",
       "frame_class": "mutation",
-      "target_owner_feature": "reason.persistence",
-      "target_owner_module": "crates/freehand-reason"
+      "target_owner_feature": "reason.persistence"
     },
     {
       "serde_name": "DeleteSession",
       "semantic_kind": "delete_session",
       "frame_class": "mutation",
-      "target_owner_feature": "reason.persistence",
-      "target_owner_module": "crates/freehand-reason"
+      "target_owner_feature": "reason.persistence"
     },
     {
       "serde_name": "RollbackLatestSessionTurn",
       "semantic_kind": "rollback_latest_session_turn",
       "frame_class": "mutation",
-      "target_owner_feature": "reason.persistence",
-      "target_owner_module": "crates/freehand-reason"
+      "target_owner_feature": "reason.persistence"
     },
     {
       "serde_name": "SubmitUserInput",
       "semantic_kind": "submit_user_input",
       "frame_class": "mutation",
-      "target_owner_feature": "reason.turn",
-      "target_owner_module": "crates/freehand-reason"
+      "target_owner_feature": "reason.turn"
     },
     {
       "serde_name": "SubscribeLatestActiveTurn",
       "semantic_kind": "subscribe_latest_active_turn",
       "frame_class": "subscribe",
-      "target_owner_feature": "ui.protocol",
-      "target_owner_module": "crates/freehand-ui-protocol"
+      "target_owner_feature": "ui.protocol"
     },
     {
       "serde_name": "SubscribeTurn",
       "semantic_kind": "subscribe_turn",
       "frame_class": "subscribe",
-      "target_owner_feature": "ui.protocol",
-      "target_owner_module": "crates/freehand-ui-protocol"
+      "target_owner_feature": "ui.protocol"
     },
     {
       "serde_name": "SubscribeNodeStatus",
       "semantic_kind": "subscribe_node_status",
       "frame_class": "subscribe",
-      "target_owner_feature": "ui.protocol",
-      "target_owner_module": "crates/freehand-ui-protocol"
+      "target_owner_feature": "ui.protocol"
     },
     {
       "serde_name": "SubscribeProgress",
       "semantic_kind": "subscribe_progress",
       "frame_class": "subscribe",
-      "target_owner_feature": "ui.protocol",
-      "target_owner_module": "crates/freehand-ui-protocol"
+      "target_owner_feature": "ui.protocol"
     },
     {
       "serde_name": "SubscribeTaskList",
       "semantic_kind": "subscribe_task_list",
       "frame_class": "subscribe",
-      "target_owner_feature": "ui.protocol",
-      "target_owner_module": "crates/freehand-ui-protocol"
+      "target_owner_feature": "ui.protocol"
     },
     {
       "serde_name": "SubscribeErrorCenterEvents",
       "semantic_kind": "subscribe_error_center_events",
       "frame_class": "subscribe",
-      "target_owner_feature": "ui.protocol",
-      "target_owner_module": "crates/freehand-ui-protocol"
+      "target_owner_feature": "ui.protocol"
     },
     {
       "serde_name": "SubscribeDebugState",
       "semantic_kind": "subscribe_debug_state",
       "frame_class": "subscribe",
-      "target_owner_feature": "ui.protocol",
-      "target_owner_module": "crates/freehand-ui-protocol"
+      "target_owner_feature": "ui.protocol"
     },
     {
       "serde_name": "QueryLatestActiveTurn",
       "semantic_kind": "query_latest_active_turn",
       "frame_class": "query",
-      "target_owner_feature": "ui.protocol",
-      "target_owner_module": "crates/freehand-ui-protocol"
+      "target_owner_feature": "ui.protocol"
     },
     {
       "serde_name": "QueryTurn",
       "semantic_kind": "query_turn",
       "frame_class": "query",
-      "target_owner_feature": "ui.protocol",
-      "target_owner_module": "crates/freehand-ui-protocol"
+      "target_owner_feature": "ui.protocol"
     },
     {
       "serde_name": "QuerySessionList",
       "semantic_kind": "query_session_list",
       "frame_class": "query",
-      "target_owner_feature": "ui.protocol",
-      "target_owner_module": "crates/freehand-ui-protocol"
+      "target_owner_feature": "ui.protocol"
     },
     {
       "serde_name": "QueryArchivedSessionList",
       "semantic_kind": "query_archived_session_list",
       "frame_class": "query",
-      "target_owner_feature": "ui.protocol",
-      "target_owner_module": "crates/freehand-ui-protocol"
+      "target_owner_feature": "ui.protocol"
     },
     {
       "serde_name": "QuerySessionTurns",
       "semantic_kind": "query_session_turns",
       "frame_class": "query",
-      "target_owner_feature": "ui.protocol",
-      "target_owner_module": "crates/freehand-ui-protocol"
+      "target_owner_feature": "ui.protocol"
     },
     {
       "serde_name": "QuerySessionSearch",
       "semantic_kind": "query_session_search",
       "frame_class": "query",
-      "target_owner_feature": "ui.protocol",
-      "target_owner_module": "crates/freehand-ui-protocol"
+      "target_owner_feature": "ui.protocol"
     },
     {
       "serde_name": "QueryConfigStatus",
       "semantic_kind": "query_config_status",
       "frame_class": "query",
-      "target_owner_feature": "ui.protocol",
-      "target_owner_module": "crates/freehand-ui-protocol"
+      "target_owner_feature": "ui.protocol"
     },
     {
       "serde_name": "QueryTaskList",
       "semantic_kind": "query_task_list",
       "frame_class": "query",
-      "target_owner_feature": "ui.protocol",
-      "target_owner_module": "crates/freehand-ui-protocol"
+      "target_owner_feature": "ui.protocol"
     },
     {
       "serde_name": "QueryTaskBoard",
       "semantic_kind": "query_task_board",
       "frame_class": "query",
-      "target_owner_feature": "ui.protocol",
-      "target_owner_module": "crates/freehand-ui-protocol"
+      "target_owner_feature": "ui.protocol"
     },
     {
       "serde_name": "QueryEventInbox",
       "semantic_kind": "query_event_inbox",
       "frame_class": "query",
-      "target_owner_feature": "ui.protocol",
-      "target_owner_module": "crates/freehand-ui-protocol"
+      "target_owner_feature": "ui.protocol"
     },
     {
       "serde_name": "QueryAgentBoard",
       "semantic_kind": "query_agent_board",
       "frame_class": "query",
-      "target_owner_feature": "ui.protocol",
-      "target_owner_module": "crates/freehand-ui-protocol"
+      "target_owner_feature": "ui.protocol"
     },
     {
       "serde_name": "QueryAgentLifecycle",
       "semantic_kind": "query_agent_lifecycle",
       "frame_class": "query",
-      "target_owner_feature": "ui.protocol",
-      "target_owner_module": "crates/freehand-ui-protocol"
+      "target_owner_feature": "ui.protocol"
     },
     {
       "serde_name": "QueryTaskHistory",
       "semantic_kind": "query_task_history",
       "frame_class": "query",
-      "target_owner_feature": "ui.protocol",
-      "target_owner_module": "crates/freehand-ui-protocol"
+      "target_owner_feature": "ui.protocol"
     },
     {
       "serde_name": "QueryWorkerControl",
       "semantic_kind": "query_worker_control",
       "frame_class": "query",
-      "target_owner_feature": "ui.protocol",
-      "target_owner_module": "crates/freehand-ui-protocol"
+      "target_owner_feature": "ui.protocol"
     },
     {
       "serde_name": "QueryTimerList",
       "semantic_kind": "query_timer_list",
       "frame_class": "query",
-      "target_owner_feature": "ui.protocol",
-      "target_owner_module": "crates/freehand-ui-protocol"
+      "target_owner_feature": "ui.protocol"
     },
     {
       "serde_name": "QueryToolRegistry",
       "semantic_kind": "query_tool_registry",
       "frame_class": "query",
-      "target_owner_feature": "ui.protocol",
-      "target_owner_module": "crates/freehand-ui-protocol"
+      "target_owner_feature": "ui.protocol"
     },
     {
       "serde_name": "QueryDiagnostics",
       "semantic_kind": "query_diagnostics",
       "frame_class": "query",
-      "target_owner_feature": "ui.protocol",
-      "target_owner_module": "crates/freehand-ui-protocol"
+      "target_owner_feature": "ui.protocol"
     },
     {
       "serde_name": "QueryErrorCenterEvents",
       "semantic_kind": "query_error_center_events",
       "frame_class": "query",
-      "target_owner_feature": "ui.protocol",
-      "target_owner_module": "crates/freehand-ui-protocol"
+      "target_owner_feature": "ui.protocol"
     },
     {
       "serde_name": "UpdateProviderConfig",
       "semantic_kind": "update_provider_config",
       "frame_class": "mutation",
-      "target_owner_feature": "config.core",
-      "target_owner_module": "crates/freehand-config"
+      "target_owner_feature": "config.core"
     },
     {
       "serde_name": "UpsertProviderConfig",
       "semantic_kind": "upsert_provider_config",
       "frame_class": "mutation",
-      "target_owner_feature": "config.core",
-      "target_owner_module": "crates/freehand-config"
+      "target_owner_feature": "config.core"
     },
     {
       "serde_name": "UpsertModelGroupConfig",
       "semantic_kind": "upsert_model_group_config",
       "frame_class": "mutation",
-      "target_owner_feature": "config.core",
-      "target_owner_module": "crates/freehand-config"
+      "target_owner_feature": "config.core"
     },
     {
       "serde_name": "UpdateAgentModelGroupSelection",
       "semantic_kind": "update_agent_model_group_selection",
       "frame_class": "mutation",
-      "target_owner_feature": "config.core",
-      "target_owner_module": "crates/freehand-config"
+      "target_owner_feature": "config.core"
     },
     {
       "serde_name": "TestProviderWebSearch",
       "semantic_kind": "test_provider_web_search",
       "frame_class": "mutation",
-      "target_owner_feature": "provider.reason-live-bridge",
-      "target_owner_module": "crates/freehand-runtime"
+      "target_owner_feature": "provider.reason-live-bridge"
     },
     {
       "serde_name": "ScheduleTimer",
       "semantic_kind": "schedule_timer",
       "frame_class": "mutation",
-      "target_owner_feature": "runtime.master-worker-loop",
-      "target_owner_module": "crates/freehand-runtime"
+      "target_owner_feature": "runtime.master-worker-loop"
     },
     {
       "serde_name": "CancelTimer",
       "semantic_kind": "cancel_timer",
       "frame_class": "mutation",
-      "target_owner_feature": "runtime.master-worker-loop",
-      "target_owner_module": "crates/freehand-runtime"
+      "target_owner_feature": "runtime.master-worker-loop"
     },
     {
       "serde_name": "UpdateAgentProviderSelection",
       "semantic_kind": "update_agent_provider_selection",
       "frame_class": "mutation",
-      "target_owner_feature": "config.core",
-      "target_owner_module": "crates/freehand-config"
+      "target_owner_feature": "config.core"
     },
     {
       "serde_name": "UpdateAgentResourceConfig",
       "semantic_kind": "update_agent_resource_config",
       "frame_class": "mutation",
-      "target_owner_feature": "config.core",
-      "target_owner_module": "crates/freehand-config"
+      "target_owner_feature": "config.core"
     },
     {
       "serde_name": "CreateTask",
       "semantic_kind": "create_task",
       "frame_class": "mutation",
-      "target_owner_feature": "task.orchestration",
-      "target_owner_module": "crates/freehand-task"
+      "target_owner_feature": "task.orchestration"
     },
     {
       "serde_name": "CreateTaskAgent",
       "semantic_kind": "create_task_agent",
       "frame_class": "mutation",
-      "target_owner_feature": "task.orchestration",
-      "target_owner_module": "crates/freehand-task"
+      "target_owner_feature": "task.orchestration"
     },
     {
       "serde_name": "AssignTask",
       "semantic_kind": "assign_task",
       "frame_class": "mutation",
-      "target_owner_feature": "task.orchestration",
-      "target_owner_module": "crates/freehand-task"
+      "target_owner_feature": "task.orchestration"
     },
     {
       "serde_name": "ClaimNextTask",
       "semantic_kind": "claim_next_task",
       "frame_class": "mutation",
-      "target_owner_feature": "task.orchestration",
-      "target_owner_module": "crates/freehand-task"
+      "target_owner_feature": "task.orchestration"
     },
     {
       "serde_name": "SubmitTaskReview",
       "semantic_kind": "submit_task_review",
       "frame_class": "mutation",
-      "target_owner_feature": "task.orchestration",
-      "target_owner_module": "crates/freehand-task"
+      "target_owner_feature": "task.orchestration"
     },
     {
       "serde_name": "RejectTaskReview",
       "semantic_kind": "reject_task_review",
       "frame_class": "mutation",
-      "target_owner_feature": "task.orchestration",
-      "target_owner_module": "crates/freehand-task"
+      "target_owner_feature": "task.orchestration"
     },
     {
       "serde_name": "ApproveTaskReview",
       "semantic_kind": "approve_task_review",
       "frame_class": "mutation",
-      "target_owner_feature": "task.orchestration",
-      "target_owner_module": "crates/freehand-task"
+      "target_owner_feature": "task.orchestration"
     },
     {
       "serde_name": "CloseTask",
       "semantic_kind": "close_task",
       "frame_class": "mutation",
-      "target_owner_feature": "task.orchestration",
-      "target_owner_module": "crates/freehand-task"
+      "target_owner_feature": "task.orchestration"
     },
     {
       "serde_name": "ApplyExecutionFact",
       "semantic_kind": "apply_execution_fact",
       "frame_class": "mutation",
-      "target_owner_feature": "task.orchestration",
-      "target_owner_module": "crates/freehand-task"
+      "target_owner_feature": "task.orchestration"
     },
     {
       "serde_name": "RunSchedulerTick",
       "semantic_kind": "run_scheduler_tick",
       "frame_class": "mutation",
-      "target_owner_feature": "task.orchestration",
-      "target_owner_module": "crates/freehand-task"
+      "target_owner_feature": "task.orchestration"
     },
     {
       "serde_name": "RunMasterPoll",
       "semantic_kind": "run_master_poll",
       "frame_class": "mutation",
-      "target_owner_feature": "task.orchestration",
-      "target_owner_module": "crates/freehand-task"
+      "target_owner_feature": "task.orchestration"
     },
     {
       "serde_name": "QueryMasterPoll",
       "semantic_kind": "query_master_poll",
       "frame_class": "query",
-      "target_owner_feature": "task.orchestration",
-      "target_owner_module": "crates/freehand-task"
+      "target_owner_feature": "task.orchestration"
     },
     {
       "serde_name": "WorkerControl",
       "semantic_kind": "worker_control",
       "frame_class": "mutation",
-      "target_owner_feature": "worker.control",
-      "target_owner_module": "crates/freehand-task"
+      "target_owner_feature": "worker.control"
     },
     {
       "serde_name": "QueryNodeStatus",
       "semantic_kind": "query_node_status",
       "frame_class": "query",
-      "target_owner_feature": "ui.protocol",
-      "target_owner_module": "crates/freehand-ui-protocol"
+      "target_owner_feature": "ui.protocol"
     },
     {
       "serde_name": "QueryTaskProgress",
       "semantic_kind": "query_task_progress",
       "frame_class": "query",
-      "target_owner_feature": "ui.protocol",
-      "target_owner_module": "crates/freehand-ui-protocol"
+      "target_owner_feature": "ui.protocol"
     },
     {
       "serde_name": "QueryDebugState",
       "semantic_kind": "query_debug_state",
       "frame_class": "query",
-      "target_owner_feature": "ui.protocol",
-      "target_owner_module": "crates/freehand-ui-protocol"
+      "target_owner_feature": "ui.protocol"
     },
     {
       "serde_name": "QueryCheckpoints",
       "semantic_kind": "query_checkpoints",
       "frame_class": "query",
-      "target_owner_feature": "ui.protocol",
-      "target_owner_module": "crates/freehand-ui-protocol"
+      "target_owner_feature": "ui.protocol"
     },
     {
       "serde_name": "SendDirectMessageToSlave",
       "semantic_kind": "send_direct_message_to_slave",
       "frame_class": "mutation",
-      "target_owner_feature": "node.master-slave",
-      "target_owner_module": "crates/freehand-node"
+      "target_owner_feature": "node.master-slave"
     },
     {
       "serde_name": "RewindCheckpoint",
       "semantic_kind": "rewind_checkpoint",
       "frame_class": "mutation",
-      "target_owner_feature": "runtime.checkpoint-rewind",
-      "target_owner_module": "crates/freehand-runtime"
+      "target_owner_feature": "runtime.checkpoint-rewind"
     },
     {
       "serde_name": "CancelTurn",
       "semantic_kind": "cancel_turn",
       "frame_class": "mutation",
-      "target_owner_feature": "reason.turn",
-      "target_owner_module": "crates/freehand-reason"
+      "target_owner_feature": "reason.turn"
     },
     {
       "serde_name": "CancelLatestActiveTurn",
       "semantic_kind": "cancel_latest_active_turn",
       "frame_class": "mutation",
-      "target_owner_feature": "reason.turn",
-      "target_owner_module": "crates/freehand-reason"
+      "target_owner_feature": "reason.turn"
     },
     {
       "serde_name": "ResumeTurn",
       "semantic_kind": "resume_turn",
       "frame_class": "mutation",
-      "target_owner_feature": "reason.turn",
-      "target_owner_module": "crates/freehand-reason"
+      "target_owner_feature": "reason.turn"
     }
   ]
 }

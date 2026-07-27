@@ -1397,7 +1397,6 @@ pub struct UiCommandDispatchEnvelope {
 pub struct UiCommandDispatchReceipt {
     pub ingress: UiCommandIngressAck,
     pub target_feature_id: String,
-    pub target_owner_module: String,
     pub dispatch_status: String,
 }
 
@@ -1415,8 +1414,8 @@ pub struct UiAdpFailure {
     pub retryable: bool,
 }
 
-pub const UI_ADP_PROTOCOL_VERSION: u32 = 1;
-pub const UI_ADP_HANDSHAKE_CAPABILITY: &str = "adp.v1.handshake";
+pub const UI_ADP_PROTOCOL_VERSION: u32 = 2;
+pub const UI_ADP_HANDSHAKE_CAPABILITY: &str = "adp.v2.handshake";
 
 pub fn adp_protocol_version() -> u32 {
     UI_ADP_PROTOCOL_VERSION
@@ -1441,7 +1440,6 @@ pub struct UiAdpCommandManifestEntry {
     pub semantic_kind: String,
     pub frame_class: UiCommandFrameClass,
     pub target_owner_feature: String,
-    pub target_owner_module: String,
 }
 
 pub fn adp_command_manifest_entries() -> Vec<UiAdpCommandManifestEntry> {
@@ -1452,7 +1450,6 @@ pub fn adp_command_manifest_entries() -> Vec<UiAdpCommandManifestEntry> {
             semantic_kind: descriptor.semantic_kind.to_owned(),
             frame_class: descriptor.frame_class,
             target_owner_feature: descriptor.target_owner_feature.to_owned(),
-            target_owner_module: descriptor.target_owner_module.to_owned(),
         })
         .collect()
 }
@@ -1917,7 +1914,6 @@ impl UiCommandDispatchPort for StaticUiCommandDispatchPort {
         Ok(UiCommandDispatchReceipt {
             ingress: envelope.ingress,
             target_feature_id: envelope.target_feature_id,
-            target_owner_module: envelope.target_owner_module,
             dispatch_status: self.dispatch_status.clone(),
         })
     }
@@ -7814,7 +7810,7 @@ mod tests {
             query: UiCommand::QueryConfigStatus,
         };
         let request_json = serde_json::to_string(&request).expect("request json");
-        assert!(request_json.contains("\"protocol_version\":1"));
+        assert!(request_json.contains("\"protocol_version\":2"));
         assert!(request_json.contains("\"kind\":\"query\""));
         assert!(request_json.contains("QueryConfigStatus"));
         let decoded_request: UiAdpRequest =
@@ -7842,7 +7838,7 @@ mod tests {
             },
         };
         let response_json = serde_json::to_string(&response).expect("response json");
-        assert!(response_json.contains("\"protocol_version\":1"));
+        assert!(response_json.contains("\"protocol_version\":2"));
         assert!(response_json.contains("\"kind\":\"failure\""));
         let decoded_response: UiAdpResponse =
             serde_json::from_str(&response_json).expect("decoded response");
@@ -7923,7 +7919,25 @@ mod tests {
         let js = adp_protocol_webui_module();
         assert!(js.contains("export function adpQueryOf"));
         assert!(js.contains("export function adpCommandOf"));
-        assert!(js.contains("\"protocol_version\": 1"));
+        assert!(js.contains("\"protocol_version\": 2"));
         assert!(js.contains("QueryConfigStatus"));
+        assert!(!js.contains("target_owner_module"));
+        assert!(!adp_protocol_manifest_json().contains("target_owner_module"));
+        let receipt_response_json = serde_json::to_string(&UiAdpResponse::CommandReceipt {
+            request_id: "req-public-receipt".to_owned(),
+            receipt: UiCommandDispatchReceipt {
+                ingress: UiCommandIngressAck {
+                    command_kind: "create_session".to_owned(),
+                    accepted: true,
+                    status_text: "accepted".to_owned(),
+                    mutation_authority: "owner_modules".to_owned(),
+                },
+                target_feature_id: "reason.persistence".to_owned(),
+                dispatch_status: "accepted".to_owned(),
+            },
+        })
+        .expect("ADP receipt response must serialize");
+        assert!(!receipt_response_json.contains("target_owner_module"));
+        assert!(!receipt_response_json.contains("crates/freehand-"));
     }
 }

@@ -300,7 +300,7 @@
 - app boundary now renders a usable WebUI shell instead of a minimal text-only smoke
 - theme code is split into `assets/theme.css` and `assets/theme.js`
 - WebUI layout/protocol-consumer code is split into `assets/webui.css` and `assets/webui.js`
-- WebUI shell now advertises `data-adp-endpoint="/adp"`; the front-end opens a WebSocket, sends protocol_version=1 handshake first, waits for `handshake_accepted`, and uses user-facing 连接/服务 wording for failures
+- WebUI shell now advertises `data-adp-endpoint="/adp"`; the front-end opens a WebSocket, sends protocol_version=2 handshake first, waits for `handshake_accepted`, and uses user-facing 连接/服务 wording for failures
 - WebUI command/query/subscribe payload construction now imports `adpQueryOf`, `adpCommandOf`, and `adpSubscribeOf` from the Rust-generated `webui/generated/adp-protocol.js` module; app code must not handwrite ADP frame-class constructors
 - WebUI shell now renders a compact session rail whose New controls open one dialog for either protocol-persisted global conversation creation or cwd-bound task creation; `/new` opens the same dialog instead of directly creating a local-only draft
 - app boundary now serves protocol-only HTTP query and SSE subscribe smoke routes from a reusable protocol-only library surface

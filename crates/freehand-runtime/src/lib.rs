@@ -3709,7 +3709,6 @@ impl RuntimeCommandDispatcher {
         Ok(UiCommandDispatchReceipt {
             ingress: envelope.ingress,
             target_feature_id: envelope.target_feature_id,
-            target_owner_module: envelope.target_owner_module,
             dispatch_status: "reason_turn_started".to_owned(),
         })
     }
@@ -3853,7 +3852,6 @@ impl RuntimeCommandDispatcher {
         Ok(UiCommandDispatchReceipt {
             ingress: envelope.ingress,
             target_feature_id: envelope.target_feature_id,
-            target_owner_module: envelope.target_owner_module,
             dispatch_status: format!(
                 "reason_live_turn_completed rounds={} schema_rejections={} tool_executions={} restored_closed_turns={}",
                 outcome.rounds,
@@ -4159,7 +4157,6 @@ impl RuntimeCommandDispatcher {
             return Ok(UiCommandDispatchReceipt {
                 ingress: envelope.ingress,
                 target_feature_id: envelope.target_feature_id,
-                target_owner_module: envelope.target_owner_module,
                 dispatch_status: "reason_live_turn_cancel_requested".to_owned(),
             });
         }
@@ -4193,7 +4190,6 @@ impl RuntimeCommandDispatcher {
         Ok(UiCommandDispatchReceipt {
             ingress: envelope.ingress,
             target_feature_id: envelope.target_feature_id,
-            target_owner_module: envelope.target_owner_module,
             dispatch_status: "reason_turn_cancelled".to_owned(),
         })
     }
@@ -4297,7 +4293,6 @@ impl RuntimeCommandDispatcher {
                 return Ok(UiCommandDispatchReceipt {
                     ingress: envelope.ingress,
                     target_feature_id: envelope.target_feature_id,
-                    target_owner_module: envelope.target_owner_module,
                     dispatch_status: format!(
                         "session_turn_rolled_back:{}",
                         marker.target_turn_id.as_str()
@@ -4323,7 +4318,6 @@ impl RuntimeCommandDispatcher {
         Ok(UiCommandDispatchReceipt {
             ingress: envelope.ingress,
             target_feature_id: envelope.target_feature_id,
-            target_owner_module: envelope.target_owner_module,
             dispatch_status: "session_metadata_updated".to_owned(),
         })
     }
@@ -4346,7 +4340,6 @@ impl RuntimeCommandDispatcher {
         Ok(UiCommandDispatchReceipt {
             ingress: envelope.ingress,
             target_feature_id: envelope.target_feature_id,
-            target_owner_module: envelope.target_owner_module,
             dispatch_status: "node_direct_message_dispatched".to_owned(),
         })
     }
@@ -4374,7 +4367,6 @@ impl RuntimeCommandDispatcher {
         Ok(UiCommandDispatchReceipt {
             ingress: envelope.ingress,
             target_feature_id: envelope.target_feature_id,
-            target_owner_module: envelope.target_owner_module,
             dispatch_status: format!("runtime_checkpoint_rewound checkpoint_id={checkpoint_id}"),
         })
     }
@@ -5356,7 +5348,6 @@ impl RuntimeCommandDispatcher {
         Ok(UiCommandDispatchReceipt {
             ingress: envelope.ingress,
             target_feature_id: envelope.target_feature_id,
-            target_owner_module: envelope.target_owner_module,
             dispatch_status: format!("task_created:{}", outcome.task.task_id.as_str()),
         })
     }
@@ -5381,7 +5372,6 @@ impl RuntimeCommandDispatcher {
         Ok(UiCommandDispatchReceipt {
             ingress: envelope.ingress,
             target_feature_id: envelope.target_feature_id,
-            target_owner_module: envelope.target_owner_module,
             dispatch_status: format!("task_agent_created:{}", outcome.agent.agent_id.as_str()),
         })
     }
@@ -5407,7 +5397,6 @@ impl RuntimeCommandDispatcher {
         Ok(UiCommandDispatchReceipt {
             ingress: envelope.ingress,
             target_feature_id: envelope.target_feature_id,
-            target_owner_module: envelope.target_owner_module,
             dispatch_status: format!("task_assigned:{}", outcome.task.task_id.as_str()),
         })
     }
@@ -5445,7 +5434,6 @@ impl RuntimeCommandDispatcher {
         Ok(UiCommandDispatchReceipt {
             ingress: envelope.ingress,
             target_feature_id: envelope.target_feature_id,
-            target_owner_module: envelope.target_owner_module,
             dispatch_status: status,
         })
     }
@@ -5473,7 +5461,6 @@ impl RuntimeCommandDispatcher {
         Ok(UiCommandDispatchReceipt {
             ingress: envelope.ingress,
             target_feature_id: envelope.target_feature_id,
-            target_owner_module: envelope.target_owner_module,
             dispatch_status: format!("task_review_submitted:{}", outcome.task.task_id.as_str()),
         })
     }
@@ -5500,7 +5487,6 @@ impl RuntimeCommandDispatcher {
         Ok(UiCommandDispatchReceipt {
             ingress: envelope.ingress,
             target_feature_id: envelope.target_feature_id,
-            target_owner_module: envelope.target_owner_module,
             dispatch_status: format!("task_review_rejected:{}", outcome.task.task_id.as_str()),
         })
     }
@@ -5525,7 +5511,6 @@ impl RuntimeCommandDispatcher {
         Ok(UiCommandDispatchReceipt {
             ingress: envelope.ingress,
             target_feature_id: envelope.target_feature_id,
-            target_owner_module: envelope.target_owner_module,
             dispatch_status: format!("task_review_approved:{}", outcome.task.task_id.as_str()),
         })
     }
@@ -5550,7 +5535,6 @@ impl RuntimeCommandDispatcher {
         Ok(UiCommandDispatchReceipt {
             ingress: envelope.ingress,
             target_feature_id: envelope.target_feature_id,
-            target_owner_module: envelope.target_owner_module,
             dispatch_status: format!("task_closed:{}", outcome.task.task_id.as_str()),
         })
     }
@@ -5572,7 +5556,6 @@ impl RuntimeCommandDispatcher {
         Ok(UiCommandDispatchReceipt {
             ingress: envelope.ingress,
             target_feature_id: envelope.target_feature_id,
-            target_owner_module: envelope.target_owner_module,
             dispatch_status: format!("execution_fact_applied:{task_id}"),
         })
     }
@@ -5600,7 +5583,6 @@ impl RuntimeCommandDispatcher {
         Ok(UiCommandDispatchReceipt {
             ingress: envelope.ingress,
             target_feature_id: envelope.target_feature_id,
-            target_owner_module: envelope.target_owner_module,
             dispatch_status: format!(
                 "scheduler_tick_recorded:facts={} events={}",
                 outcome.facts.len(),
@@ -5641,7 +5623,6 @@ impl RuntimeCommandDispatcher {
         Ok(UiCommandDispatchReceipt {
             ingress: envelope.ingress,
             target_feature_id: envelope.target_feature_id,
-            target_owner_module: envelope.target_owner_module,
             dispatch_status: format!(
                 "master_poll_recorded:events={} classifications={} cursor={}",
                 outcome.event_inbox.events.len(),
@@ -5681,7 +5662,6 @@ impl RuntimeCommandDispatcher {
         Ok(UiCommandDispatchReceipt {
             ingress: envelope.ingress,
             target_feature_id: envelope.target_feature_id,
-            target_owner_module: envelope.target_owner_module,
             dispatch_status: format!(
                 "worker_control_applied:{}:{}:{}",
                 event.op, event.control_id, event.status
@@ -5712,7 +5692,6 @@ impl RuntimeCommandDispatcher {
         Ok(UiCommandDispatchReceipt {
             ingress: envelope.ingress,
             target_feature_id: envelope.target_feature_id,
-            target_owner_module: envelope.target_owner_module,
             dispatch_status: format!(
                 "timer_scheduled:timer_id={} next_due_at={} status={}",
                 schedule.timer_id, schedule.next_due_at, schedule.status
@@ -5741,7 +5720,6 @@ impl RuntimeCommandDispatcher {
         Ok(UiCommandDispatchReceipt {
             ingress: envelope.ingress,
             target_feature_id: envelope.target_feature_id,
-            target_owner_module: envelope.target_owner_module,
             dispatch_status: format!(
                 "timer_cancelled:timer_id={} status={}",
                 schedule.timer_id, schedule.status
@@ -5796,7 +5774,6 @@ impl RuntimeCommandDispatcher {
         Ok(UiCommandDispatchReceipt {
             ingress: envelope.ingress,
             target_feature_id: envelope.target_feature_id,
-            target_owner_module: envelope.target_owner_module,
             dispatch_status: "provider_config_saved_restart_required".to_owned(),
         })
     }
@@ -5834,7 +5811,6 @@ impl RuntimeCommandDispatcher {
         Ok(UiCommandDispatchReceipt {
             ingress: envelope.ingress,
             target_feature_id: envelope.target_feature_id,
-            target_owner_module: envelope.target_owner_module,
             dispatch_status: "provider_config_upserted_restart_required".to_owned(),
         })
     }
@@ -5879,7 +5855,6 @@ impl RuntimeCommandDispatcher {
         Ok(UiCommandDispatchReceipt {
             ingress: envelope.ingress,
             target_feature_id: envelope.target_feature_id,
-            target_owner_module: envelope.target_owner_module,
             dispatch_status: "model_group_config_upserted_restart_required".to_owned(),
         })
     }
@@ -5911,7 +5886,6 @@ impl RuntimeCommandDispatcher {
         Ok(UiCommandDispatchReceipt {
             ingress: envelope.ingress,
             target_feature_id: envelope.target_feature_id,
-            target_owner_module: envelope.target_owner_module,
             dispatch_status: "model_group_selection_saved_restart_required".to_owned(),
         })
     }
@@ -5942,7 +5916,6 @@ impl RuntimeCommandDispatcher {
         Ok(UiCommandDispatchReceipt {
             ingress: envelope.ingress,
             target_feature_id: envelope.target_feature_id,
-            target_owner_module: envelope.target_owner_module,
             dispatch_status: receipt_status,
         })
     }
@@ -5975,7 +5948,6 @@ impl RuntimeCommandDispatcher {
         Ok(UiCommandDispatchReceipt {
             ingress: envelope.ingress,
             target_feature_id: envelope.target_feature_id,
-            target_owner_module: envelope.target_owner_module,
             dispatch_status: "agent_provider_selection_saved_restart_required".to_owned(),
         })
     }
@@ -6008,7 +5980,6 @@ impl RuntimeCommandDispatcher {
         Ok(UiCommandDispatchReceipt {
             ingress: envelope.ingress,
             target_feature_id: envelope.target_feature_id,
-            target_owner_module: envelope.target_owner_module,
             dispatch_status: format!(
                 "agent_resource_config_saved_restart_required:count={resource_count}"
             ),

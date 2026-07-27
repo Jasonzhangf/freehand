@@ -307,7 +307,7 @@
   - split theme/WebUI static assets are landed
   - HTTP query and continuous SSE subscribe transport smoke is landed
   - HTTP command ingress dispatch-receipt/failure smoke is landed
-  - WebUI root shell now exposes `/adp`, and WebUI JS uses protocol_version=1 first-frame handshake plus ADP WebSocket for command/query/subscription truth, while EventSource remains latest-turn SSE display refresh
+  - WebUI root shell now exposes `/adp`, and WebUI JS uses protocol_version=2 first-frame handshake plus ADP WebSocket for command/query/subscription truth, while EventSource remains latest-turn SSE display refresh
 - WebUI layout shape classifier and CSS shape rules are landed; `scripts/verify-webui-layout-shapes.mjs` locks the pure classifier, and `scripts/webui_verify_online.mjs` captures the online viewport matrix against S profile
 - WebUI Android WebView first paint is server-pinned through the root `client=android-webview` query so the app enters directly in portrait drawer layout instead of flashing the desktop grid before JS recalculates
 - WebUI mobile portrait drawer layout is landed: phone/tall-phone/tablet-portrait default to a phone-first conversation workspace, while session CRUD/list and debug/config detail panels open through mobile overlay controls without changing ADP/session truth

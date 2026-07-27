@@ -306,7 +306,6 @@ fn spawn_adp_sample_mock_server(kind: MockAdpSampleKind) -> (String, thread::Joi
                                     receipt: UiCommandDispatchReceipt {
                                         ingress: envelope.ingress,
                                         target_feature_id: envelope.target_feature_id,
-                                        target_owner_module: envelope.target_owner_module,
                                         dispatch_status: match kind {
                                             MockAdpSampleKind::Success => "sample_success",
                                             MockAdpSampleKind::Failure => {
@@ -539,7 +538,6 @@ fn spawn_adp_session_mock_server() -> (String, thread::JoinHandle<()>) {
                                         mutation_authority: "runtime".to_owned(),
                                     },
                                     target_feature_id: "reason.persistence".to_owned(),
-                                    target_owner_module: "crates/freehand-reason".to_owned(),
                                     dispatch_status: "session_turn_rolled_back:runtime-turn-10"
                                         .to_owned(),
                                 },
@@ -637,7 +635,6 @@ fn spawn_adp_session_continue_mock_server() -> (String, thread::JoinHandle<()>) 
                                             mutation_authority: "runtime".to_owned(),
                                         },
                                         target_feature_id: "reason.turn".to_owned(),
-                                        target_owner_module: "crates/freehand-reason".to_owned(),
                                         dispatch_status: "sample_turn_complete".to_owned(),
                                     },
                                 },
@@ -776,7 +773,6 @@ fn spawn_adp_task_lifecycle_mock_server() -> (String, thread::JoinHandle<()>) {
                                 request_id,
                                 "create_task",
                                 "task.orchestration",
-                                "crates/freehand-task",
                                 "task_created",
                             )
                             .await;
@@ -790,7 +786,6 @@ fn spawn_adp_task_lifecycle_mock_server() -> (String, thread::JoinHandle<()>) {
                                 request_id,
                                 "submit_task_review",
                                 "task.orchestration",
-                                "crates/freehand-task",
                                 "task_review_submitted",
                             )
                             .await;
@@ -804,7 +799,6 @@ fn spawn_adp_task_lifecycle_mock_server() -> (String, thread::JoinHandle<()>) {
                                 request_id,
                                 "approve_task_review",
                                 "task.orchestration",
-                                "crates/freehand-task",
                                 "task_review_approved",
                             )
                             .await;
@@ -818,7 +812,6 @@ fn spawn_adp_task_lifecycle_mock_server() -> (String, thread::JoinHandle<()>) {
                                 request_id,
                                 "close_task",
                                 "task.orchestration",
-                                "crates/freehand-task",
                                 "task_closed",
                             )
                             .await;
@@ -990,7 +983,6 @@ fn spawn_adp_phase1_foundation_mock_server() -> (String, thread::JoinHandle<()>)
                                 request_id,
                                 "create_task",
                                 "task.orchestration",
-                                "crates/freehand-task",
                                 "task_created",
                             )
                             .await;
@@ -1005,7 +997,6 @@ fn spawn_adp_phase1_foundation_mock_server() -> (String, thread::JoinHandle<()>)
                                 request_id,
                                 "apply_execution_fact",
                                 "task.orchestration",
-                                "crates/freehand-task",
                                 "execution_fact_applied",
                             )
                             .await;
@@ -1020,7 +1011,6 @@ fn spawn_adp_phase1_foundation_mock_server() -> (String, thread::JoinHandle<()>)
                                 request_id,
                                 "run_scheduler_tick",
                                 "task.orchestration",
-                                "crates/freehand-task",
                                 "scheduler_tick_recorded:facts=2 events=2",
                             )
                             .await;
@@ -1207,7 +1197,6 @@ fn spawn_adp_master_worker_foundation_mock_server_with_connections(
                                 request_id,
                                 "create_task_agent",
                                 "task.orchestration",
-                                "crates/freehand-task",
                                 "task_agent_created",
                             )
                             .await;
@@ -1242,7 +1231,6 @@ fn spawn_adp_master_worker_foundation_mock_server_with_connections(
                                 request_id,
                                 "create_task",
                                 "task.orchestration",
-                                "crates/freehand-task",
                                 "task_created",
                             )
                             .await;
@@ -1260,7 +1248,6 @@ fn spawn_adp_master_worker_foundation_mock_server_with_connections(
                                 request_id,
                                 "assign_task",
                                 "task.orchestration",
-                                "crates/freehand-task",
                                 "task_assigned",
                             )
                             .await;
@@ -1280,7 +1267,6 @@ fn spawn_adp_master_worker_foundation_mock_server_with_connections(
                                 request_id,
                                 "claim_next_task",
                                 "task.orchestration",
-                                "crates/freehand-task",
                                 "task_claimed",
                             )
                             .await;
@@ -1308,7 +1294,6 @@ fn spawn_adp_master_worker_foundation_mock_server_with_connections(
                                 request_id,
                                 "apply_execution_fact",
                                 "task.orchestration",
-                                "crates/freehand-task",
                                 "execution_fact_applied",
                             )
                             .await;
@@ -1326,7 +1311,6 @@ fn spawn_adp_master_worker_foundation_mock_server_with_connections(
                                 request_id,
                                 "reject_task_review",
                                 "task.orchestration",
-                                "crates/freehand-task",
                                 "task_review_rejected",
                             )
                             .await;
@@ -1344,7 +1328,6 @@ fn spawn_adp_master_worker_foundation_mock_server_with_connections(
                                 request_id,
                                 "approve_task_review",
                                 "task.orchestration",
-                                "crates/freehand-task",
                                 "task_review_approved",
                             )
                             .await;
@@ -1362,7 +1345,6 @@ fn spawn_adp_master_worker_foundation_mock_server_with_connections(
                                 request_id,
                                 "close_task",
                                 "task.orchestration",
-                                "crates/freehand-task",
                                 "task_closed",
                             )
                             .await;
@@ -1597,7 +1579,6 @@ fn spawn_adp_master_worker_autonomy_mock_server_with_connections(
                                     receipt: UiCommandDispatchReceipt {
                                         ingress: envelope.ingress,
                                         target_feature_id: envelope.target_feature_id,
-                                        target_owner_module: envelope.target_owner_module,
                                         dispatch_status: format!(
                                             "master_autonomy_model_turn_complete:{}",
                                             parsed.scenario
@@ -1847,7 +1828,6 @@ fn spawn_adp_master_poll_foundation_mock_server_with_connections(
                                 request_id,
                                 "create_task_agent",
                                 "task.orchestration",
-                                "crates/freehand-task",
                                 "task_agent_created",
                             )
                             .await;
@@ -1884,7 +1864,6 @@ fn spawn_adp_master_poll_foundation_mock_server_with_connections(
                                 request_id,
                                 "create_task",
                                 "task.orchestration",
-                                "crates/freehand-task",
                                 "task_created",
                             )
                             .await;
@@ -1902,7 +1881,6 @@ fn spawn_adp_master_poll_foundation_mock_server_with_connections(
                                 request_id,
                                 "assign_task",
                                 "task.orchestration",
-                                "crates/freehand-task",
                                 "task_assigned",
                             )
                             .await;
@@ -1922,7 +1900,6 @@ fn spawn_adp_master_poll_foundation_mock_server_with_connections(
                                 request_id,
                                 "claim_next_task",
                                 "task.orchestration",
-                                "crates/freehand-task",
                                 "task_claimed",
                             )
                             .await;
@@ -1950,7 +1927,6 @@ fn spawn_adp_master_poll_foundation_mock_server_with_connections(
                                 request_id,
                                 "apply_execution_fact",
                                 "task.orchestration",
-                                "crates/freehand-task",
                                 "execution_fact_applied",
                             )
                             .await;
@@ -1968,7 +1944,6 @@ fn spawn_adp_master_poll_foundation_mock_server_with_connections(
                                 request_id,
                                 "run_scheduler_tick",
                                 "task.orchestration",
-                                "crates/freehand-task",
                                 "scheduler_tick_recorded",
                             )
                             .await;
@@ -1984,7 +1959,6 @@ fn spawn_adp_master_poll_foundation_mock_server_with_connections(
                                 request_id,
                                 "run_master_poll",
                                 "task.orchestration",
-                                "crates/freehand-task",
                                 &format!("master_poll_recorded:events=0 classifications=2 cursor={cursor}"),
                             )
                             .await;
@@ -2203,7 +2177,6 @@ fn spawn_adp_worker_control_foundation_mock_server_with_connections(
                                 request_id,
                                 "create_task_agent",
                                 "task.orchestration",
-                                "crates/freehand-task",
                                 "task_agent_created",
                             )
                             .await;
@@ -2239,7 +2212,6 @@ fn spawn_adp_worker_control_foundation_mock_server_with_connections(
                                 request_id,
                                 "create_task",
                                 "task.orchestration",
-                                "crates/freehand-task",
                                 "task_created",
                             )
                             .await;
@@ -2257,7 +2229,6 @@ fn spawn_adp_worker_control_foundation_mock_server_with_connections(
                                 request_id,
                                 "assign_task",
                                 "task.orchestration",
-                                "crates/freehand-task",
                                 "task_assigned",
                             )
                             .await;
@@ -2277,7 +2248,6 @@ fn spawn_adp_worker_control_foundation_mock_server_with_connections(
                                 request_id,
                                 "claim_next_task",
                                 "task.orchestration",
-                                "crates/freehand-task",
                                 "task_claimed",
                             )
                             .await;
@@ -2297,7 +2267,6 @@ fn spawn_adp_worker_control_foundation_mock_server_with_connections(
                                 request_id,
                                 "apply_execution_fact",
                                 "task.orchestration",
-                                "crates/freehand-task",
                                 "execution_fact_applied",
                             )
                             .await;
@@ -2340,7 +2309,6 @@ fn spawn_adp_worker_control_foundation_mock_server_with_connections(
                                 request_id,
                                 "worker_control",
                                 "worker.control",
-                                "crates/freehand-task",
                                 &format!(
                                     "worker_control_applied:{}:{}:{}",
                                     event.op, event.control_id, event.status
@@ -3184,7 +3152,6 @@ async fn send_task_command_receipt(
     request_id: String,
     command_kind: &str,
     target_feature_id: &str,
-    target_owner_module: &str,
     dispatch_status: &str,
 ) {
     send_adp_response(
@@ -3199,7 +3166,6 @@ async fn send_task_command_receipt(
                     mutation_authority: "runtime".to_owned(),
                 },
                 target_feature_id: target_feature_id.to_owned(),
-                target_owner_module: target_owner_module.to_owned(),
                 dispatch_status: dispatch_status.to_owned(),
             },
         },

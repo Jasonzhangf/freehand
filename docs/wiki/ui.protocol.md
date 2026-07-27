@@ -22,7 +22,7 @@ Generated from `docs/mainline-calls/ui.protocol.json`. Do not edit by hand.
 - accepted command ingress is wrapped into a dispatch envelope that declares the target owner feature/module before leaving the protocol boundary
 - runtime-owned mutation commands such as checkpoint rewind stay explicit at the protocol envelope layer and do not become UI-owned semantics
 - query and subscribe stay separate
-- ADP WebSocket clients use protocol-owned typed frames with top-level protocol_version=1; the first client frame must be Handshake, and command/query/subscribe frames are valid only after a server HandshakeAccepted capability response
+- ADP WebSocket clients use protocol-owned typed frames with top-level protocol_version=2; the first client frame must be Handshake, and command/query/subscribe frames are valid only after a server HandshakeAccepted capability response
 - ADP command/frame metadata is single-sourced from the protocol-owned UI_COMMAND_DESCRIPTORS table; generated JSON manifest and WebUI constructors must be exported from Rust instead of handwritten in JavaScript
 - task list/history query commands are protocol-owned read-only ADP/query shapes while task truth remains runtime/task-owner supplied
 - Phase 1 TaskBoard, AgentBoard, and AgentLifecycle queries are protocol-owned ADP/query command shapes while runtime/task owners supply truth
@@ -60,7 +60,7 @@ Generated from `docs/mainline-calls/ui.protocol.json`. Do not edit by hand.
 - command ingress returns explicit dispatch receipt without claiming truth mutation success
 - subscribe returns an initial snapshot followed by continuous incremental projections through a protocol-owned subscription channel, or waits for the first turn when the latest-turn stream is subscribed before any turn exists
 - ADP handshake returns an explicit HandshakeAccepted frame with server capabilities before any command/query/subscribe response; ADP subscribe returns an explicit SubscriptionAccepted frame before later SubscriptionEvent frames so UI-less clients can distinguish waiting from transport failure
-- ADP protocol export returns a deterministic manifest with protocol_version, handshake capability, request/response kinds, command serde names, frame classes, and owner-routing metadata, plus a WebUI module exposing adpQueryOf, adpCommandOf, and adpSubscribeOf constructors
+- ADP protocol export returns a deterministic public manifest with protocol_version, handshake capability, request/response kinds, command serde names, frame classes, and owner feature ids, plus a WebUI module exposing adpQueryOf, adpCommandOf, and adpSubscribeOf constructors; internal owner module paths stay out of served/generated artifacts and public CommandReceipt responses
 - projections are read-only views over owner-written truth
 - model request lifecycle is projected as UiModelRequestActivity inside UiTurnProjection for ordinary thinking, schema retry, and tool-result continuation; provider retry/failover are transport substate on the same activity, not separate reasoning-flow phases, and the activity clears when response/tool/usage/terminal/error projection arrives
 - terminal completion shows only final projected text
@@ -106,7 +106,7 @@ Generated from `docs/mainline-calls/ui.protocol.json`. Do not edit by hand.
 - invalid command, invalid stream selection, or unavailable source projection return explicit protocol errors
 - query/subscribe commands sent to command-ingress route are explicit protocol misuse errors
 - ADP request/response frames missing protocol_version or carrying an unsupported version are rejected during protocol deserialization before route handling
-- stale or missing generated ADP manifest/constructor artifacts are gate failures; WebUI frame-class misuse throws before a request leaves the browser constructor helper
+- stale or missing generated ADP manifest/constructor artifacts are gate failures; generated artifacts and public command receipts must not expose internal owner module paths; WebUI frame-class misuse throws before a request leaves the browser constructor helper
 - query commands sent as ADP command frames are explicit protocol misuse errors, not mutation attempts
 - empty checkpoint rewind ids are rejected at the protocol boundary before runtime dispatch
 - checkpoint query misses return an empty read-only snapshot, not an implicit recovery or filesystem fallback
@@ -228,7 +228,7 @@ Generated from `docs/mainline-calls/ui.protocol.json`. Do not edit by hand.
   - why shared: WebUI, Android, CLI, and headless tests need one worker-control frame shape while worker.control owns semantics
 - `adp_protocol_manifest / adp_command_manifest_entries / adp_protocol_manifest_json / adp_protocol_webui_module`
   - owner: `crates/freehand-ui-protocol/src/lib.rs`
-  - purpose: single-source ADP protocol version, handshake capability, command serde names, frame classes, and owner-routing metadata into deterministic JSON and WebUI constructor artifacts
+  - purpose: single-source ADP protocol version, handshake capability, command serde names, frame classes, and public owner feature ids into deterministic JSON and WebUI constructor artifacts while excluding internal owner module paths
   - allowed callers: export-adp-protocol bin, xtask gates check, WebUI asset smoke, protocol tests
   - related tests: adp_protocol_manifest_covers_all_command_variants, verify_adp_protocol_artifacts
   - why shared: all Rust and WebUI ADP clients need one command/frame contract instead of handwritten JavaScript mirrors or duplicated command classification logic
@@ -283,7 +283,7 @@ Generated from `docs/mainline-calls/ui.protocol.json`. Do not edit by hand.
 | 32 | `UiCommand::QueryToolRegistry / UiQueryResult::ToolRegistry / UiToolRegistryProjection / UiToolRegistryToolProjection` | `crates/freehand-ui-protocol/src/lib.rs` | define read-only Tools dashboard query/result DTOs without owning tool registry truth or executing tools | tool registry query | runtime-backed UI-safe built-in tool registry projection or protocol-state route rejection | ADP query transport | runtime.ui-command-dispatch |  |  |  | bound |
 | 33 | `UiCommand::QuerySessionSearch / UiQueryResult::SessionSearch / UiSessionSearchProjection / UiSessionSearchResultProjection / UiSessionSearchChildProjection` | `crates/freehand-ui-protocol/src/lib.rs` | define read-only persisted-session Search dashboard query/result DTOs without owning session index truth or promoting Worker sessions to top-level results | search query text plus optional limit | runtime-backed UI-safe persisted session search projection or protocol-state route rejection | ADP query transport | runtime.ui-command-dispatch |  |  |  | bound |
 | 34 | `UiCommand::QueryDiagnostics / UiQueryResult::Diagnostics / UiDiagnosticsProjection / UiDiagnosticLogFileProjection` | `crates/freehand-ui-protocol/src/lib.rs` | define read-only diagnostics query/result DTOs without owning debug/log truth or exposing raw provider payloads, secrets, or absolute user paths | diagnostics query | runtime-backed UI-safe diagnostics projection or protocol-state route rejection | ADP query transport | runtime.ui-command-dispatch |  |  |  | bound |
-| 18a | `UI_COMMAND_DESCRIPTORS / command_descriptor / adp_protocol_manifest / adp_protocol_webui_module` | `crates/freehand-ui-protocol/src/lib.rs` | derive the ADP manifest and WebUI constructor module from the exhaustive protocol command descriptor table | UiCommand variants plus protocol version and handshake capability constants | deterministic command manifest entries, frame classes, owner-routing metadata, and JavaScript constructor helpers | export-adp-protocol / protocol tests / xtask gate | protocol owner descriptor table |  |  |  | bound |
+| 18a | `UI_COMMAND_DESCRIPTORS / command_descriptor / adp_protocol_manifest / adp_protocol_webui_module` | `crates/freehand-ui-protocol/src/lib.rs` | derive the ADP manifest and WebUI constructor module from the exhaustive protocol command descriptor table | UiCommand variants plus protocol version and handshake capability constants | deterministic command manifest entries, frame classes, public owner feature ids, and JavaScript constructor helpers without internal crate paths | export-adp-protocol / protocol tests / xtask gate | protocol owner descriptor table |  |  |  | bound |
 | 18b | `write_output / main` | `crates/freehand-ui-protocol/src/bin/export-adp-protocol.rs` | write the generated ADP JSON manifest or WebUI constructor module to the requested artifact path | --json or --js output path | generated adp-protocol.schema.json or adp-protocol.js artifact | developer / xtask gate | freehand-ui-protocol manifest exporters |  |  |  | bound |
 
 ## Sync Status Against Mainline Call
@@ -305,7 +305,7 @@ Generated from `docs/mainline-calls/ui.protocol.json`. Do not edit by hand.
 - tool activity status and result detail are now preserved in UiTurnProjection.tool_activities and public conversation status mapping
 - public tool summaries preserve tool_call_id, duplicate same-id tool calls upsert into one public card, and completed/failed public tool bodies expose tool result detail
 - CancelLatestActiveTurn is now accepted by command ingress and routed to reason.turn
-- ADP request and response frames are protocol-owned, versioned with protocol_version=1, include handshake/handshake_accepted variants, and are JSON roundtrip/negative-version tested for UI-less automation clients
+- ADP request and response frames are protocol-owned, versioned with protocol_version=2, include handshake/handshake_accepted variants, and are JSON roundtrip/negative-version tested for UI-less automation clients
 - task list/history query command DTOs and runtime query-port shape are landed
 - Phase 1 TaskBoard, AgentBoard, and AgentLifecycle query DTOs are landed and route only through runtime-backed query ports
 - Phase 1 ApplyExecutionFact and RunSchedulerTick command DTOs are landed and route only through runtime-backed task.orchestration dispatch

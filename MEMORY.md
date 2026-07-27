@@ -679,7 +679,7 @@ Tags: #architecture #gap5 #node #ui-protocol #dependency-edge
 
 ## 2026-07-27 — ADP versioned handshake baseline
 
-- ADP transport is now explicitly versioned at the protocol owner: `UiAdpRequest` and `UiAdpResponse` require top-level `protocol_version=1`; missing or unsupported versions reject during serde before route handling.
+- ADP transport is now explicitly versioned at the protocol owner: `UiAdpRequest` and `UiAdpResponse` require top-level `protocol_version=2`; missing or unsupported versions reject during serde before route handling.
 - `/adp` WebSocket lifecycle requires first-frame handshake: clients send `UiAdpRequest::Handshake`, server responds with `UiAdpResponse::HandshakeAccepted` and server capabilities; command/query/subscribe frames before handshake fail with `adp_handshake_required`, and duplicate handshake fails with `adp_handshake_already_accepted`.
 - WebUI `app-shell/adp-client.js` owns browser ADP connection lifecycle: send versioned handshake on open, wait for `handshake_accepted`, stamp outgoing requests, validate response `protocol_version`, and keep user-visible copy to connection/service wording instead of raw ADP.
 - Focused proof used `CARGO_TARGET_DIR=/tmp/freehand-target-adp-version`: `cargo test -p freehand-ui-protocol adp`, `cargo test -p freehand-server adp`, `cargo test -p freehand-cli --test config_startup`, `cargo test -p freehand-daemon`, focused clippy for protocol/server/cli/daemon, `node --check apps/freehand-server/assets/webui/app-shell/adp-client.js`, `xtask mainlines check`, `xtask gates check`, and `git diff --check`.
@@ -692,3 +692,9 @@ Tags: #architecture #gap5 #node #ui-protocol #dependency-edge
 - `xtask gates check` now runs `verify_adp_protocol_artifacts`: it re-runs `export-adp-protocol --json/--js`, diffs committed artifacts, verifies the generated WebUI asset is served, and checks WebUI consumers use generated constructors.
 - Verified this slice with `cargo fmt --check`, `cargo test -p freehand-ui-protocol adp -- --test-threads=1`, `cargo test -p freehand-server adp -- --test-threads=1`, `cargo test -p freehand-server webui -- --test-threads=1`, Node syntax checks for ADP WebUI modules, targeted clippy for `freehand-ui-protocol/freehand-server/xtask`, `cargo test -p xtask -- --test-threads=1`, `xtask mainlines check`, `xtask gates check`, and `git diff --check`.
 - Gap 6 remains open for full payload DTO schema/types, `UiProtocolState`/projection crate split, `target_owner_module` debug-only removal from public wire artifact, `/adp` auth, and internal command-surface contraction (`ApplyExecutionFact`, `ClaimNextTask`, `RunSchedulerTick`).
+
+## 2026-07-27 — Gap6 ADP public manifest removes internal owner paths
+
+- Public generated ADP artifacts and public ADP `CommandReceipt` responses no longer serialize `target_owner_module` or `crates/freehand-*` owner paths. `UiAdpCommandManifestEntry` exposes command serde name, semantic kind, frame class, and `target_owner_feature`; runtime `UiCommandDispatchEnvelope` still carries `target_owner_module` internally for dispatch routing.
+- `xtask gates check` / `verify_adp_protocol_artifacts` now regenerates JSON/JS artifacts and fails if public JSON/served WebUI generated JS contains `target_owner_module` or `crates/freehand-*` paths; protocol ADP tests also prove command receipt serialization excludes those internals and generated artifacts advertise protocol v2.
+- Gap 6 remains open for full payload DTO schema/types, `UiProtocolState`/projection crate split, `/adp` auth, and internal command-surface contraction (`ApplyExecutionFact`, `ClaimNextTask`, `RunSchedulerTick`).
