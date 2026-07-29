@@ -211,6 +211,7 @@ pub(super) fn verify_openminis_ui_evidence(
                 )
             })?;
         verify_openminis_ui_report_revision(root, report_commit, report_tree)?;
+        provenance::verify_online_report_provenance(gate_id, &report)?;
         repository_revisions.insert((report_commit.to_owned(), report_tree.to_owned()));
         if report.get("exit_code").and_then(Value::as_i64) != Some(0) {
             return Err(format!(
@@ -457,6 +458,7 @@ pub(super) fn read_openminis_ui_evidence_artifact(
     })
 }
 
+pub(crate) mod provenance;
 mod retirement;
 
 pub(super) fn verify_openminis_ui_legacy_retirement(

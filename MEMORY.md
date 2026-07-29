@@ -831,3 +831,8 @@ Tags: #architecture #gap5 #node #ui-protocol #dependency-edge
 
 - Supersedes the earlier external-provenance fail-closed rule: registered repository, WebUI, Android-device, and legacy no-touch gates use one source-attested verifier-report admission path. Required gate ids must not be rejected categorically because that makes terminal lifecycle states impossible.
 - Promotion requires the code-locked command/proof/verifier identity, gate-specific assertions, successful process result, distinct report digest, exact source commit/tree, lifecycle-only manifest drift, and no other dirty path. Forged commands, generic success fields, assertion/report/source drift, and incomplete gate coverage remain explicit failures.
+
+## 2026-07-30 OpenMinis external online provenance truth
+
+- Supersedes repository-only online evidence admission: WebUI, Android-device, and legacy no-touch reports must carry a valid Ed25519 signature over the complete canonical report payload. The verifier pins the external runner public key; the production private key must never enter the repository.
+- Repository JSON paths, matching digests, passed assertions, and clean source attestations are necessary but forgeable by a local author. Signature verification is the external trust boundary; missing, malformed, or locally replaced signatures fail even when the attacker updates the report digest.

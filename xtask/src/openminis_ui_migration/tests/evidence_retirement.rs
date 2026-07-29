@@ -1,5 +1,6 @@
 use super::super::*;
 use super::common::*;
+use sha2::{Digest, Sha256};
 
 #[test]
 fn openminis_ui_migration_manifest_rejects_self_reported_noncanonical_proof() {
@@ -41,6 +42,49 @@ fn openminis_ui_migration_manifest_accepts_source_attested_online_report() {
         &gates,
     )
     .expect("source-attested canonical online verifier report must promote lifecycle truth");
+}
+
+#[test]
+fn openminis_ui_migration_manifest_rejects_forged_online_provenance() {
+    let (root, node, gates) = write_openminis_evidence_fixture("forged-online-provenance");
+    let record = node["evidence"]
+        .as_array()
+        .expect("evidence")
+        .iter()
+        .find(|record| record["gate_id"] == "webui_online_e2e")
+        .expect("WebUI evidence");
+    let artifact_path = record["artifact_path"].as_str().expect("artifact path");
+    let mut artifact: Value =
+        serde_json::from_slice(&fs::read(root.join(artifact_path)).expect("read artifact"))
+            .expect("parse artifact");
+    let report_path = artifact["verifier_report_path"]
+        .as_str()
+        .expect("report path");
+    let mut report: Value =
+        serde_json::from_slice(&fs::read(root.join(report_path)).expect("read report"))
+            .expect("parse report");
+    report["provenance_signature"] = Value::String("00".repeat(64));
+    let report_bytes = serde_json::to_vec(&report).expect("encode forged report");
+    fs::write(root.join(report_path), &report_bytes).expect("write forged report");
+    artifact["verifier_report_sha256"] =
+        Value::String(format!("{:x}", Sha256::digest(&report_bytes)));
+    fs::write(
+        root.join(artifact_path),
+        serde_json::to_vec(&artifact).expect("encode artifact"),
+    )
+    .expect("write artifact");
+
+    let err = verify_openminis_ui_evidence(
+        &root,
+        "foundation.root",
+        node.as_object().expect("node"),
+        &gates,
+    )
+    .expect_err("locally forged online report must fail external provenance");
+    assert!(
+        err.contains("invalid external provenance_signature"),
+        "{err}"
+    );
 }
 
 #[test]

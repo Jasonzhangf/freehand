@@ -9349,3 +9349,10 @@ exact_replay: "Round 12 source fixtures reproduce both static gate admissions; n
 - Round 40 found one P1 lifecycle contradiction: required `webui_online_e2e`, `android_device_e2e`, and `openminis_ui_legacy_online_no_touch` evidence was rejected by gate id before the existing canonical verifier-report validation, making `online_verified` and `legacy_retired` unrepresentable.
 - The unique evidence owner now admits every registered gate through one path: canonical command/proof/verifier identity, gate-specific assertions, process success, report digest, exact commit/tree, manifest lifecycle-only drift, and clean source-attestation boundary. No required gate is rejected categorically.
 - Positive proof now covers source-attested WebUI evidence and source-attested legacy no-touch evidence; negative canonical-command proof remains red. Full xtask passes 200/200, mainlines generate/check, gates, workspace build/clippy with warnings denied, fmt, and diff checks pass. Codex Review round 41 remains required.
+
+## 2026-07-30 - Codex Review round 42 provenance remediation
+
+- Round 42 rejected Round 41's repository-only online evidence admission: a local author could forge report JSON, assertions, and digest while staying inside the admitted evidence paths.
+- Online, Android-device, and legacy no-touch reports now require Ed25519 verification over the complete canonical report payload. The verifier pins only the external runner public key; the production private key is absent from the repository. Repository-only gates do not require this external signature.
+- Positive WebUI and legacy no-touch fixtures use a test-only key; a paired negative test rewrites the signature and matching report digest yet still fails provenance. The production public key has an independent parse/curve validity test.
+- Verification passes: 202/202 xtask tests, mainlines generate/check, gates, workspace build, clippy with warnings denied, fmt, and diff checks. Codex Review round 43 returned a semantic PASS with no actionable correctness issues.

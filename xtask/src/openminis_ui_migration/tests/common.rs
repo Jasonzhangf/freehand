@@ -1,4 +1,5 @@
 use super::super::*;
+use ed25519_dalek::{Signer, SigningKey};
 use sha2::{Digest, Sha256};
 use std::ops::Deref;
 
@@ -204,7 +205,7 @@ pub(super) fn write_openminis_evidence_fixture(
         };
         let artifact_path = format!("docs/migrations/openminis-ui/evidence/{gate_id}.json");
         let report_path = format!("docs/migrations/openminis-ui/evidence/{gate_id}-report.json");
-        let report = serde_json::json!({
+        let mut report = serde_json::json!({
             "schema_version": "freehand.verifier-report.v1",
             "verifier_id": verifier_id,
             "node_id": "foundation.root",
@@ -219,6 +220,9 @@ pub(super) fn write_openminis_evidence_fixture(
             "repository_tree": repository_tree,
             "assertions": assertions
         });
+        if gate_id == "webui_online_e2e" {
+            sign_online_report(&mut report);
+        }
         let report_bytes = serde_json::to_vec(&report).expect("encode report");
         fs::write(root.join(&report_path), &report_bytes).expect("write report");
         let artifact = serde_json::json!({
@@ -327,7 +331,7 @@ pub(super) fn write_openminis_retirement_fixture(
     let command = "make verify-webui-online";
     let artifact_path = "docs/migrations/openminis-ui/evidence/no-touch.json";
     let report_path = "docs/migrations/openminis-ui/evidence/no-touch-report.json";
-    let report = serde_json::json!({
+    let mut report = serde_json::json!({
         "schema_version": "freehand.verifier-report.v1",
         "verifier_id": "freehand.webui_online.legacy_no_touch",
         "node_id": "foundation.root",
@@ -346,6 +350,7 @@ pub(super) fn write_openminis_retirement_fixture(
             "owner_truth_verified": true
         }
     });
+    sign_online_report(&mut report);
     let report_bytes = serde_json::to_vec(&report).expect("encode report");
     fs::write(root.join(report_path), &report_bytes).expect("write report");
     let artifact = serde_json::json!({
@@ -388,4 +393,12 @@ pub(super) fn write_openminis_retirement_fixture(
     });
     let gates = [gate_id.to_owned()].into_iter().collect::<BTreeSet<_>>();
     (root, node, gates)
+}
+
+fn sign_online_report(report: &mut Value) {
+    report["provenance_key_id"] = Value::String("freehand.openminis-online.v1".to_owned());
+    let payload =
+        super::super::evidence::provenance::canonical_report_payload(report).expect("payload");
+    let signature = SigningKey::from_bytes(&[7_u8; 32]).sign(&payload);
+    report["provenance_signature"] = Value::String(hex::encode(signature.to_bytes()));
 }

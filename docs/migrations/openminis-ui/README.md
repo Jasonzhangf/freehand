@@ -129,7 +129,7 @@ Committed or uncommitted source/manifest/verifier drift outside the exact
 attestation/report paths invalidates the proof.
 
 WebUI, Android-device, and legacy no-touch reports use the same source-attested
-verifier-report contract as repository gates. Required online gate ids are not
-rejected categorically: their code-locked command, proof/verifier identity,
-gate-specific assertions, successful process result, report digest, and exact
-source commit/tree must all validate before promotion.
+verifier-report contract as repository gates and additionally require an
+Ed25519 signature from the external runner key pinned in the verifier. Required
+online gate ids are not rejected categorically, but locally authored JSON cannot
+promote lifecycle truth without that signature.

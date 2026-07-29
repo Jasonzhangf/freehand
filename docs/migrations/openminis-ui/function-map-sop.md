@@ -244,8 +244,10 @@ Assertions in the attestation itself do not count. A copied or self-selected
 command, proof kind, generic `passed` field, report digest drift, or incomplete
 report assertion set cannot promote a node. WebUI, Android-device, and legacy
 no-touch reports enter the same verifier-report admission path as repository
-gates; categorical rejection by gate id is invalid because it makes terminal
-lifecycle states unrepresentable. The admission gate reads Git diff/untracked
+gates and must carry a valid Ed25519 signature over the complete report payload
+from the externally held runner key pinned in the verifier. Categorical
+rejection by gate id makes terminal lifecycle states unrepresentable, while
+unsigned locally authored JSON is not provenance. The admission gate reads Git diff/untracked
 status and permits changes after that
 source revision only for the exact attestation and verifier-report paths named
 by the node plus the canonical

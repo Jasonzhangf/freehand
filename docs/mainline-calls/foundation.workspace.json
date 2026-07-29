@@ -874,6 +874,33 @@
       "why_shared": "all Rust declaration visitor paths use one occurrence recorder"
     },
     {
+      "symbol": "crate::openminis_ui_migration::evidence::provenance::canonical_report_payload",
+      "owner": "xtask/src/openminis_ui_migration/evidence/provenance.rs",
+      "purpose": "serialize one verifier report without its signature through the only canonical provenance payload builder",
+      "allowed_callers": [
+        "crate::openminis_ui_migration::evidence::provenance::verify_online_report_provenance",
+        "crate::openminis_ui_migration::tests::common::sign_online_report"
+      ],
+      "related_tests": [
+        "crate::openminis_ui_migration::tests::common::sign_online_report"
+      ],
+      "why_shared": "external verification and deterministic test signing must consume identical report bytes"
+    },
+    {
+      "symbol": "crate::openminis_ui_migration::evidence::provenance::decode_array",
+      "owner": "xtask/src/openminis_ui_migration/evidence/provenance.rs",
+      "purpose": "decode fixed-width provenance key and signature hex through one length-checked parser",
+      "allowed_callers": [
+        "crate::openminis_ui_migration::evidence::provenance::provenance_verifying_key",
+        "crate::openminis_ui_migration::evidence::provenance::tests::production_provenance_public_key_is_valid",
+        "crate::openminis_ui_migration::evidence::provenance::verify_online_report_provenance"
+      ],
+      "related_tests": [
+        "crate::openminis_ui_migration::evidence::provenance::tests::production_provenance_public_key_is_valid"
+      ],
+      "why_shared": "public key and signature admission require the same exact hex and length policy"
+    },
+    {
       "symbol": "crate::openminis_ui_migration::evidence::read_openminis_ui_evidence_artifact",
       "owner": "xtask/src/openminis_ui_migration/evidence.rs",
       "purpose": "load one evidence artifact through the only repository-relative JSON parser",
@@ -887,13 +914,14 @@
     {
       "symbol": "crate::openminis_ui_migration::evidence::verify_openminis_ui_evidence",
       "owner": "xtask/src/openminis_ui_migration/evidence.rs",
-      "purpose": "own JSON artifact/report identity, exact source revision, dirty-path rejection, exact verification-gate coverage, and one verifier-report admission path for repository and online gates",
+      "purpose": "own JSON artifact/report identity, external online-report signature provenance, exact source revision, dirty-path rejection, and exact verification-gate coverage",
       "allowed_callers": [
         "crate::openminis_ui_migration::tests::evidence_retirement::openminis_ui_migration_legacy_retirement_accepts_complete_structural_proof",
         "crate::openminis_ui_migration::tests::evidence_retirement::openminis_ui_migration_manifest_accepts_source_attested_online_report",
         "crate::openminis_ui_migration::tests::evidence_retirement::openminis_ui_migration_manifest_rejects_evidence_artifact_or_coverage_drift",
         "crate::openminis_ui_migration::tests::evidence_retirement::openminis_ui_migration_manifest_rejects_evidence_identity_and_json_drift",
         "crate::openminis_ui_migration::tests::evidence_retirement::openminis_ui_migration_manifest_rejects_evidence_outside_dedicated_root",
+        "crate::openminis_ui_migration::tests::evidence_retirement::openminis_ui_migration_manifest_rejects_forged_online_provenance",
         "crate::openminis_ui_migration::tests::evidence_retirement::openminis_ui_migration_manifest_rejects_self_reported_noncanonical_proof",
         "crate::openminis_ui_migration::tests::evidence_round30::openminis_ui_evidence_allows_only_canonical_manifest_transition_metadata",
         "crate::openminis_ui_migration::tests::evidence_round30::openminis_ui_evidence_rejects_tree_object_as_repository_commit",
@@ -910,6 +938,7 @@
         "crate::openminis_ui_migration::tests::evidence_retirement::openminis_ui_migration_manifest_rejects_evidence_artifact_or_coverage_drift",
         "crate::openminis_ui_migration::tests::evidence_retirement::openminis_ui_migration_manifest_rejects_evidence_identity_and_json_drift",
         "crate::openminis_ui_migration::tests::evidence_retirement::openminis_ui_migration_manifest_rejects_evidence_outside_dedicated_root",
+        "crate::openminis_ui_migration::tests::evidence_retirement::openminis_ui_migration_manifest_rejects_forged_online_provenance",
         "crate::openminis_ui_migration::tests::evidence_retirement::openminis_ui_migration_manifest_rejects_self_reported_noncanonical_proof",
         "crate::openminis_ui_migration::tests::evidence_round30::openminis_ui_evidence_allows_only_canonical_manifest_transition_metadata",
         "crate::openminis_ui_migration::tests::evidence_round30::openminis_ui_evidence_rejects_tree_object_as_repository_commit",
@@ -5202,6 +5231,66 @@
       "output_semantic": "module-qualified callee",
       "caller": "crate::openminis_ui_migration::call_graph::discovery::methods::local_items::collect_local_items_impl",
       "callee": "crate::openminis_ui_migration::call_graph::discovery::methods::local_items::NestedLocalItemCollector::impl_Visit::visit_stmt",
+      "binding_status": "bound",
+      "graph_id": "openminis_ui_migration"
+    },
+    {
+      "step": "19edge311",
+      "symbol_path": "crate::openminis_ui_migration::evidence::provenance::decode_array",
+      "file_path": "xtask/src/openminis_ui_migration/evidence/provenance.rs",
+      "responsibility": "register one exact direct Rust production call edge",
+      "input_semantic": "module-qualified caller",
+      "output_semantic": "module-qualified callee",
+      "caller": "crate::openminis_ui_migration::evidence::provenance::provenance_verifying_key",
+      "callee": "crate::openminis_ui_migration::evidence::provenance::decode_array",
+      "binding_status": "bound",
+      "graph_id": "openminis_ui_migration"
+    },
+    {
+      "step": "19edge312",
+      "symbol_path": "crate::openminis_ui_migration::evidence::provenance::canonical_report_payload",
+      "file_path": "xtask/src/openminis_ui_migration/evidence/provenance.rs",
+      "responsibility": "register one exact direct Rust production call edge",
+      "input_semantic": "module-qualified caller",
+      "output_semantic": "module-qualified callee",
+      "caller": "crate::openminis_ui_migration::evidence::provenance::verify_online_report_provenance",
+      "callee": "crate::openminis_ui_migration::evidence::provenance::canonical_report_payload",
+      "binding_status": "bound",
+      "graph_id": "openminis_ui_migration"
+    },
+    {
+      "step": "19edge313",
+      "symbol_path": "crate::openminis_ui_migration::evidence::provenance::decode_array",
+      "file_path": "xtask/src/openminis_ui_migration/evidence/provenance.rs",
+      "responsibility": "register one exact direct Rust production call edge",
+      "input_semantic": "module-qualified caller",
+      "output_semantic": "module-qualified callee",
+      "caller": "crate::openminis_ui_migration::evidence::provenance::verify_online_report_provenance",
+      "callee": "crate::openminis_ui_migration::evidence::provenance::decode_array",
+      "binding_status": "bound",
+      "graph_id": "openminis_ui_migration"
+    },
+    {
+      "step": "19edge314",
+      "symbol_path": "crate::openminis_ui_migration::evidence::provenance::provenance_verifying_key",
+      "file_path": "xtask/src/openminis_ui_migration/evidence/provenance.rs",
+      "responsibility": "register one exact direct Rust production call edge",
+      "input_semantic": "module-qualified caller",
+      "output_semantic": "module-qualified callee",
+      "caller": "crate::openminis_ui_migration::evidence::provenance::verify_online_report_provenance",
+      "callee": "crate::openminis_ui_migration::evidence::provenance::provenance_verifying_key",
+      "binding_status": "bound",
+      "graph_id": "openminis_ui_migration"
+    },
+    {
+      "step": "19edge315",
+      "symbol_path": "crate::openminis_ui_migration::evidence::provenance::verify_online_report_provenance",
+      "file_path": "xtask/src/openminis_ui_migration/evidence/provenance.rs",
+      "responsibility": "register one exact direct Rust production call edge",
+      "input_semantic": "module-qualified caller",
+      "output_semantic": "module-qualified callee",
+      "caller": "crate::openminis_ui_migration::evidence::verify_openminis_ui_evidence",
+      "callee": "crate::openminis_ui_migration::evidence::provenance::verify_online_report_provenance",
       "binding_status": "bound",
       "graph_id": "openminis_ui_migration"
     }
