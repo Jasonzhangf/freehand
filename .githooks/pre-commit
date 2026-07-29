@@ -1,7 +1,9 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
+unset $(git rev-parse --local-env-vars)
+
 echo "[freehand] pre-commit: fmt + gates"
+scripts/provision-openminis-source.sh
 cargo fmt --check
 cargo run -p xtask -- gates check
-

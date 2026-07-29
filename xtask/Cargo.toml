@@ -7,3 +7,12 @@ license.workspace = true
 [dependencies]
 serde = { version = "1", features = ["derive"] }
 serde_json = "1"
+serde_yaml = "0.9"
+sha2 = "0.10"
+proc-macro2 = "1"
+syn = { version = "2", features = ["full", "visit"] }
+tempfile = "3"
+tree-sitter = "0.25"
+tree-sitter-javascript = "0.25"
+tree-sitter-kotlin-ng = "1.1"
+tree-sitter-typescript = "0.23"

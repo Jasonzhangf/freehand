@@ -1110,8 +1110,8 @@
         "src/ios/Views/Chat/Media"
       ],
       "source_symbols": [
-        "ImagePreview",
-        "AudioPreview",
+        "ImagePreviewView",
+        "MinisAudioPreviewView",
         "MinisVideoPlayerView"
       ],
       "source_semantic": "typed generated artifact link and preview presentation",
@@ -1723,7 +1723,7 @@
         "src/ios/Views/Settings/OffloadPermissionSettingsView.swift"
       ],
       "source_symbols": [
-        "OffloadPermissionDialog",
+        "OffloadPermissionDialogContent",
         "OffloadPermissionSettingsView"
       ],
       "source_semantic": "typed tool permission, confirmation, and rejection interaction",
@@ -2288,8 +2288,8 @@
       ],
       "source_symbols": [
         "FileBrowserView",
-        "ImagePreview",
-        "AudioPreview"
+        "ImagePreviewView",
+        "MinisAudioPreviewView"
       ],
       "source_semantic": "workspace file and generated artifact list, preview, and download interaction",
       "non_migrated_source_semantics": [
@@ -2584,12 +2584,13 @@
     "product_ui_tree"
   ],
   "completion_requirements": [
-    "Every included node is online_verified before total migration completion is claimed.",
+    "Every included node is legacy_retired before total migration completion is claimed; online_verified alone is not aggregate completion.",
     "Blocked nodes first receive a registered resource owner and protocol path.",
     "All user mutations use generated commands and owner re-query.",
     "No owner truth is stored in browser local state or Android.",
     "Browser and cookie scope remain excluded.",
-    "Duplicate legacy implementations are physically retired after dependency and online proof."
+    "Duplicate legacy implementations are physically retired after dependency and online proof.",
+    "Every legacy retirement uses exactly one owner-feature mainline legacy_scan_roots row whose registered paths and removed identity sets exactly match lifecycle truth and whose paths cover all bound targets and removed paths."
   ],
   "required_node_ids": [
     "foundation.root",
@@ -2647,7 +2648,7 @@
   ],
   "source_repository": {
     "repository_id": "OpenMinis",
-    "path_hint": "../OpenMinis",
+    "path_hint": "external/OpenMinis",
     "commit": "9cf3a855fecd27bb5735b84cacbd56852a3ab8dd"
   },
   "entrypoint_node_id": "foundation.root",

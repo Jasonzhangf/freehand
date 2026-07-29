@@ -1,4 +1,7 @@
-.PHONY: build fmt clippy test mainlines gates ci verify-webui-online verify-webui-release-online release install-global install-symlink install-launchd install-launchdS install-worker-launchd install-worker-launchdS restart-launchd restart-launchdS restart-worker-launchd restart-worker-launchdS uninstall-launchd uninstall-launchdS uninstall-worker-launchd uninstall-worker-launchdS launchd-status launchd-statusS worker-launchd-status worker-launchd-statusS launchd-logs launchd-logsS worker-launchd-logs worker-launchd-logsS hooks
+.PHONY: provision-openminis-source build fmt clippy test mainlines gates ci verify-webui-online verify-webui-release-online release install-global install-symlink install-launchd install-launchdS install-worker-launchd install-worker-launchdS restart-launchd restart-launchdS restart-worker-launchd restart-worker-launchdS uninstall-launchd uninstall-launchdS uninstall-worker-launchd uninstall-worker-launchdS launchd-status launchd-statusS worker-launchd-status worker-launchd-statusS launchd-logs launchd-logsS worker-launchd-logs worker-launchd-logsS hooks
+
+provision-openminis-source:
+	scripts/provision-openminis-source.sh
 
 build:
 	cargo build --workspace
@@ -9,16 +12,16 @@ fmt:
 clippy:
 	cargo clippy --workspace --all-targets -- -D warnings
 
-test:
+test: provision-openminis-source
 	cargo test --workspace
 
 mainlines:
 	cargo run -p xtask -- mainlines check
 
-gates:
+gates: provision-openminis-source
 	cargo run -p xtask -- gates check
 
-ci: build fmt clippy test mainlines gates
+ci: provision-openminis-source build fmt clippy test mainlines gates
 
 verify-webui-online:
 	scripts/verify-webui-online.sh

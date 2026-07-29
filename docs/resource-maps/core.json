@@ -461,6 +461,11 @@
       "target_resource": "android_notification",
       "effect": "after observing a live Android WebView turn transition from nonterminal to terminal, call the native notification bridge once for that session/turn/status",
       "mainline_call_doc": "docs/mainline-calls/app.webui-smoke.json",
+      "ui_contract": {
+        "projection_or_query": "UiTurnProjection",
+        "generated_command": "none",
+        "surface_path": "apps/freehand-server/assets/webui/legacy-monolith.js"
+      },
       "binding_status": "bound"
     },
     {
