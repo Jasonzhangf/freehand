@@ -826,3 +826,8 @@ Tags: #architecture #gap5 #node #ui-protocol #dependency-edge
 - Associated const initializer calls retain their impl/trait owner so `Self::method()` resolves exactly. Block-local const/static initializers retain the enclosing callable scope, and callable-local declarations shadow same-named module declarations instead of producing false ambiguity.
 - OpenMinis checkout validation asks Git for the exact worktree root rather than requiring a `.git` directory, so normal clones, worktrees, and submodules share one origin/HEAD/clean validator. First-run serialization uses an atomic owner-bearing lock; stale reclamation is allowed only when the recorded owner is on the current host and its PID is absent.
 - Round 39 retains 69 total shared functions, 68 migration-owned shared functions, and 300 exact production direct-call rows.
+
+## 2026-07-30 OpenMinis lifecycle evidence admission truth
+
+- Supersedes the earlier external-provenance fail-closed rule: registered repository, WebUI, Android-device, and legacy no-touch gates use one source-attested verifier-report admission path. Required gate ids must not be rejected categorically because that makes terminal lifecycle states impossible.
+- Promotion requires the code-locked command/proof/verifier identity, gate-specific assertions, successful process result, distinct report digest, exact source commit/tree, lifecycle-only manifest drift, and no other dirty path. Forged commands, generic success fields, assertion/report/source drift, and incomplete gate coverage remain explicit failures.

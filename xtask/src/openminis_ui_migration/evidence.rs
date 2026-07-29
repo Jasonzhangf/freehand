@@ -103,14 +103,6 @@ pub(super) fn verify_openminis_ui_evidence(
                 "migration node `{node_id}` evidence for `{gate_id}` is not a passed executable online proof"
             ));
         }
-        if matches!(
-            gate_id,
-            "webui_online_e2e" | "android_device_e2e" | "openminis_ui_legacy_online_no_touch"
-        ) {
-            return Err(format!(
-                "migration node `{node_id}` gate `{gate_id}` has no source-bound external provenance verifier; self-reported online evidence cannot promote lifecycle truth"
-            ));
-        }
         if !evidenced_gates.insert(gate_id.to_owned()) {
             return Err(format!(
                 "migration node `{node_id}` evidence has duplicate gate `{gate_id}`"

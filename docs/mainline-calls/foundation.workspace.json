@@ -887,13 +887,14 @@
     {
       "symbol": "crate::openminis_ui_migration::evidence::verify_openminis_ui_evidence",
       "owner": "xtask/src/openminis_ui_migration/evidence.rs",
-      "purpose": "own JSON artifact/report identity, exact source revision, dirty-path rejection, exact verification-gate coverage, and fail-closed rejection of online reports without source-bound external provenance",
+      "purpose": "own JSON artifact/report identity, exact source revision, dirty-path rejection, exact verification-gate coverage, and one verifier-report admission path for repository and online gates",
       "allowed_callers": [
+        "crate::openminis_ui_migration::tests::evidence_retirement::openminis_ui_migration_legacy_retirement_accepts_complete_structural_proof",
+        "crate::openminis_ui_migration::tests::evidence_retirement::openminis_ui_migration_manifest_accepts_source_attested_online_report",
         "crate::openminis_ui_migration::tests::evidence_retirement::openminis_ui_migration_manifest_rejects_evidence_artifact_or_coverage_drift",
         "crate::openminis_ui_migration::tests::evidence_retirement::openminis_ui_migration_manifest_rejects_evidence_identity_and_json_drift",
         "crate::openminis_ui_migration::tests::evidence_retirement::openminis_ui_migration_manifest_rejects_evidence_outside_dedicated_root",
         "crate::openminis_ui_migration::tests::evidence_retirement::openminis_ui_migration_manifest_rejects_self_reported_noncanonical_proof",
-        "crate::openminis_ui_migration::tests::evidence_retirement::openminis_ui_migration_manifest_rejects_self_reported_online_success",
         "crate::openminis_ui_migration::tests::evidence_round30::openminis_ui_evidence_allows_only_canonical_manifest_transition_metadata",
         "crate::openminis_ui_migration::tests::evidence_round30::openminis_ui_evidence_rejects_tree_object_as_repository_commit",
         "crate::openminis_ui_migration::tests::round7::openminis_ui_migration_manifest_accepts_committed_evidence_over_attested_source",
@@ -904,11 +905,12 @@
         "crate::openminis_ui_migration::verify_openminis_ui_migration_manifest_value"
       ],
       "related_tests": [
+        "crate::openminis_ui_migration::tests::evidence_retirement::openminis_ui_migration_legacy_retirement_accepts_complete_structural_proof",
+        "crate::openminis_ui_migration::tests::evidence_retirement::openminis_ui_migration_manifest_accepts_source_attested_online_report",
         "crate::openminis_ui_migration::tests::evidence_retirement::openminis_ui_migration_manifest_rejects_evidence_artifact_or_coverage_drift",
         "crate::openminis_ui_migration::tests::evidence_retirement::openminis_ui_migration_manifest_rejects_evidence_identity_and_json_drift",
         "crate::openminis_ui_migration::tests::evidence_retirement::openminis_ui_migration_manifest_rejects_evidence_outside_dedicated_root",
         "crate::openminis_ui_migration::tests::evidence_retirement::openminis_ui_migration_manifest_rejects_self_reported_noncanonical_proof",
-        "crate::openminis_ui_migration::tests::evidence_retirement::openminis_ui_migration_manifest_rejects_self_reported_online_success",
         "crate::openminis_ui_migration::tests::evidence_round30::openminis_ui_evidence_allows_only_canonical_manifest_transition_metadata",
         "crate::openminis_ui_migration::tests::evidence_round30::openminis_ui_evidence_rejects_tree_object_as_repository_commit",
         "crate::openminis_ui_migration::tests::round7::openminis_ui_migration_manifest_accepts_committed_evidence_over_attested_source",

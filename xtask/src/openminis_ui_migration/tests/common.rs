@@ -309,6 +309,19 @@ pub(super) fn write_openminis_retirement_fixture(
         serde_json::to_vec(&mainline).expect("encode mainline"),
     )
     .expect("write mainline");
+    fs::write(
+        root.join("docs/migrations/openminis-ui/ui-tree.manifest.json"),
+        serde_json::to_vec(&serde_json::json!({
+            "status": "migration_in_progress",
+            "nodes": [{
+                "node_id": "foundation.root",
+                "status": "source_bound",
+                "evidence": []
+            }]
+        }))
+        .expect("encode baseline lifecycle manifest"),
+    )
+    .expect("write baseline lifecycle manifest");
     let (repository_commit, repository_tree) = commit_test_repository_baseline(&root);
     let gate_id = "openminis_ui_legacy_online_no_touch";
     let command = "make verify-webui-online";

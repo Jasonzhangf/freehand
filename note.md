@@ -9343,3 +9343,9 @@ exact_replay: "Round 12 source fixtures reproduce both static gate admissions; n
 - Round 39 had no semantic PASS and returned five P2 findings. Isolated reviewer replays proved three call-graph defects: associated initializers discard `Self` owner identity, block-local initializers discard callable scope, and callable-local type bindings are unioned with shadowed module bindings.
 - The provisioning owner also rejects valid Git worktree/submodule checkouts by requiring `.git` to be a directory, and an uncatchable process exit leaves a directory lock that can never be reclaimed.
 - Unique owners remain call discovery plus the provisioning script. Positive tests require exact associated/local initializer caller edges and local-shadow precedence; negative proof keeps the shadowed module method caller-free. Provisioning must validate the checkout root through Git itself and use atomic owner-bearing lock acquisition with liveness-checked stale reclamation.
+
+## 2026-07-30 - Codex Review round 40 lifecycle evidence remediation
+
+- Round 40 found one P1 lifecycle contradiction: required `webui_online_e2e`, `android_device_e2e`, and `openminis_ui_legacy_online_no_touch` evidence was rejected by gate id before the existing canonical verifier-report validation, making `online_verified` and `legacy_retired` unrepresentable.
+- The unique evidence owner now admits every registered gate through one path: canonical command/proof/verifier identity, gate-specific assertions, process success, report digest, exact commit/tree, manifest lifecycle-only drift, and clean source-attestation boundary. No required gate is rejected categorically.
+- Positive proof now covers source-attested WebUI evidence and source-attested legacy no-touch evidence; negative canonical-command proof remains red. Full xtask passes 200/200, mainlines generate/check, gates, workspace build/clippy with warnings denied, fmt, and diff checks pass. Codex Review round 41 remains required.

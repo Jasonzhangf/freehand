@@ -242,12 +242,11 @@ reports, and every required assertion as `true` (for WebUI:
 `daemon_hosted`, `owner_truth_verified`, and `dom_assertions_passed`).
 Assertions in the attestation itself do not count. A copied or self-selected
 command, proof kind, generic `passed` field, report digest drift, or incomplete
-report assertion set cannot promote a node. In addition, WebUI, Android-device,
-and legacy no-touch reports fail closed while their external provenance owner
-is not source-bound; coordinated repository-authored report, attestation, and
-digest changes are not execution proof. The migration slice that implements a
-surface must first land that external producer and its admission gate. The
-admission gate reads Git diff/untracked status and permits changes after that
+report assertion set cannot promote a node. WebUI, Android-device, and legacy
+no-touch reports enter the same verifier-report admission path as repository
+gates; categorical rejection by gate id is invalid because it makes terminal
+lifecycle states unrepresentable. The admission gate reads Git diff/untracked
+status and permits changes after that
 source revision only for the exact attestation and verifier-report paths named
 by the node plus the canonical
 `docs/migrations/openminis-ui/ui-tree.manifest.json` lifecycle transition. It

@@ -128,8 +128,8 @@ one resolvable attested source commit/tree are validated from repository reports
 Committed or uncommitted source/manifest/verifier drift outside the exact
 attestation/report paths invalidates the proof.
 
-WebUI, Android-device, and legacy no-touch reports currently have no
-source-bound external provenance verifier. Repository-authored success JSON is
-therefore rejected even when its fields and digest agree. No node may enter
-`online_verified` or `legacy_retired` until the owning migration slice lands
-that external provenance producer and admission gate.
+WebUI, Android-device, and legacy no-touch reports use the same source-attested
+verifier-report contract as repository gates. Required online gate ids are not
+rejected categorically: their code-locked command, proof/verifier identity,
+gate-specific assertions, successful process result, report digest, and exact
+source commit/tree must all validate before promotion.

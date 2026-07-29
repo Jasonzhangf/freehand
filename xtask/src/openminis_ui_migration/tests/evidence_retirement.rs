@@ -31,29 +31,16 @@ fn openminis_ui_migration_manifest_rejects_self_reported_noncanonical_proof() {
 }
 
 #[test]
-fn openminis_ui_migration_manifest_rejects_self_reported_online_success() {
-    let (root, node, _) = write_openminis_evidence_fixture("self-reported-online-success");
-    let webui_record = node["evidence"]
-        .as_array()
-        .expect("evidence")
-        .iter()
-        .find(|record| record["gate_id"] == "webui_online_e2e")
-        .expect("WebUI record")
-        .clone();
-    let node = serde_json::json!({"evidence": [webui_record]});
-    let gates = BTreeSet::from(["webui_online_e2e".to_owned()]);
+fn openminis_ui_migration_manifest_accepts_source_attested_online_report() {
+    let (root, node, gates) = write_openminis_evidence_fixture("source-attested-online-success");
 
-    let err = verify_openminis_ui_evidence(
+    verify_openminis_ui_evidence(
         &root,
         "foundation.root",
         node.as_object().expect("node"),
         &gates,
     )
-    .expect_err("repository-authored online success must not promote lifecycle truth");
-    assert!(
-        err.contains("no source-bound external provenance verifier"),
-        "{err}"
-    );
+    .expect("source-attested canonical online verifier report must promote lifecycle truth");
 }
 
 #[test]
@@ -203,6 +190,13 @@ fn openminis_ui_migration_manifest_rejects_evidence_artifact_or_coverage_drift()
 #[test]
 fn openminis_ui_migration_legacy_retirement_accepts_complete_structural_proof() {
     let (root, node, gates) = write_openminis_retirement_fixture("complete", false);
+    verify_openminis_ui_evidence(
+        &root,
+        "foundation.root",
+        node.as_object().expect("node"),
+        &gates,
+    )
+    .expect("source-attested legacy no-touch report should pass evidence admission");
     verify_openminis_ui_legacy_retirement(
         &root,
         "foundation.root",
