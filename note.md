@@ -9370,3 +9370,75 @@ exact_replay: "Round 12 source fixtures reproduce both static gate admissions; n
 - The prior blanket `source_bound` statement is superseded. Exact lifecycle truth is: `foundation.root=source_bound`, `foundation.surface_contract=source_bound`, `foundation.protocol_calls=inventoried`, and `foundation.shared_states=implementation_in_progress`.
 - `foundation.protocol_calls` cannot advance until outbound ADP requests and inbound receipt/failure return paths are bound as one explicit bidirectional resource chain. `foundation.shared_states` cannot advance until the missing sheet state is implemented and bound alongside loading, empty, error, and confirmation.
 - Codex Review round 3 returned `VERDICT: PASS`. It confirmed strict Home fixture validation, unique function-map step identities, owner-derived WebUI asset versioning, and loading-to-running shared-state marker cleanup. External signed WebUI evidence remains absent, so no foundation node is `online_verified`.
+## 2026-07-30 — 修复 source_edge_registry 缺失 + 死符号清理
+
+- Gate failure: app.webui-smoke#11h-adp-generated 缺失 source_edge_registry 条目
+  - 添加到 docs/resource-maps/core.json
+- 死符号: reportCanonicalWebUiLayout 在 MainActivity.kt 中不存在
+  - 实际方法: reProbeWebUiLayout
+  - 更新 docs/mainline-calls/app.android-client.json step 08 和 shared_functions
+- xtask gates check ✓
+- cargo fmt ✓, cargo build ✓, cargo clippy (-- -D warnings) ✓
+- 测试: 18 个已知 CLI ADP mock-fixture 失败（独立 owner，未改动）
+
+
+## 2026-07-31 - 修复 APK 进不去主界面
+
+**现场**:
+- daemon 100.66.1.82:4041 健康但 stderr 报 `master lifecycle state failed: No such file or directory (os error 2)` 反复刷
+- daemonS 127.0.0.1:4042 与 daemon 4041 同时跑，互相抢 `~/.freehand/state/master-loop/master.tmp -> master.json` 的 rename
+- `~/.local/bin/freehand-daemon` 是旧 release（22:40 编译，缺 lifecycle 完整性修复）
+- 15t 设备 ADB 离线，USB 未接入无法抓 APK 现场
+
+**修复**:
+- `target/debug/freehand-daemon` → `~/.local/bin/freehand-daemon`，shasum `d20b02946d4c4b0515e377cedcc21727da8a2af307086fa33619834b28765908`
+- `launchctl bootout` `com.freehand.daemonS.plist`，PID 20019 已退出
+- 现在 4041 单 owner 在跑，新 daemon 已起
+
+**验证**:
+- `curl http://100.66.1.82:4041/health` → 200 ok
+- `curl http://100.66.1.82:4041/assets/webui.js` → 200，serve `?v=20260730-chinese-menu` bootstrap
+- `curl http://100.66.1.82:4041/` → 中文 HTML（含"新建会话"、"定时任务"、"内置工具"、"自由手"）
+- `state/master-loop/master.json` 12405 bytes，正常加载
+
+**剩余风险**:
+- 15t USB 未接入，没法直接验证 APK 实际加载主界面
+- lifecycle runner 仍偶发报 "No such file"，可能写 tmp->rename 流程被某种 race 触发，需进一步排查 `master_runner.rs:1670-1680`
+- Worker daemon 仍在旧 master.json 残留 `pending_attention`，下次重启应自动收敛
+
+**下一步**:
+- 15t 重启 APK → 应进入中文主界面
+- 进入后 review UI tree：按 Jason 要求把 home 分成"正在运行 + 历史会话"两栏（session dashboard）
+- 多 worker dashboard 用 Claude Code TUI header 风格
+
+## 2026-07-31 00:51 — APK 启动诊断与 daemon 修复
+
+### 问题诊断
+- APK 连接 `100.66.1.82:4041` 进不去 → 根因：**两个 master daemon 竞争同一状态目录**
+  - daemon 4041 (APK 对应)：`freehand-daemon serve --agent master --bind 100.66.1.82:4041`
+  - daemonS 4042：`freehand-daemonS-bin serve --agent master --bind 127.0.0.1:4042`
+  - 两者同时写 `~/.freehand/state/master-loop/master.json`，写时 rename 到 tmp 的 race 导致 `No such file or directory`
+- 4041 daemon 的旧 binary (release, 7/30 22:40) 生命周期错误：reason ledger 为空、UI snapshots 缺早期轮次
+
+### 修复
+- `~/.local/bin/freehand-daemon` 替换为 `target/debug/freehand-daemon` (7/31 00:51, 54MB)
+  - shasum: `d20b02946d4c4b0515e377cedcc21727da8a2af307086fa33619834b28765908`
+- 杀掉 daemonS (PID 55938)，只留 4041 单一 master owner
+- launchd `com.freehand.daemon.plist` 自动拉起新版
+
+### 验证结果
+- `curl http://100.66.1.82:4041/health` → 200 `ok`
+- `curl http://100.66.1.82:4041/assets/webui.js?v=20260730-chinese-menu` → 200 (入口: `initializeMobileWebui()`)
+- `state/master-loop/master.json` → 12405 bytes 已加载
+- 4041 根路径返回完整 HTML（中文标签）
+
+### 剩余问题
+- lifecycle runner 仍报 `master lifecycle state failed: No such file or directory` — race 根因已消，但新 daemon 重启后是否还复现待观察
+- worker daemon (PID 85948/85949/85953) 状态残留，`pending_attention: []` 空
+- 15t 设备 ADB offline（USB 未接入），无法远程截图验证
+
+### 下一步
+1. Jason 在 15t 上重启 APK 验证能否进入中文主界面
+2. 接 USB 后验证 UI tree 是否符合设计
+3. lifecycle runner race 进一步追踪
+
