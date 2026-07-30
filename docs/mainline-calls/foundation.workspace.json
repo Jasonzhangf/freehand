@@ -19,6 +19,7 @@
     "gate runner resolves source_bound target symbols through exact bound mainline symbol segments and a bound resource-map operation",
     "gate runner requires JSON evidence artifact identity and independent legacy disappearance plus online legacy_touched=false proof before legacy_retired",
     "gate runner verifies generated ADP protocol artifacts are present, deterministic against the Rust exporter, served by WebUI assets, and consumed through generated constructors",
+    "gate runner executes the WebUI foundation contract verifier and rejects surface-registry or shared-state schema drift before runtime packaging",
     "gate runner verifies migrated mainline manifest cross-links between JSON truth, feature map, function map, test design, and generated wiki path",
     "gate runner verifies migrated mainline call-table `bound` rows still point to existing files and discoverable source symbols",
     "gate runner verifies `make ci`, pre-push, CI, and release paths include the canonical full gate with mainline freshness",
@@ -44,6 +45,7 @@
     "gate returns success when resource-map ownership, relation rules, forbidden direct relations, source-edge registry rows, and operation test coverage are internally consistent",
     "gate returns success when the OpenMinis checkout/CI pin, exact machine/human topology registries, lifecycle-specific fields, exact source-bound rows/operations, JSON evidence identity, and independent legacy-retirement proof all match",
     "gate returns success when committed ADP manifest and WebUI constructor artifacts match a fresh Rust export",
+    "gate returns success when the runtime-owned WebUI surface registry and shared-state contracts pass positive and negative schema checks",
     "gate returns success when migrated mainline manifests are deterministically linked to their owner docs",
     "gate returns success when migrated mainline call-table bindings resolve to source files and source symbols",
     "gate returns success when local and remote automation routes through the same full gate stack",
@@ -83,6 +85,7 @@
     "invalid JSON mainline source surfaces as generation/check failure",
     "stale generated wiki surfaces as explicit freshness failure",
     "missing or stale ADP protocol manifest/constructor artifacts surface as gate failure with the exact exporter command to rerun",
+    "missing, duplicate, mutable, empty, or mismatched WebUI surface contracts and invalid shared-state models surface as foundation gate failure",
     "no fallback path exists",
     "loop overreach, missing owner mapping, active kill switch, or exhausted budget surfaces as escalation/no-op instead of automated action"
   ],
@@ -1223,7 +1226,8 @@
         "crate::openminis_ui_migration::tests::lifecycle::openminis_ui_migration_manifest_rejects_unstructured_online_evidence",
         "crate::openminis_ui_migration::tests::topology_source_binding::openminis_ui_migration_manifest_rejects_excluded_source_path",
         "crate::openminis_ui_migration::tests::topology_source_binding::openminis_ui_migration_manifest_rejects_missing_pinned_source_symbol",
-        "crate::openminis_ui_migration::verify_openminis_ui_migration_manifest"
+        "crate::openminis_ui_migration::verify_openminis_ui_migration_manifest",
+        "crate::openminis_ui_migration::tests::lifecycle::openminis_ui_migration_manifest_rejects_typo_on_source_bound_status"
       ],
       "related_tests": [
         "crate::openminis_ui_migration::tests::lifecycle::openminis_ui_migration_manifest_accepts_exact_source_bound_binding",
@@ -1242,7 +1246,8 @@
         "crate::openminis_ui_migration::tests::lifecycle::openminis_ui_migration_manifest_rejects_unknown_status",
         "crate::openminis_ui_migration::tests::lifecycle::openminis_ui_migration_manifest_rejects_unstructured_online_evidence",
         "crate::openminis_ui_migration::tests::topology_source_binding::openminis_ui_migration_manifest_rejects_excluded_source_path",
-        "crate::openminis_ui_migration::tests::topology_source_binding::openminis_ui_migration_manifest_rejects_missing_pinned_source_symbol"
+        "crate::openminis_ui_migration::tests::topology_source_binding::openminis_ui_migration_manifest_rejects_missing_pinned_source_symbol",
+        "crate::openminis_ui_migration::tests::lifecycle::openminis_ui_migration_manifest_rejects_typo_on_source_bound_status"
       ],
       "why_shared": "repository gate and negative mutations execute the same registry contract"
     },
@@ -1500,6 +1505,17 @@
       "output_semantic": "pass/fail with stale-artifact or missing-constructor diagnostics",
       "caller": "run_gates_check",
       "callee": "cargo export-adp-protocol and filesystem scanners",
+      "binding_status": "bound"
+    },
+    {
+      "step": "19aa",
+      "symbol_path": "verify_webui_foundation_contracts",
+      "file_path": "xtask/src/main.rs",
+      "responsibility": "execute the runtime WebUI surface-registry and shared-state contract verifier as part of the workspace gate",
+      "input_semantic": "repository WebUI foundation modules and verifier script",
+      "output_semantic": "pass/fail with surface registry or shared-state contract diagnostics",
+      "caller": "run_gates_check",
+      "callee": "scripts/verify-webui-foundation-contracts.mjs",
       "binding_status": "bound"
     },
     {

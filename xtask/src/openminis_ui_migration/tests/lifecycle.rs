@@ -20,7 +20,16 @@ fn openminis_ui_migration_manifest_rejects_unbound_advanced_status() {
     let raw = fs::read_to_string(root.join("docs/migrations/openminis-ui/ui-tree.manifest.json"))
         .expect("read migration manifest");
     let mut manifest: Value = serde_json::from_str(&raw).expect("parse migration manifest");
-    manifest["nodes"][0]["status"] = Value::String("source_bound".to_owned());
+    let unbound = manifest["nodes"]
+        .as_array_mut()
+        .expect("migration nodes")
+        .iter_mut()
+        .find(|node| node["status"] == "inventoried")
+        .expect("at least one inventoried migration node");
+    unbound["status"] = Value::String("source_bound".to_owned());
+    unbound["operation_id"] = Value::String("pending".to_owned());
+    unbound["source_resources"] = serde_json::json!(["resource_pending"]);
+    unbound["target_resource"] = Value::String("resource_pending".to_owned());
 
     let err = verify_openminis_ui_migration_manifest_value(&root, &manifest)
         .expect_err("unbound advanced state must fail");
@@ -73,6 +82,16 @@ fn openminis_ui_migration_manifest_rejects_unknown_status() {
     let err = verify_openminis_ui_migration_manifest_value(&root, &manifest)
         .expect_err("unknown lifecycle status must fail");
     assert!(err.contains("unknown status `blocked_typo`"), "{err}");
+}
+
+#[test]
+fn openminis_ui_migration_manifest_rejects_typo_on_source_bound_status() {
+    let (root, mut manifest) = openminis_ui_migration_test_manifest();
+    manifest["nodes"][0]["status"] = Value::String("source_boun".to_owned());
+
+    let err = verify_openminis_ui_migration_manifest_value(&root, &manifest)
+        .expect_err("typo status must fail");
+    assert!(err.contains("unknown status `source_boun`"), "{err}");
 }
 
 #[test]

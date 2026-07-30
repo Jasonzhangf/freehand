@@ -836,3 +836,10 @@ Tags: #architecture #gap5 #node #ui-protocol #dependency-edge
 
 - Supersedes repository-only online evidence admission: WebUI, Android-device, and legacy no-touch reports must carry a valid Ed25519 signature over the complete canonical report payload. The verifier pins the external runner public key; the production private key must never enter the repository.
 - Repository JSON paths, matching digests, passed assertions, and clean source attestations are necessary but forgeable by a local author. Signature verification is the external trust boundary; missing, malformed, or locally replaced signatures fail even when the attacker updates the report digest.
+
+## 2026-07-30 WebUI foundation registry and online-state proof truth
+
+- A WebUI surface registry is runtime truth only when bootstrap and its gate import the same registry module. Source-text scans plus a verifier-local surface list are not a machine contract because runtime registration can drift while the gate stays green.
+- Surface registry admission validates immutable contracts, non-empty string identity/role/DOM-root fields, non-empty immutable string arrays, exact registry-key identity, and unique surface plus DOM-root identities. Resource and mainline bindings point to the registry owner, while bootstrap remains the shell composition owner.
+- Online proof for loading/empty/error/confirmation components must create a deterministic projection transition through served production modules. Depending on ambient Home data to happen to be empty is not evidence. The verifier may use an isolated verifier-owned DOM container without mutating business truth.
+- Asset-version acceptance has one verifier expectation passed into page-side collection; a second page-function hardcoded version creates guaranteed false failure after every version bump.

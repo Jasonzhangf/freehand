@@ -10,7 +10,7 @@ const baseUrl = normalizedBaseUrl(process.env.FREEHAND_WEBUI_BASE_URL || 'http:/
 const adpUrl = process.env.FREEHAND_WEBUI_ADP_URL || adpUrlFromBaseUrl(baseUrl);
 const runId = `mobile-ui-tree-phase1-${new Date().toISOString().replace(/[-:.]/g, '').slice(0, 15)}-${process.pid}`;
 const artifactDir = path.join(process.cwd(), 'artifacts', 'webui-online', runId);
-const assetVersion = '20260726-stale-lifecycle-reconcile';
+const assetVersion = '20260730-openminis-foundation';
 const multiSelectSessionIds = [
   'webui-home-multiselect-fixed-a',
   'webui-home-multiselect-fixed-b',
@@ -89,10 +89,12 @@ try {
   await waitForFunction(cdp, () => {
     return document.body.dataset.webuiJsReady === 'true' &&
       !!document.querySelector('[data-webui-shell="true"]') &&
-      !!document.getElementById('mobile-home-dashboard');
+      !!document.getElementById('mobile-home-dashboard') &&
+      window.__freehandSharedStateContract?.contractId === 'foundation.shared_states';
   }, 20_000, 'production WebUI shell 就绪');
 
   const moduleAssets = await captureModuleAssets();
+  const sharedStateProjection = await captureSharedStateProjection(cdp);
   const snapshots = [];
   for (const viewport of viewports) {
     snapshots.push(await captureViewport(cdp, viewport));
@@ -100,7 +102,14 @@ try {
   const homeMultiSelect = await captureHomeMultiSelect(cdp);
   const sessionDetail = await captureSessionDetailRoute(cdp);
   const settings = await captureSettingsTree(cdp);
-  const summary = buildSummary({ snapshots, homeMultiSelect, sessionDetail, settings, moduleAssets });
+  const summary = buildSummary({
+    snapshots,
+    homeMultiSelect,
+    sessionDetail,
+    settings,
+    moduleAssets,
+    sharedStateProjection,
+  });
   await fs.writeFile(path.join(artifactDir, 'summary.json'), JSON.stringify(summary, null, 2));
 
   const failed = Object.entries(summary.checks)
@@ -143,7 +152,7 @@ async function captureViewport(cdp, viewport) {
     window.__freehandLayout?.applyLayoutShape?.();
   });
   await delay(350);
-  const state = await evalInPage(cdp, collectPhaseOneState);
+  const state = await evalInPage(cdp, collectPhaseOneState, assetVersion);
   const screenshot = await cdp.send('Page.captureScreenshot', {
     format: 'png',
     captureBeyondViewport: true,
@@ -170,7 +179,7 @@ async function captureHomeMultiSelect(cdp) {
     return document.body.dataset.webuiRoute === 'home_dashboard' &&
       sessionIds.every((sessionId) => !!document.querySelector(`#mobile-home-session-list [data-session-id="${sessionId}"] .mobile-home-session-checkbox`));
   }, 20_000, 'Home multi-select rows', multiSelectSessionIds);
-  const stateBefore = await evalInPage(cdp, collectPhaseOneState);
+  const stateBefore = await evalInPage(cdp, collectPhaseOneState, assetVersion);
   const selection = await evalInPage(cdp, (sessionIds) => {
     sessionIds.forEach((sessionId) => {
       const checkbox = document.querySelector(`#mobile-home-session-list [data-session-id="${sessionId}"] .mobile-home-session-checkbox`);
@@ -196,7 +205,7 @@ async function captureHomeMultiSelect(cdp) {
     };
   }, multiSelectSessionIds);
   await delay(350);
-  const stateAfter = await evalInPage(cdp, collectPhaseOneState);
+  const stateAfter = await evalInPage(cdp, collectPhaseOneState, assetVersion);
   const screenshot = await cdp.send('Page.captureScreenshot', {
     format: 'png',
     captureBeyondViewport: true,
@@ -232,7 +241,7 @@ async function captureSessionDetailRoute(cdp) {
     return { clicked: true, sessionId: host?.dataset.sessionId || '' };
   });
   if (!clickResult.clicked) {
-    const state = await evalInPage(cdp, collectPhaseOneState);
+    const state = await evalInPage(cdp, collectPhaseOneState, assetVersion);
     const result = { skipped: true, reason: clickResult.reason, state };
     await fs.writeFile(path.join(artifactDir, 'session-detail-route.json'), JSON.stringify(result, null, 2));
     return result;
@@ -256,7 +265,7 @@ async function captureSessionDetailRoute(cdp) {
         rect.height > 0;
     }
   }, 12_000, 'SessionDetail route mutual exclusion', clickResult.sessionId);
-  const state = await evalInPage(cdp, collectPhaseOneState);
+  const state = await evalInPage(cdp, collectPhaseOneState, assetVersion);
   const expand = await evalInPage(cdp, () => {
     const pill = document.querySelector('#session-worker-rail .session-worker-pill');
     if (!pill) {
@@ -275,7 +284,7 @@ async function captureSessionDetailRoute(cdp) {
         !!row?.querySelector('.session-worker-open-button');
     }, 5_000, 'Header worker detail expansion', expand.taskId);
   }
-  const expandedState = await evalInPage(cdp, collectPhaseOneState);
+  const expandedState = await evalInPage(cdp, collectPhaseOneState, assetVersion);
   const screenshot = await cdp.send('Page.captureScreenshot', {
     format: 'png',
     captureBeyondViewport: true,
@@ -346,6 +355,10 @@ async function captureModuleAssets() {
     'assets/webui/app-shell/route-controller.js',
     'assets/webui/app-shell/edge-registry.js',
     'assets/webui/app-shell/layout-shape.js',
+    'assets/webui/app-shell/surface-registry.js',
+    'assets/webui/app-shell/shared-states/index.js',
+    'assets/webui/app-shell/shared-states/model.js',
+    'assets/webui/app-shell/shared-states/view.js',
     'assets/webui/surfaces/home-dashboard/index.js',
     'assets/webui/surfaces/home-dashboard/view.js',
     'assets/webui/surfaces/home-dashboard/model.js',
@@ -381,6 +394,42 @@ async function captureModuleAssets() {
     });
   }
   return results;
+}
+
+async function captureSharedStateProjection(cdp) {
+  const result = await evalInPage(cdp, async (expectedAssetVersion) => {
+    const suffix = `?v=${encodeURIComponent(expectedAssetVersion)}`;
+    const modelModule = await import(`/assets/webui/app-shell/shared-states/model.js${suffix}`);
+    const viewModule = await import(`/assets/webui/app-shell/shared-states/view.js${suffix}`);
+    const container = document.createElement('div');
+    container.dataset.verifierOwned = 'shared-state-projection';
+    document.body.append(container);
+    try {
+      const states = [];
+      for (const [kind, title] of [
+        [modelModule.SharedUiStateKind.Loading, '在线加载态验证'],
+        [modelModule.SharedUiStateKind.Empty, '在线空态验证'],
+      ]) {
+        const model = modelModule.createSharedStateModel(kind, { title });
+        viewModule.renderSharedState(container, model);
+        states.push({
+          kind,
+          projectedKind: container.dataset.sharedState || '',
+          role: container.querySelector('.shared-ui-state')?.getAttribute('role') || '',
+          title: container.querySelector('.shared-ui-state-title')?.textContent || '',
+          childCount: container.children.length,
+        });
+      }
+      return { states };
+    } finally {
+      container.remove();
+    }
+  }, assetVersion);
+  await fs.writeFile(
+    path.join(artifactDir, 'shared-state-projection.json'),
+    JSON.stringify(result, null, 2),
+  );
+  return result;
 }
 
 async function navigateSettingsPage(cdp, currentPage, targetPage) {
@@ -428,7 +477,7 @@ async function navigateSettingsPage(cdp, currentPage, targetPage) {
 }
 
 async function captureSettingsSnapshot(cdp, fileBase) {
-  const state = await evalInPage(cdp, collectPhaseOneState);
+  const state = await evalInPage(cdp, collectPhaseOneState, assetVersion);
   const screenshot = await cdp.send('Page.captureScreenshot', {
     format: 'png',
     captureBeyondViewport: true,
@@ -440,7 +489,14 @@ async function captureSettingsSnapshot(cdp, fileBase) {
   return result;
 }
 
-function buildSummary({ snapshots, homeMultiSelect, sessionDetail, settings, moduleAssets }) {
+function buildSummary({
+  snapshots,
+  homeMultiSelect,
+  sessionDetail,
+  settings,
+  moduleAssets,
+  sharedStateProjection,
+}) {
   const portraitSnapshots = snapshots.filter((snapshot) =>
     ['phone_portrait', 'tall_phone', 'tablet_portrait'].includes(snapshot.state.layoutShape)
   );
@@ -467,12 +523,22 @@ function buildSummary({ snapshots, homeMultiSelect, sessionDetail, settings, mod
     sessionDetail,
     settings,
     moduleAssets,
+    sharedStateProjection,
     checks: {
       productionAssetVersion: snapshots.every((snapshot) => snapshot.state.assetVersionSeen),
       viewportMatrixCovered: snapshots.length === viewports.length,
       noHorizontalOverflow: snapshots.every((snapshot) => snapshot.state.noHorizontalOverflow),
       portraitQuickEntriesIconOnly: portraitEntriesVisibleAndSeparated,
       mobileHomeDashboardVisible: portraitSnapshots.every((snapshot) => snapshot.state.mobileHomeDashboardVisible),
+      sharedStateContractLoaded: snapshots.every((snapshot) => snapshot.state.sharedStateContractLoaded),
+      sharedEmptyAndLoadingRendered:
+        sharedStateProjection.states.length === 2 &&
+        sharedStateProjection.states.every((state) =>
+          state.projectedKind === state.kind &&
+          state.role === 'status' &&
+          state.title.length > 0 &&
+          state.childCount === 1
+        ),
       desktopDoesNotForceMobileHome: snapshots
         .filter((snapshot) => snapshot.viewport.width >= 1180)
         .every((snapshot) => !snapshot.state.mobileHomeDashboardVisible),
@@ -628,7 +694,7 @@ function buildSummary({ snapshots, homeMultiSelect, sessionDetail, settings, mod
   return summary;
 }
 
-function collectPhaseOneState() {
+function collectPhaseOneState(expectedAssetVersion) {
   function localRectOf(node) {
     if (!node) {
       return { left: 0, top: 0, width: 0, height: 0, right: 0, bottom: 0 };
@@ -726,7 +792,7 @@ function collectPhaseOneState() {
     shellRoute: shell?.dataset.webuiRoute || '',
     routeSession: shell?.dataset.routeSession || '',
     selectedSession: shell?.dataset.selectedSession || '',
-    assetVersionSeen: html.includes('20260726-stale-lifecycle-reconcile'),
+    assetVersionSeen: html.includes(expectedAssetVersion),
     bodyText,
     bodyWidth: document.body.scrollWidth,
     docWidth: document.documentElement.scrollWidth,
@@ -735,6 +801,7 @@ function collectPhaseOneState() {
       Math.max(document.body.scrollWidth, document.documentElement.scrollWidth) <= window.innerWidth + 2,
     globalSessionText,
     mobileHomeDashboardVisible: localIsVisible(document.getElementById('mobile-home-dashboard')),
+    sharedStateContractLoaded: window.__freehandSharedStateContract?.contractId === 'foundation.shared_states',
     mobileHomeText: document.getElementById('mobile-home-dashboard')?.innerText || '',
     mobileHomeActiveVisible: localIsVisible(document.getElementById('mobile-home-active-list')),
     mobileHomeHistoryVisible: localIsVisible(document.getElementById('mobile-home-session-list')),
