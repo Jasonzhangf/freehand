@@ -10,7 +10,7 @@ const baseUrl = normalizedBaseUrl(process.env.FREEHAND_WEBUI_BASE_URL || 'http:/
 const adpUrl = process.env.FREEHAND_WEBUI_ADP_URL || adpUrlFromBaseUrl(baseUrl);
 const runId = `mobile-ui-tree-phase1-${new Date().toISOString().replace(/[-:.]/g, '').slice(0, 15)}-${process.pid}`;
 const artifactDir = path.join(process.cwd(), 'artifacts', 'webui-online', runId);
-const assetVersion = '20260730-openminis-foundation';
+let assetVersion = '';
 const multiSelectSessionIds = [
   'webui-home-multiselect-fixed-a',
   'webui-home-multiselect-fixed-b',
@@ -53,7 +53,7 @@ let chrome = null;
 let cdp = null;
 
 try {
-  await assertProductionPageReachable();
+  assetVersion = await productionAssetVersion();
   await ensureMultiSelectSessions();
   await ensureHeaderWorkerRailTruth();
   chrome = spawn(
@@ -84,6 +84,9 @@ try {
   cdp = await createCdpClient(pageTarget.webSocketDebuggerUrl);
   await cdp.send('Page.enable');
   await cdp.send('Runtime.enable');
+  await cdp.send('Page.addScriptToEvaluateOnNewDocument', {
+    source: 'window.__freehandEnableTestHooks = true;',
+  });
   await cdp.send('Page.navigate', { url: baseUrl });
   await waitForLoad(cdp);
   await waitForFunction(cdp, () => {
@@ -102,6 +105,7 @@ try {
   const homeMultiSelect = await captureHomeMultiSelect(cdp);
   const sessionDetail = await captureSessionDetailRoute(cdp);
   const settings = await captureSettingsTree(cdp);
+  const homeSharedStateIntegration = await captureHomeSharedStateIntegration(cdp);
   const summary = buildSummary({
     snapshots,
     homeMultiSelect,
@@ -109,6 +113,7 @@ try {
     settings,
     moduleAssets,
     sharedStateProjection,
+    homeSharedStateIntegration,
   });
   await fs.writeFile(path.join(artifactDir, 'summary.json'), JSON.stringify(summary, null, 2));
 
@@ -129,15 +134,17 @@ try {
   await fs.rm(chromeProfileDir, { recursive: true, force: true }).catch(() => null);
 }
 
-async function assertProductionPageReachable() {
+async function productionAssetVersion() {
   const response = await fetch(baseUrl, { cache: 'no-store' });
   if (!response.ok) {
     throw new Error(`production WebUI not reachable: ${response.status} ${response.statusText}`);
   }
   const html = await response.text();
-  if (!html.includes(assetVersion)) {
-    throw new Error(`served WebUI asset version mismatch: expected ${assetVersion}`);
+  const match = html.match(/\/assets\/webui\.js\?v=([^"'&<>\s]+)/);
+  if (!match || !match[1]) {
+    throw new Error('served WebUI does not expose the owner-stamped asset version');
   }
+  return decodeURIComponent(match[1]);
 }
 
 async function captureViewport(cdp, viewport) {
@@ -432,6 +439,44 @@ async function captureSharedStateProjection(cdp) {
   return result;
 }
 
+async function captureHomeSharedStateIntegration(cdp) {
+  const result = await evalInPage(cdp, () => {
+    const hooks = window.__freehandWebUiTest;
+    if (!hooks || typeof hooks.projectHomeSharedStateForTest !== 'function') {
+      throw new Error('Home shared-state test hook unavailable');
+    }
+    const loading = hooks.projectHomeSharedStateForTest({ loaded: false, sessions: [] });
+    const empty = hooks.projectHomeSharedStateForTest({ loaded: true, sessions: [] });
+    const populated = hooks.projectHomeSharedStateForTest({
+      loaded: true,
+      sessions: [{
+        session_id: 'webui-home-shared-state-negative',
+        title: '非空历史会话',
+        active_turn_id: null,
+        archived: false,
+        updated_at: '2026-07-30T00:00:00Z',
+      }],
+    });
+    const running = hooks.projectHomeSharedStateForTest({
+      loaded: true,
+      sessions: [{
+        session_id: 'webui-home-shared-state-running-negative',
+        title: '运行中会话',
+        active_turn_id: 'turn-running',
+        latest_turn_id: 'turn-running',
+        latest_status: 'running',
+        archived: false,
+      }],
+    });
+    return { loading, empty, populated, running };
+  });
+  await fs.writeFile(
+    path.join(artifactDir, 'home-shared-state-integration.json'),
+    JSON.stringify(result, null, 2),
+  );
+  return result;
+}
+
 async function navigateSettingsPage(cdp, currentPage, targetPage) {
   const clickResult = await evalInPage(cdp, ({ currentPage, targetPage }) => {
     try {
@@ -496,6 +541,7 @@ function buildSummary({
   settings,
   moduleAssets,
   sharedStateProjection,
+  homeSharedStateIntegration,
 }) {
   const portraitSnapshots = snapshots.filter((snapshot) =>
     ['phone_portrait', 'tall_phone', 'tablet_portrait'].includes(snapshot.state.layoutShape)
@@ -539,6 +585,17 @@ function buildSummary({
           state.title.length > 0 &&
           state.childCount === 1
         ),
+      homeSharedStateIntegration:
+        homeSharedStateIntegration.loading.activeState === 'loading' &&
+        homeSharedStateIntegration.loading.historyStates.includes('loading') &&
+        homeSharedStateIntegration.empty.activeState === 'empty' &&
+        homeSharedStateIntegration.empty.historyStates.includes('empty'),
+      populatedHomeDoesNotRenderSharedHistoryState:
+        homeSharedStateIntegration.populated.historyStates.length === 0 &&
+        homeSharedStateIntegration.populated.historySessionIds.includes('webui-home-shared-state-negative'),
+      runningHomeClearsSharedActiveState:
+        homeSharedStateIntegration.running.activeState === '' &&
+        homeSharedStateIntegration.running.historySessionIds.length === 0,
       desktopDoesNotForceMobileHome: snapshots
         .filter((snapshot) => snapshot.viewport.width >= 1180)
         .every((snapshot) => !snapshot.state.mobileHomeDashboardVisible),

@@ -22,6 +22,18 @@ const adpClient = await readFile(
   new URL('apps/freehand-server/assets/webui/app-shell/adp-client.js', root),
   'utf8',
 );
+const homeView = await readFile(
+  new URL('apps/freehand-server/assets/webui/surfaces/home-dashboard/view.js', root),
+  'utf8',
+);
+const legacyWebui = await readFile(
+  new URL('apps/freehand-server/assets/webui/legacy-monolith.js', root),
+  'utf8',
+);
+const onlineVerifier = await readFile(
+  new URL('scripts/verify-webui-mobile-ui-tree-online.mjs', root),
+  'utf8',
+);
 
 const registeredSurfaces = surfaceContracts.map(({ surfaceId }) => surfaceId);
 assert.deepEqual(registeredSurfaces, [
@@ -99,6 +111,12 @@ assert.match(bootstrap, /__freehandSharedStateContract = sharedStateContract/);
 assert.match(adpClient, /generated\/adp-protocol\.js/);
 assert.match(adpClient, /ADP_PROTOCOL_VERSION/);
 assert.match(adpClient, /frame\.protocol_version !== ADP_PROTOCOL_VERSION/);
+assert.match(homeView, /delete list\.dataset\.sharedState/);
+assert.match(legacyWebui, /typeof loaded !== "boolean"/);
+assert.match(legacyWebui, /!Array\.isArray\(sessions\)/);
+assert.match(onlineVerifier, /async function productionAssetVersion\(\)/);
+assert.doesNotMatch(onlineVerifier, /const assetVersion = ['"][^'"]+['"]/);
+assert.match(onlineVerifier, /runningHomeClearsSharedActiveState/);
 
 const stateModels = Object.values(SharedUiStateKind).map((kind) =>
   createSharedStateModel(kind, {

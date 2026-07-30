@@ -224,8 +224,17 @@
       "owner_crate": "crates/freehand-ui-protocol",
       "identity": "query type plus resource id",
       "truth_store": "derived protocol projection, not independent truth",
-      "operations": ["query", "subscribe", "project_public_state", "dispatch_command", "post_android_turn_finished_notification"],
+      "operations": ["query", "subscribe", "project_public_state", "dispatch_command", "compose_shell", "render_surface_contract", "render_shared_state", "post_android_turn_finished_notification"],
       "projections": ["CLI/WebUI/Android protocol frames"]
+    },
+    {
+      "resource_type": "ui_surface",
+      "owner_feature_id": "app.webui-smoke",
+      "owner_crate": "apps/freehand-server",
+      "identity": "surface contract id plus current protocol projection",
+      "truth_store": "ephemeral render projection only, never business or session truth",
+      "operations": ["compose", "render", "present_shared_state"],
+      "projections": ["WebUI shell and surface DOM"]
     },
     {
       "resource_type": "runtime_command",
@@ -452,6 +461,48 @@
       "target_resource": "ui_projection",
       "effect": "project persisted attachment metadata into UiTurnProjection.attachments without raw/base64 image payload",
       "mainline_call_doc": "docs/mainline-calls/runtime.ui-command-dispatch.json",
+      "binding_status": "bound"
+    },
+    {
+      "operation_id": "ui_projection.compose_shell",
+      "owner_feature_id": "app.webui-smoke",
+      "source_resource": "ui_projection",
+      "target_resource": "ui_surface",
+      "effect": "compose the top-level WebUI shell from registered presentation contracts without introducing browser-owned session or lifecycle truth",
+      "mainline_call_doc": "docs/mainline-calls/app.webui-smoke.json",
+      "ui_contract": {
+        "projection_or_query": "registered UiProjection surface contracts",
+        "generated_command": "none",
+        "surface_path": "apps/freehand-server/assets/webui/bootstrap.js"
+      },
+      "binding_status": "bound"
+    },
+    {
+      "operation_id": "ui_projection.render_surface_contract",
+      "owner_feature_id": "app.webui-smoke",
+      "source_resource": "ui_projection",
+      "target_resource": "ui_surface",
+      "effect": "register model, view, and control responsibility for each split WebUI surface while keeping protocol truth outside the presentation layer",
+      "mainline_call_doc": "docs/mainline-calls/app.webui-smoke.json",
+      "ui_contract": {
+        "projection_or_query": "registered UiProjection surface contracts",
+        "generated_command": "none",
+        "surface_path": "apps/freehand-server/assets/webui/bootstrap.js"
+      },
+      "binding_status": "bound"
+    },
+    {
+      "operation_id": "ui_projection.render_shared_state",
+      "owner_feature_id": "app.webui-smoke",
+      "source_resource": "ui_projection",
+      "target_resource": "ui_surface",
+      "effect": "render explicit loading, empty, error, and confirmation presentation states without changing owner projection truth",
+      "mainline_call_doc": "docs/mainline-calls/app.webui-smoke.json",
+      "ui_contract": {
+        "projection_or_query": "SharedUiStateModel",
+        "generated_command": "none",
+        "surface_path": "apps/freehand-server/assets/webui/app-shell/shared-states/view.js"
+      },
       "binding_status": "bound"
     },
     {
@@ -1014,6 +1065,39 @@
       "call_table_step": "07b",
       "file_path": "crates/freehand-runtime/src/turn_projection.rs",
       "symbol_path": "project_runtime_turn_history / persist_prepared_live_submit_active_turn",
+      "binding_status": "bound"
+    },
+    {
+      "edge_id": "app.webui-smoke#10-foundation-root",
+      "operation_id": "ui_projection.compose_shell",
+      "source_resource": "ui_projection",
+      "target_resource": "ui_surface",
+      "mainline_call_doc": "docs/mainline-calls/app.webui-smoke.json",
+      "call_table_step": "10-foundation-root",
+      "file_path": "apps/freehand-server/assets/webui/bootstrap.js",
+      "symbol_path": "initializeMobileWebui",
+      "binding_status": "bound"
+    },
+    {
+      "edge_id": "app.webui-smoke#10-foundation-surface",
+      "operation_id": "ui_projection.render_surface_contract",
+      "source_resource": "ui_projection",
+      "target_resource": "ui_surface",
+      "mainline_call_doc": "docs/mainline-calls/app.webui-smoke.json",
+      "call_table_step": "10-foundation-surface",
+      "file_path": "apps/freehand-server/assets/webui/app-shell/surface-registry.js",
+      "symbol_path": "surfaceContracts",
+      "binding_status": "bound"
+    },
+    {
+      "edge_id": "app.webui-smoke#10-foundation-shared",
+      "operation_id": "ui_projection.render_shared_state",
+      "source_resource": "ui_projection",
+      "target_resource": "ui_surface",
+      "mainline_call_doc": "docs/mainline-calls/app.webui-smoke.json",
+      "call_table_step": "10-foundation-shared",
+      "file_path": "apps/freehand-server/assets/webui/app-shell/shared-states/view.js",
+      "symbol_path": "renderSharedState",
       "binding_status": "bound"
     },
     {
@@ -1758,6 +1842,14 @@
       "allowed_direct": true,
       "via_resources": [],
       "reason": "Android owns only notification permission, turn-finished notification posting, duplicate suppression, tap return intent, and status logging for its package."
+    },
+    {
+      "rule_id": "ui-projection-renders-ui-surface-direct",
+      "source_resource": "ui_projection",
+      "target_resource": "ui_surface",
+      "allowed_direct": true,
+      "via_resources": [],
+      "reason": "The WebUI app boundary may render protocol-owned projections into ephemeral shell and surface DOM without becoming session, task, lifecycle, or config truth."
     },
     {
       "rule_id": "ui-projection-posts-android-notification-direct",

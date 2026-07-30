@@ -2,7 +2,7 @@
 
 ## Status
 
-- status: `design_baseline`
+- status: `migration_in_progress`
 - machine manifest:
   `docs/migrations/openminis-ui/ui-tree.manifest.json`
 - SOP: `docs/migrations/openminis-ui/function-map-sop.md`
@@ -12,8 +12,9 @@
 
 This tree describes the complete non-browser UI migration scope. It describes
 semantic parity and Freehand target ownership, not visual parity.
-All current non-blocked nodes start at `inventoried`; no implementation or
-online-verification claim is made by this baseline.
+Node status in the tables below mirrors the machine manifest. Only nodes whose
+owner, operation, target symbol, and mapped gates are bound may advance beyond
+`inventoried`; no `online_verified` claim is made without signed online evidence.
 
 ## Tree
 
@@ -192,10 +193,10 @@ Layer 7  Android platform bridge
 
 | Node | Source reference | Freehand target | Initial status |
 | --- | --- | --- | --- |
-| `foundation.root` | `Views/ContentView.swift` | app shell, route controller, edge registry | `inventoried` |
-| `foundation.surface_contract` | OpenMinis view hierarchy as semantic input | `surfaces/*/{index,model,view,controls}` | `inventoried` |
+| `foundation.root` | `Views/ContentView.swift` | app shell, route controller, edge registry | `source_bound` |
+| `foundation.surface_contract` | OpenMinis view hierarchy as semantic input | `surfaces/*/{index,model,view,controls}` | `source_bound` |
 | `foundation.protocol_calls` | OpenMinis local action wiring, semantics only | generated ADP command/query path | `inventoried` |
-| `foundation.shared_states` | loading/empty/error/sheet patterns | shared render contracts | `inventoried` |
+| `foundation.shared_states` | loading/empty/error/confirmation/sheet patterns | shared render contracts | `implementation_in_progress` |
 
 ### Home and session navigation
 

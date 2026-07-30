@@ -1,6 +1,6 @@
 {
   "migration_tree_id": "openminis-ui-foundation-to-freehand",
-  "status": "design_baseline",
+  "status": "migration_in_progress",
   "browser_included": false,
   "canonical_doc": "docs/migrations/openminis-ui/ui-tree.md",
   "sop_doc": "docs/migrations/openminis-ui/function-map-sop.md",
@@ -42,7 +42,7 @@
       "migration_unit_id": "ui_migration.foundation.root",
       "node_id": "foundation.root",
       "group": "foundation",
-      "status": "inventoried",
+      "status": "source_bound",
       "owner_feature_id": "app.webui-smoke",
       "touched_feature_ids": [
         "app.webui-smoke",
@@ -67,20 +67,38 @@
       "source_resources": [
         "ui_projection"
       ],
-      "target_resource": "ui_projection",
-      "operation_id": "pending",
-      "projection_or_query": "pending",
-      "generated_command": "pending",
+      "target_resource": "ui_surface",
+      "operation_id": "ui_projection.compose_shell",
+      "projection_or_query": "registered UiProjection surface contracts",
+      "generated_command": "none",
       "target_paths": [
         "apps/freehand-server/assets/webui/bootstrap.js",
         "apps/freehand-server/assets/webui/app-shell"
       ],
-      "target_symbols": [],
+      "target_symbols": [
+        "initializeMobileWebui"
+      ],
       "surface_path": "apps/freehand-server/assets/webui/bootstrap.js",
       "model_responsibility": "projection_to_render_model_only",
       "view_responsibility": "render_only",
       "control_responsibility": "registered_edge_or_generated_command_only",
-      "route_edge_ids": [],
+      "route_edge_ids": [
+        "ui_tree.foundation.root.to.home.dashboard",
+        "ui_tree.foundation.root.to.session_detail.root",
+        "ui_tree.foundation.root.to.tools.registry",
+        "ui_tree.foundation.root.to.settings.root",
+        "ui_tree.foundation.root.to.session_search.root",
+        "ui_tree.foundation.root.to.new_session.root",
+        "ui_tree.foundation.root.to.timer.dashboard",
+        "ui_tree.foundation.root.to.files_artifacts.root",
+        "ui_tree.foundation.root.to.skills.root",
+        "ui_tree.foundation.root.to.memory.root",
+        "ui_tree.foundation.root.to.integrations.root",
+        "ui_tree.foundation.root.to.platform.android_bridge",
+        "ui_tree.foundation.root.to.foundation.surface_contract",
+        "ui_tree.foundation.root.to.foundation.protocol_calls",
+        "ui_tree.foundation.root.to.foundation.shared_states"
+      ],
       "function_map_docs": [
         "docs/function-maps/app.webui-smoke.md",
         "docs/function-maps/ui.protocol.md",
@@ -107,7 +125,7 @@
       "migration_unit_id": "ui_migration.foundation.surface_contract",
       "node_id": "foundation.surface_contract",
       "group": "foundation",
-      "status": "inventoried",
+      "status": "source_bound",
       "owner_feature_id": "app.webui-smoke",
       "touched_feature_ids": [
         "app.webui-smoke"
@@ -131,19 +149,23 @@
       "source_resources": [
         "ui_projection"
       ],
-      "target_resource": "ui_projection",
-      "operation_id": "pending",
-      "projection_or_query": "pending",
-      "generated_command": "pending",
+      "target_resource": "ui_surface",
+      "operation_id": "ui_projection.render_surface_contract",
+      "projection_or_query": "registered UiProjection surface contracts",
+      "generated_command": "none",
       "target_paths": [
-        "apps/freehand-server/assets/webui/surfaces"
+        "apps/freehand-server/assets/webui/app-shell/surface-registry.js"
       ],
-      "target_symbols": [],
-      "surface_path": "apps/freehand-server/assets/webui/surfaces",
+      "target_symbols": [
+        "surfaceContracts"
+      ],
+      "surface_path": "apps/freehand-server/assets/webui/bootstrap.js",
       "model_responsibility": "projection_to_render_model_only",
       "view_responsibility": "render_only",
       "control_responsibility": "registered_edge_or_generated_command_only",
-      "route_edge_ids": [],
+      "route_edge_ids": [
+        "ui_tree.foundation.root.to.foundation.surface_contract"
+      ],
       "function_map_docs": [
         "docs/function-maps/app.webui-smoke.md"
       ],
@@ -221,7 +243,7 @@
       "migration_unit_id": "ui_migration.foundation.shared_states",
       "node_id": "foundation.shared_states",
       "group": "foundation",
-      "status": "inventoried",
+      "status": "implementation_in_progress",
       "owner_feature_id": "app.webui-smoke",
       "touched_feature_ids": [
         "app.webui-smoke"
@@ -244,17 +266,23 @@
       "source_resources": [
         "ui_projection"
       ],
-      "target_resource": "ui_projection",
-      "operation_id": "pending",
-      "projection_or_query": "pending",
-      "generated_command": "pending",
-      "target_paths": [],
-      "target_symbols": [],
-      "surface_path": "pending",
+      "target_resource": "ui_surface",
+      "operation_id": "ui_projection.render_shared_state",
+      "projection_or_query": "SharedUiStateModel",
+      "generated_command": "none",
+      "target_paths": [
+        "apps/freehand-server/assets/webui/app-shell/shared-states"
+      ],
+      "target_symbols": [
+        "renderSharedState"
+      ],
+      "surface_path": "apps/freehand-server/assets/webui/app-shell/shared-states/view.js",
       "model_responsibility": "projection_to_render_model_only",
       "view_responsibility": "render_only",
       "control_responsibility": "registered_edge_or_generated_command_only",
-      "route_edge_ids": [],
+      "route_edge_ids": [
+        "ui_tree.foundation.root.to.foundation.shared_states"
+      ],
       "function_map_docs": [
         "docs/function-maps/app.webui-smoke.md"
       ],

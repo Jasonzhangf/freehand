@@ -5,7 +5,7 @@ use axum::response::{IntoResponse, Response};
 /// Single source of truth for the WebUI cache-busting version. Asset files and
 /// the page template reference `__WEBUI_ASSET_VERSION__`; the server stamps
 /// this value at serve time, so bumping the version is a one-line change here.
-pub const WEBUI_ASSET_VERSION: &str = "20260728-worker-recovered-history";
+pub const WEBUI_ASSET_VERSION: &str = "20260730-openminis-foundation";
 
 const WEBUI_ASSET_VERSION_TOKEN: &str = "__WEBUI_ASSET_VERSION__";
 
@@ -63,9 +63,29 @@ const WEBUI_ROUTE_CONTROLLER_JS: Asset = Asset {
     body: include_str!("../assets/webui/app-shell/route-controller.js"),
 };
 
+const WEBUI_SURFACE_REGISTRY_JS: Asset = Asset {
+    content_type: "application/javascript; charset=utf-8",
+    body: include_str!("../assets/webui/app-shell/surface-registry.js"),
+};
+
 const WEBUI_ADP_CLIENT_JS: Asset = Asset {
     content_type: "application/javascript; charset=utf-8",
     body: include_str!("../assets/webui/app-shell/adp-client.js"),
+};
+
+const WEBUI_SHARED_STATES_JS: Asset = Asset {
+    content_type: "application/javascript; charset=utf-8",
+    body: include_str!("../assets/webui/app-shell/shared-states/index.js"),
+};
+
+const WEBUI_SHARED_STATES_MODEL_JS: Asset = Asset {
+    content_type: "application/javascript; charset=utf-8",
+    body: include_str!("../assets/webui/app-shell/shared-states/model.js"),
+};
+
+const WEBUI_SHARED_STATES_VIEW_JS: Asset = Asset {
+    content_type: "application/javascript; charset=utf-8",
+    body: include_str!("../assets/webui/app-shell/shared-states/view.js"),
 };
 
 const WEBUI_ADP_PROTOCOL_JS: Asset = Asset {
@@ -186,7 +206,11 @@ pub fn asset_response(path: &str) -> Result<Response, StatusCode> {
         "webui/app-shell/layout-shape.js" => &WEBUI_LAYOUT_SHAPE_JS,
         "webui/app-shell/edge-registry.js" => &WEBUI_EDGE_REGISTRY_JS,
         "webui/app-shell/route-controller.js" => &WEBUI_ROUTE_CONTROLLER_JS,
+        "webui/app-shell/surface-registry.js" => &WEBUI_SURFACE_REGISTRY_JS,
         "webui/app-shell/adp-client.js" => &WEBUI_ADP_CLIENT_JS,
+        "webui/app-shell/shared-states/index.js" => &WEBUI_SHARED_STATES_JS,
+        "webui/app-shell/shared-states/model.js" => &WEBUI_SHARED_STATES_MODEL_JS,
+        "webui/app-shell/shared-states/view.js" => &WEBUI_SHARED_STATES_VIEW_JS,
         "webui/generated/adp-protocol.js" => &WEBUI_ADP_PROTOCOL_JS,
         "webui/surfaces/home-dashboard/index.js" => &WEBUI_SURFACE_HOME_DASHBOARD_JS,
         "webui/surfaces/home-dashboard/model.js" => &WEBUI_SURFACE_HOME_DASHBOARD_MODEL_JS,

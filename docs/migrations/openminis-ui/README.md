@@ -2,7 +2,7 @@
 
 ## Status
 
-- status: `design_baseline` (advances to `migration_in_progress` and `migration_complete` only through the machine lifecycle gate)
+- status: `migration_in_progress` (advances to `migration_complete` only through the machine lifecycle gate)
 - scope: OpenMinis-inspired UI foundation and tool/configuration interaction migration
 - browser scope: excluded
 - Freehand UI owner: `app.webui-smoke`

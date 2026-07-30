@@ -9644,6 +9644,32 @@ function installWebUiTestHooks() {
     return;
   }
   globalThis.__freehandWebUiTest = {
+    projectHomeSharedStateForTest({ loaded, sessions }) {
+      if (typeof loaded !== "boolean") {
+        throw new Error("Home shared-state fixture loaded must be boolean");
+      }
+      if (!Array.isArray(sessions)) {
+        throw new Error("Home shared-state fixture sessions must be an array");
+      }
+      state.sessions = sessions;
+      state.sessionListLoaded = loaded;
+      state.turn = null;
+      state.sessionTurns = [];
+      state.taskBoard = null;
+      state.agentBoard = null;
+      renderMobileHomeDashboard();
+      return {
+        activeState: mobileHomeActiveList?.dataset.sharedState || "",
+        historyStates: Array.from(
+          mobileHomeSessionList?.querySelectorAll("[data-shared-state]") || [],
+          (element) => element.dataset.sharedState || "",
+        ),
+        historySessionIds: Array.from(
+          mobileHomeSessionList?.querySelectorAll("[data-session-id]") || [],
+          (element) => element.dataset.sessionId || "",
+        ),
+      };
+    },
     resetAmbiguousSubmitState(sessionId, prompt) {
       state.sessions = [];
       state.sessionListLoaded = false;

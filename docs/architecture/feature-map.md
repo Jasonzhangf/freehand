@@ -93,6 +93,7 @@ This table is the feature-map backlink for `docs/resource-maps/core.json`. The r
 | `metadata.core` | `metadata` | `docs/resource-maps/core.json` |
 | `debug.core` | `debug_trace` | `docs/resource-maps/core.json` |
 | `ui.protocol` | `ui_projection`, `input_attachment` | `docs/resource-maps/core.json` |
+| `app.webui-smoke` | `ui_surface` | `docs/resource-maps/core.json` |
 | `runtime.ui-command-dispatch` | `runtime_command` | `docs/resource-maps/core.json` |
 | `runtime.checkpoint-rewind` | `checkpoint` | `docs/resource-maps/core.json` |
 | `node.master-slave` | `node_pairing`, `remote_daemon_directory` | `docs/resource-maps/core.json` |
@@ -613,10 +614,11 @@ Non-violation pending items live in `docs/architecture/architecture-gaps.md`. Ea
 ### `app.webui-smoke`
 
 - owner: `apps/freehand-server`
-- allowed_paths: `apps/freehand-server/**`, `crates/freehand-ui-protocol/**`, `scripts/verify-webui-image-attachment-online.mjs`, `docs/function-maps/**`, `docs/testing/**`, `docs/design/**`, `docs/goals/**`, `docs/mainline-calls/**`, `docs/wiki/**`, `docs/resource-maps/core.json`
+- allowed_paths: `apps/freehand-server/**`, `crates/freehand-ui-protocol/**`, `scripts/verify-webui-foundation-contracts.mjs`, `scripts/verify-webui-mobile-ui-tree-online.mjs`, `scripts/verify-webui-image-attachment-online.mjs`, `docs/function-maps/**`, `docs/testing/**`, `docs/design/**`, `docs/goals/**`, `docs/mainline-calls/**`, `docs/wiki/**`, `docs/resource-maps/core.json`
 - forbidden_paths: `crates/freehand-runtime/**`, `crates/freehand-reason/**`, `crates/freehand-node/**`, `crates/freehand-config/**`, `crates/freehand-provider-*/**` except consuming already-owned UI protocol projections
 - required_checks:
   - `cargo test -p freehand-server`
+  - `node scripts/verify-webui-foundation-contracts.mjs`
   - `cargo run -p xtask -- mainlines check`
   - `cargo run -p xtask -- gates check`
 - required_white_box_tests:

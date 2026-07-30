@@ -223,6 +223,7 @@ fn run_gates_check() -> Result<(), String> {
             "docs/references/provider-protocols/openai-chat-completions.md",
             "docs/references/provider-protocols/anthropic-messages.md",
             "scripts/source-search.sh",
+            "scripts/verify-webui-foundation-contracts.mjs",
             ".agents/skills/freehand-dev/SKILL.md",
             ".agents/skills/freehand-dev/agents/openai.yaml",
             ".agents/skills/provider-protocols/SKILL.md",
@@ -245,11 +246,27 @@ fn run_gates_check() -> Result<(), String> {
     verify_source_search_policy(&root)?;
     verify_data_control_boundaries(&root)?;
     verify_webui_app_boundary(&root)?;
+    verify_webui_foundation_contracts(&root)?;
     verify_runtime_daemon_boundary(&root)?;
     verify_dependency_graph(&root)?;
     verify_task_status_single_writer(&root)?;
     verify_adp_protocol_artifacts(&root)?;
     openminis_ui_migration::verify_openminis_ui_migration_manifest(&root)?;
+    Ok(())
+}
+
+fn verify_webui_foundation_contracts(root: &Path) -> Result<(), String> {
+    let output = std::process::Command::new("node")
+        .arg("scripts/verify-webui-foundation-contracts.mjs")
+        .current_dir(root)
+        .output()
+        .map_err(|err| format!("failed to run WebUI foundation contract gate: {err}"))?;
+    if !output.status.success() {
+        return Err(format!(
+            "WebUI foundation contract gate failed: {}",
+            String::from_utf8_lossy(&output.stderr).trim()
+        ));
+    }
     Ok(())
 }
 

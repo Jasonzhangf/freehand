@@ -843,3 +843,10 @@ Tags: #architecture #gap5 #node #ui-protocol #dependency-edge
 - Surface registry admission validates immutable contracts, non-empty string identity/role/DOM-root fields, non-empty immutable string arrays, exact registry-key identity, and unique surface plus DOM-root identities. Resource and mainline bindings point to the registry owner, while bootstrap remains the shell composition owner.
 - Online proof for loading/empty/error/confirmation components must create a deterministic projection transition through served production modules. Depending on ambient Home data to happen to be empty is not evidence. The verifier may use an isolated verifier-owned DOM container without mutating business truth.
 - Asset-version acceptance has one verifier expectation passed into page-side collection; a second page-function hardcoded version creates guaranteed false failure after every version bump.
+
+## 2026-07-30 WebUI foundation lifecycle boundary truth
+
+- Foundation lifecycle status is deliberately non-uniform: `foundation.root` and `foundation.surface_contract` are `source_bound`; `foundation.protocol_calls` is `inventoried`; `foundation.shared_states` is `implementation_in_progress`.
+- Protocol calls require one explicit bidirectional ADP resource chain covering outbound requests and inbound receipt/failure return paths before source binding. A generated constructor import alone is not lifecycle closure.
+- Shared-state source binding requires the complete registered state family. Loading, empty, error, and confirmation do not justify `source_bound` while sheet semantics remain unimplemented.
+- External signed WebUI evidence is required for `online_verified`; local builds, tests, browser harnesses, and Codex Review PASS do not substitute for that evidence.

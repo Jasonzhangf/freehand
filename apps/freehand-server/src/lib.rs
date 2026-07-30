@@ -2600,6 +2600,7 @@ mod tests {
         assert!(bootstrap_body.contains("surfaceContracts"));
         assert!(bootstrap_body.contains("./legacy-monolith.js"));
         assert!(bootstrap_body.contains("__freehandWebUiSurfaceContracts"));
+        assert!(bootstrap_body.contains("__freehandSharedStateContract"));
 
         let legacy = client
             .get(format!(
@@ -2745,6 +2746,27 @@ mod tests {
         assert_eq!(adp_client.status(), StatusCode::OK);
         let adp_client_body = adp_client.text().await.expect("adp-client body");
         assert!(adp_client_body.contains("export function createAdpClient"));
+
+        for (asset, symbol) in [
+            ("app-shell/shared-states/index.js", "sharedStateContract"),
+            ("app-shell/shared-states/model.js", "createSharedStateModel"),
+            ("app-shell/shared-states/view.js", "renderSharedState"),
+            ("app-shell/surface-registry.js", "surfaceContracts"),
+        ] {
+            let response = client
+                .get(format!("{}/assets/webui/{}", server.base_url, asset))
+                .send()
+                .await
+                .expect("shared-state asset response");
+            assert_eq!(response.status(), StatusCode::OK);
+            assert!(
+                response
+                    .text()
+                    .await
+                    .expect("shared-state asset body")
+                    .contains(symbol)
+            );
+        }
         assert!(adp_client_body.contains("generated/adp-protocol.js"));
         assert!(adp_client_body.contains("ADP_PROTOCOL_VERSION"));
 

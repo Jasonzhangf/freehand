@@ -25,6 +25,7 @@
   - gate command can validate policy locks
   - gate command validates resource-map ownership, operation binding, direct/indirect/forbidden relation, source-edge registry, function-map backlink, and test-design coverage consistency before code refactor
   - gate command validates generated ADP protocol manifest/constructor artifacts are deterministic against the Rust exporter and consumed by WebUI assets
+  - gate command executes the WebUI foundation contract verifier against the same runtime-owned surface registry consumed by bootstrap
   - gate command validates the OpenMinis non-browser UI migration design baseline, including exact required nodes/statuses, owner and map references, Browser/Cookie/Profile/Takeover exclusion, human/machine entrypoint and forward topology parity, advanced-state target bindings, and structured online-state evidence coverage
   - source-only search policy keeps implementation search out of generated/runtime outputs and rejects unsafe `rg` ignore-bypass options
   - gate command can reject data/control boundary leaks at the repo source level
@@ -38,6 +39,7 @@
   - feature-map duplicate seed-entry detection
   - resource-map parser and consistency checks, including required core resources, unique owner backlinks, operation binding completeness, source-edge registry backlinks, forbidden/direct relation conflict rejection, forbidden direct relations backed by matching indirect relation rules, source shortcut gates, and precise source-edge gates
   - ADP protocol artifact gate regenerates JSON and JS outputs through `export-adp-protocol`, diffs committed artifacts, and scans WebUI consumers for generated constructor usage
+  - WebUI foundation gate imports the runtime surface registry, validates non-empty typed fields, immutable string arrays, unique surface/DOM-root identities, and rejects empty or key-mismatched registries plus invalid shared-state/action contracts
   - OpenMinis migration manifest loader/value validator checks the lifecycle envelope, owner/touched-feature references, source scope exclusions, required per-node gates, and every lifecycle state's canonical repository-relative function/mainline/test map paths; the three map sets must name the same feature ids, include the owner feature, stay in their unique map directories, and prove each document's path/self/feature identity
   - OpenMinis migration lifecycle validator has a separate contract per status: `owner_mapped` requires owner/resource/operation truth without target symbols; `contract_ready` and `implementation_in_progress` require complete protocol/surface fields; `source_bound` and later require real target symbols; blocked states retain their named pending boundary and cannot masquerade as implemented
   - promoted OpenMinis nodes bind their source resource, target resource, operation owner, bound status, allowed direct relation, and exact non-empty incident `route_edge_ids` set to canonical resource/topology registries; invented endpoints, missing/unrelated route edges, and owner/touched-feature drift fail
@@ -71,6 +73,7 @@
   - loop governance docs include required L1 report-only files and deny automated action until explicit L2 approval
 - module black-box plan:
   - `xtask gates check` smoke from repo root, including ADP generated artifact freshness
+  - `node scripts/verify-webui-foundation-contracts.mjs` positive runtime registry/shared-state proof plus built-in negative schema mutations
   - `xtask mainlines check` smoke from repo root
   - `cargo test -p xtask` manifest-link positive and negative tests
   - `cargo test -p xtask` call-table binding positive and negative tests
@@ -95,6 +98,7 @@
   - loop governance doc smoke validates required files are present and owner-bound through `foundation.workspace`
 - project black-box impact:
   - full workspace `make ci` gate smoke, including `cargo run -p xtask -- mainlines check`
+  - `cargo run -p xtask -- gates check` invokes `verify_webui_foundation_contracts`, so WebUI foundation schema drift blocks the canonical project gate
   - `scripts/release.sh` stages host and Android release artifacts plus `dist/android/update.json` under `dist/`
   - `scripts/install-global.sh` installs `freehand-cli`, `freehand-server`, `freehand-daemon`, and runtime-home Android update artifacts
   - `scripts/install-symlink.sh` installs `freehand-cliS`, `freehand-serverS`, `freehand-daemonS`, and `freehand-daemon-launchdS` as symlinks
