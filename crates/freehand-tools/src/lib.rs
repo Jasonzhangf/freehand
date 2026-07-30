@@ -1,5 +1,9 @@
 //! Tool registry and built-in tool surface for Freehand.
 
+#![recursion_limit = "512"]
+
+mod camo;
+
 use std::cell::RefCell;
 use std::collections::BTreeMap;
 use std::env;
@@ -268,7 +272,7 @@ impl BuiltinToolRegistry {
             .values()
             .filter(|spec| {
                 spec.implemented
-                    && (matches!(spec.definition.name.as_str(), "task" | "timer")
+                    && (matches!(spec.definition.name.as_str(), "task" | "timer" | "camo")
                         || self.execution_scope(&spec.definition.name)
                             == Some(BuiltinToolExecutionScope::Workspace)
                         || self.execution_scope(&spec.definition.name)
@@ -285,6 +289,7 @@ impl BuiltinToolRegistry {
                 spec.implemented
                     && spec.definition.name != "task"
                     && spec.definition.name != "timer"
+                    && spec.definition.name != "camo"
                     && self.execution_scope(&spec.definition.name)
                         != Some(BuiltinToolExecutionScope::Shell)
             })
@@ -322,6 +327,7 @@ impl BuiltinToolRegistry {
             "task" | "timer" | "todo_write" | "complete_step" => {
                 BuiltinToolExecutionScope::Framework
             }
+            "camo" => BuiltinToolExecutionScope::Framework,
             "bash" | "bg_jobs" | "kill_shell" | "wait_job" => BuiltinToolExecutionScope::Shell,
             "web_fetch" => BuiltinToolExecutionScope::Network,
             _ => BuiltinToolExecutionScope::Workspace,
@@ -401,6 +407,7 @@ impl BuiltinToolRegistry {
             "grep" => execute_grep(&call.tool_call.arguments),
             "ls" => execute_ls(&call.tool_call.arguments),
             "web_fetch" => execute_web_fetch(&call.tool_call.arguments),
+            "camo" => camo::execute_camo_impl(&call.tool_call.arguments),
             "todo_write" => execute_todo_write(&call.tool_call.arguments),
             "complete_step" => execute_complete_step(&call.tool_call.arguments),
             "delete_range" => execute_delete_range(&call.tool_call.arguments),
@@ -494,6 +501,16 @@ fn builtin_tool_examples(name: &str) -> Vec<String> {
                 .to_owned(),
         ],
         "bash" => vec![r#"{"command":"cargo test -p freehand-tools","timeout_seconds":900}"#.to_owned()],
+        "camo" => vec![
+            r#"{"command":"profile","profile":"test","profile_op":"create"}"#.to_owned(),
+            r#"{"command":"start","profile":"test","url":"https://example.com"}"#.to_owned(),
+            r#"{"command":"goto","profile":"test","url":"https://example.com/page"}"#.to_owned(),
+            r##"{"command":"click","profile":"test","selector":"#btn"}"##.to_owned(),
+            r##"{"command":"type","profile":"test","selector":"#inp","text":"hello"}"##.to_owned(),
+            r#"{"command":"screenshot","profile":"test"}"#.to_owned(),
+            r#"{"command":"devtools","profile":"test","devtools_op":"eval","expression":"document.title"}"#.to_owned(),
+            r#"{"command":"stop","profile":"test"}"#.to_owned(),
+        ],
         _ => Vec::new(),
     }
 }
@@ -522,6 +539,15 @@ fn builtin_tool_guidance(name: &str) -> Vec<String> {
         ],
         "bash" => vec![
             "Generic owner-test foreground shell tool; not exposed to Master or Worker live model surfaces.".to_owned(),
+        ],
+        "camo" => vec![
+            "All operations go through `camo <cmd>` (subcommand word is the `command` field).".to_owned(),
+            "Profile id, URL, selector, and type text are positional arguments, not flags. `camo goto` takes URL as positional, `camo click` takes selector as positional, `camo type` takes selector and text as positional.".to_owned(),
+            "Create a profile with `camo profile create <id>` before first use; without an existing profile the daemon fails fast with `profile not found`.".to_owned(),
+            "For long-running browser tasks, start the named profile once, reuse it across calls, then `camo stop` when done. Do not start/stop per call.".to_owned(),
+            "Ephemeral mode omits `profile` and uses the persisted default profile; that profile must still exist.".to_owned(),
+            "Argument `url` is positional for `goto` but becomes a `--url` flag for `start` and `new-page`; the typed builder handles this asymmetry.".to_owned(),
+            "JavaScript eval is `camo devtools eval <profileId> <expression>`: use `devtools_op` plus `expression`.".to_owned(),
         ],
         "todo_write" | "complete_step" => vec![
             "Worker-safe framework progress tool; not exposed to Master live turns.".to_owned(),
@@ -984,6 +1010,94 @@ pub fn reasonix_aligned_builtin_specs() -> Vec<BuiltinToolSpec> {
                 "required": ["op"]
             }),
         ),
+        spec(
+            "camo",
+            true,
+            true,
+            "Browser automation via @web-auto/camo@0.3.5 CLI (camoufox). All operations go through `camo <subcommand>`. Profile-aware commands require profile created with `camo profile create <id>` first. Profile, URL (for goto), selector (for click/type/highlight), and text (for type) are positional arguments, not flags. See `camo help` for all subcommands.",
+            json!({
+                "type": "object",
+                "properties": {
+                    "profile": {
+                        "type": "string",
+                        "description": "Browser profile name (positional, not a flag). Must be created with `camo profile create <id>` before use. Omit to use the default profile."
+                    },
+                    "command": {
+                        "type": "string",
+                        "description": "camo subcommand. Lifecycle: start|stop|status. Navigation: goto|back|screenshot. Interaction: click|type|scroll|highlight|clear-highlight|viewport|mouse|window. Pages: new-page|close-page|switch-page|list-pages. DevTools: devtools. System: sessions|instances|cleanup|force-stop|lock|unlock|shutdown|version|profiles|profile|init|create|config|highlight-mode|attach. Cookies: cookies. Recording: record. Container: container. Autoscript: autoscript. Events: events. System: system. Run `camo help` for full list.",
+                        "enum": [
+                            "start", "stop", "status", "goto", "back", "screenshot",
+                            "click", "type", "scroll", "highlight", "clear-highlight",
+                            "viewport", "mouse", "window", "new-page", "close-page",
+                            "switch-page", "list-pages", "devtools", "sessions",
+                            "instances", "cleanup", "force-stop", "lock", "unlock",
+                            "shutdown", "version", "profiles", "profile", "init",
+                            "create", "config", "highlight-mode", "attach",
+                            "cookies", "record", "container", "autoscript", "events",
+                            "system"
+                        ]
+                    },
+                    "url": {"type": "string", "description": "URL. Positional for goto; flag (--url) for start and new-page."},
+                    "selector": {"type": "string", "description": "CSS selector. Positional for click, type, highlight, scroll, switch-page, close-page, container watch."},
+                    "text": {"type": "string", "description": "Text string. Positional third arg for type."},
+                    "index": {"type": "integer", "description": "Page index. Positional for switch-page and close-page."},
+                    "direction": {"type": "string", "description": "Scroll direction: down|up|left|right.", "enum": ["down", "up", "left", "right"]},
+                    "full": {"type": "boolean", "description": "Full-page screenshot."},
+                    "highlight": {"type": "boolean", "description": "Enable highlight for scroll, click, type."},
+                    "visible": {"type": "boolean", "description": "Show browser window."},
+                    "no_headless": {"type": "boolean", "description": "Disable headless mode."},
+                    "devtools": {"type": "boolean", "description": "Enable devtools."},
+                    "record": {"type": "boolean", "description": "Enable recording."},
+                    "record_overlay": {"type": "boolean", "description": "Enable overlay recording."},
+                    "record_name": {"type": "string", "description": "Recording name."},
+                    "record_output": {"type": "string", "description": "Recording output path."},
+                    "record_op": {"type": "string", "description": "Record sub-op: start|stop|status."},
+                    "alias": {"type": "string", "description": "Session alias."},
+                    "idle_timeout": {"type": "string", "description": "Idle timeout duration e.g. 45m."},
+                    "width": {"type": "integer", "description": "Viewport width in pixels."},
+                    "height": {"type": "integer", "description": "Viewport height in pixels."},
+                    "x": {"type": "integer", "description": "X coordinate."},
+                    "y": {"type": "integer", "description": "Y coordinate."},
+                    "button": {"type": "string", "description": "Mouse button: left|right|middle."},
+                    "clicks": {"type": "integer", "description": "Number of clicks."},
+                    "delay": {"type": "integer", "description": "Delay in ms."},
+                    "deltax": {"type": "integer", "description": "Delta X for mouse wheel."},
+                    "deltay": {"type": "integer", "description": "Delta Y for mouse wheel."},
+                    "amount": {"type": "integer", "description": "Scroll amount in pixels."},
+                    "devtools_op": {"type": "string", "description": "DevTools sub-op: logs|eval|clear."},
+                    "expression": {"type": "string", "description": "JavaScript expression for devtools eval (positional)."},
+                    "levels": {"type": "string", "description": "Log levels e.g. error,warn."},
+                    "limit": {"type": "integer", "description": "Log limit."},
+                    "since": {"type": "integer", "description": "Since timestamp in ms."},
+                    "clear": {"type": "boolean", "description": "Clear logs."},
+                    "profile_op": {"type": "string", "description": "Profile sub-op: create|delete|default|list."},
+                    "create_op": {"type": "string", "description": "Create sub-op: fingerprint|profile."},
+                    "cookies_op": {"type": "string", "description": "Cookies sub-op: get|save|load|auto."},
+                    "container_op": {"type": "string", "description": "Container sub-op: init|sets|register|targets|filter|watch|list."},
+                    "autoscript_op": {"type": "string", "description": "Autoscript sub-op: validate|explain|snapshot|replay|run|resume|mock-run."},
+                    "events_op": {"type": "string", "description": "Events sub-op: serve|tail|recent|emit."},
+                    "path": {"type": "string", "description": "File path."},
+                    "source": {"type": "string", "description": "Source directory."},
+                    "site": {"type": "string", "description": "Site key."},
+                    "force": {"type": "boolean", "description": "Force flag."},
+                    "jsonl_file": {"type": "string", "description": "JSONL file path."},
+                    "summary_file": {"type": "string", "description": "Summary file path."},
+                    "snapshot": {"type": "string", "description": "Snapshot file path."},
+                    "from_node": {"type": "string", "description": "Resume from node ID."},
+                    "fixture": {"type": "string", "description": "Fixture file."},
+                    "reason": {"type": "string", "description": "Reason text."},
+                    "event": {"type": "string", "description": "Event name."},
+                    "host": {"type": "string", "description": "Host."},
+                    "port": {"type": "integer", "description": "Port."},
+                    "interval": {"type": "integer", "description": "Interval in ms."},
+                    "highlight_mode": {"type": "string", "description": "Highlight mode: status|on|off.", "enum": ["status", "on", "off"]},
+                    "os": {"type": "string", "description": "OS: mac|windows|linux."},
+                    "region": {"type": "string", "description": "Region: us|uk|jp|cn."},
+                    "padding": {"type": "string", "description": "QR screenshot padding."}
+                },
+                "required": ["command"]
+            }),
+        ),
     ]
 }
 
@@ -1279,7 +1393,6 @@ fn execute_web_fetch(arguments: &[ToolArgument]) -> Result<ToolExecutionOutput, 
         ),
     })
 }
-
 fn execute_read_file(arguments: &[ToolArgument]) -> Result<ToolExecutionOutput, ToolRegistryError> {
     let path = required_string(arguments, "read_file", "path")?;
     let root = locked_workspace_root("read_file")?;
@@ -2508,8 +2621,8 @@ mod tests {
         assert!(names.contains(&"web_fetch".to_owned()));
         assert_eq!(
             names.len(),
-            11,
-            "master surface must contain local workspace tools plus task/timer/web_fetch"
+            12,
+            "master surface must contain local workspace tools plus task/timer/web_fetch/camo"
         );
         for forbidden in ["todo_write", "complete_step", "bash"] {
             assert!(
