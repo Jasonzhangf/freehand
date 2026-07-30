@@ -2,7 +2,7 @@
 
 ## Status
 
-- status: `design_baseline`
+- status: `migration_in_progress`
 - machine manifest:
   `docs/migrations/openminis-ui/ui-tree.manifest.json`
 - SOP: `docs/migrations/openminis-ui/function-map-sop.md`
@@ -12,8 +12,9 @@
 
 This tree describes the complete non-browser UI migration scope. It describes
 semantic parity and Freehand target ownership, not visual parity.
-All current non-blocked nodes start at `inventoried`; no implementation or
-online-verification claim is made by this baseline.
+Node status in the tables below mirrors the machine manifest. Only nodes whose
+owner, operation, target symbol, and mapped gates are bound may advance beyond
+`inventoried`; no `online_verified` claim is made without signed online evidence.
 
 ## Tree
 
@@ -106,6 +107,73 @@ flowchart TD
   NewSession --> Session
 ```
 
+## Entrypoint And Registered Paths
+
+- entrypoint_node_id: `foundation.root`
+
+### Forward Edges
+
+| edge_id | from_node_id | to_node_id | semantic |
+| --- | --- | --- | --- |
+| `ui_tree.foundation.root.to.home.dashboard` | `foundation.root` | `home.dashboard` | `contains_or_navigates_to` |
+| `ui_tree.foundation.root.to.session_detail.root` | `foundation.root` | `session_detail.root` | `contains_or_navigates_to` |
+| `ui_tree.foundation.root.to.tools.registry` | `foundation.root` | `tools.registry` | `contains_or_navigates_to` |
+| `ui_tree.foundation.root.to.settings.root` | `foundation.root` | `settings.root` | `contains_or_navigates_to` |
+| `ui_tree.foundation.root.to.session_search.root` | `foundation.root` | `session_search.root` | `contains_or_navigates_to` |
+| `ui_tree.foundation.root.to.new_session.root` | `foundation.root` | `new_session.root` | `contains_or_navigates_to` |
+| `ui_tree.foundation.root.to.timer.dashboard` | `foundation.root` | `timer.dashboard` | `contains_or_navigates_to` |
+| `ui_tree.foundation.root.to.files_artifacts.root` | `foundation.root` | `files_artifacts.root` | `contains_or_navigates_to` |
+| `ui_tree.foundation.root.to.skills.root` | `foundation.root` | `skills.root` | `contains_or_navigates_to` |
+| `ui_tree.foundation.root.to.memory.root` | `foundation.root` | `memory.root` | `contains_or_navigates_to` |
+| `ui_tree.foundation.root.to.integrations.root` | `foundation.root` | `integrations.root` | `contains_or_navigates_to` |
+| `ui_tree.foundation.root.to.platform.android_bridge` | `foundation.root` | `platform.android_bridge` | `contains_or_navigates_to` |
+| `ui_tree.home.dashboard.to.session_detail.root` | `home.dashboard` | `session_detail.root` | `contains_or_navigates_to` |
+| `ui_tree.session_detail.root.to.session_detail.header` | `session_detail.root` | `session_detail.header` | `contains_or_navigates_to` |
+| `ui_tree.session_detail.root.to.session_detail.transcript` | `session_detail.root` | `session_detail.transcript` | `contains_or_navigates_to` |
+| `ui_tree.session_detail.root.to.session_detail.composer` | `session_detail.root` | `session_detail.composer` | `contains_or_navigates_to` |
+| `ui_tree.session_detail.root.to.session_detail.agent_sheet` | `session_detail.root` | `session_detail.agent_sheet` | `contains_or_navigates_to` |
+| `ui_tree.session_detail.transcript.to.turn_blocks.user` | `session_detail.transcript` | `turn_blocks.user` | `contains_or_navigates_to` |
+| `ui_tree.session_detail.transcript.to.turn_blocks.assistant` | `session_detail.transcript` | `turn_blocks.assistant` | `contains_or_navigates_to` |
+| `ui_tree.session_detail.transcript.to.turn_blocks.reasoning` | `session_detail.transcript` | `turn_blocks.reasoning` | `contains_or_navigates_to` |
+| `ui_tree.session_detail.transcript.to.turn_blocks.tool_activity` | `session_detail.transcript` | `turn_blocks.tool_activity` | `contains_or_navigates_to` |
+| `ui_tree.session_detail.transcript.to.turn_blocks.attachment` | `session_detail.transcript` | `turn_blocks.attachment` | `contains_or_navigates_to` |
+| `ui_tree.session_detail.transcript.to.turn_blocks.artifact` | `session_detail.transcript` | `turn_blocks.artifact` | `contains_or_navigates_to` |
+| `ui_tree.session_detail.transcript.to.turn_blocks.error` | `session_detail.transcript` | `turn_blocks.error` | `contains_or_navigates_to` |
+| `ui_tree.tools.registry.to.tools.detail` | `tools.registry` | `tools.detail` | `contains_or_navigates_to` |
+| `ui_tree.settings.root.to.settings.models` | `settings.root` | `settings.models` | `contains_or_navigates_to` |
+| `ui_tree.settings.root.to.settings.agent_runtime` | `settings.root` | `settings.agent_runtime` | `contains_or_navigates_to` |
+| `ui_tree.settings.root.to.settings.connection` | `settings.root` | `settings.connection` | `contains_or_navigates_to` |
+| `ui_tree.settings.root.to.settings.observability` | `settings.root` | `settings.observability` | `contains_or_navigates_to` |
+| `ui_tree.settings.root.to.settings.appearance` | `settings.root` | `settings.appearance` | `contains_or_navigates_to` |
+| `ui_tree.settings.root.to.settings.about` | `settings.root` | `settings.about` | `contains_or_navigates_to` |
+| `ui_tree.session_search.root.to.session_detail.root` | `session_search.root` | `session_detail.root` | `contains_or_navigates_to` |
+| `ui_tree.new_session.root.to.session_detail.root` | `new_session.root` | `session_detail.root` | `contains_or_navigates_to` |
+| `ui_tree.foundation.root.to.foundation.surface_contract` | `foundation.root` | `foundation.surface_contract` | `contains_or_navigates_to` |
+| `ui_tree.foundation.root.to.foundation.protocol_calls` | `foundation.root` | `foundation.protocol_calls` | `contains_or_navigates_to` |
+| `ui_tree.foundation.root.to.foundation.shared_states` | `foundation.root` | `foundation.shared_states` | `contains_or_navigates_to` |
+| `ui_tree.session_detail.composer.to.composer.text_submit` | `session_detail.composer` | `composer.text_submit` | `contains_or_navigates_to` |
+| `ui_tree.session_detail.composer.to.composer.attachments` | `session_detail.composer` | `composer.attachments` | `contains_or_navigates_to` |
+| `ui_tree.session_detail.composer.to.composer.queue` | `session_detail.composer` | `composer.queue` | `contains_or_navigates_to` |
+| `ui_tree.session_detail.composer.to.composer.stop_continue` | `session_detail.composer` | `composer.stop_continue` | `contains_or_navigates_to` |
+| `ui_tree.session_detail.composer.to.composer.voice` | `session_detail.composer` | `composer.voice` | `contains_or_navigates_to` |
+| `ui_tree.tools.registry.to.tools.activity` | `tools.registry` | `tools.activity` | `contains_or_navigates_to` |
+| `ui_tree.tools.registry.to.tools.permissions` | `tools.registry` | `tools.permissions` | `contains_or_navigates_to` |
+
+### Return Paths
+
+| from_node_id | to_node_id | semantic |
+| --- | --- | --- |
+| `session_detail.root` | `foundation.root` | `route_back_to_app_shell` |
+| `tools.registry` | `foundation.root` | `route_back_to_app_shell` |
+| `settings.root` | `foundation.root` | `route_back_to_app_shell` |
+| `session_search.root` | `foundation.root` | `route_back_to_app_shell` |
+| `new_session.root` | `foundation.root` | `route_back_to_app_shell` |
+| `timer.dashboard` | `foundation.root` | `route_back_to_app_shell` |
+| `files_artifacts.root` | `foundation.root` | `route_back_to_app_shell` |
+| `skills.root` | `foundation.root` | `route_back_to_app_shell` |
+| `memory.root` | `foundation.root` | `route_back_to_app_shell` |
+| `integrations.root` | `foundation.root` | `route_back_to_app_shell` |
+
 ## Migration Layers
 
 ```text
@@ -125,10 +193,10 @@ Layer 7  Android platform bridge
 
 | Node | Source reference | Freehand target | Initial status |
 | --- | --- | --- | --- |
-| `foundation.root` | `Views/ContentView.swift` | app shell, route controller, edge registry | `inventoried` |
-| `foundation.surface_contract` | OpenMinis view hierarchy as semantic input | `surfaces/*/{index,model,view,controls}` | `inventoried` |
+| `foundation.root` | `Views/ContentView.swift` | app shell, route controller, edge registry | `source_bound` |
+| `foundation.surface_contract` | OpenMinis view hierarchy as semantic input | `surfaces/*/{index,model,view,controls}` | `source_bound` |
 | `foundation.protocol_calls` | OpenMinis local action wiring, semantics only | generated ADP command/query path | `inventoried` |
-| `foundation.shared_states` | loading/empty/error/sheet patterns | shared render contracts | `inventoried` |
+| `foundation.shared_states` | loading/empty/error/confirmation/sheet patterns | shared render contracts | `implementation_in_progress` |
 
 ### Home and session navigation
 
@@ -252,5 +320,8 @@ SwiftUI layout/color/theme copying
 The tree is complete only when all included non-deferred nodes are
 `online_verified`, blocked nodes have real owners/contracts and then pass the
 same state progression, and all corresponding legacy duplicate paths are
-retired. The machine manifest, product UI tree, function maps, mainline call
-maps, and tests must agree.
+retired. Every retirement must use exactly one owner-feature mainline
+`legacy_scan_roots` row whose paths and removed identity sets exactly match the
+node lifecycle record and whose paths cover the node's bound targets and removed
+paths; manifest-selected arbitrary scan roots are invalid. The machine manifest,
+product UI tree, function maps, mainline call maps, and tests must agree.

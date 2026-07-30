@@ -8910,3 +8910,463 @@ Provider truth remains separate: Master/worker/worker-2/worker-3 are now configu
 - WebView DevTools opened exact Worker session `worker-task-task-1785166804`. DOM proved `data-recovery-state=historical_failure_recovered`, normal text `历史失败 · 后续已恢复`, no raw 401, exact task closed, and the later Success transcript remained visible.
 - Real-device screenshots: `artifacts/webui-online/worker-recovered-history-android.png` and `artifacts/webui-online/worker-recovered-history-android-card.png`.
 - The earlier stylesheet splash was transient device/WebView startup state; package-scoped restart plus live layout probe closed it without Android source change or APK rebuild.
+
+## 2026-07-28 — OpenMinis UI migration gate hardening implementation
+
+- Foundation gate worktree split the OpenMinis migration verifier out of the giant xtask entry file and then partitioned it by concern under `xtask/src/openminis_ui_migration/`; every Rust source file is below 500 lines.
+- Gate now validates independent lifecycle contracts and aggregate manifest phase; deterministic `external/OpenMinis`/CI commit identity; recursive pinned path/symbol resolution; BrowserUse/Cookie/Profile/Takeover exclusions; exact human/machine entrypoint/edge/return registries; exact bound target/mainline/resource-operation rows; exact shared-function caller/direct-test graph from sanitized Rust bodies; JSON evidence node/gate/command/result/run identity; and independent legacy path/symbol/import/caller disappearance plus online `legacy_touched=false` proof.
+- Pinned OpenMinis HEAD verified as `9cf3a855fecd27bb5735b84cacbd56852a3ab8dd`; all 41 current node source inventories pass. Focused OpenMinis gate tests pass 28/28; `mainlines check` and `xtask gates check` pass after map/wiki regeneration.
+- Current manifest remains `design_baseline` with 32 inventoried and 9 blocked nodes. No migration node was falsely promoted; Review PASS and full validation remain before implementation begins.
+
+## 2026-07-28 — OpenMinis migration gate Round 4 findings closed
+
+- Removed dead duplicate `RustFunctionBody.owner` storage and the dummy `_owned_function_count`; owner truth remains only in the call-graph `definitions` map.
+- Mainline registry now uses one real direct caller-to-callee edge per `graph_id=openminis_ui_migration` row. Sanitized Rust bodies automatically derive the complete multi-reference production function set; the gate compares the exact `shared_functions`, direct callers, direct tests, and full production edge set without a tracked-symbol whitelist.
+- CI pin validation parses YAML and accepts only one checkout step that jointly binds `OpenMinis/OpenMinis`, manifest SHA, and `external/OpenMinis`; matching values in a later unrelated step fail.
+- Evidence/retirement paths share canonical repository-relative validation. Absolute, backslash, dot-segment, non-canonical, and canonicalized repository-escape paths fail; `/tmp` scan-path negative coverage passes.
+- Documentation/skill/test-design now state these executable contracts explicitly. Manifest remains truthful `design_baseline`: 41 nodes = 32 inventoried + 4 blocked_resource_missing + 4 blocked_owner_missing + 1 blocked_protocol_missing; no node was promoted.
+- Verified after final edits: `mainlines generate/check`, 31 focused OpenMinis positive/negative tests, 81 full xtask tests, `cargo fmt --check`, `cargo build --workspace`, `cargo clippy --workspace --all-targets -- -D warnings`, `xtask gates check`, and `git diff --check` all pass.
+- `cargo test --workspace` reaches the pre-existing CLI ADP mock prerequisite and fails 18 `apps/freehand-cli/tests/config_startup.rs` tests because mock WebSocket servers omit the new authenticated upgrade headers. That repair is owned by the separate active claim `feature_app.cli-runtime-smoke_adp-auth-test-fixture`; this migration claim did not copy or overwrite its dirty main-worktree patch.
+- Remaining gate-baseline action is an additional Codex Review. Prior Round 4 exceeded the project maximum three repair rounds and returned FAIL before these fixes, so the next review requires explicit Jason authorization; no migration node implementation starts before `VERDICT: PASS`.
+
+## 2026-07-28 — OpenMinis legacy retirement owner-bound scan-root test design
+
+- Round 4 路径闭合只证明 `scan_paths` 位于仓内，仍允许节点自选仓内空目录并虚假证明 symbol/import/caller 消失。
+- 唯一修改点确定为 `foundation.workspace` 的 migration retirement gate：`legacy_retired` 必须从节点所属 owner feature 的 mainline JSON 读取唯一 `legacy_scan_roots` 记录；manifest 只能精确引用该记录，不能自选扫描根。
+- 生命周期闭环要求：registry 的 node/owner 与 manifest 一致；扫描根为 canonical 仓内目录；覆盖节点全部 bound target paths 和 removed paths；正向锁定 owner-bound retirement，反向锁定空目录、wrong owner、registry drift、target/removed path 未覆盖。
+
+## 2026-07-28 — OpenMinis owner-bound legacy scan-root gate verification
+
+- 实现 `MainlineCallDoc.legacy_scan_roots` machine registry 和 generated wiki renderer；`legacy_retired` 只接受节点 owner feature 的 canonical/self-identifying mainline 中唯一 row。
+- Retirement gate 精确比较 node/owner/scan paths，要求每个 scan root 是 canonical 仓内目录并覆盖全部 bound target paths 与 removed paths；manifest 自选仓内空目录不再能生成虚假消失证明。
+- 正向通过 owner-bound retirement。反向已锁：空目录、missing/duplicate registry、错误 mainline identity、wrong owner、非目录、registry drift、target 未覆盖、removed path 未覆盖，以及既有 absolute/out-of-repo/remaining identity/legacy_touched。
+- 验证通过：`mainlines generate/check`、32 个 OpenMinis focused tests、82 个 xtask tests、`cargo fmt --check`、`cargo build --workspace`、`cargo clippy --workspace --all-targets -- -D warnings`、`xtask gates check`、staged/unstaged diff checks。
+- `cargo test --workspace -- --test-threads=1` 仍在独立 claim `feature_app.cli-runtime-smoke_adp-auth-test-fixture` 边界失败：CLI mock servers 缺 authenticated WebSocket upgrade header，6 passed / 18 failed；本 migration claim 未复制或覆盖主 worktree 的 auth fixture 脏改动。
+
+## 2026-07-28 — OpenMinis worktree recovery and path-boundary audit
+
+- `/private/tmp` 隔离 worktree 被外部清理；Git worktree admin index 仍完整。已导出 SHA-256 `aed5c01c61c4726f1e6deb3e0cf45bf4de9d9e44546f30dd7d6b1f7a8097728c` recovery patch，在稳定卷 `/Volumes/extension/code/freehand-worktrees/20260728T020636Z-openminis-foundation-gates` 新建 detached worktree 并精确恢复 staged migration diff；未删除旧 admin entry。
+- 重新从 `OpenMinis/OpenMinis` 检出 pinned commit `9cf3a855fecd27bb5735b84cacbd56852a3ab8dd`；恢复后 32 个 focused OpenMinis tests 通过。
+- 额外静态审计确认同类路径边界：target/mainline 直接 `root.join` 可被绝对路径绕过；removed-path `exists()` 会把 broken symlink 误判为已删除；递归扫描会跟随 symlink。测试设计先扩展为 canonical 仓内相对路径、全组件禁 symlink、broken legacy symlink 仍算物理存在。
+
+## 2026-07-28 OpenMinis migration gate review round 5 findings
+
+- Codex Review final verdict: FAIL with two P1 findings: pre-`source_bound` map paths admitted absolute host files through `Path::join`, and the call graph merged definitions/callers by bare function name.
+- Test design was updated before implementation. The manifest gate now validates every lifecycle state's function/mainline/test documents through canonical repository-relative, symlink-free, unique-directory paths; all three sets must carry the same feature ids, include the owner, and each Markdown/JSON document must prove path/self identity.
+- The textual bare-name call scanner was physically replaced by a `syn`-parsed Rust module/import/definition/direct-call graph. Registry symbols, callers, related tests, and graph call-table rows now use `crate::...` module-qualified identities. A red test locks the existing `test_repo_root` collision in `crate::tests` versus `crate::openminis_ui_migration::tests::common` as distinct definitions and caller sets.
+- Focused result after the fix: `cargo test -p xtask openminis_ui_migration_ -- --nocapture` passed 37/37; complete xtask suite passed 87/87. Full baseline and final Codex Review still pending.
+
+## 2026-07-28 OpenMinis migration gate Review round 6 remediation
+
+- Review root causes were confirmed in code: promoted node admission did not bind canonical operation owner/endpoints/relation; aggregate completion accepted `online_verified`; evidence trusted artifact self-report beyond identity; parsed call truth admitted cfg-disabled items; `call_graph.rs` exceeded the project file-size boundary.
+- Test design was updated first. Implementation now structurally binds promoted nodes to one bound resource operation and allowed direct relation, requires all nodes `legacy_retired` for `migration_complete`, locks canonical evidence command/proof kind/required assertions, and parses current `rustc --print cfg` plus explicit test cfg while rejecting inactive/unsupported cfg items.
+- Call-graph discovery is split into `call_graph.rs` (registry comparison), `call_graph/discovery.rs` (module/import/call discovery), and `call_graph/cfg.rs` (cfg admission); all are below 500 lines.
+- Focused OpenMinis tests pass 41/41 and full xtask tests pass 91/91 after machine mainline caller/edge truth and generated wiki synchronization. Full workspace validation and Codex Review remain pending.
+- Full validation passed: xtask 91/91, fmt, workspace build, workspace clippy, mainlines check, gates check, and staged/unstaged diff checks. `cargo test --workspace` remains red only in the separately claimed CLI ADP auth fixture boundary: `apps/freehand-cli/tests/config_startup.rs` passed 6/24 and failed 18/24 with `Protocol(MissingConnectionUpgradeHeader)` / reset-by-peer; this claim did not modify that file.
+
+## 2026-07-28 — OpenMinis migration gate Review round 7 findings closeout
+
+- Round 7 的四个 P1 已转成正反测试：evidence attestation 绑定 distinct verifier report path + SHA-256，并校验 schema/verifier/command/run/process/timestamps/assertions；target 与 pinned Swift symbol 统一走 `declarations.rs` 的唯一 declaration index；三类 map feature set 必须精确等于 `touched_feature_ids`；全 `online_verified` 仍是 `migration_in_progress`，只有全 `legacy_retired` 可 `migration_complete`。
+- 声明真源揭露 manifest 三个伪 symbol：`ImagePreview`、`AudioPreview`、`OffloadPermissionDialog` 在 pinned source 中不是 declaration。已改为真实 declaration `ImagePreviewView`、`MinisAudioPreviewView`、`OffloadPermissionDialogContent`；全 43 个唯一 source symbol 通过 pinned checkout 验证。
+- `evidence.rs` 超过单文件边界后拆成 attestation/report admission 与 `evidence/retirement.rs` retirement concern，wrapper 保留原 mainline entry，真实 shared caller registry 已同步。
+- Round 7 红测与完整 xtask 验证：focused 47/47、xtask 97/97；workspace build、fmt、clippy、mainlines、gates、diff checks 全绿。尚待 workspace test（已知 CLI ADP auth fixture 独立 claim）与 Codex Review round 8。
+
+## 2026-07-28 — OpenMinis migration gate Review round 9 remediation
+
+- Evidence root cause: repository reports claimed `xtask gates check`, while that aggregate gate consumed the same reports, creating a self-certification cycle; verifier reports also lacked node identity.
+- Unique evidence-owner fix: repository reports now use `cargo run -p xtask -- openminis-ui verify-node <node_id>`. The command validates a source-bound projection with all promoted nodes demoted and evidence/retirement records removed, so report generation cannot consume itself. Every raw report must match the exact `node_id` and `migration_unit_id`.
+- Call-map root cause: direct-edge targets were selected by callee-name prefixes, and the expression visitor could enter a nested function body and attribute its calls to the outer caller.
+- Unique discovery-owner fix: every production migration definition is now a call-edge target with no name whitelist. The machine mainline gained all 65 previously omitted direct edges, including legacy-retirement checker ownership. Nested functions are rejected explicitly after cfg admission so neither active nor cfg-disabled nested bodies can forge an outer direct edge.
+- Positive/negative tests now cover non-recursive repository evidence, cross-node raw-report drift, all production edge registration, and active/cfg-disabled nested function rejection.
+- Round 9 remediation verification passed: focused OpenMinis 53/53, full xtask 103/103, workspace build, workspace clippy, fmt, mainlines generate/check, gates check, staged/unstaged diff checks. All migration Rust files are below 500 lines after extracting `node_verifier.rs` and redistributing two evidence tests.
+
+## 2026-07-28 — OpenMinis migration gate Codex Review round 10 closeout
+
+- Codex Review round 10 returned an unambiguous semantic PASS without the literal `VERDICT: PASS` line. The conclusion explicitly states `无 fallback/P0/MAP-DRIFT/ARCH evidence`, lists positive evidence (53/53 OpenMinis tests, workspace build OK, manifest design_baseline, no promoted nodes, no fallback, map/SOP/AGENTS/wiki in sync), and isolates the only remaining gap (CLI ADP auth fixture red) to the unrelated claim `feature_app.cli-runtime-smoke_adp-auth-test-fixture`.
+- Project AGENTS.md rule 36 accepts an unambiguous semantic PASS even without the literal line as long as no FAIL / P0 / P1 blocking findings exist; this round qualifies under that clause. Heartbeat now records the closeout and waits for explicit Jason authorization before promoting any migration node.
+- Local validation already passed in this round: `cargo fmt --check`, `cargo clippy --workspace --all-targets -- -D warnings`, `cargo build --workspace`, `cargo test -p xtask` (103/103), `cargo run -p xtask -- mainlines generate/check`, `cargo run -p xtask -- gates check`, and `git diff --check` / `git diff --cached --check`.
+
+## 2026-07-28 — Pre-commit foreign Git environment isolation
+
+- Real `git commit` reproduced a gate-only failure twice: the OpenMinis pinned-source check saw Freehand HEAD `d408136...` instead of OpenMinis `9cf3a855...`, while manual gates passed.
+- Git trace confirmed the pre-commit hook receives outer repository Git environment. Official Git hooks documentation requires clearing `git rev-parse --local-env-vars` before invoking Git against a foreign repository.
+- Unique hook-owner fix: `.githooks/pre-commit` clears those variables before Cargo gates. `verify_ci_cd_gate_commands` now requires the exact isolation line, with a red test proving a leaking hook fails. No gate or pinned-source validation was bypassed.
+
+## 2026-07-28 — Codex Review round 11 remediation
+
+- Review found two P1 truth gaps: coordinated repository-authored online report/artifact/digest JSON could self-report success, and source exclusion checked only a declared ancestor before recursively admitting descendant blobs.
+- Evidence-owner fix is fail-closed: repository gate reports remain auditable, but WebUI, Android-device, and legacy no-touch reports cannot promote lifecycle truth until a source-bound external provenance owner and gate land. A red test proves a field-perfect repository-authored WebUI success report is rejected.
+- Pinned-source owner now applies the same exclusion policy to every `git ls-tree -r` result before admitting it. A red test proves broad `src/ios` inventory fails when it contains a BrowserUse descendant.
+- Post-fix verification passed: focused OpenMinis 55/55, full xtask 106/106, workspace clippy/build, mainlines generate/check, gates check, fmt, and diff checks. MemoryPalace re-mined 594 drawers into wing `freehand`; the new lifecycle-provenance phrase resolves `MEMORY.md` at rank 1.
+
+## 2026-07-28 — Codex Review round 12 diagnosis contract
+
+```yaml
+symptom:
+  observed: "Round 12 found that the exact call graph omits impl/trait method definitions and ExprMethodCall edges, while target binding independently accepts a declaration and a mainline row in different files."
+  expected: "Every migration-owned Rust function or method and every direct call edge is machine-bound; each promoted target symbol is bound by a mainline row whose file_path is the declaration's exact repository-relative file."
+  entry: "codex --profile tcm review -"
+  ids: ["feature_foundation.workspace_openminis-migration-gates", "review-round-12"]
+  raw_evidence: [".agent-collab/runs/20260728T020636Z-Macstudio-42713-d2225e3f/codex-review-round-12.txt"]
+sop_model_flow:
+  status: known
+  flow_id: foundation.workspace.openminis-ui-migration-gates
+  source_docs: ["docs/resource-maps/core.json", "docs/function-maps/foundation.workspace.md", "docs/mainline-calls/foundation.workspace.json", "docs/testing/foundation.workspace.md", "docs/migrations/openminis-ui/function-map-sop.md"]
+  lifecycle_nodes: ["discover source declarations/calls", "resolve exact identities", "compare machine registry", "admit or fail"]
+  resource_edges: ["repository source -> foundation gate projection"]
+  forbidden_edges: ["unresolved source semantics -> successful migration truth"]
+  owner_graph: ["xtask/src/openminis_ui_migration/call_graph/discovery.rs", "xtask/src/openminis_ui_migration/binding.rs"]
+hypotheses:
+  - id: H1
+    cause: "collect_module_items only admits Item::Fn/Mod/Use and FunctionCallVisitor only records ExprCall."
+    modules: ["openminis_ui_migration.call_graph.discovery"]
+    supporting_evidence: "Source match is exhaustive over those three Item variants; declarations.rs already discovers impl/trait methods."
+    counter_evidence_or_gap: "Method identity and receiver resolution must remain deterministic and fail closed on ambiguity."
+    verification_action: "Add fixture methods/associated calls and assert exact module-qualified definitions and caller edges."
+    confidence: 100
+  - id: H2
+    cause: "verify_openminis_ui_target_bindings discards the unique DeclarationOccurrence.file and separately accepts any row below target_paths."
+    modules: ["openminis_ui_migration.binding"]
+    supporting_evidence: "The declaration cardinality loop does not retain its unique occurrence; row_path checks only target-root membership."
+    counter_evidence_or_gap: "Repository-relative normalization must match existing canonical path gate."
+    verification_action: "Add a two-file fixture where declaration is in a.js and the bound row points to b.js."
+    confidence: 100
+active_hypothesis: H1
+first_divergence_node: "Rust source discovery, then target declaration-to-row binding"
+root_cause_module: "call_graph/discovery.rs and binding.rs are two independent review findings with separate unique owners"
+unique_owner: "discover_rust_call_graph; verify_openminis_ui_target_bindings"
+allowed_paths: ["xtask/src/openminis_ui_migration/call_graph/discovery.rs", "xtask/src/openminis_ui_migration/tests/call_graph.rs", "xtask/src/openminis_ui_migration/binding.rs", "xtask/src/openminis_ui_migration/tests/topology_source_binding.rs", "docs/function-maps/foundation.workspace.md", "docs/mainline-calls/foundation.workspace.json", "docs/testing/foundation.workspace.md", "docs/migrations/openminis-ui/function-map-sop.md", "docs/migrations/openminis-ui/README.md", "docs/wiki/foundation.workspace.md", ".agents/skills/freehand-dev/SKILL.md", "note.md", "MEMORY.md"]
+forbidden_paths: ["runtime/provider/UI implementation paths", "migration node lifecycle status fields"]
+required_verification: ["red/green focused method-call graph tests", "red/green exact declaration-file binding tests", "cargo test -p xtask", "workspace build/clippy/fmt", "mainlines generate/check", "xtask gates check", "Codex Review"]
+exact_replay: "Round 12 source fixtures reproduce both static gate admissions; no runtime path is involved."
+```
+
+## 2026-07-28 — Codex Review round 12 remediation
+
+- Confirmed H1 at the Rust discovery owner: the old graph registered only free `Item::Fn` bodies and `ExprCall`, so module/lexical impl methods, trait defaults/impls, `Self` calls, and statically typed receiver calls were absent. Method discovery now lives in `call_graph/discovery/methods.rs`, assigns receiver/trait-qualified identities, keeps lexical item bodies out of the enclosing caller, applies cfg admission to methods, and records all real method-related production edges. `discovery.rs` and `methods.rs` remain below 500 lines.
+- Confirmed H2 at the target-binding owner: unique declaration cardinality was checked but `DeclarationOccurrence.file` was discarded, while an accepting row could name any file under broad `target_paths`. The owner now retains the canonical repository-relative declaration file and requires exact equality with the bound mainline row's `file_path`.
+- Positive/negative proof added: inherent/trait/default/trait-impl and associated/method calls resolve with exact callers; a declaration in `src/target.js` with a row forged to another valid `src/other.js` fails. Manifest aggregate wording now matches the enforced `legacy_retired` completion state.
+- Machine mainline truth now contains all 119 exact production edges, including 25 method-discovery edges absent before Round 12. Generated wiki, function map, test design, SOP, README, and local skill are synchronized.
+- Verification after remediation: focused OpenMinis 57/57; full xtask 108/108; workspace build; workspace clippy with warnings denied; fmt; mainlines generate/check; gates check; staged/unstaged diff checks. Migration remains `design_baseline`; no node was promoted.
+
+## 2026-07-28 — Codex Review round 13 remediation
+
+- Round 13 found three P1 machine-truth gaps: typed trait-method calls resolved only against inherent method identity and could disappear, test ownership was guessed from `::tests::`, and non-Rust declarations came from keyword token adjacency.
+- Call-graph owner now indexes inherent and trait-impl methods by receiver, so `worker.execute()` binds the exact `Worker::impl_Runner::execute` identity. Ambiguity and an unresolved method on a repository-local receiver without an external-trait owner are hard failures; repository-external receiver/trait methods remain outside the graph. Test ownership is stored on discovered callables from `#[test]`, test attributes, and ancestor `#[cfg(test)]`; a production module named `tests` remains production.
+- Declaration owner now uses parser ASTs only: Swift compiler `-frontend -dump-parse -enable-bare-slash-regex`, Rust `syn`, and JS/TS/Kotlin tree-sitter grammars. CI installs Swift before `make ci`, and the CI/CD gate has a negative test that rejects missing Swift setup. Regex/string/comment declaration forgeries do not resolve.
+- Red/green proof: typed trait dispatch, top-level/ancestor test attributes versus a production `tests` module, JavaScript regex forgery, and missing CI Swift parser. Focused OpenMinis tests pass 58/58 and full xtask passes 110/110 before final workspace verification. Manifest remains `design_baseline`; no migration node was promoted.
+
+- 2026-07-28: Round 14 review remediation: tree-sitter declaration parsing now rejects syntax-error trees before declaration traversal, with a malformed JS red test. OpenMinis workflow gate provisioning now applies to every workflow that runs `make ci`: pinned OpenMinis checkout and `swift-actions/setup-swift@v2` must appear before the full gate in the same job; release workflow is provisioned and covered by a negative test.
+
+- 2026-07-28: Round 15 review remediation: verifier reports now reject symbolic `repository_commit` values such as `HEAD`; source-revision evidence must carry a full 40-character immutable git SHA before tree comparison.
+
+### 2026-07-28T12:36:07Z OpenMinis migration gates Round 16 remediation
+- Codex Review Round 16 returned FAIL with two P1s: JS/TS/Kotlin tree-sitter declaration scanning accepted local-scope declarations, and Rust method-edge discovery normalized imported receiver types against the current module so direct method edges could be omitted.
+- Remediation: declaration collection now rejects nodes under local execution scopes before symbol admission; call-graph method discovery resolves receiver type paths through current-module `use` aliases and unique glob imports before falling back to lexical normalization.
+- Red/green coverage: added local-scope JS forged declaration assertions to `openminis_ui_migration_declarations_reject_lexical_forgeries` and added `openminis_ui_migration_call_graph_resolves_imported_receiver_types`.
+
+## 2026-07-28 OpenMinis migration gate Round 17 P2 closeout
+- Review P2s: imported `impl` receiver types could miss direct method edges; qualified UFCS calls could be ignored.
+- Remediation: `collect_impl` now resolves receiver/trait paths through module imports; `ExprPath` with `qself` fails closed with an explicit unsupported UFCS diagnostic. Added focused positive imported-impl and negative UFCS tests.
+
+## 2026-07-28 — Codex Review round 20 remediation
+
+- Round 20 returned two P1s and two P2s: unresolved identifier receivers after `unwrap` could omit local method edges; local macro/include expansion could hide direct calls; impl/trait methods lost ancestor test-module identity; broad Android target roots attempted to parse assets as declarations.
+- Call-graph owner now derives `Result`/`Option` success receiver types through `unwrap`/`expect`, rejects local macro definitions and `include!` before graph admission, and propagates ancestor test identity through top-level and lexical impl/trait collection.
+- Target-binding owner now filters recursively collected files to parser-supported declaration languages before reading/parsing, while exact target-symbol cardinality and exact declaration-file/mainline equality remain unchanged.
+- Paired fixtures prove unwrap receiver resolution, local macro/include rejection, test-only impl/trait identity, and successful Kotlin binding in a directory that also contains invalid UTF-8 PNG plus XML assets.
+- Post-remediation focused foundation stack passes: `cargo fmt --check`, `cargo clippy -p xtask --all-targets -- -D warnings`, `cargo test -p xtask` (122/122), `mainlines check`, `gates check`, and staged/unstaged diff checks. Foundation Review PASS is still pending; no migration node was promoted.
+
+## 2026-07-28 — Codex Review round 21 diagnosis and test design
+
+- Round 21 returned five P1 foundation-gate findings. The unique owners are:
+  `verify_openminis_ui_call_edges` for self-authorized external callees;
+  macro call discovery for ordinary macro bodies hidden from `syn::Visit`;
+  `FunctionCallVisitor::visit_expr_method_call` for silently externalized chained receivers;
+  `has_no_local_scope_ancestor` for direct control-flow declarations;
+  and `check_openminis_ui_legacy_retirement` for UTF-8-only scans over Android binary assets.
+- White-box positive coverage will prove ordinary macro arguments contribute direct calls, migration callers force external callee edges, top-level declarations remain accepted, and binary-containing owner scan roots can retire.
+- White-box negative coverage will prove opaque macro bodies with call-like tokens fail closed, chained potentially local method calls cannot disappear, control-flow-local JavaScript declarations cannot satisfy target truth, and legacy tokens in text files remain rejected even when binary assets coexist.
+- Module black-box coverage remains `cargo test -p xtask -- --test-threads=1`; project black-box coverage remains `mainlines generate/check` plus `gates check`. No runtime/UI path changes, no migration node promotion, and no Browser/Cookie/Profile/Takeover scope changes are allowed.
+
+## 2026-07-28 — Codex Review round 22 diagnosis and test design
+
+- Round 22 reproduced four P1 source-truth omissions: typed closure receiver calls, outer receiver loss after inner shadowing, `Box`/`Arc`-style autoderef receiver calls, and grouped `::{self}` module imports.
+- The call-graph owner must preserve lexical receiver scopes, index typed closure parameters, fail closed on unresolved identifier receivers that collide with repository-local method names, derive supported smart-pointer pointee identities, and normalize grouped self imports.
+- Positive fixtures prove each real local edge is retained. Negative exact-registry coverage continues proving that removing a resulting edge is rejected. No migration node may be promoted before another Review PASS.
+
+## 2026-07-29 — Codex Review round 22 remediation
+
+- The four reproduced omissions were closed at the parsed call-graph owner: grouped `::{self}` imports bind the parent module, typed closure parameters enter a closure-local receiver scope, nested blocks restore outer receiver bindings, and supported `Box`/`Arc`-class wrappers resolve their pointee identity.
+- Broadly treating every unknown identifier receiver as potentially local exposed real external Rust chains as false failures. The receiver-state owner now distinguishes typed built-in receivers and bindings rooted in known external method chains/iterators from genuinely unknown shadow bindings. Unknown receivers whose method name can dispatch repository-local code still fail closed.
+- Generic local method names in the verifier itself were renamed to semantic identities (`record_occurrence`, `document_extension`) so external collection/path methods do not create artificial repository-local dispatch collisions.
+- Discovery state moved to `call_graph/discovery/state.rs`; all Rust source and test files remain at or below 500 lines. The exact machine registry now contains 189 production call edges and includes the new receiver-scope helpers; generated wiki was rebuilt from it.
+- Focused proof passes: all 25 call-graph tests, including closure, lexical shadow, smart pointer, grouped self import, unknown shadow, built-in signature, external chain, and external iterator positive/negative fixtures; exact registry, mainline generation, and mainline freshness also pass. Full validation and Codex Review remain pending.
+- Pre-review validation passes: xtask 132/132, xtask clippy with warnings denied, workspace build, workspace clippy with warnings denied, fmt, mainlines generate/check, gates check, and staged/unstaged diff checks. Full workspace tests still stop only at the separately owned CLI ADP mock fixture: `apps/freehand-cli/tests/config_startup.rs` passes 6 and fails 18 with `Protocol(MissingConnectionUpgradeHeader)`; this claim did not modify that owner.
+
+## 2026-07-29 — Codex Review round 23 diagnosis and test design
+
+- Round 23 produced four P2 findings backed by valid-Rust replay fixtures. Untyped closure parameters and unresolved local-iterator bindings can retain an outer receiver identity and invent a local edge; a shadowing `let` binding is installed before its own initializer and can hide a real outer-receiver edge; an omitted trait method with a default body is not inherited into implementer dispatch.
+- The unique scope owner is `FunctionCallVisitor`: initializer expressions must be visited before the new binding enters scope, and every closure/loop pattern binding must replace the outer receiver state even when its inferred type is unknown. Unknown receiver calls that collide with local method names remain fail-closed.
+- The unique trait-dispatch owner is `collect_impl` plus discovery finalization: retain parser-owned default-method identities and project them onto each local implementing receiver only when that receiver has no explicit implementation for the method.
+- Paired white-box proof will cover the three false-edge/missing-edge scope cases and inherited trait-default dispatch. Module/project gates remain xtask tests, exact mainline generation/check, and `xtask gates check`; no migration lifecycle node may be promoted before a subsequent Review PASS.
+
+## 2026-07-29 — Codex Review round 23 remediation
+
+- Receiver scope now follows Rust binding order: `let` initializers are traversed under the outer scope before installing the new binding, and every identifier introduced by a closure or loop pattern clears the same-named outer receiver. Unknown item types remain fail-closed when their method name can dispatch local code.
+- Trait collection now records default-method identities; discovery projects each default onto local implementing receivers unless an explicit receiver method already owns that name. Multiple inherited defaults remain ambiguous rather than being silently selected.
+- Four replay fixtures lock untyped closure shadowing, loop shadowing, shadow-initializer ordering, and inherited trait-default dispatch. The exact machine graph now contains 191 production edges and includes `pattern_identifiers` plus inherited-default dispatch.
+- Post-remediation verification passes: xtask 136/136, focused xtask clippy, workspace build, workspace clippy with warnings denied, fmt, JSON parse, all migration Rust files at or below 500 lines, mainlines generate/check, gates check, and staged/unstaged diff checks. Round 24 Review is still required; no migration node was promoted.
+- MemoryPalace closeout remains broken: `mempalace mine . --wing freehand` emitted the missing pipx Python interpreter error and reported zero mined drawers; a subsequent search returned stale source and did not retrieve the new MEMORY phrase. Files are updated, but re-mine/retrieval is not closed.
+
+## 2026-07-29 — Codex Review round 24 diagnosis and test design
+
+- Round 24 reproduced five parsed-call-graph defects. Function-local `use` aliases are indexed under the callable lexical scope but calls are resolved from the parent module; built-in containers erase repository-local item types in `for`; destructured `let` patterns do not replace every outer receiver binding; nested `cfg(...test...)` predicates are classified by token whitespace instead of parsed syntax; and unresolved test method calls are exempted from the fail-closed local-method collision rule.
+- The unique owner remains `openminis_ui_migration::call_graph::discovery`: lexical call resolution must consume callable-local imports without changing signature type scope, iterable inference must preserve repository-local element identity or remain unresolved, every pattern identifier must replace outer receiver state after the initializer, cfg test identity must be parsed recursively, and local-method collisions must fail closed for production and tests alike.
+- Positive fixtures will prove callable-local imports and `Vec<Local>`/slice iteration retain exact direct edges, and nested cfg predicates produce test ownership. Negative fixtures will prove destructuring cannot invent an outer-receiver edge and unresolved test receiver inference cannot silently omit a local edge. Full xtask, exact mainline generation/check, workspace build/clippy/fmt, gates, and a new Codex Review remain required; no migration node may be promoted.
+
+## 2026-07-29 — Codex Review round 24 remediation
+
+- Callable path resolution now keeps parent-module Rust semantics while consulting the callable lexical scope for local imports. The owner was split into `call_graph/discovery/scope.rs` so every source/test file remains at or below 500 lines.
+- Signature and explicitly typed local iterables preserve repository-local item identities for supported built-in containers. Destructured local patterns clear every introduced binding after the initializer, nested cfg test predicates are parsed recursively, and unresolved local-method collisions fail closed for tests and production.
+- Five replay fixtures lock the two missing-edge cases, destructured-shadow false edge, nested cfg test ownership, and unresolved test-method omission. Exact machine truth now registers 201 production edges and the new shared iterable item-type owner. Focused/full xtask verification passes (141/141), xtask clippy passes with warnings denied, mainlines generate/check pass, and `xtask gates check` passes. Workspace verification and another Codex Review remain required; no migration node was promoted.
+- Workspace build and workspace clippy with warnings denied pass; fmt, JSON parse, generated wiki freshness, staged/unstaged diff checks, and the <=500-line source/test constraint pass. Full workspace tests stop at the same separately owned CLI ADP mock fixture: `apps/freehand-cli/tests/config_startup.rs` passes 6 and fails 18 because its server receives `Protocol(MissingConnectionUpgradeHeader)`. This claim did not modify that owner.
+
+## 2026-07-29 — Codex Review round 25 diagnosis and test design
+
+- Round 25 returned three P2 call-graph truth findings with isolated valid-Rust replays. `#[cfg(any(test, unix))]` is active in a normal Unix build, but the attribute owner marks it test-only merely because one disjunct mentions `test`; match/if-let patterns do not replace same-named receiver bindings for their lexical body; and untyped closure parameters clear receiver/external state but retain the outer iterable-item type.
+- Known flow: parsed Rust source -> active cfg and lexical scope -> module-qualified direct call graph -> exact production mainline registry. The first divergence remains in `openminis_ui_migration::call_graph::discovery`; downstream registry comparison only consumes the polluted graph.
+- H1 is confirmed by the Round 25 reviewer replay: all three fixtures compile in the isolated xtask copy and fail their expected assertions while the repository's 141 tests and gate pass. Unique owners are `attributes::has_test_attribute` for production-vs-test identity and `methods::visitor::FunctionCallVisitor` for lexical receiver state.
+- Allowed edit paths: call-graph cfg/attribute and method visitor/pattern owners, focused call-graph tests, exact mainline registry/generated wiki, foundation function/test/SOP docs, local skill, note, and MEMORY. Runtime/provider/UI paths and migration node lifecycle statuses remain forbidden.
+- Positive proof will retain a real production edge for `cfg(any(test, unix))` while keeping `cfg(all(test, unix))` test-only. Negative proof will force match and if-let shadow receivers to fail closed instead of inventing an outer-type edge, and force an untyped closure iterable shadow to fail closed instead of inheriting the outer item type. Full xtask, exact mainline generation/check, workspace build/clippy/fmt, gates, and a new Codex Review remain required.
+
+## 2026-07-29 — Codex Review round 25 remediation
+
+- Test identity now evaluates the same parsed cfg predicate with `test` removed: `cfg(any(test, unix))` remains production on Unix, while `cfg(all(test, unix))` is test-only. The cfg evaluator is one shared owner for admission and identity.
+- Receiver binding traversal now scopes match-arm and direct if-let patterns after their scrutinee and restores the outer receiver/iterable maps afterward. Untyped closure parameters clear and restore iterable-item state as well as receiver/external state. Unknown replacement types continue to fail closed on local-method collisions.
+- Binding helpers moved to `methods/bindings.rs`; `visitor.rs` is 453 lines and all migration source/test files remain at or below 500 lines. Three Round 25 fixtures lock disjunctive production cfg, match/if-let shadow rejection, and closure iterable shadow rejection.
+- Exact machine truth contains 204 production edges and 51 migration shared functions. Generated wiki, function map, test design, gate docs, SOP, local skill, and MEMORY are synchronized.
+- Verification passes: focused Round 25 3/3, call-graph rounds 26/26, full xtask 144/144, focused/workspace clippy with warnings denied, workspace build, fmt, mainlines generate/check, gates check, JSON parse, and staged/unstaged diff checks. A new Codex Review is still required; no migration node was promoted.
+
+## 2026-07-29 — Codex Review round 26 diagnosis and test design
+
+- Round 26 returned six P2 exact-call-graph findings and supplied isolated valid-Rust red replays. The current graph drops direct and method recursion, resolves single-segment callable value bindings as same-named module functions, starts every external module file with production identity, scopes only direct `if let`, retains outer iterable metadata through `for` binders, and does not derive iterable item identity from typed closure parameters.
+- The first divergence remains the single parsed Rust call-graph owner under `xtask/src/openminis_ui_migration/call_graph/discovery*`; registry comparison consumes the resulting false or incomplete graph. Runtime, provider, UI, and migration lifecycle status paths remain out of scope.
+- Unique modification points are: graph edge materialization for recursion; callable lexical binding state in `methods::visitor`; external module declaration identity during discovery indexing; conditional-let lexical traversal for `if`/`while`; loop binder iterable state; and the existing `iterable_item_type` owner for typed closure inputs.
+- Positive white-box proof will retain direct and method self-edges, classify a helper in an external `#[cfg(test)] mod tests;` file as test-owned, and retain a `Worker::run` edge inside a typed `Vec<Worker>` closure parameter. Negative proof will prevent a function parameter or local callable from resolving to a same-named module function and will force conditional-let and nested loop shadow receivers to fail closed rather than inherit an outer local type.
+- Module black-box proof remains full xtask tests plus exact mainline generation/check. Project proof remains workspace build/clippy/fmt and `xtask gates check`; all migration Rust source/test files must remain at or below 500 lines. A new Codex Review PASS is required before the foundation commit or any migration-node implementation.
+
+## 2026-07-29 — Codex Review round 26 remediation
+
+- Recursive direct/method edges now remain in graph truth, and callable parameters/local bindings occupy a lexical value namespace that prevents same-named module-function edges.
+- Discovery first builds module declaration ancestry and propagates explicit test identity before indexing callables, so external and nested external `#[cfg(test)]` modules are order-independent.
+- Conditional traversal now scopes direct/chained `if let` and `while let` patterns after each scrutinee. Loop binders clear/restore receiver, external, iterable, and bound-value state; typed closure containers reuse the canonical iterable-item inference owner.
+- Six isolated replay fixtures lock recursive self-edges, callable-value shadowing, external test-module identity, conditional-let scope, loop iterable shadowing, and typed closure iterable receivers. Focused Round 26 tests pass 6/6; the complete call-graph suite passes 43/43; focused xtask clippy passes with warnings denied.
+- Exact machine truth now contains 59 migration-owned shared functions and 228 production direct-call edges. Generated wiki and machine mainline freshness pass.
+- Pre-review verification passes: full xtask 150/150, focused/workspace clippy with warnings denied, workspace build, fmt, mainlines generate/check, gates check, JSON parse, staged/unstaged diff checks, and every migration Rust source/test file at or below 500 lines. Full workspace tests stop only at the separately owned CLI ADP fixture: `apps/freehand-cli/tests/config_startup.rs` passes 6 and fails 18 with `Protocol(MissingConnectionUpgradeHeader)`; this claim did not modify that owner.
+- MemoryPalace remains unavailable because its configured pipx Python interpreter is absent; no memory re-mine/retrieval closure is claimed. Codex Review round 27 remains required; no migration node was promoted.
+
+## 2026-07-29 — Codex Review round 27 diagnosis and test design
+
+- Round 27 returned four P2 exact-call-graph findings backed by valid Rust examples: aliased function calls are filtered before alias resolution, nested-block imports never enter lexical call scope, block-local `const`/`static` callables do not shadow same-named module functions, and destructured loop fields inherit the whole iterable item type.
+- The first divergence remains the parsed Rust call-graph owner. Registry generation consumes that graph, so omitted or false edges can become accepted machine truth even while current gates pass.
+- Unique fixes are: resolve direct paths before applying the bare-name fast path; make `FunctionCallVisitor` own block-scoped import and callable-item bindings; and project named struct-pattern fields through the existing unique `struct_fields` type index instead of assigning the item owner to every binder.
+- Positive white-box proof will retain aliased calls, both outer and nested-block imported calls, and the exact field-owner method edge in a destructured loop. Negative proof will keep same-named module functions uncalled when block-local `const`/`static` function pointers shadow them and will keep the container type's same-named method out of the destructured field edge.
+- Module/project proof remains full xtask tests, exact mainline generation/check, workspace build/clippy/fmt, and `xtask gates check`. No migration node may be promoted before a subsequent Codex Review PASS.
+
+## 2026-07-29 — Codex Review round 27 remediation
+
+- Direct-call discovery now resolves imported aliases before the bare-name fast path, scopes nested-block imports plus local `const`/`static` callable bindings with their block, and projects named struct loop fields through the canonical struct-field index.
+- Four replay fixtures lock aliased calls, nested import restoration, block-local callable shadowing, and destructured loop field receiver identity. The visitor owner remains under its existing canonical module identity and every migration Rust source/test file remains at or below 500 lines.
+- Exact machine truth now contains 61 migration-owned shared functions and 240 production direct-call edges. The increase is source-derived from the new lexical/pattern helper calls; generated wiki and registry freshness pass.
+- Post-remediation proof passes: Round 27 4/4, exact registry, full xtask 154/154, focused xtask clippy with warnings denied, fmt, mainlines generate/check, and `xtask gates check`. Workspace build/clippy/tests and Codex Review round 28 remain required; no migration node was promoted.
+- Workspace build and workspace clippy with warnings denied pass. Full workspace tests stop only at the separately owned CLI ADP mock fixture: `apps/freehand-cli/tests/config_startup.rs` passes 6 and fails 18 with `Protocol(MissingConnectionUpgradeHeader)` / connection reset or refused; this claim did not modify that owner.
+
+## 2026-07-29 — Codex Review round 28 diagnosis and test design
+
+- Round 28 did not pass. It found two P1 call-graph truth gaps and two P2 lifecycle gaps: cfg-disabled body calls are recorded as production edges, nested lexical glob imports are dropped, valid `cfg(not(test))` production items are rejected because discovery uses only a test-augmented cfg set, and retirement identities are self-selected instead of owner-registry truth.
+- The unique call-graph owners remain `call_graph/cfg.rs`, `discovery/attributes.rs`, and `methods::{visitor,bindings}`. Discovery must admit the union of production and test items while classifying and traversing each callable in its actual cfg mode; body-level disabled statements must not contribute edges. Lexical imports must resolve both aliases and glob candidates, failing on ambiguity rather than omitting an edge.
+- The unique retirement owner remains the machine mainline `legacy_scan_roots` row consumed by `evidence/retirement.rs`. That owner row must register the exact immutable `removed_paths`, `removed_symbols`, `removed_import_tokens`, and `removed_callers`; the lifecycle manifest may only repeat that truth.
+- Paired proof will retain a production `cfg(not(test))` caller and a nested glob edge, omit a `cfg(any())` body edge, reject ambiguous nested glob resolution, accept exact owner-bound retirement identities, and reject a fabricated absent identity. Full xtask, exact mainline generation/check, workspace build/clippy/fmt, gates, line limits, and a new Codex Review are required before the foundation commit. No migration node is promoted.
+
+## 2026-07-29 — Codex Review round 28 remediation
+
+- Call-graph cfg admission now accepts the union of production and test projections while each callable traverses statements in its actual mode. A body-level inactive cfg statement contributes no edge, and valid `cfg(not(test))` production callables remain admitted.
+- Nested lexical glob imports now resolve against parser-owned module definitions. A unique candidate binds to its module-qualified callee; multiple candidates fail explicitly instead of silently omitting a real edge.
+- The owning machine mainline `legacy_scan_roots` row now registers all removed path/symbol/import-token/caller sets. Retirement requires exact manifest equality with that owner truth, so a fabricated absent identity cannot prove lifecycle closure.
+- Positive/negative Round 28 fixtures cover body cfg omission, production-only cfg admission, unique/ambiguous nested globs, exact retirement identity, and fabricated identity rejection. The symlink retirement fixture moved to a dedicated test module so every migration source/test file remains at or below 500 lines.
+- Exact machine truth now contains 61 migration-owned shared functions and 248 production direct-call edges. Full xtask passes 159/159; workspace build/clippy with warnings denied, fmt, mainlines generate/check, gates, JSON/diff checks, and line limits pass.
+- Full workspace tests still stop only at the separately owned CLI ADP mock fixture: `apps/freehand-cli/tests/config_startup.rs` passes 6 and fails 18 with `Protocol(MissingConnectionUpgradeHeader)` followed by connection reset/refused. This claim did not modify that owner. Codex Review round 29 remains required; no migration node was promoted.
+
+## 2026-07-29 — Codex Review round 29 diagnosis and test design
+
+- Round 29 did not pass. It found two P1 parsed-call-graph omissions and one P2 test-resource lifecycle leak: cfg-disabled nested expressions and match arms still contribute edges; module/callable glob imports do not resolve qualified paths such as `nested::target`; and `test_repo_root` leaves every synthetic repository in the system temp directory.
+- The unique call-graph owners remain `methods::visitor` for expression/arm cfg traversal and `discovery::scope` for module/callable import resolution. The unique test-resource owner is `tests::common::test_repo_root`, which must return an RAII directory guard rather than an unmanaged path.
+- Paired white-box proof will omit cfg-disabled nested tuple and match-arm calls while retaining an active match-arm call; retain module-level and callable-local qualified-glob edges while rejecting multiple real qualified candidates; and prove a fixture directory exists during guard lifetime and is removed on drop.
+- Module/project verification remains full xtask tests, exact mainline generation/check, workspace build/clippy/fmt, `xtask gates check`, line limits, and another Codex Review. Existing leaked temp directories are not removed without explicit authorization. No migration node is promoted.
+
+## 2026-07-29 — Codex Review round 29 remediation
+
+- Callable-mode cfg admission now wraps every expression subtree and match arm, so disabled nested tuple expressions and disabled arms disappear while active arms remain. Module and callable import resolution appends the complete qualified path to normalized glob targets and rejects multiple real definitions as ambiguous.
+- `test_repo_root` now owns a `tempfile::TempDir` guard. Fixture-returning helpers preserve that guard through each test, and a focused drop test proves the directory is physically removed at scope exit. Previously leaked temp directories remain untouched because deletion was not authorized.
+- Positive/negative Round 29 fixtures cover nested expression cfg, disabled/active match arms, module/callable qualified glob paths, qualified-glob ambiguity, and fixture cleanup. Every migration Rust source/test file remains at or below 500 lines.
+- Exact machine truth now contains 63 migration-owned shared functions and 257 production direct-call edges. Full xtask passes 165/165; focused/workspace clippy with warnings denied, workspace build, fmt, mainlines generate/check, `xtask gates check`, JSON counts, and staged/unstaged diff checks pass. Full workspace tests and Codex Review round 30 remain required; no migration node was promoted.
+- Full workspace tests again stop only at the separately owned CLI ADP fixture: `apps/freehand-cli/tests/config_startup.rs` passes 6 and fails 18 after its mock server reports `Protocol(MissingConnectionUpgradeHeader)` and clients see connection reset/refused. This claim did not modify that owner. Codex Review round 30 remains required.
+
+## 2026-07-29 — Codex Review round 30 diagnosis and test design
+
+- Round 30 did not pass. It found two P1 lifecycle/call-graph defects and one P2 graph-boundary defect: evidence admission rejects the canonical manifest change required to promote a source-bound node; `Result<Local, E>` inline `unwrap`/`expect` receiver chains omit the local method edge; and an external helper called by migration code imports that helper's unrelated non-migration callers into migration graph truth.
+- The lifecycle truth boundary is the attested source revision plus the current manifest validated by the migration gate. Post-proof drift may include only the exact evidence artifact/report paths and the canonical `docs/migrations/openminis-ui/ui-tree.manifest.json`; all runtime/source/registry drift must remain rejected.
+- The unique receiver-type owner is the existing parsed `expression_type` inference in `methods/receiver.rs`; the visitor must consume that owner for wrapper method expressions instead of independently reducing them to a local/external boolean. The unique edge-projection owner is `verify_openminis_ui_call_edges`: migration-owned callees retain legitimate inbound callers, while outside callees retain only migration-owned callers.
+- Paired proof will accept a canonical manifest-only lifecycle transition while rejecting non-evidence source drift, retain `Worker::run` from `make_worker().unwrap().run()`, and retain migration-to-external-helper plus external-to-migration edges while excluding unrelated outside-to-outside helper calls. Full xtask, exact mainline generation/check, workspace build/clippy/fmt, gates, line limits, and another Codex Review are required before commit; no migration node is promoted.
+
+## 2026-07-29 — Codex Review round 30 remediation
+
+- Evidence worktree admission now allows only exact artifact/report paths plus the canonical migration manifest after the attested source revision. The current manifest still passes the complete lifecycle, binding, evidence, topology, and exact-call-graph gate; adding source, registry, verifier, or unrelated repository drift remains a hard failure.
+- `expression_type` is the single receiver inference owner. Inline `Result<Local, E>` / `Option<Local>` `unwrap`/`expect` chains now preserve the local type for the following method edge.
+- Exact graph projection now retains all legitimate non-test inbound callers for migration-owned callees, retains only migration-owned direct callers for external callees, and excludes outside-to-outside helper edges. Machine truth and generated wiki now contain 63 migration-owned shared functions and 253 production direct-call edges.
+
+## 2026-07-29 Round 31 call-graph closure
+
+- Codex Review reproduced three missing-edge cases against the exact graph gate: qualified module re-exports, reassignment from an external receiver to a repository-local receiver, and supported container extraction followed by `unwrap`/`expect`.
+- `call_graph/discovery/scope.rs` now resolves qualified candidates through the target module's import/re-export scope. `FunctionCallVisitor` now refreshes receiver state after direct assignments and carries supported container item identity through wrapper chains without misclassifying `unwrap` itself as a local method.
+- Red fixtures failed before the fix and now pass. The reassignment fixture also proves the reverse case: assigning an external value clears the previous local receiver identity, so no stale local edge remains.
+- Machine registry, generated wiki, function map, test design, gate docs, SOP, and local skill now describe the same behavior. Exact truth is 65 migration-owned shared functions and 259 production direct-call edges. `cargo run -p xtask -- gates check` passes.
+- Round 31 closeout split the oversized call visitor without moving `FunctionCallVisitor`: `visitor/entry.rs` owns callable registration/traversal and `visitor/assignment.rs` owns assignment-state replacement. Focused reassignment/re-export/container tests pass, every migration Rust source remains at or below 500 lines, and regenerated machine truth contains 65 migration-owned shared functions plus 261 production direct-call edges.
+- Positive/negative Round 30 fixtures lock canonical-manifest-only evidence transition, source-drift rejection, wrapped local receiver inference, migration/external boundary edges, and outside-to-outside exclusion. All migration Rust source/test files remain at or below 500 lines.
+- Verification passes: `cargo fmt --check`; 168/168 xtask tests; xtask and workspace clippy with warnings denied; workspace build; mainlines generate/check; `xtask gates check`; JSON parsing; line limits; staged and unstaged diff checks. Full workspace tests stop only at the unchanged independently owned `apps/freehand-cli/tests/config_startup.rs` fixture: 6 passed and 18 failed after `Protocol(MissingConnectionUpgradeHeader)` followed by reset/refused/broken-pipe client errors. This claim did not modify that owner.
+- Memory files and the local workflow skill are updated. MemoryPalace remains unavailable from the previously confirmed missing pipx interpreter, so no re-mine/retrieval closure is claimed. Codex Review round 31 is still required; no migration node was promoted.
+## 2026-07-29 Round 32 review follow-up
+
+- Codex review found two evidence-boundary gaps despite passing gates: parenthesized direct Rust callees such as `(target)()` were omitted from the exact call graph, and post-attestation admission allowed arbitrary edits to the canonical migration manifest.
+- Root fixes will add paired regression coverage before implementation: transparent parenthesized callees must retain their direct edge, while manifest drift may change only top-level lifecycle status and per-node status/evidence/legacy-retirement fields; source binding and operation contract mutations must fail.
+- Red tests reproduced both omissions. The visitor now unwraps transparent callee wrappers, and evidence admission compares normalized attested/current manifests. Focused tests pass; the full xtask suite passes 172/172 after registering the new direct test caller.
+
+## 2026-07-29 — Codex Review round 33 diagnosis and test design
+
+- Round 33 did not pass. It found one P1 lifecycle truth gap and two P2 exact-call-graph gaps: promoted projection/command/surface strings are not bound to an owner registry, module-level const/static initializer calls have no caller identity, and a local `Deref<Target = Local>` wrapper can omit the target's local method edge because any external-trait impl exempts the whole receiver.
+- The P1 unique owner is the existing resource operation binding. Contract-ready and later nodes must exactly match its owner-backed `projection_or_query`, `generated_command`, and `surface_path`; lifecycle code may not accept independently authored strings.
+- The initializer owner remains parsed call-graph discovery. Active module-level const/static initializers will receive deterministic `<item>::__initializer` caller identities, while cfg-disabled initializers remain absent.
+- The deref owner remains method-dispatch discovery. Parsed external `Deref` impls will bind one repository-local associated `Target`, method lookup will follow that target, and unrelated external-trait calls will remain external.
+- Paired proof will accept the exact operation-owned UI contract and reject drift in each field; retain const/static initializer edges and omit cfg-disabled initializer edges; retain `Wrapper -> Local::local_method` autoderef while avoiding a false local edge for an unrelated external-trait method. Full xtask, registry generation/check, workspace build/clippy/fmt, gates, line limits, and another Codex Review remain required before commit.
+
+## 2026-07-29 — Codex Review round 33 remediation
+
+- `contract_ready` and later lifecycle admission now compares projection/query, generated command, and surface path with the canonical resource operation binding's `ui_contract`. Exact contract proof passes; fabricated values for each field fail.
+- Active module const/static initializers now enter parsed call truth as deterministic `<item>::__initializer` callers. Inactive cfg initializers fail closed. Parsed external `Deref` implementations bind a repository-local associated `Target`, so wrapper calls retain the target method edge while unrelated external-trait methods remain external.
+- Call-graph diagnostics now report only missing/extra edge sets. Oversized discovery/visitor owners were split back below 500 lines without changing canonical visitor identity. Machine truth is 66 migration-owned shared functions and 271 production direct-call edges.
+- Verification passes: Round 33 4/4, exact registry, full xtask 177/177, workspace clippy with warnings denied, workspace build, fmt, mainlines generate/check, and gates check. Full workspace tests retain the separately owned CLI ADP mock-fixture blocker from prior proof. Codex Review round 34 remains required before commit.
+
+## 2026-07-29 — Codex Review round 34 diagnosis and test design
+
+- Round 34 did not pass. It found three P2 machine-truth gaps: evidence `repository_commit` accepts a tree object, operation-owned `surface_path` accepts absolute/parent/external paths, and associated impl/trait const initializers do not enter exact Rust call truth.
+- The evidence revision owner remains `verify_openminis_ui_report_revision`; it must prove the supplied object is a commit before deriving its tree. Positive proof retains a real commit, while negative proof substitutes its tree OID and must fail.
+- The resource-path owner remains `verify_resource_map`; `surface_path` must be a normalized repository-relative path whose canonical target remains inside the canonical repository. Positive proof retains an in-repository surface, while parent and absolute paths must fail.
+- The call-graph owner remains parsed initializer discovery. Impl and trait associated const expressions will receive deterministic owner-qualified `::__initializer` caller identities, while inactive cfg initializers remain rejected. Proof must retain inherent-impl and trait-default const-function edges and reject a disabled associated initializer.
+- Full xtask, exact mainline regeneration/check, workspace build/clippy/fmt, gates, line limits, and Codex Review round 35 remain required before commit. No migration node is promoted.
+
+## 2026-07-29 — Codex Review round 34 remediation
+
+- Evidence admission now checks the exact Git object type before tree derivation, so a tree OID cannot impersonate a committed verifier revision.
+- Operation-owned UI surface paths now require normalized relative components, canonical repository containment, and a file target. Parent traversal and absolute paths fail.
+- Active impl and trait associated-const defaults now enter parsed call truth under owner-qualified `::__initializer` identities; inactive cfg associated initializers fail closed.
+- Positive/negative replay proof passes for real commit versus tree object, in-repository file versus parent/absolute surface path, inherent/trait associated initializer edges, and disabled associated initializer rejection.
+- Exact machine truth now contains 67 migration-owned shared functions and 273 production direct-call edges. Full xtask passes 181/181; workspace build/clippy with warnings denied, fmt, mainlines generation/check, gates, JSON/diff checks, and the 500-line migration source limit pass. Full workspace tests retain the separately owned CLI ADP fixture blocker. Codex Review round 35 remains required before commit.
+
+## 2026-07-29 — Codex Review round 35 diagnosis and test design
+
+- Round 35 did not pass. It found two P1 topology/lifecycle gaps and one P2 call-graph projection gap: promoted nodes do not bind `route_edge_ids`, required nodes need not be reachable from the entrypoint, and production/test cfg-exclusive imports or definitions are incorrectly merged into one scope.
+- The route owner remains the manifest edge registry. `contract_ready` and later nodes, including verification-blocked source-bound nodes, must repeat the exact non-empty incident edge-id set; unknown, unrelated, missing, and extra ids fail.
+- The topology owner remains `verify_openminis_ui_tree_topology`. A forward traversal from `foundation.root` must reach every required manifest node before human/machine parity can pass.
+- The Rust graph owner will derive production and test projections independently, then merge production call truth with only test-only caller truth. Cfg-disabled-in-both items remain rejected, while mutually exclusive imports/definitions no longer collide.
+- Paired proof will accept exact promoted route bindings and reject empty/unrelated ids; accept the current connected topology and reject an unreachable required node; and retain separate production/test import targets without treating cfg-exclusive same-name definitions as duplicates. Full validation and Codex Review round 36 remain required before commit.
+
+## 2026-07-29 — Codex Review round 35 remediation
+
+- Lifecycle topology now requires every manifest node to be forward-reachable from `foundation.root`. Nodes at `contract_ready` or later must repeat the exact non-empty incident edge-id set, including verification-blocked nodes.
+- Rust call discovery now builds production and test cfg projections independently. Merge retains all production definitions/edges and only test-only definitions/callers, preventing mutually exclusive imports or same-name definitions from colliding in one scope.
+- Positive/negative Round 35 fixtures lock exact promoted route ownership versus missing/unrelated ids, connected topology versus an unreachable required node, and cfg-exclusive imports/definitions versus false ambiguity/duplicate identity. Focused tests, full gates, workspace validation, and Codex Review round 36 remain required before commit; no migration node is promoted.
+- Full-suite replay exposed one additional projection boundary: production discovery still traversed an external source file whose only declaration was `#[cfg(test)] mod ...;`. Each projection must process only file modules reachable through declarations active in that projection; otherwise test-only callers leak into production before merge. The existing nested external-test fixture is the red/green lock.
+- The projection now filters parsed file modules through active declaration reachability before indexing. The existing nested external-test fixture passes, and the prior edge-drift fixture now mutates semantics without accidentally violating the new reachability invariant first.
+- Exact machine truth contains 67 shared functions and 280 production direct-call rows. Full xtask passes 185/185; workspace build/clippy with warnings denied, fmt, mainlines generate/check, gates, JSON/diff checks, and the 500-line migration source limit pass.
+- Full workspace tests retain the independent CLI ADP fixture blocker: `apps/freehand-cli/tests/config_startup.rs` passes 6 and fails 18 after `Protocol(MissingConnectionUpgradeHeader)` followed by connection refused. This claim did not modify that owner. Codex Review round 36 remains required; no migration node is promoted.
+
+## 2026-07-29 — Codex Review round 36 diagnosis and test design
+
+- Round 36 did not pass. It found one P1 local gate lifecycle gap and two P2 exact-call-graph gaps: a fresh clone has no deterministic local provisioning path for the required ignored `external/OpenMinis` checkout; cfg-disabled block `use`/`const`/`static` items enter lexical scope before statement filtering; and enum discriminant initializer calls have no caller identity.
+- The pinned-source owner remains the OpenMinis migration gate. A repository-owned provisioning command must read the manifest commit, create only the missing ignored checkout at `external/OpenMinis`, and reject existing origin/HEAD/worktree drift. `make ci`, `make test`, `make gates`, and pre-commit must invoke it before any source-dependent gate. CI keeps its explicit checkout and the provisioning command becomes an exact no-op verification there.
+- The lexical cfg owner remains `collect_block_scope_bindings`; it must receive the callable projection and admit only active block items before imports or bound values enter scope. Positive proof will resolve production and test block aliases to separate targets. Negative proof will ensure inactive block const/static names cannot shadow an active module function.
+- The enum initializer owner remains parsed call-graph discovery. Every explicit variant discriminant gets a deterministic `<Enum>::<Variant>::__discriminant_initializer` caller identity and active/test projection handling through the existing initializer visitor. Positive proof retains the exact const-function edge; cfg-disabled enums or variants fail closed under the existing projection contract.
+- Module/project proof remains focused red/green fixtures, full xtask, deterministic source provisioning from an absent temporary clone, shell syntax, exact mainline generation/check, workspace build/clippy/fmt, gates, line limits, and another Codex Review. No migration node is promoted.
+
+## 2026-07-29 — Codex Review round 36 remediation
+
+- `scripts/provision-openminis-source.sh` is the single local provisioning entrypoint. It reads the canonical manifest commit, verifies an existing checkout without mutation, or creates a missing sparse exact-SHA checkout from the canonical upstream and atomically installs it. `make test`, `make gates`, `make ci`, and pre-commit invoke it before source-dependent gates; the Rust gate remains read-only.
+- Online fresh-clone replay from an absent checkout passed at `/tmp/freehand-openminis-provision-round36-sparse-89763` with exact HEAD `9cf3a855fecd27bb5735b84cacbd56852a3ab8dd` and a clean worktree. Two prior full-transfer attempts failed with GitHub HTTP/2 early EOF; the successful path uses HTTP/1.1, shallow exact-SHA fetch, blob filtering, and sparse source paths without weakening source semantics.
+- Block-scope discovery now cfg-filters `use`, `const`, and `static` before lexical admission. Enum discriminants use deterministic owner-qualified initializer identities. Four Round 36 positive/negative fixtures failed before remediation and pass after it.
+- Machine truth registers 67 total shared functions, 66 migration-owned shared functions, and 285 exact production direct-call rows. Full verification and Codex Review round 37 remain required before commit; no migration node was promoted.
+- Round 36 verification passes: provisioner shell syntax and existing-checkout replay; 189/189 xtask tests; mainlines generate/check; `xtask gates check`; workspace build; workspace clippy with warnings denied; fmt; JSON parsing; 500-line migration source limit; staged/unstaged diff checks. Full workspace tests stop only at the unchanged independently owned `apps/freehand-cli/tests/config_startup.rs` fixture: 6 passed and 18 failed after `Protocol(MissingConnectionUpgradeHeader)` followed by connection reset/refused. This claim did not modify that owner.
+
+## 2026-07-29 - Codex Review round 37 diagnosis and test design
+
+- Round 37 did not pass. It reproduced one P1 local gate failure and two P2 exact-call-graph failures: the provisioner inherits hook-exported `GIT_DIR`/related variables and therefore reads the Freehand repository through `git -C external/OpenMinis`; cfg-disabled block items enter the callable index before lexical cfg filtering; and methods on function-local impl/trait items resolve unqualified calls against a synthetic callable scope instead of the real enclosing module.
+- The provisioning owner remains `scripts/provision-openminis-source.sh`. It must clear Git's repository-local environment at its own entrypoint so pre-commit, pre-push, Make, and direct execution share one safe behavior. Positive online replay will run with deliberately inherited Freehand Git variables and still verify OpenMinis; the negative gate fixture removes the clear operation and must fail.
+- The call-graph owner remains `collect_local_items`. Every block item must pass the active cfg projection before imports, types, impls, traits, fields, or methods enter indexes. Function-local declaration identity remains synthetic and owner-qualified, while direct-call resolution inside its method body must use the real enclosing Rust module. Positive fixtures retain the active module import and exact local impl/trait method edges; inactive imports and impls contribute neither ambiguity nor phantom edges.
+- Full xtask, exact mainline regeneration/check, workspace build/clippy/fmt, gates, line limits, inherited-Git-environment provisioner replay, and another Codex Review remain required before commit.
+
+## 2026-07-29 - Codex Review round 37 remediation
+
+- The provisioner now clears Git repository-local variables before any nested-checkout command. A real replay with Freehand `GIT_DIR` and `GIT_WORK_TREE` deliberately exported verifies the exact OpenMinis origin/HEAD instead of drifting to the outer repository.
+- Function-local item indexing now applies cfg projection before admitting imports, types, fields, impls, traits, or methods. Local declaration identities remain callable-qualified, while method bodies retain the real enclosing module for unqualified call resolution. The paired Round 37 fixtures failed before the fix and now retain active import/local impl/local trait edges while rejecting inactive ambiguity and phantom impl edges.
+- `methods/local_items.rs` owns the bounded indexing implementation while `methods::collect_local_items` remains the stable public owner symbol. Machine registry, generated wiki, function map, test design, dev gate, local skill, and memory are synchronized at 67 total shared functions, 66 migration-owned shared functions, and 290 exact production direct-call rows.
+- Verification passes: inherited-Git-environment provisioner replay; 192/192 xtask tests; mainlines generate/check; `xtask gates check`; workspace build; workspace clippy with warnings denied; fmt; JSON/diff checks; and every migration Rust file remains at or below 500 lines. Full workspace tests retain the independently owned CLI ADP fixture blocker already reproduced in Round 36. Codex Review round 38 remains required before commit.
+
+## 2026-07-29 - Codex Review round 38 diagnosis and test design
+
+- Round 38 did not pass. It reproduced four P2 closure gaps: calls such as `Local::invoke()` do not resolve against the callable-local declaration scope; impl/trait items nested below the callable body are silently discarded; block-local const/static initializer calls are attributed to the enclosing function instead of an independent initializer identity; and concurrent first-run provisioners race at destination installation and leave the losing staging checkout behind.
+- The callable resolution owner remains `call_graph/discovery/scope.rs`. A callable-qualified definition candidate must be considered alongside enclosing-module and import candidates, with ambiguity still rejected.
+- The local-item owner remains `methods/local_items.rs`. Direct function-local impl/trait items retain their existing callable-qualified identities; active nested impl/trait items must fail closed until a stable nested declaration identity is modeled. Every active block-local const/static expression receives a deterministic caller-qualified `::__initializer` identity, and the outer callable visitor must not also claim its calls.
+- The provisioning owner remains `scripts/provision-openminis-source.sh`. First-run installation must serialize through one repository-owned lock, clean only its own staging/lock artifacts on every exit, and make waiting contenders verify the installed canonical checkout rather than fail because the destination appeared.
+- Paired red/green proof will retain a direct `Local::invoke()` edge; reject an active nested impl while allowing a cfg-disabled nested impl; retain direct and nested local const/static initializer identities without an outer-function duplicate edge; and replay two concurrent absent-checkout provisioners to one exact clean destination with no staging/lock residue. Full xtask, mainline generation/check, workspace build/clippy/fmt, gates, shell syntax, line limits, and another Codex Review remain required before commit.
+
+## 2026-07-29 - Codex Review round 38 remediation
+
+- Callable-local associated paths now resolve through callable scope. Active nested impl/trait declarations fail closed, cfg-disabled nested declarations remain absent, and block-local const/static expressions have deterministic independent initializer callers without outer-callable duplication.
+- First-run source provisioning now serializes destination installation through one repository-owned lock. Waiters verify the winner's exact checkout, and EXIT cleanup owns only the current process staging and acquired lock.
+- Round 38 focused call-graph tests pass 3/3, provisioner shell syntax passes, and the CI/CD gate tests pass 9/9. Exact machine registry synchronization now contains 69 total shared functions, 68 migration-owned shared functions, and 300 production direct-call rows.
+- Real concurrent absent-checkout replay, full validation, and Codex Review round 39 remain required before commit.
+- Real concurrent absent-checkout replay passed at `/tmp/freehand-openminis-concurrent-round38.OaAhpM`: explicit PIDs 97541 and 97542 both exited 0; destination HEAD/origin/clean truth matched; no lock or staging residue remained.
+- Full validation passes: 196/196 xtask tests, mainline generation/check, workspace gates, workspace build/clippy with warnings denied, fmt, JSON/diff checks, and the 500-line migration source limit. Full workspace tests retain the unchanged independently owned CLI ADP mock-fixture blocker: 6 passed and 18 failed at `Protocol(MissingConnectionUpgradeHeader)` followed by reset/refused.
+
+## 2026-07-29 - Codex Review round 39 remediation design
+
+- Round 39 had no semantic PASS and returned five P2 findings. Isolated reviewer replays proved three call-graph defects: associated initializers discard `Self` owner identity, block-local initializers discard callable scope, and callable-local type bindings are unioned with shadowed module bindings.
+- The provisioning owner also rejects valid Git worktree/submodule checkouts by requiring `.git` to be a directory, and an uncatchable process exit leaves a directory lock that can never be reclaimed.
+- Unique owners remain call discovery plus the provisioning script. Positive tests require exact associated/local initializer caller edges and local-shadow precedence; negative proof keeps the shadowed module method caller-free. Provisioning must validate the checkout root through Git itself and use atomic owner-bearing lock acquisition with liveness-checked stale reclamation.
+
+## 2026-07-30 - Codex Review round 40 lifecycle evidence remediation
+
+- Round 40 found one P1 lifecycle contradiction: required `webui_online_e2e`, `android_device_e2e`, and `openminis_ui_legacy_online_no_touch` evidence was rejected by gate id before the existing canonical verifier-report validation, making `online_verified` and `legacy_retired` unrepresentable.
+- The unique evidence owner now admits every registered gate through one path: canonical command/proof/verifier identity, gate-specific assertions, process success, report digest, exact commit/tree, manifest lifecycle-only drift, and clean source-attestation boundary. No required gate is rejected categorically.
+- Positive proof now covers source-attested WebUI evidence and source-attested legacy no-touch evidence; negative canonical-command proof remains red. Full xtask passes 200/200, mainlines generate/check, gates, workspace build/clippy with warnings denied, fmt, and diff checks pass. Codex Review round 41 remains required.
+
+## 2026-07-30 - Codex Review round 42 provenance remediation
+
+- Round 42 rejected Round 41's repository-only online evidence admission: a local author could forge report JSON, assertions, and digest while staying inside the admitted evidence paths.
+- Online, Android-device, and legacy no-touch reports now require Ed25519 verification over the complete canonical report payload. The verifier pins only the external runner public key; the production private key is absent from the repository. Repository-only gates do not require this external signature.
+- Positive WebUI and legacy no-touch fixtures use a test-only key; a paired negative test rewrites the signature and matching report digest yet still fails provenance. The production public key has an independent parse/curve validity test.
+- Verification passes: 202/202 xtask tests, mainlines generate/check, gates, workspace build, clippy with warnings denied, fmt, and diff checks. Codex Review round 43 returned a semantic PASS with no actionable correctness issues.
+
+## 2026-07-30 - OpenMinis WebUI foundation source binding
+
+- The four foundation migration nodes now bind `ui_projection` operations to the shell bootstrap, an importable runtime surface registry, generated ADP constructors, and the shared-state view. `ui_surface` remains presentation-only and cannot own session, lifecycle, config, provider, or task truth.
+- Codex Review round 2 rejected workspace map drift, a stale second online asset-version literal, nondeterministic shared-state evidence, and a verifier-owned duplicate surface list with incomplete schema checks.
+- Remediation moved the exact surface collection into `app-shell/surface-registry.js`; bootstrap and the gate consume that same validated registry. Validation rejects empty/mismatched/duplicate identities, mutable or empty arrays, and invalid string fields. The online verifier passes its one expected asset version into page collection and renders loading plus empty states deterministically through the served production modules in an isolated browser container.
+- `foundation.workspace` now registers `run_gates_check -> verify_webui_foundation_contracts -> scripts/verify-webui-foundation-contracts.mjs`; app, resource, migration, function, test, mainline, and generated wiki truth point to the registry owner.
+- Local proof after remediation: foundation Node gate, online-verifier syntax, fmt, 202/202 xtask tests, 18/18 server tests, workspace build, workspace clippy with warnings denied, mainlines generate/check, and workspace gates pass. Full workspace tests retain the independently owned CLI ADP fixture failure: 6 pass and 18 fail at `Protocol(MissingConnectionUpgradeHeader)` followed by connection reset. External signed WebUI evidence is still absent, so foundation nodes remain `source_bound`.
+
+## 2026-07-30 - OpenMinis WebUI foundation lifecycle correction and review
+
+- The prior blanket `source_bound` statement is superseded. Exact lifecycle truth is: `foundation.root=source_bound`, `foundation.surface_contract=source_bound`, `foundation.protocol_calls=inventoried`, and `foundation.shared_states=implementation_in_progress`.
+- `foundation.protocol_calls` cannot advance until outbound ADP requests and inbound receipt/failure return paths are bound as one explicit bidirectional resource chain. `foundation.shared_states` cannot advance until the missing sheet state is implemented and bound alongside loading, empty, error, and confirmation.
+- Codex Review round 3 returned `VERDICT: PASS`. It confirmed strict Home fixture validation, unique function-map step identities, owner-derived WebUI asset versioning, and loading-to-running shared-state marker cleanup. External signed WebUI evidence remains absent, so no foundation node is `online_verified`.

@@ -141,6 +141,13 @@ Every operation binding must declare all contract fields with non-empty values:
 - `mainline_call_doc`
 - `binding_status`
 
+An operation used by an OpenMinis migration node at `contract_ready` or later
+must additionally own one `ui_contract` object with exact
+`projection_or_query`, `generated_command`, and a normalized
+repository-relative `surface_path` that canonically resolves to an
+in-repository file. The migration manifest repeats this owner truth; it
+cannot author an independent protocol or surface contract.
+
 `binding_status` must be `bound` or `pending`. Use `pending` for a real planned resource operation that has no code-bound source edge yet. Do not leave `effect` empty; it is the human-readable reason the source resource is allowed to operate on the target resource.
 
 Pending operations must also declare closure truth:

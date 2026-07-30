@@ -1,5 +1,9 @@
 # MEMORY
 
+# 2026-07-28
+
+- OpenMinis migration gate passed Codex Review round 10 with an unambiguous semantic PASS (53/53 OpenMinis focused tests, 103/103 xtask tests, workspace build/clippy clean, manifest `design_baseline` with zero promoted nodes, map/call-graph/SOP/AGENTS/wiki in sync, no fallback/P0/MAP-DRIFT/ARCH findings). Round 9 fixes that produced this state: repository reports use `cargo run -p xtask -- openminis-ui verify-node <node_id>` instead of `cargo run -p xtask -- gates check`, eliminating self-certification; raw reports bind exact `node_id`/`migration_unit_id`; direct call-edge discovery has no callee-name whitelist; and nested Rust functions fail explicitly after cfg admission so their calls cannot be attributed to the outer caller. All migration Rust files remain at or below 500 lines. Reviewer did not emit the literal `VERDICT: PASS` line in round 10; per AGENTS.md rule 36 the unambiguous semantic PASS qualifies. No migration node was advanced; manifest remains `design_baseline` (32 inventoried + 9 blocked).
+
 # 2026-07-25
 
 - Mobile UI tree Settings IA layering is implemented and online-proven on S-profile `127.0.0.1:4042`. Settings first level is now only `Models`, `Agent Runtime`, `Connectivity`, `Observability`, `Appearance`, and `About`; LLM-specific provider/config/strategy/model-group details stay under Models, Diagnostics is under Observability, Worker limit is under Agent Runtime, and Android APK update is under Connectivity. Status marker semantics are fixed: green hollow square = owner-backed, orange hollow square = partial, red hollow square = placeholder/not implemented. Online proof `scripts/verify-webui-mobile-ui-tree-online.mjs` passed with artifact `artifacts/webui-online/mobile-ui-tree-phase1-20260725T045905-74490`, proving grouped first-level titles, no flat `LLM Provider`, partial marker counts, hollow markers, and Diagnostics group `observability`. Related Settings regressions passed for Diagnostics (`webui-diagnostics-1784955564587`), provider registry (`provider-registry-ui-1784955579027`), model groups (`model-group-ui-1784955618922`), and provider web_search Settings (`provider-web-search-settings-ui-1784955890342`). Final S config restored to minimax/MiniMax-M3 and fixture env grep had zero matches.
@@ -710,3 +714,139 @@ Tags: #architecture #gap5 #node #ui-protocol #dependency-edge
 - `worker-task-task-1785166804` contains an old `Failed` turn followed by a later `Success`, while exact owner task `task-1785166804` is `closed`. The raw 401 is valid historical truth, but presenting it as the current Worker state contradicted TaskBoard and later-turn truth.
 - SessionDetail now derives `historical_failure_recovered` only from ordered SessionTurns plus the exact TaskBoard-projected Worker task being `closed`. Normal mode shows `历史失败 · 后续已恢复` without duplicate provider-error text; debug details retains the original 401. Latest failures, success-before-failure, non-closed tasks, non-Worker sessions, and unrelated tasks remain unrecovered.
 - Production S-profile WebUI and the real Android WebView relay route both opened the exact Worker session and projected the recovery card. Android startup readiness reported the current stamped CSS/JS assets loaded, and the phone screenshot preserved the closed Worker header plus the later successful execution. This WebUI-only change did not require a new APK.
+- OpenMinis UI lifecycle promotion now fails closed for WebUI, Android-device, and legacy no-touch evidence until each has a source-bound external provenance owner; coordinated repository-authored success report/attestation/digest JSON is not execution truth. Pinned-source exclusion applies to every blob recursively resolved from declared ancestors, so broad allowed roots cannot admit BrowserUse/Cookie/Profile/Takeover descendants.
+- OpenMinis exact call-map truth includes free functions plus module/lexical impl and trait methods. Method identities are receiver/trait-qualified; `Self`, associated, and statically typed receiver calls are source-derived, while lexical item bodies remain independent from their enclosing function. Promoted target binding retains each unique declaration file and requires exact equality with the accepting bound mainline row's repository-relative `file_path`; broad target-root membership is insufficient.
+- OpenMinis declaration truth is parser-owned: Swift compiler parse AST (`-frontend -dump-parse -enable-bare-slash-regex`), Rust `syn`, and JS/TS/Kotlin tree-sitter ASTs; JS/TS/Kotlin local-scope declarations do not satisfy migration symbol truth. CI must install Swift before the full gate; lexical keyword/token scans cannot bind lifecycle source truth. Rust call-graph test ownership comes from test/cfg attributes and ancestor modules, while typed trait dispatch uses a receiver-to-impl index and resolves imported receiver types rather than silently dropping the edge.
+
+- 2026-07-28: OpenMinis foundation gate review remediation: JS/TS/Kotlin tree-sitter declaration truth rejects syntax-error parse trees before traversal, so partial ASTs cannot satisfy source/target symbol truth. Every workflow that runs `make ci` must provision the pinned `OpenMinis/OpenMinis` checkout and `swift-actions/setup-swift@v2` before the gate in the same job; CI metadata/cross-job and unprovisioned release gates are red-tested.
+
+- 2026-07-28: OpenMinis evidence verifier reports must bind `repository_commit` to a full 40-character immutable git SHA before tree comparison; symbolic refs such as `HEAD`/`main` are rejected so evidence cannot drift with mutable refs.
+
+- OpenMinis Rust call-graph discovery must resolve imports in both method call receiver types and `impl` receiver identities before edge comparison; qualified UFCS calls fail closed until modeled, instead of silently omitting direct method edges.
+- OpenMinis exact call-graph truth propagates ancestor `#[cfg(test)]` identity into impl/trait methods and resolves repository-local `Result`/`Option` success receivers through `?`, `unwrap`, and `expect`. Local macro definitions and `include!` are rejected until expansion-aware edge discovery exists.
+- OpenMinis promoted target directories admit declarations only from parser-supported Rust/Swift/JS/TS/Kotlin files. Android binary, XML, and JSON assets are ignored as declaration inputs; exact symbol cardinality and declaration-file/mainline equality remain mandatory.
+## OpenMinis Rust call-graph lexical and trait dispatch truth
+
+- Rust receiver bindings follow language scope: a `let` initializer sees the outer binding, while every closure/loop pattern identifier replaces a same-named outer binding even when its type cannot be inferred. Unknown receivers whose method can resolve to repository-local code fail closed.
+- A local trait implementation inherits parser-owned default-method dispatch when it does not explicitly implement that method. Explicit receiver methods retain ownership; competing inherited defaults remain ambiguous and fail instead of being selected.
+
+## OpenMinis Rust callable scope and container receiver truth
+
+- Callable-local `use` bindings are a lexical scope distinct from the parent module, but their relative `crate`/`self`/`super` targets normalize against that parent module. Exact call discovery must consult both scopes.
+- Supported built-in iterable containers preserve repository-local item receiver identity. Every destructured local pattern replaces outer receiver state after its initializer, and unresolved local-method collisions fail closed in test code as well as production code.
+- Test identity is derived from parsed cfg predicates recursively; `test` nested inside `any`, `all`, or `not` cannot be classified by whitespace-token matching.
+
+## OpenMinis Rust conditional and pattern scope truth
+
+- A parsed cfg item is test-only only when its active predicate becomes false after removing `test`; merely mentioning `test` is insufficient. On Unix, `cfg(any(test, unix))` is production while `cfg(all(test, unix))` is test-only.
+- Match-arm and direct if-let patterns replace same-named outer receiver and iterable-item bindings only inside their lexical body. Untyped closure parameters also replace outer iterable-item bindings. Unknown replacement types fail closed on repository-local method-name collisions instead of inventing an outer-type edge.
+
+## OpenMinis Rust recursion, value namespace, and external module truth
+
+- Direct and method recursion are real production self-edges and must remain in exact graph truth. Callable parameters and local values shadow same-named module functions; lexical value calls must not invent a module-function edge.
+- External module test identity is resolved from parsed module declarations and propagated through nested module ancestry before callable indexing, so `#[cfg(test)] mod tests;` remains test-owned independently of source-file traversal order.
+- Direct and chained `if let` plus `while let` patterns own receiver and iterable state only in their lexical continuation/body. Loop binders clear and restore outer iterable metadata, while typed closure container parameters derive item identity through the single iterable-item owner.
+- The current exact foundation registry contains 61 migration-owned shared functions and 248 production direct-call edges.
+
+## OpenMinis Rust alias, block scope, and loop-field truth
+
+- Resolve direct function imports and aliases before applying any bare-callee-name fast path; otherwise a valid renamed call can disappear from exact graph truth.
+- Callable import scope is lexical down to nested blocks. Block-local `use`, `const`, and `static` items enter before body traversal and restore on block exit, so nested imports target the correct function and local function pointers suppress same-named module edges.
+- A destructured loop binder does not inherit the iterable item type wholesale. Named struct patterns project each field through the canonical struct-field type index; unknown patterns remain unresolved and fail closed on local-method collisions.
+- Round 27 retained the exact registry at 61 migration-owned shared functions and 240 production direct-call edges after correcting edge attribution.
+
+## OpenMinis cfg, lexical-glob, and retirement identity truth
+
+- Call-graph admission is the union of production target cfg and explicit test cfg, but body traversal uses the callable's actual mode. `cfg(not(test))` is valid production truth, while cfg-disabled statements contribute no edge.
+- Nested lexical glob imports resolve against parser-owned module definitions; one candidate binds, multiple candidates fail as ambiguous, and no candidate falls through to ordinary lexical/module resolution.
+- Legacy retirement identity is owner-mainline truth. The unique `legacy_scan_roots` row registers exact removed path/symbol/import-token/caller sets, and the lifecycle manifest can only repeat them; an arbitrary absent identity cannot prove retirement.
+- Round 28 remediation keeps 61 migration-owned shared functions and records 248 exact production direct-call edges.
+
+## OpenMinis nested cfg, qualified glob, and test fixture lifetime truth
+
+- Callable-mode cfg admission applies to statements, every nested expression subtree, and match arms. A disabled nested expression or arm contributes no edge; active arms remain traversed.
+- Module, callable-local, and nested-block glob imports resolve qualified paths by appending the complete call path to the normalized glob target. One real definition binds; multiple real definitions fail as ambiguous.
+- Synthetic OpenMinis migration test repositories are RAII-owned `TempDir` resources. Tests retain the guard for the full fixture lifetime and drop removes the directory; unmanaged temp paths are forbidden.
+- Round 29 remediation registers 63 migration-owned shared functions and 257 exact production direct-call edges.
+
+## OpenMinis evidence transition and graph-boundary truth
+
+- Verifier reports attest the source revision before lifecycle promotion. Post-proof Git drift may contain only exact evidence artifact/report paths and `docs/migrations/openminis-ui/ui-tree.manifest.json`; the current manifest remains independently gate-validated. Source, call-registry, and verifier drift remain rejected.
+- Parsed receiver inference owns inline wrapper chains: `Result<Local, E>` / `Option<Local>` `unwrap` or `expect` preserves `Local` for the following method edge.
+- Outside callees retain only migration-owned direct callers; migration-owned callees retain legitimate non-test inbound callers; outside-to-outside edges are forbidden. Round 30 truth is 63 shared functions and 253 production edges.
+
+## 2026-07-29 OpenMinis migration gate Round 31 truth
+
+- Exact Rust call-graph truth must follow qualified module re-exports instead of treating `module::function()` as external when the module re-exports a repository function.
+- Direct assignment is a receiver-state transition. Reassigning a local from external to repository-local must add the following local method edge; reassigning from repository-local to external must clear the old receiver identity.
+- Supported built-in container extraction (`pop`, front/back/first/last/get/remove variants) followed by `unwrap`/`expect` preserves the repository-local item identity for the following method edge, while the wrapper method itself remains external.
+- The unique implementation owner remains `xtask/src/openminis_ui_migration/call_graph/discovery/`: `scope.rs` owns qualified import/re-export resolution and `methods/visitor` owns receiver-state and expression-type inference. Round 31 machine truth is 65 migration-owned shared functions and 259 production direct-call edges.
+- Round 31 closeout keeps `FunctionCallVisitor` physically owned by `methods/visitor.rs` so canonical method identities do not drift; `visitor/entry.rs` and `visitor/assignment.rs` are bounded implementation submodules. The final machine truth is 65 migration-owned shared functions and 261 production direct-call edges.
+
+## 2026-07-29 OpenMinis evidence and direct-call closure
+
+- OpenMinis evidence admission compares the attested and current canonical manifests after removing only top-level `status` and per-node `status`, `evidence`, and `legacy_retirement`; operation/source/target/map contract drift cannot reuse pre-promotion evidence.
+- The exact Rust call graph unwraps transparent parenthesized/grouped callee expressions before direct-path resolution, so `(target)()` retains the same edge as `target()`.
+- The foundation registry remains at 65 migration-owned shared functions and 261 production direct-call edges; the parenthesized-callee regression is registered as a direct test caller of `discover_rust_call_graph`.
+
+## 2026-07-29 OpenMinis operation contract and initializer/autoderef truth
+
+- A migration node at `contract_ready` or later cannot self-author non-pending UI contract strings. Its projection/query, generated command, and surface path must exactly repeat the canonical resource operation binding's `ui_contract`.
+- Active module-level Rust const/static initializers are independent call sites with deterministic `<item>::__initializer` identities. Inactive cfg initializers fail closed rather than disappearing from exact graph truth.
+
+## 2026-07-29 OpenMinis revision, surface-path, and associated-initializer truth
+
+- Evidence `repository_commit` must name a Git object whose type is exactly `commit`; accepting a tree-ish is not committed-revision evidence even when Git can derive a tree from it.
+- An operation-owned UI `surface_path` is a normalized repository-relative path that canonically resolves to an in-repository file. Absolute paths, parent traversal, missing targets, directories, and symlink escape are invalid.
+- Impl and trait associated-const default expressions are independent exact-call-graph sites with owner-qualified `::__initializer` identities. Active initializers retain local call edges; inactive cfg initializers fail closed.
+- Method dispatch follows a parsed external `Deref` impl only when its associated `Target` resolves to a repository-local type. Local target methods retain their edge; unrelated external-trait methods remain external. The exact foundation registry is 66 migration-owned shared functions and 271 production direct-call edges.
+
+## 2026-07-29 OpenMinis route, reachability, and cfg-projection truth
+
+- Every OpenMinis migration node must be forward-reachable from `foundation.root`. A node at `contract_ready` or later, including verification-blocked source-bound state, must repeat the exact non-empty set of incident manifest edge ids in `route_edge_ids`; missing, extra, or unrelated route ownership fails lifecycle admission.
+- Rust migration call truth discovers production and test cfg projections independently. Each projection processes only file modules reachable through declarations active in that projection. The merged graph keeps all production definitions/edges and only test-only definitions/callers, so cfg-exclusive external modules, imports, and same-name definitions cannot leak into production or create false ambiguity/duplicate identity.
+- Round 35 remediation registers 67 shared functions and 280 exact production direct-call rows. Full xtask passes 185/185; workspace build/clippy/fmt, mainlines generate/check, gates, JSON/diff checks, and the 500-line migration source limit pass.
+
+## 2026-07-29 OpenMinis local provisioning and initializer call truth
+
+- Fresh local clones provision the missing ignored `external/OpenMinis` source only through `scripts/provision-openminis-source.sh`. The provisioner reads the manifest SHA, fetches only canonical-upstream sparse source paths at that exact SHA, and atomically installs the verified checkout; existing origin, HEAD, or dirty-state drift fails without mutation. The Rust migration gate remains read-only.
+- Block-level `use`, `const`, and `static` bindings enter Rust lexical call-discovery scope only when active in the current production/test cfg projection. Explicit enum discriminants enter exact call truth through deterministic `<Enum>::<Variant>::__discriminant_initializer` identities.
+- Round 36 machine truth contains 67 total shared functions, 66 migration-owned shared functions, and 285 exact OpenMinis production direct-call rows.
+- Provisioning scripts that execute Git against a nested checkout clear repository-local Git variables at their own entrypoint, because hooks export the outer repository environment and can override `git -C`. OpenMinis call discovery cfg-filters function-local items before indexing and separates callable-qualified declaration identity from enclosing-module call resolution. Round 37 machine truth contains 67 total shared functions, 66 migration-owned shared functions, and 290 exact production direct-call rows.
+
+## 2026-07-29 OpenMinis callable-local and concurrent provisioning truth
+
+- Callable-local associated paths resolve against the callable-qualified scope, so a direct `Local::invoke()` call binds the callable-local method instead of disappearing.
+- Active impl/trait declarations nested below the callable body fail closed until a stable nested declaration identity exists; cfg-disabled nested declarations remain absent. Active block-local const/static expressions use independent deterministic initializer callers and are not also attributed to the outer callable.
+- Concurrent first-run OpenMinis provisioning is serialized by one repository-owned lock. Waiting processes verify the winner's canonical origin/HEAD/clean truth, and each process removes only its own staging and owned lock artifacts.
+- Round 38 machine truth contains 69 total shared functions, 68 migration-owned shared functions, and 300 exact production direct-call rows.
+
+## 2026-07-29 OpenMinis initializer scope and provision-lock truth
+
+- Associated const initializer calls retain their impl/trait owner so `Self::method()` resolves exactly. Block-local const/static initializers retain the enclosing callable scope, and callable-local declarations shadow same-named module declarations instead of producing false ambiguity.
+- OpenMinis checkout validation asks Git for the exact worktree root rather than requiring a `.git` directory, so normal clones, worktrees, and submodules share one origin/HEAD/clean validator. First-run serialization uses an atomic owner-bearing lock; stale reclamation is allowed only when the recorded owner is on the current host and its PID is absent.
+- Round 39 retains 69 total shared functions, 68 migration-owned shared functions, and 300 exact production direct-call rows.
+
+## 2026-07-30 OpenMinis lifecycle evidence admission truth
+
+- Supersedes the earlier external-provenance fail-closed rule: registered repository, WebUI, Android-device, and legacy no-touch gates use one source-attested verifier-report admission path. Required gate ids must not be rejected categorically because that makes terminal lifecycle states impossible.
+- Promotion requires the code-locked command/proof/verifier identity, gate-specific assertions, successful process result, distinct report digest, exact source commit/tree, lifecycle-only manifest drift, and no other dirty path. Forged commands, generic success fields, assertion/report/source drift, and incomplete gate coverage remain explicit failures.
+
+## 2026-07-30 OpenMinis external online provenance truth
+
+- Supersedes repository-only online evidence admission: WebUI, Android-device, and legacy no-touch reports must carry a valid Ed25519 signature over the complete canonical report payload. The verifier pins the external runner public key; the production private key must never enter the repository.
+- Repository JSON paths, matching digests, passed assertions, and clean source attestations are necessary but forgeable by a local author. Signature verification is the external trust boundary; missing, malformed, or locally replaced signatures fail even when the attacker updates the report digest.
+
+## 2026-07-30 WebUI foundation registry and online-state proof truth
+
+- A WebUI surface registry is runtime truth only when bootstrap and its gate import the same registry module. Source-text scans plus a verifier-local surface list are not a machine contract because runtime registration can drift while the gate stays green.
+- Surface registry admission validates immutable contracts, non-empty string identity/role/DOM-root fields, non-empty immutable string arrays, exact registry-key identity, and unique surface plus DOM-root identities. Resource and mainline bindings point to the registry owner, while bootstrap remains the shell composition owner.
+- Online proof for loading/empty/error/confirmation components must create a deterministic projection transition through served production modules. Depending on ambient Home data to happen to be empty is not evidence. The verifier may use an isolated verifier-owned DOM container without mutating business truth.
+- Asset-version acceptance has one verifier expectation passed into page-side collection; a second page-function hardcoded version creates guaranteed false failure after every version bump.
+
+## 2026-07-30 WebUI foundation lifecycle boundary truth
+
+- Foundation lifecycle status is deliberately non-uniform: `foundation.root` and `foundation.surface_contract` are `source_bound`; `foundation.protocol_calls` is `inventoried`; `foundation.shared_states` is `implementation_in_progress`.
+- Protocol calls require one explicit bidirectional ADP resource chain covering outbound requests and inbound receipt/failure return paths before source binding. A generated constructor import alone is not lifecycle closure.
+- Shared-state source binding requires the complete registered state family. Loading, empty, error, and confirmation do not justify `source_bound` while sheet semantics remain unimplemented.
+- External signed WebUI evidence is required for `online_verified`; local builds, tests, browser harnesses, and Codex Review PASS do not substitute for that evidence.

@@ -4,15 +4,22 @@
 - owner: `apps/freehand-server`
 - resource map: `docs/resource-maps/core.json`
 - resource operations:
+  - `ui_projection.compose_shell`
+  - `ui_projection.render_surface_contract`
+  - `ui_projection.render_shared_state`
   - `ui_projection.post_android_turn_finished_notification`
 
 ## Resource Operation Test Coverage
 
 | resource operation | status | white-box | module black-box | project black-box |
 | --- | --- | --- | --- | --- |
+| `ui_projection.compose_shell` | bound | `node scripts/verify-webui-foundation-contracts.mjs` validates the registered shell contract and rejects an unregistered surface contract | `cargo test -p freehand-server --lib webui -- --nocapture` verifies the version-stamped bootstrap and split shell assets are served | `node scripts/verify-webui-mobile-ui-tree-online.mjs` proves the live browser executes the shell bootstrap and reaches registered surfaces without a bootstrap exception |
+| `ui_projection.render_surface_contract` | bound | `node scripts/verify-webui-foundation-contracts.mjs` imports the runtime-owned registry and rejects missing, mismatched, duplicate, mutable, empty, or non-string contract fields | `cargo test -p freehand-server --lib webui -- --nocapture` verifies the registry asset is served and bootstrap exposes its validated collection | `node scripts/verify-webui-mobile-ui-tree-online.mjs` proves Home and SessionDetail route through mutually exclusive registered surfaces |
+| `ui_projection.render_shared_state` | bound | `node scripts/verify-webui-foundation-contracts.mjs` validates loading/empty/error/confirmation models and rejects missing fields, unsupported kinds, and missing action handlers | `cargo test -p freehand-server --lib webui -- --nocapture` verifies all shared-state modules and symbols are served | `node scripts/verify-webui-mobile-ui-tree-online.mjs` drives the real Home projection through loading and loaded-empty truth, then proves a populated history list is not replaced by shared-state DOM; the migration node remains `implementation_in_progress` because sheet presentation is unbound |
 | `ui_projection.post_android_turn_finished_notification` | bound | `cargo test -p freehand-server --lib android -- --nocapture` locks the Android bridge asset surface | `cargo test -p freehand-server --lib android -- --nocapture` verifies daemon-served WebUI notification bridge wiring without importing Android semantics | `node scripts/verify-webui-image-attachment-online.mjs` proves one live nonterminal-to-terminal transition emits one Android notification payload while restored historical terminal turns emit 无 |
 - lifecycle path under test:
   - app boundary receives protocol-owned query/projection truth
+  - app boundary composes the shell, registered surfaces, generated protocol calls, and shared presentation states into `ui_surface` without storing business truth
   - app boundary receives protocol-owned command ingress intent and returns dispatch receipt/failure only
   - app boundary renders a usable protocol-driven WebUI shell
   - app boundary serves split theme, WebUI, and shared logo assets

@@ -7,6 +7,9 @@
   "mainline_call_doc": "docs/mainline-calls/app.webui-smoke.json",
   "generated_wiki_doc": "docs/wiki/app.webui-smoke.md",
   "resource_operations": [
+    "ui_projection.compose_shell",
+    "ui_projection.render_surface_contract",
+    "ui_projection.render_shared_state",
     "ui_projection.post_android_turn_finished_notification"
   ],
   "request_mainline": [
@@ -313,6 +316,48 @@
       "output_semantic": "visible WebUI state updates or user-safe connection/service failure cards",
       "caller": "WebUI shell",
       "callee": "daemon `/adp`",
+      "binding_status": "bound"
+    },
+    {
+      "step": "10-foundation-root",
+      "symbol_path": "initializeMobileWebui",
+      "file_path": "apps/freehand-server/assets/webui/bootstrap.js",
+      "responsibility": "compose the top-level WebUI shell from registered routes, surfaces, layout, theme, and shared presentation-state contracts",
+      "input_semantic": "protocol projection and browser viewport",
+      "output_semantic": "initialized ui_surface shell with no browser-owned business truth",
+      "caller": "thin WebUI entry module",
+      "callee": "registered app-shell and surface contracts",
+      "source_resource": "ui_projection",
+      "target_resource": "ui_surface",
+      "resource_operation": "ui_projection.compose_shell",
+      "binding_status": "bound"
+    },
+    {
+      "step": "10-foundation-surface",
+      "symbol_path": "surfaceContracts",
+      "file_path": "apps/freehand-server/assets/webui/app-shell/surface-registry.js",
+      "responsibility": "validate and register the exact split model, view, and control responsibility contracts consumed by the WebUI shell",
+      "input_semantic": "imported split surface contracts",
+      "output_semantic": "schema-valid immutable surface contract registry with unique surface and DOM-root identities",
+      "caller": "shell bootstrap",
+      "callee": "validateSurfaceContractRegistry and split surface modules",
+      "source_resource": "ui_projection",
+      "target_resource": "ui_surface",
+      "resource_operation": "ui_projection.render_surface_contract",
+      "binding_status": "bound"
+    },
+    {
+      "step": "10-foundation-shared",
+      "symbol_path": "renderSharedState",
+      "file_path": "apps/freehand-server/assets/webui/app-shell/shared-states/view.js",
+      "responsibility": "render explicit validated loading, empty, error, or confirmation models and reject missing action handlers",
+      "input_semantic": "validated SharedUiStateModel plus required action handler for actionable state",
+      "output_semantic": "shared state DOM projection",
+      "caller": "home dashboard surface",
+      "callee": "browser DOM",
+      "source_resource": "ui_projection",
+      "target_resource": "ui_surface",
+      "resource_operation": "ui_projection.render_shared_state",
       "binding_status": "bound"
     },
     {

@@ -1,3 +1,6 @@
+import { SharedUiStateKind, createSharedStateModel } from "../../app-shell/shared-states/model.js?v=__WEBUI_ASSET_VERSION__";
+import { renderSharedState } from "../../app-shell/shared-states/view.js?v=__WEBUI_ASSET_VERSION__";
+
 export function renderHomeDashboard(model, context) {
   const root = context.dom.mobileHomeDashboard;
   if (!root) return;
@@ -22,8 +25,12 @@ export function renderRunningList(model, context) {
   const list = context.dom.mobileHomeActiveList;
   if (!list) return;
   list.replaceChildren();
+  delete list.dataset.sharedState;
   if (model.running.length === 0) {
-    list.textContent = context.state.sessionListLoaded ? '暂无运行中会话。' : '等待活动真源';
+    renderSharedState(list, createSharedStateModel(
+      context.state.sessionListLoaded ? SharedUiStateKind.Empty : SharedUiStateKind.Loading,
+      { title: context.state.sessionListLoaded ? '暂无运行中会话。' : '等待活动真源' },
+    ));
     return;
   }
   model.running.forEach((observation) => {
@@ -70,7 +77,10 @@ export function renderHistoryList(model, context) {
   if (model.history.length === 0) {
     const empty = document.createElement('div');
     empty.className = 'mobile-home-empty-row';
-    empty.textContent = context.state.sessionListLoaded ? '暂无历史会话。' : '等待会话真源';
+    renderSharedState(empty, createSharedStateModel(
+      context.state.sessionListLoaded ? SharedUiStateKind.Empty : SharedUiStateKind.Loading,
+      { title: context.state.sessionListLoaded ? '暂无历史会话。' : '等待会话真源' },
+    ));
     list.appendChild(empty);
   }
 }

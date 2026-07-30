@@ -1,6 +1,12 @@
 # Dev Gates
 
-Freehand uses one gate stack locally and in CI.
+Freehand uses one gate stack locally, in CI, and in release automation.
+The OpenMinis declaration gate requires `swiftc`; every workflow that runs
+`make ci` installs it with `swift-actions/setup-swift@v2` before the stack.
+Local source-dependent entrypoints first run
+`scripts/provision-openminis-source.sh`. It reads the canonical manifest SHA,
+creates only a missing sparse `external/OpenMinis` checkout, and rejects
+existing origin, HEAD, or dirty-worktree drift.
 
 ## Required Local Gate
 
@@ -85,15 +91,29 @@ This keeps generated wiki artifacts as compiled review surfaces over one machine
 `xtask gates check` validates the non-browser OpenMinis UI migration registry:
 
 - the machine manifest and human migration tree contain the exact same required node ids
-- the source repository is pinned to a full OpenMinis commit SHA
+- the human registry and machine manifest have identical entrypoint, forward edge id/from/to/semantic, and return from/to/semantic sets; Mermaid node/forward pairs also remain exact, and every manifest node must be forward-reachable from `foundation.root`
+- `.github/workflows/ci.yml` has one `actions/checkout` step whose `with.repository`, `with.ref`, and `with.path` jointly bind `OpenMinis/OpenMinis`, the manifest SHA, and `external/OpenMinis`; values in unrelated steps do not satisfy the gate
+- the local/CI `external/OpenMinis` checkout exists, its HEAD equals the manifest SHA, the object is a commit, every node source path resolves recursively at that commit, and every source symbol resolves as exactly one declaration in those pinned blobs
+- `make test`, `make gates`, `make ci`, and pre-commit invoke the deterministic local source provisioner before source-dependent validation; the provisioner itself clears hook-exported repository-local Git variables, validates the exact checkout root through Git so normal/worktree/submodule layouts are accepted, serializes concurrent first-run installation through an atomic owner-bearing lock, reclaims it only when the recorded same-host PID is absent, and cleans only its own staging/lock artifacts on every exit; waiting contenders verify the winner's exact checkout, and the Rust gate never fetches or mutates source
+- repository evidence is produced by `cargo run -p xtask -- openminis-ui verify-node <node_id>`, which validates a source-bound projection without admitting evidence and therefore cannot recursively certify `xtask gates check`
+- every verifier report binds the exact `node_id` and `migration_unit_id`; a generic report cannot promote multiple nodes
+- every direct production call edge inside `xtask/src/openminis_ui_migration/`, including recursive self-edges, is derived without a function-name whitelist; production and test cfg projections are discovered independently, each processes only file modules reachable through active declarations, then they are merged by retaining all production truth plus test-only definitions/callers, so cfg-exclusive external modules, imports, and same-name definitions never share one false scope; migration-owned callees retain legitimate non-test inbound callers, external callees retain only migration-owned direct callers, and outside-to-outside edges are excluded; imported aliases and module/callable/nested lexical glob imports resolve single- and multi-segment paths before bare-name filtering, callable-local associated paths and module re-exports resolve instead of disappearing, reassigned local receiver truth is refreshed instead of staying stale, inline `Result<Local, E>` / `Option<Local>` `unwrap`/`expect` chains preserve their following local receiver edge, cfg-disabled statements/expressions/match arms contribute no edges, and callable parameters plus local values/`const`/`static` items shadow same-named module functions; block-local const/static initializers receive independent callers, while active nested impl/trait items, nested function items, local macro definitions, and `include!` are rejected because unexpanded or nested code cannot supply an independently registered module-qualified caller identity
+- BrowserUse, Cookie, Profile, and Takeover source paths/symbols are rejected without treating `FileBrowserView` as browser-tool scope; exclusion is checked on every blob recursively resolved from a declared ancestor, not only on the ancestor string
 - every migration unit has one owner feature and separates touched features
-- all OpenMinis source paths are repository-relative and every unit names explicit source symbols
-- browser, Cookie, profile, and takeover symbols are excluded from included source bindings
+- lifecycle fields are validated per state: `owner_mapped` does not require target symbols; contract states require protocol/surface fields; source-bound and later states require target symbols; blocked states retain their named pending boundary
+- manifest phase is consistent: `design_baseline` has only inventory/blocked nodes, `migration_in_progress` has promoted nodes without complete retirement, and `migration_complete` requires every included node to be `legacy_retired`
 - map, mainline, test-design, target-path, resource-operation, and gate references exist
-- design-baseline nodes cannot claim bound/verified status without operation, target-symbol, and evidence fields
+- a `syn`-parsed Rust module/import graph automatically derives the complete multi-reference production-plus-test-only shared-function set from separate cfg projections; external module test identity is resolved from parsed module ancestry before callable indexing, current target predicates come from `rustc --print cfg`, `test` is explicit, test-only identity requires absence from the production projection, inactive-in-both/unsupported cfg items fail, and `shared_functions`, exact module-qualified direct `allowed_callers`, module-qualified direct `related_tests`, and one-edge-per-row `openminis_ui_migration` mainline calls must match, with no tracked-symbol whitelist, bare-name merging, or prose/grouped aliases
+- every lifecycle state validates function/mainline/test paths as canonical repository-relative files in their unique map directories; the three sets must carry identical feature ids, equal `touched_feature_ids`, include the owner feature, and prove Markdown/JSON path and self identity
+- every promoted node must match one canonical resource-map operation exactly: `binding_status=bound`, one source resource, target resource, operation owner in touched features, and an `allowed_direct=true` relation; it must also bind the exact non-empty set of incident manifest edge ids in `route_edge_ids`; `source_bound` and later additionally accept only canonical repository-relative target/mainline paths, reject symlink traversal, select only supported declaration-source languages from broad target directories, and require every target symbol to resolve as exactly one language-aware declaration—not a comment, literal, call, longer identifier, or binary/XML/JSON asset—and equal an exact mainline symbol segment on a bound row with the same operation
+- evidence covers its declared gates exactly and points to JSON attestations under `docs/migrations/openminis-ui/evidence/` whose node, gate, code-locked canonical command, proof kind, verifier identity, passed result, and run id match the evidence record; each attestation binds a distinct report under that root using schema `freehand.verifier-report.v1`, canonical path, and SHA-256. The report must carry the gate-specific passed assertions and attest the pre-promotion source commit/tree, so post-proof drift admits only the exact attestation/report paths plus top-level `status` and per-node `status`, `evidence`, and `legacy_retirement` changes in the canonical manifest. WebUI, Android-device, and legacy no-touch reports must also verify an Ed25519 signature over the complete report payload from the externally held runner key pinned in the gate; locally authored JSON cannot satisfy this provenance boundary. Required gate ids are never rejected categorically, and command/proof/verifier/assertion/signature/source/registry/manifest-contract drift fails
+- `legacy_retired` independently requires exactly one `legacy_scan_roots` row in the node owner feature mainline, exact registry/manifest node-owner/path/removed-identity agreement, canonical repository-relative non-symlink directory roots covering every bound target and removed path, reject nested scan symlinks and treat broken legacy symlinks as present, absent registered legacy paths, no registered removed symbol/import/caller under those roots, the dedicated `openminis_ui_legacy_online_no_touch` gate, and an artifact proving `legacy_touched=false`; manifest-selected fabricated identities, arbitrary in-repository empty roots, wrong owners, path drift, uncovered identities, and absolute/non-canonical/out-of-repository paths fail
 - every node is bound to this gate through `verification_gates`
 
-The gate is part of `xtask gates check`, which is invoked by `make ci`, CI, release, pre-commit, and pre-push. The migration registry is therefore a design baseline until its nodes advance with code-bound evidence; it is not implementation truth merely because the JSON parses.
+The gate is part of `xtask gates check`, which is invoked by `make ci`, CI,
+release, pre-commit, and pre-push. Missing pinned source or evidence is an
+explicit failure; the gate never fetches, falls back, or treats design/pending
+records as implementation truth.
 
 
 ## ADP Protocol Artifact Gate
@@ -144,6 +164,7 @@ This keeps mainline call maps code-bound instead of becoming stale review prose.
 - feature-map seed `owner` must contain each owned resource's `owner_crate`
 - every resource operation name is non-empty and unique within that resource
 - every operation binding contract field is non-empty: `operation_id`, `owner_feature_id`, `source_resource`, `target_resource`, `effect`, `mainline_call_doc`, and `binding_status`
+- every present operation-owned `ui_contract` has non-empty `projection_or_query`, `generated_command`, and a normalized repository-relative `surface_path` that canonically resolves to an in-repository file; OpenMinis migration nodes at `contract_ready` or later must match those values exactly
 - every pending operation binding declares non-empty `pending_reason`, `pending_closure_doc`, and `pending_verification`, and the closure doc exists
 - every operation binding references existing source and target resources
 - every operation binding id uses `<source_resource>.<operation>` format
@@ -191,6 +212,7 @@ This is the first gate for the resource-center model. It does not yet prove ever
 
 - `Makefile` must provide a `mainlines` target that runs `cargo run -p xtask -- mainlines check`
 - `Makefile` `ci` must include `build fmt clippy test mainlines gates`
+- `.githooks/pre-commit` must clear `git rev-parse --local-env-vars` before running gates so nested pinned-source Git commands cannot inherit the outer commit index/worktree
 - `.githooks/pre-push` must run `make ci`
 - GitHub CI must run `make ci`
 - release workflow must run `make ci` before release build/publish steps
