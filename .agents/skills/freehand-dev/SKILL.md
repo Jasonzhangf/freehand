@@ -664,6 +664,7 @@ Use this skill for any non-trivial work in this repo.
 
 Use this checklist for both new features and bug fixes:
 
+- Codex review gate uses `codex --profile cc review` by default. If that route returns HTTP 402 / insufficient quota before a final verdict, rerun the identical review prompt with `codex --profile tcm review`. This is an external reviewer transport switch only; do not weaken tests, skip review, or treat it as product-runtime fallback.
 - information sufficient
 - logic closed-loop
 - lifecycle management complete
