@@ -1,0 +1,72 @@
+{
+  "schema_version": 1,
+  "verification_map_id": "relay.transport.verification",
+  "feature_id": "relay.transport",
+  "status": "active",
+  "module_registry": "docs/module-registry/relay.transport.json",
+  "function_map": "docs/function-maps/relay.transport.md",
+  "mainline_call_map": "docs/mainline-calls/relay.transport.json",
+  "test_design": "docs/testing/relay.transport.md",
+  "gates": [
+    {
+      "gate_id": "relay.transport.unit-module",
+      "kind": "test",
+      "command": "cargo test -p freehand-relay -- --nocapture",
+      "binding_status": "active"
+    },
+    {
+      "gate_id": "relay.transport.module-blackbox",
+      "kind": "test",
+      "command": "cargo test -p freehand-relay --test relay_http_blackbox -- --nocapture",
+      "binding_status": "active"
+    },
+    {
+      "gate_id": "relay.transport.server-check",
+      "kind": "build",
+      "command": "cargo check -p freehand-relay-server",
+      "binding_status": "active"
+    },
+    {
+      "gate_id": "relay.transport.clippy",
+      "kind": "lint",
+      "command": "cargo clippy -p freehand-relay --all-targets -- -D warnings",
+      "binding_status": "active"
+    },
+    {
+      "gate_id": "relay.transport.deployment-smoke",
+      "kind": "project-blackbox",
+      "command": "scripts/verify-relay-deployment-smoke.sh",
+      "binding_status": "active"
+    },
+    {
+      "gate_id": "relay.transport.local-online",
+      "kind": "online-local",
+      "command": "scripts/verify-remote-relay-local-online.sh",
+      "binding_status": "active"
+    },
+    {
+      "gate_id": "relay.transport.mainline",
+      "kind": "architecture",
+      "command": "cargo run -p xtask -- mainlines check",
+      "binding_status": "active"
+    },
+    {
+      "gate_id": "relay.transport.architecture",
+      "kind": "architecture",
+      "command": "cargo run -p xtask -- gates check",
+      "binding_status": "active"
+    },
+    {
+      "gate_id": "relay.transport.remote-network",
+      "kind": "online-remote",
+      "command": "manual distinct-network smoke: authenticated directory subscription plus /relay/agents/{agent_id}/connect/{path} opaque WebSocket round trip",
+      "binding_status": "manual-required"
+    },
+    {
+      "gate_id": "relay.transport.codex-review",
+      "kind": "review",
+      "command": "codex review - < ~/.claude/skills/codex-review/review-prompt.md; only if unavailable or without a final conclusion use codex -p asxs review --uncommitted, then codex -p tcm review --uncommitted",
+      "binding_status": "manual-required"
+    }
+  ]
+}

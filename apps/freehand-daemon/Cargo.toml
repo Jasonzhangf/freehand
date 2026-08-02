@@ -6,10 +6,11 @@ license.workspace = true
 
 [dependencies]
 freehand-contracts = { path = "../../crates/freehand-contracts" }
+freehand-relay = { path = "../../crates/freehand-relay" }
 freehand-runtime = { path = "../../crates/freehand-runtime" }
 freehand-server = { path = "../freehand-server" }
 freehand-ui-protocol = { path = "../../crates/freehand-ui-protocol" }
-tokio = { version = "1", features = ["macros", "rt-multi-thread", "net", "sync"] }
+tokio = { version = "1", features = ["macros", "rt-multi-thread", "net", "sync", "time"] }
 
 [dev-dependencies]
 freehand-metadata = { path = "../../crates/freehand-metadata" }

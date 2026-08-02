@@ -8,8 +8,8 @@
       "owner_crate": "crates/freehand-config",
       "identity": "agent profile plus config source path",
       "truth_store": "~/.freehand/config.toml",
-      "operations": ["load", "validate", "compile_agent_topology", "compile_remote_daemon_registry", "project_safe_config", "mutate_provider_config", "mutate_model_group_config", "mutate_agent_resource_topology", "bootstrap_node_pairing", "compile_instruction_capability"],
-      "projections": ["runtime bootstrap config", "ordered configured peer topology", "safe CLI/ADP config query"]
+      "operations": ["load", "validate", "compile_agent_topology", "compile_agent_relay_connection", "compile_remote_daemon_registry", "project_safe_config", "mutate_provider_config", "mutate_model_group_config", "mutate_agent_resource_topology", "bootstrap_node_pairing", "compile_instruction_capability"],
+      "projections": ["runtime bootstrap config", "ordered configured peer topology", "runtime-only resolved Agent Relay connection", "safe CLI/ADP config query"]
     },
     {
       "resource_type": "remote_daemon_registry",
@@ -30,13 +30,49 @@
       "projections": ["account-scoped daemon directory snapshot", "per-daemon selected route", "route health diagnostics"]
     },
     {
-      "resource_type": "remote_relay_transport",
-      "owner_feature_id": "app.runtime-daemon",
-      "owner_crate": "apps/freehand-daemon",
-      "identity": "relay_host_id plus upstream daemon base URL",
-      "truth_store": "relay service in-memory host registry populated by explicit host registration",
-      "operations": ["register_host", "query_account_directory", "proxy_http", "proxy_adp"],
-      "projections": ["account-scoped relay directory snapshot", "proxied daemon WebUI HTTP response", "proxied daemon health response", "proxied daemon ADP WebSocket frames", "explicit relay host errors"]
+      "resource_type": "relay_account",
+      "owner_feature_id": "relay.transport",
+      "owner_crate": "crates/freehand-relay",
+      "identity": "account id plus normalized username plus hashed access token",
+      "truth_store": "Relay persisted store accounts and token hashes; raw passwords and raw tokens are never persisted",
+      "operations": ["register", "authenticate"],
+      "projections": ["authenticated account id", "opaque access token returned once at registration or login", "explicit authentication errors"]
+    },
+    {
+      "resource_type": "agent_presence",
+      "owner_feature_id": "relay.transport",
+      "owner_crate": "crates/freehand-relay",
+      "identity": "account id plus agent id",
+      "truth_store": "Relay persisted Agent identity projection plus live control-channel lease timestamp",
+      "operations": ["admit_control", "heartbeat", "disconnect", "query_directory", "subscribe_directory", "resolve_tunnel"],
+      "projections": ["account-scoped Agent directory", "account-scoped Agent directory subscription", "online/offline lease projection", "Master/Worker role and current work-status projection", "authenticated tunnel identity"]
+    },
+    {
+      "resource_type": "relay_control_tunnel",
+      "owner_feature_id": "relay.transport",
+      "owner_crate": "crates/freehand-relay",
+      "identity": "authenticated account id plus agent id plus control connection generation",
+      "truth_store": "live control connection registry and persisted presence projection",
+      "operations": ["connect", "heartbeat", "disconnect", "admit_data", "admit_error"],
+      "projections": ["authenticated tunnel admission", "presence lease updates", "explicit disconnect"]
+    },
+    {
+      "resource_type": "relay_data_tunnel",
+      "owner_feature_id": "relay.transport",
+      "owner_crate": "crates/freehand-relay",
+      "identity": "authenticated account id plus agent id plus exchange id",
+      "truth_store": "ephemeral typed request/response exchange registry; no business truth",
+      "operations": ["open_routable_exchange", "stream_request", "stream_response", "close_exchange", "fail_exchange", "proxy_http", "proxy_adp", "proxy_websocket"],
+      "projections": ["opaque HTTP bytes", "opaque ADP frames", "opaque generic WebSocket frames"]
+    },
+    {
+      "resource_type": "relay_error_tunnel",
+      "owner_feature_id": "relay.transport",
+      "owner_crate": "crates/freehand-relay",
+      "identity": "authenticated account id plus agent id plus optional exchange id",
+      "truth_store": "ephemeral typed tunnel error chain",
+      "operations": ["report", "correlate", "close_terminal"],
+      "projections": ["explicit auth, route, lease, disconnect, protocol, and bridge failures"]
     },
     {
       "resource_type": "android_apk_update",
@@ -224,7 +260,7 @@
       "owner_crate": "crates/freehand-ui-protocol",
       "identity": "query type plus resource id",
       "truth_store": "derived protocol projection, not independent truth",
-      "operations": ["query", "subscribe", "project_public_state", "dispatch_command", "compose_shell", "render_surface_contract", "render_shared_state", "post_android_turn_finished_notification"],
+      "operations": ["query", "subscribe", "project_public_state", "dispatch_command", "compose_shell", "render_surface_contract", "bind_protocol_call", "render_shared_state", "post_android_turn_finished_notification"],
       "projections": ["CLI/WebUI/Android protocol frames"]
     },
     {
@@ -492,6 +528,20 @@
       "binding_status": "bound"
     },
     {
+      "operation_id": "ui_projection.bind_protocol_call",
+      "owner_feature_id": "app.webui-smoke",
+      "source_resource": "ui_projection",
+      "target_resource": "ui_projection",
+      "effect": "bind generated ADP query, command, and subscribe request constructors to one request-id correlated WebSocket response chain that settles query_result, command_receipt, subscription_accepted, subscription_event, and failure frames explicitly",
+      "mainline_call_doc": "docs/mainline-calls/app.webui-smoke.json",
+      "ui_contract": {
+        "projection_or_query": "ADP_PROTOCOL_MANIFEST / settleAdpResponseFrame",
+        "generated_command": "adpQueryOf / adpCommandOf / adpSubscribeOf",
+        "surface_path": "apps/freehand-server/assets/webui/app-shell/adp-client.js"
+      },
+      "binding_status": "bound"
+    },
+    {
       "operation_id": "ui_projection.render_shared_state",
       "owner_feature_id": "app.webui-smoke",
       "source_resource": "ui_projection",
@@ -664,6 +714,15 @@
       "binding_status": "bound"
     },
     {
+      "operation_id": "config.compile_agent_relay_connection",
+      "owner_feature_id": "config.core",
+      "source_resource": "config",
+      "target_resource": "config",
+      "effect": "validate one atomic per-Agent Relay URL and token-env declaration and resolve its token only into the selected runtime config projection",
+      "mainline_call_doc": "docs/mainline-calls/config.core.json",
+      "binding_status": "bound"
+    },
+    {
       "operation_id": "config.compile_remote_daemon_registry",
       "owner_feature_id": "config.core",
       "source_resource": "config",
@@ -691,39 +750,120 @@
       "binding_status": "bound"
     },
     {
-      "operation_id": "remote_relay_transport.register_host",
-      "owner_feature_id": "app.runtime-daemon",
-      "source_resource": "remote_relay_transport",
-      "target_resource": "remote_relay_transport",
-      "effect": "publish one relay host registration with account, daemon, upstream base URL, endpoint candidates, and last-seen evidence",
-      "mainline_call_doc": "docs/mainline-calls/app.runtime-daemon.json",
+      "operation_id": "relay_account.register",
+      "owner_feature_id": "relay.transport",
+      "source_resource": "relay_account",
+      "target_resource": "relay_account",
+      "effect": "validate account credentials, persist an Argon2 password hash and token hash, and return one opaque access token without persisting either raw secret",
+      "mainline_call_doc": "docs/mainline-calls/relay.transport.json",
       "binding_status": "bound"
     },
     {
-      "operation_id": "remote_relay_transport.query_account_directory",
-      "owner_feature_id": "app.runtime-daemon",
-      "source_resource": "remote_relay_transport",
-      "target_resource": "remote_relay_transport",
-      "effect": "return the relay-owned account directory snapshot for registered daemon hosts without credential leakage",
-      "mainline_call_doc": "docs/mainline-calls/app.runtime-daemon.json",
+      "operation_id": "relay_account.authenticate",
+      "owner_feature_id": "relay.transport",
+      "source_resource": "relay_account",
+      "target_resource": "relay_account",
+      "effect": "resolve a Bearer or HttpOnly-cookie access token hash to exactly one authenticated account id",
+      "mainline_call_doc": "docs/mainline-calls/relay.transport.json",
       "binding_status": "bound"
     },
     {
-      "operation_id": "remote_relay_transport.proxy_http",
-      "owner_feature_id": "app.runtime-daemon",
-      "source_resource": "remote_relay_transport",
-      "target_resource": "remote_relay_transport",
-      "effect": "proxy relay daemon WebUI root/assets/query/health HTTP requests to the registered upstream daemon base URL under the relay host namespace",
-      "mainline_call_doc": "docs/mainline-calls/app.runtime-daemon.json",
+      "operation_id": "agent_presence.heartbeat",
+      "owner_feature_id": "relay.transport",
+      "source_resource": "agent_presence",
+      "target_resource": "agent_presence",
+      "effect": "persist one authenticated Agent identity, role, work status, active-session count projection, and last-seen timestamp",
+      "mainline_call_doc": "docs/mainline-calls/relay.transport.json",
       "binding_status": "bound"
     },
     {
-      "operation_id": "remote_relay_transport.proxy_adp",
-      "owner_feature_id": "app.runtime-daemon",
-      "source_resource": "remote_relay_transport",
-      "target_resource": "remote_relay_transport",
-      "effect": "proxy relay daemon ADP WebSocket frames bidirectionally to the registered upstream daemon ADP endpoint",
-      "mainline_call_doc": "docs/mainline-calls/app.runtime-daemon.json",
+      "operation_id": "agent_presence.query_directory",
+      "owner_feature_id": "relay.transport",
+      "source_resource": "agent_presence",
+      "target_resource": "agent_presence",
+      "effect": "project the authenticated account's Agent rows and derive online state only from heartbeat lease freshness",
+      "mainline_call_doc": "docs/mainline-calls/relay.transport.json",
+      "binding_status": "bound"
+    },
+    {
+      "operation_id": "agent_presence.subscribe_directory",
+      "owner_feature_id": "relay.transport",
+      "source_resource": "agent_presence",
+      "target_resource": "agent_presence",
+      "effect": "stream changed account-scoped Agent directory snapshots on a typed server-output-only WebSocket",
+      "mainline_call_doc": "docs/mainline-calls/relay.transport.json",
+      "binding_status": "bound"
+    },
+    {
+      "operation_id": "agent_presence.admit_control",
+      "owner_feature_id": "relay.transport",
+      "source_resource": "agent_presence",
+      "target_resource": "relay_control_tunnel",
+      "effect": "admit one authenticated Agent identity and bind its presence lifecycle to one generation-fenced control tunnel",
+      "mainline_call_doc": "docs/mainline-calls/relay.transport.json",
+      "binding_status": "bound"
+    },
+    {
+      "operation_id": "relay_control_tunnel.connect",
+      "owner_feature_id": "relay.transport",
+      "source_resource": "relay_control_tunnel",
+      "target_resource": "relay_control_tunnel",
+      "effect": "enter the Agent-side outbound tunnel lifecycle through authenticated control identity admission before opening dependent data and error sockets",
+      "mainline_call_doc": "docs/mainline-calls/relay.transport.json",
+      "binding_status": "bound"
+    },
+    {
+      "operation_id": "relay_control_tunnel.admit_data",
+      "owner_feature_id": "relay.transport",
+      "source_resource": "relay_control_tunnel",
+      "target_resource": "relay_data_tunnel",
+      "effect": "admit one typed data tunnel only for an identity with an active control tunnel",
+      "mainline_call_doc": "docs/mainline-calls/relay.transport.json",
+      "binding_status": "bound"
+    },
+    {
+      "operation_id": "relay_control_tunnel.admit_error",
+      "owner_feature_id": "relay.transport",
+      "source_resource": "relay_control_tunnel",
+      "target_resource": "relay_error_tunnel",
+      "effect": "atomically admit one typed error tunnel only while the same account and Agent identity has an active control tunnel",
+      "mainline_call_doc": "docs/mainline-calls/relay.transport.json",
+      "binding_status": "bound"
+    },
+    {
+      "operation_id": "relay_data_tunnel.proxy_http",
+      "owner_feature_id": "relay.transport",
+      "source_resource": "relay_data_tunnel",
+      "target_resource": "relay_data_tunnel",
+      "effect": "stream authenticated Agent HTTP bytes without forwarding Relay credentials or inspecting, rewriting, or interpreting Agent business payloads",
+      "mainline_call_doc": "docs/mainline-calls/relay.transport.json",
+      "binding_status": "bound"
+    },
+    {
+      "operation_id": "relay_data_tunnel.proxy_adp",
+      "owner_feature_id": "relay.transport",
+      "source_resource": "relay_data_tunnel",
+      "target_resource": "relay_data_tunnel",
+      "effect": "stream authenticated Agent ADP frames bidirectionally without parsing or mutating session, task, provider, or lifecycle semantics",
+      "mainline_call_doc": "docs/mainline-calls/relay.transport.json",
+      "binding_status": "bound"
+    },
+    {
+      "operation_id": "relay_data_tunnel.proxy_websocket",
+      "owner_feature_id": "relay.transport",
+      "source_resource": "relay_data_tunnel",
+      "target_resource": "relay_data_tunnel",
+      "effect": "stream authenticated opaque WebSocket frames to a validated local Agent path without parsing business payloads",
+      "mainline_call_doc": "docs/mainline-calls/relay.transport.json",
+      "binding_status": "bound"
+    },
+    {
+      "operation_id": "relay_error_tunnel.correlate",
+      "owner_feature_id": "relay.transport",
+      "source_resource": "relay_error_tunnel",
+      "target_resource": "relay_data_tunnel",
+      "effect": "validate one typed Agent tunnel failure, remove only its authenticated pending exchange, and deliver the exact correlated failure to that exchange receiver",
+      "mainline_call_doc": "docs/mainline-calls/relay.transport.json",
       "binding_status": "bound"
     },
     {
@@ -1090,6 +1230,28 @@
       "binding_status": "bound"
     },
     {
+      "edge_id": "app.webui-smoke#10-foundation-protocol-client",
+      "operation_id": "ui_projection.bind_protocol_call",
+      "source_resource": "ui_projection",
+      "target_resource": "ui_projection",
+      "mainline_call_doc": "docs/mainline-calls/app.webui-smoke.json",
+      "call_table_step": "10-foundation-protocol-client",
+      "file_path": "apps/freehand-server/assets/webui/legacy-monolith.js / apps/freehand-server/assets/webui/app-shell/adp-client.js",
+      "symbol_path": "handleAdpFrame / settleAdpResponseFrame",
+      "binding_status": "bound"
+    },
+    {
+      "edge_id": "app.webui-smoke#10-foundation-protocol-generated",
+      "operation_id": "ui_projection.bind_protocol_call",
+      "source_resource": "ui_projection",
+      "target_resource": "ui_projection",
+      "mainline_call_doc": "docs/mainline-calls/app.webui-smoke.json",
+      "call_table_step": "10-foundation-protocol-generated",
+      "file_path": "apps/freehand-server/assets/webui/generated/adp-protocol.js",
+      "symbol_path": "ADP_PROTOCOL_MANIFEST / adpQueryOf / adpCommandOf / adpSubscribeOf",
+      "binding_status": "bound"
+    },
+    {
       "edge_id": "app.webui-smoke#10-foundation-shared",
       "operation_id": "ui_projection.render_shared_state",
       "source_resource": "ui_projection",
@@ -1109,6 +1271,17 @@
       "call_table_step": "11g",
       "file_path": "apps/freehand-server/assets/webui/legacy-monolith.js",
       "symbol_path": "maybeNotifyAndroidTurnFinished",
+      "binding_status": "bound"
+    },
+    {
+      "edge_id": "app.webui-smoke#11h-adp-generated",
+      "operation_id": "ui_projection.bind_protocol_call",
+      "source_resource": "ui_projection",
+      "target_resource": "ui_projection",
+      "mainline_call_doc": "docs/mainline-calls/app.webui-smoke.json",
+      "call_table_step": "11h-adp-generated",
+      "file_path": "apps/freehand-server/assets/webui/generated/adp-protocol.js",
+      "symbol_path": "ADP_PROTOCOL_MANIFEST / adpQueryOf / adpCommandOf / adpSubscribeOf",
       "binding_status": "bound"
     },
     {
@@ -1266,6 +1439,17 @@
       "binding_status": "bound"
     },
     {
+      "edge_id": "config.core#07",
+      "operation_id": "config.compile_agent_relay_connection",
+      "source_resource": "config",
+      "target_resource": "config",
+      "mainline_call_doc": "docs/mainline-calls/config.core.json",
+      "call_table_step": "07",
+      "file_path": "crates/freehand-config/src/lib.rs",
+      "symbol_path": "LoadedConfig::select_agent",
+      "binding_status": "bound"
+    },
+    {
       "edge_id": "config.core#10",
       "operation_id": "config.mutate_provider_config",
       "source_resource": "config",
@@ -1354,47 +1538,146 @@
       "binding_status": "bound"
     },
     {
-      "edge_id": "app.runtime-daemon#15",
-      "operation_id": "remote_relay_transport.register_host",
-      "source_resource": "remote_relay_transport",
-      "target_resource": "remote_relay_transport",
-      "mainline_call_doc": "docs/mainline-calls/app.runtime-daemon.json",
-      "call_table_step": "15",
-      "file_path": "apps/freehand-server/src/remote_relay.rs",
-      "symbol_path": "RemoteRelayDirectory::publish_host",
+      "edge_id": "relay.transport#01",
+      "operation_id": "relay_account.register",
+      "source_resource": "relay_account",
+      "target_resource": "relay_account",
+      "mainline_call_doc": "docs/mainline-calls/relay.transport.json",
+      "call_table_step": "01",
+      "file_path": "crates/freehand-relay/src/service.rs / crates/freehand-relay/src/store.rs",
+      "symbol_path": "register / RelayStore::register",
       "binding_status": "bound"
     },
     {
-      "edge_id": "app.runtime-daemon#16",
-      "operation_id": "remote_relay_transport.query_account_directory",
-      "source_resource": "remote_relay_transport",
-      "target_resource": "remote_relay_transport",
-      "mainline_call_doc": "docs/mainline-calls/app.runtime-daemon.json",
-      "call_table_step": "16",
-      "file_path": "apps/freehand-server/src/remote_relay.rs",
-      "symbol_path": "RemoteRelayDirectory::account_directory",
+      "edge_id": "relay.transport#02",
+      "operation_id": "relay_account.authenticate",
+      "source_resource": "relay_account",
+      "target_resource": "relay_account",
+      "mainline_call_doc": "docs/mainline-calls/relay.transport.json",
+      "call_table_step": "02",
+      "file_path": "crates/freehand-relay/src/service.rs / crates/freehand-relay/src/store.rs",
+      "symbol_path": "authenticated_account / RelayStore::authenticate",
       "binding_status": "bound"
     },
     {
-      "edge_id": "app.runtime-daemon#17",
-      "operation_id": "remote_relay_transport.proxy_http",
-      "source_resource": "remote_relay_transport",
-      "target_resource": "remote_relay_transport",
-      "mainline_call_doc": "docs/mainline-calls/app.runtime-daemon.json",
-      "call_table_step": "17",
-      "file_path": "apps/freehand-server/src/remote_relay.rs",
-      "symbol_path": "proxy_relay_daemon_http",
+      "edge_id": "relay.transport#03",
+      "operation_id": "agent_presence.heartbeat",
+      "source_resource": "agent_presence",
+      "target_resource": "agent_presence",
+      "mainline_call_doc": "docs/mainline-calls/relay.transport.json",
+      "call_table_step": "03",
+      "file_path": "crates/freehand-relay/src/service.rs / crates/freehand-relay/src/store.rs",
+      "symbol_path": "heartbeat / RelayStore::heartbeat",
       "binding_status": "bound"
     },
     {
-      "edge_id": "app.runtime-daemon#18",
-      "operation_id": "remote_relay_transport.proxy_adp",
-      "source_resource": "remote_relay_transport",
-      "target_resource": "remote_relay_transport",
-      "mainline_call_doc": "docs/mainline-calls/app.runtime-daemon.json",
-      "call_table_step": "18",
-      "file_path": "apps/freehand-server/src/remote_relay.rs",
-      "symbol_path": "handle_relay_daemon_adp",
+      "edge_id": "relay.transport#04",
+      "operation_id": "agent_presence.query_directory",
+      "source_resource": "agent_presence",
+      "target_resource": "agent_presence",
+      "mainline_call_doc": "docs/mainline-calls/relay.transport.json",
+      "call_table_step": "04",
+      "file_path": "crates/freehand-relay/src/service.rs / crates/freehand-relay/src/store.rs",
+      "symbol_path": "directory / RelayStore::directory",
+      "binding_status": "bound"
+    },
+    {
+      "edge_id": "relay.transport#05",
+      "operation_id": "agent_presence.subscribe_directory",
+      "source_resource": "agent_presence",
+      "target_resource": "agent_presence",
+      "mainline_call_doc": "docs/mainline-calls/relay.transport.json",
+      "call_table_step": "05",
+      "file_path": "crates/freehand-relay/src/directory_socket.rs / crates/freehand-relay/src/service.rs",
+      "symbol_path": "directory_subscription / project_directory",
+      "binding_status": "bound"
+    },
+    {
+      "edge_id": "relay.transport#06",
+      "operation_id": "agent_presence.admit_control",
+      "source_resource": "agent_presence",
+      "target_resource": "relay_control_tunnel",
+      "mainline_call_doc": "docs/mainline-calls/relay.transport.json",
+      "call_table_step": "06",
+      "file_path": "crates/freehand-relay/src/websocket_tunnel.rs",
+      "symbol_path": "control_tunnel / attach_control",
+      "binding_status": "bound"
+    },
+    {
+      "edge_id": "relay.transport#07",
+      "operation_id": "relay_control_tunnel.admit_data",
+      "source_resource": "relay_control_tunnel",
+      "target_resource": "relay_data_tunnel",
+      "mainline_call_doc": "docs/mainline-calls/relay.transport.json",
+      "call_table_step": "07",
+      "file_path": "crates/freehand-relay/src/websocket_tunnel.rs",
+      "symbol_path": "data_tunnel / attach_data",
+      "binding_status": "bound"
+    },
+    {
+      "edge_id": "relay.transport#14",
+      "operation_id": "relay_control_tunnel.admit_error",
+      "source_resource": "relay_control_tunnel",
+      "target_resource": "relay_error_tunnel",
+      "mainline_call_doc": "docs/mainline-calls/relay.transport.json",
+      "call_table_step": "14",
+      "file_path": "crates/freehand-relay/src/websocket_tunnel.rs / crates/freehand-relay/src/tunnel.rs",
+      "symbol_path": "attach_error / RelayTunnelRegistry::admit_error",
+      "binding_status": "bound"
+    },
+    {
+      "edge_id": "relay.transport#08",
+      "operation_id": "relay_data_tunnel.proxy_http",
+      "source_resource": "relay_data_tunnel",
+      "target_resource": "relay_data_tunnel",
+      "mainline_call_doc": "docs/mainline-calls/relay.transport.json",
+      "call_table_step": "08",
+      "file_path": "crates/freehand-relay/src/http_tunnel.rs / crates/freehand-relay/src/tunnel.rs",
+      "symbol_path": "open_http_exchange / RelayTunnelRegistry::open_routable_exchange",
+      "binding_status": "bound"
+    },
+    {
+      "edge_id": "relay.transport#09",
+      "operation_id": "relay_data_tunnel.proxy_adp",
+      "source_resource": "relay_data_tunnel",
+      "target_resource": "relay_data_tunnel",
+      "mainline_call_doc": "docs/mainline-calls/relay.transport.json",
+      "call_table_step": "09",
+      "file_path": "crates/freehand-relay/src/websocket_tunnel.rs / crates/freehand-relay/src/tunnel.rs",
+      "symbol_path": "proxy_adp / proxy_websocket",
+      "binding_status": "bound"
+    },
+    {
+      "edge_id": "relay.transport#10",
+      "operation_id": "relay_data_tunnel.proxy_websocket",
+      "source_resource": "relay_data_tunnel",
+      "target_resource": "relay_data_tunnel",
+      "mainline_call_doc": "docs/mainline-calls/relay.transport.json",
+      "call_table_step": "10",
+      "file_path": "crates/freehand-relay/src/websocket_tunnel.rs",
+      "symbol_path": "proxy_websocket_path / proxy_websocket",
+      "binding_status": "bound"
+    },
+    {
+      "edge_id": "relay.transport#11",
+      "operation_id": "relay_error_tunnel.correlate",
+      "source_resource": "relay_error_tunnel",
+      "target_resource": "relay_data_tunnel",
+      "mainline_call_doc": "docs/mainline-calls/relay.transport.json",
+      "call_table_step": "11",
+      "file_path": "crates/freehand-relay/src/websocket_tunnel.rs / crates/freehand-relay/src/tunnel.rs",
+      "symbol_path": "run_error_socket / RelayTunnelRegistry::fail_exchange",
+      "binding_status": "bound"
+    },
+    {
+      "edge_id": "relay.transport#13",
+      "operation_id": "relay_control_tunnel.connect",
+      "source_resource": "relay_control_tunnel",
+      "target_resource": "relay_control_tunnel",
+      "mainline_call_doc": "docs/mainline-calls/relay.transport.json",
+      "call_table_step": "13",
+      "file_path": "apps/freehand-relay-server/src/main.rs / crates/freehand-relay/src/agent_client.rs",
+      "symbol_path": "agent_tunnel_config_from_env / RelayAgentClient::run",
       "binding_status": "bound"
     },
     {
@@ -1812,12 +2095,68 @@
       "reason": "Node owner may consume config-compiled account and endpoint truth to publish one account-scoped multi-daemon directory and route resolution without owning configuration or credential truth."
     },
     {
-      "rule_id": "remote-relay-transport-self-owned-direct",
-      "source_resource": "remote_relay_transport",
-      "target_resource": "remote_relay_transport",
+      "rule_id": "relay-account-self-owned-direct",
+      "source_resource": "relay_account",
+      "target_resource": "relay_account",
       "allowed_direct": true,
       "via_resources": [],
-      "reason": "Runtime daemon relay transport owns its host registry and pass-through IO; it may update and query only its own transport resource without becoming config, node, task, or Android truth."
+      "reason": "Relay account owner may register credentials and authenticate opaque token hashes without exposing raw secrets to config, daemon, WebUI, or Android owners."
+    },
+    {
+      "rule_id": "agent-presence-self-owned-direct",
+      "source_resource": "agent_presence",
+      "target_resource": "agent_presence",
+      "allowed_direct": true,
+      "via_resources": [],
+      "reason": "Relay presence owner may persist authenticated heartbeats and derive account-scoped online/offline directory projections from lease freshness."
+    },
+    {
+      "rule_id": "agent-presence-admits-relay-control-direct",
+      "source_resource": "agent_presence",
+      "target_resource": "relay_control_tunnel",
+      "allowed_direct": true,
+      "via_resources": [],
+      "reason": "An authenticated Agent identity must enter transport through the control tunnel that owns its presence lifecycle."
+    },
+    {
+      "rule_id": "relay-control-admits-relay-data-direct",
+      "source_resource": "relay_control_tunnel",
+      "target_resource": "relay_data_tunnel",
+      "allowed_direct": true,
+      "via_resources": [],
+      "reason": "A data tunnel may be admitted only after the same account and Agent identity has an active control tunnel."
+    },
+    {
+      "rule_id": "relay-control-admits-relay-error-direct",
+      "source_resource": "relay_control_tunnel",
+      "target_resource": "relay_error_tunnel",
+      "allowed_direct": true,
+      "via_resources": [],
+      "reason": "An error tunnel may be admitted only by the same registry mutation that observes the account and Agent identity's active control tunnel."
+    },
+    {
+      "rule_id": "relay-control-connects-self-direct",
+      "source_resource": "relay_control_tunnel",
+      "target_resource": "relay_control_tunnel",
+      "allowed_direct": true,
+      "via_resources": [],
+      "reason": "The Relay Agent client may enter the outbound lifecycle only by establishing its authenticated control identity before dependent channel admission."
+    },
+    {
+      "rule_id": "relay-data-self-owned-direct",
+      "source_resource": "relay_data_tunnel",
+      "target_resource": "relay_data_tunnel",
+      "allowed_direct": true,
+      "via_resources": [],
+      "reason": "The independent Relay data tunnel owns opaque HTTP and ADP exchange IO only and cannot become config, node, session, task, provider, or Android truth."
+    },
+    {
+      "rule_id": "relay-error-correlates-data-direct",
+      "source_resource": "relay_error_tunnel",
+      "target_resource": "relay_data_tunnel",
+      "allowed_direct": true,
+      "via_resources": [],
+      "reason": "The typed Relay error owner may close exactly one authenticated pending data exchange and deliver its explicit failure without entering business payload bytes."
     },
     {
       "rule_id": "android-apk-update-self-owned-direct",
@@ -1850,6 +2189,14 @@
       "allowed_direct": true,
       "via_resources": [],
       "reason": "The WebUI app boundary may render protocol-owned projections into ephemeral shell and surface DOM without becoming session, task, lifecycle, or config truth."
+    },
+    {
+      "rule_id": "ui-projection-binds-adp-protocol-call-direct",
+      "source_resource": "ui_projection",
+      "target_resource": "ui_projection",
+      "allowed_direct": true,
+      "via_resources": [],
+      "reason": "UI protocol may bind generated ADP frame constructors to request-id-correlated response/failure projection without creating a second truth owner."
     },
     {
       "rule_id": "ui-projection-posts-android-notification-direct",

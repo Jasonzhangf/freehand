@@ -724,6 +724,9 @@
       "output_semantic": "protocol-shaped query, command, or subscribe payload accepted by createAdpClient",
       "caller": "legacy-monolith.js and split WebUI surface controls",
       "callee": "ADP WebSocket client",
+      "source_resource": "ui_projection",
+      "target_resource": "ui_projection",
+      "resource_operation": "ui_projection.bind_protocol_call",
       "binding_status": "bound"
     }
   ],

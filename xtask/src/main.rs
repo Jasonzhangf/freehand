@@ -248,6 +248,7 @@ fn run_gates_check() -> Result<(), String> {
     verify_webui_app_boundary(&root)?;
     verify_webui_foundation_contracts(&root)?;
     verify_runtime_daemon_boundary(&root)?;
+    verify_relay_transport_boundary(&root)?;
     verify_dependency_graph(&root)?;
     verify_task_status_single_writer(&root)?;
     verify_adp_protocol_artifacts(&root)?;
@@ -2153,7 +2154,7 @@ fn verify_ci_cd_gate_commands(root: &Path) -> Result<(), String> {
         fs::read_to_string(root.join("Makefile")).map_err(|err| format!("read Makefile: {err}"))?;
     require_contains(
         &makefile,
-        ".PHONY: provision-openminis-source build fmt clippy test mainlines gates ci verify-webui-online verify-webui-release-online release install-global install-symlink install-launchd install-launchdS install-worker-launchd install-worker-launchdS restart-launchd restart-launchdS restart-worker-launchd restart-worker-launchdS uninstall-launchd uninstall-launchdS uninstall-worker-launchd uninstall-worker-launchdS launchd-status launchd-statusS worker-launchd-status worker-launchd-statusS launchd-logs launchd-logsS worker-launchd-logs worker-launchd-logsS hooks",
+        ".PHONY: provision-openminis-source build fmt clippy test mainlines gates relay-deployment-smoke relay-local-online ci verify-webui-online verify-webui-release-online release install-global install-symlink install-launchd install-launchdS install-worker-launchd install-worker-launchdS restart-launchd restart-launchdS restart-worker-launchd restart-worker-launchdS uninstall-launchd uninstall-launchdS uninstall-worker-launchd uninstall-worker-launchdS launchd-status launchd-statusS worker-launchd-status worker-launchd-statusS launchd-logs launchd-logsS worker-launchd-logs worker-launchd-logsS hooks",
         "Makefile",
     )?;
     require_contains(
@@ -2170,7 +2171,7 @@ fn verify_ci_cd_gate_commands(root: &Path) -> Result<(), String> {
     )?;
     require_contains(
         &makefile,
-        "ci: provision-openminis-source build fmt clippy test mainlines gates",
+        "ci: provision-openminis-source build fmt clippy test mainlines gates relay-deployment-smoke relay-local-online",
         "Makefile",
     )?;
     require_contains(&makefile, "release:\n\tscripts/release.sh", "Makefile")?;
@@ -3530,6 +3531,786 @@ fn verify_runtime_daemon_boundary(root: &Path) -> Result<(), String> {
             ));
         }
     }
+    Ok(())
+}
+
+fn verify_relay_transport_boundary(root: &Path) -> Result<(), String> {
+    let required_paths = [
+        "docs/module-registry/relay.transport.json",
+        "docs/module-registry/config.core.json",
+        "docs/verification-maps/relay.transport.json",
+        "docs/lifecycles/relay-outbound-tunnel.json",
+        "crates/freehand-relay/Cargo.toml",
+        "crates/freehand-relay/src/config.rs",
+        "crates/freehand-relay/src/lib.rs",
+        "crates/freehand-relay/src/store.rs",
+        "crates/freehand-relay/src/service.rs",
+        "crates/freehand-relay/tests/relay_http_blackbox.rs",
+        "apps/freehand-relay-server/Cargo.toml",
+        "apps/freehand-relay-server/src/main.rs",
+        "apps/freehand-relay-server/deploy/freehand-relay.service",
+        "apps/freehand-relay-server/deploy/relay.env.example",
+        "scripts/verify-relay-deployment-smoke.sh",
+    ];
+    for path in required_paths {
+        if !root.join(path).is_file() {
+            return Err(format!("relay.transport required path is missing: {path}"));
+        }
+    }
+
+    verify_relay_module_registry(root)?;
+    verify_config_module_registry(root)?;
+    verify_relay_verification_map(root)?;
+    verify_relay_tunnel_lifecycle(root)?;
+
+    let relay_cargo = fs::read_to_string(root.join("crates/freehand-relay/Cargo.toml"))
+        .map_err(|error| error.to_string())?;
+    for forbidden in [
+        "freehand-config",
+        "freehand-runtime",
+        "freehand-server",
+        "freehand-task",
+        "freehand-reason",
+        "freehand-ui-protocol",
+    ] {
+        if relay_cargo.contains(forbidden) {
+            return Err(format!(
+                "freehand-relay must remain independent and cannot depend on {forbidden}"
+            ));
+        }
+    }
+
+    let relay_host_cargo = fs::read_to_string(root.join("apps/freehand-relay-server/Cargo.toml"))
+        .map_err(|error| error.to_string())?;
+    for required in ["freehand-relay", "tokio"] {
+        if !relay_host_cargo.contains(required) {
+            return Err(format!(
+                "freehand-relay-server thin host must depend on {required}"
+            ));
+        }
+    }
+    for forbidden in ["freehand-server", "freehand-runtime", "freehand-config"] {
+        if relay_host_cargo.contains(forbidden) {
+            return Err(format!(
+                "freehand-relay-server must stay a thin host and cannot depend on {forbidden}"
+            ));
+        }
+    }
+
+    let daemon_cargo = fs::read_to_string(root.join("apps/freehand-daemon/Cargo.toml"))
+        .map_err(|error| error.to_string())?;
+    if !daemon_cargo.contains("freehand-relay") {
+        return Err(
+            "freehand-daemon compatibility host must call the relay.transport public crate"
+                .to_owned(),
+        );
+    }
+    let daemon_source = fs::read_to_string(root.join("apps/freehand-daemon/src/main.rs"))
+        .map_err(|error| error.to_string())?;
+    require_contains(
+        &daemon_source,
+        "RelayServerConfig::from_env()",
+        "apps/freehand-daemon/src/main.rs",
+    )?;
+    if daemon_source.contains("run_remote_relay_mode(bind_addr)")
+        || daemon_source.contains("remote-relay [--bind")
+    {
+        return Err("daemon remote-relay must read FREEHAND_RELAY_BIND through relay.transport config, not CLI bind defaults".to_owned());
+    }
+    if root
+        .join("apps/freehand-server/src/remote_relay.rs")
+        .exists()
+    {
+        return Err(
+            "legacy apps/freehand-server relay implementation must be physically removed"
+                .to_owned(),
+        );
+    }
+
+    let config_source = fs::read_to_string(root.join("crates/freehand-config/src/lib.rs"))
+        .map_err(|error| error.to_string())?;
+    for forbidden in [
+        "AgentRelayConfig",
+        "SelectedAgentRelayConfig",
+        "RawAgentRelayConfig",
+    ] {
+        if config_source.contains(forbidden) {
+            return Err(format!(
+                "config owner cannot own Relay credentials or transport schema: {forbidden}"
+            ));
+        }
+    }
+
+    let server_source = fs::read_to_string(root.join("apps/freehand-server/src/lib.rs"))
+        .map_err(|error| error.to_string())?;
+    for forbidden in ["RemoteRelayDirectory", "relay/hosts", "relay/directory"] {
+        if server_source.contains(forbidden) {
+            return Err(format!(
+                "freehand-server cannot own legacy Relay semantics: {forbidden}"
+            ));
+        }
+    }
+
+    for path in [
+        "apps/freehand-relay-server/deploy/freehand-relay.service",
+        "apps/freehand-relay-server/deploy/relay.env.example",
+    ] {
+        let source = fs::read_to_string(root.join(path)).map_err(|error| error.to_string())?;
+        for forbidden in ["PASSWORD=", "TOKEN=", "SECRET="] {
+            if source.to_ascii_uppercase().contains(forbidden) {
+                return Err(format!(
+                    "Relay deployment files cannot embed secret fields: {path} contains {forbidden}"
+                ));
+            }
+        }
+    }
+
+    let relay_doc = load_mainline_doc(&root.join("docs/mainline-calls/relay.transport.json"))?;
+    let expected_edges = [
+        ("01", "register", "RelayStore::register"),
+        ("02", "authenticated_account", "RelayStore::authenticate"),
+        ("03", "heartbeat", "RelayStore::heartbeat"),
+        ("04", "directory", "RelayStore::directory"),
+        ("05", "directory_subscription", "project_directory"),
+        ("06", "control_tunnel", "attach_control"),
+        ("07", "data_tunnel", "attach_data"),
+        (
+            "08",
+            "open_http_exchange",
+            "RelayTunnelRegistry::open_routable_exchange",
+        ),
+        ("09", "proxy_adp", "proxy_websocket"),
+        ("10", "proxy_websocket_path", "proxy_websocket"),
+        (
+            "11",
+            "run_error_socket",
+            "RelayTunnelRegistry::fail_exchange",
+        ),
+        ("12", "main", "RelayService::serve"),
+        (
+            "13",
+            "agent_tunnel_config_from_env",
+            "RelayAgentClient::run",
+        ),
+        ("14", "attach_error", "RelayTunnelRegistry::admit_error"),
+    ];
+    if relay_doc.call_table.len() != expected_edges.len() {
+        return Err(
+            "relay.transport call map must contain exactly fourteen bound edges".to_owned(),
+        );
+    }
+    for (row, (step, caller, callee)) in relay_doc.call_table.iter().zip(expected_edges) {
+        if row.step != step || row.caller != caller || row.callee != callee {
+            return Err(format!(
+                "relay.transport step {step} must bind real edge {caller} -> {callee}"
+            ));
+        }
+        let files = split_binding_segments(&row.file_path);
+        if !symbol_resolves_in_files(root, &files, caller)?
+            || !symbol_resolves_in_files(root, &files, callee)?
+        {
+            return Err(format!(
+                "relay.transport step {step} caller/callee symbols do not resolve in {}",
+                row.file_path
+            ));
+        }
+    }
+
+    let relay_service = fs::read_to_string(root.join("crates/freehand-relay/src/service.rs"))
+        .map_err(|error| error.to_string())?;
+    for call in [
+        "store.register(",
+        "store.authenticate(",
+        "store.heartbeat(",
+        "store.directory(",
+    ] {
+        require_contains(&relay_service, call, "crates/freehand-relay/src/service.rs")?;
+    }
+    let relay_directory =
+        fs::read_to_string(root.join("crates/freehand-relay/src/directory_socket.rs"))
+            .map_err(|error| error.to_string())?;
+    for call in ["directory_subscription(", "project_directory("] {
+        require_contains(
+            &relay_directory,
+            call,
+            "crates/freehand-relay/src/directory_socket.rs",
+        )?;
+    }
+    let relay_websocket =
+        fs::read_to_string(root.join("crates/freehand-relay/src/websocket_tunnel.rs"))
+            .map_err(|error| error.to_string())?;
+    for call in [
+        "attach_control(",
+        "attach_data(",
+        "attach_error(",
+        "open_routable_exchange(",
+        "proxy_websocket(",
+        "proxy_websocket_path(",
+        "fail_exchange(",
+    ] {
+        require_contains(
+            &relay_websocket,
+            call,
+            "crates/freehand-relay/src/websocket_tunnel.rs",
+        )?;
+    }
+    let relay_http = fs::read_to_string(root.join("crates/freehand-relay/src/http_tunnel.rs"))
+        .map_err(|error| error.to_string())?;
+    require_contains(
+        &relay_http,
+        "open_routable_exchange(",
+        "crates/freehand-relay/src/http_tunnel.rs",
+    )?;
+    let relay_registry = fs::read_to_string(root.join("crates/freehand-relay/src/tunnel.rs"))
+        .map_err(|error| error.to_string())?;
+    require_contains(
+        &relay_registry,
+        "fn open_exchange(",
+        "crates/freehand-relay/src/tunnel.rs",
+    )?;
+    if relay_registry.contains("pub fn open_exchange(")
+        || relay_registry.contains("pub(crate) fn open_exchange(")
+    {
+        return Err(
+            "relay.transport raw pending opener must remain private to RelayTunnelRegistry"
+                .to_owned(),
+        );
+    }
+    let relay_main = fs::read_to_string(root.join("apps/freehand-relay-server/src/main.rs"))
+        .map_err(|error| error.to_string())?;
+    require_contains(
+        &relay_main,
+        "service.serve(listener).await?",
+        "apps/freehand-relay-server/src/main.rs",
+    )?;
+
+    for (path, forbidden) in [
+        (
+            "apps/freehand-relay-server/src/main.rs",
+            "unwrap_or_else(|_| \"127.0.0.1:18443\"",
+        ),
+        (
+            "crates/freehand-relay/src/model.rs",
+            "#[serde(default)]\n    pub active_session_count",
+        ),
+        ("crates/freehand-relay/src/store.rs", "StoreData::default()"),
+        (
+            "scripts/verify-remote-relay-local-online.sh",
+            "remote-relay --bind",
+        ),
+        (
+            "crates/freehand-relay/src/service.rs",
+            ".duration_since(UNIX_EPOCH)\n        .unwrap_or_default()",
+        ),
+    ] {
+        let source = fs::read_to_string(root.join(path)).map_err(|error| error.to_string())?;
+        if source.contains(forbidden) {
+            return Err(format!(
+                "relay.transport explicit-error gate rejects fallback in {path}: {forbidden}"
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn verify_relay_tunnel_lifecycle(root: &Path) -> Result<(), String> {
+    let path = root.join("docs/lifecycles/relay-outbound-tunnel.json");
+    let source = fs::read_to_string(&path).map_err(|error| error.to_string())?;
+    let manifest: serde_json::Value =
+        serde_json::from_str(&source).map_err(|error| error.to_string())?;
+    if manifest["lifecycle_id"] != "relay.transport.outbound-tunnel.v1"
+        || manifest["owner_feature"] != "relay.transport"
+        || manifest["status"] != "active"
+        || manifest["entrypoint"] != "RelayControlIn01AuthenticatedConnect"
+        || manifest["return_path"] != "RelayDataOut03ResponseEnd or RelayErrorOut03Terminal"
+    {
+        return Err("Relay outbound-tunnel lifecycle identity/status is invalid".to_owned());
+    }
+    let nodes = manifest["nodes"]
+        .as_array()
+        .ok_or_else(|| "Relay outbound-tunnel lifecycle nodes are missing".to_owned())?;
+    let node_ids = nodes
+        .iter()
+        .map(|node| {
+            node["node_id"]
+                .as_str()
+                .ok_or_else(|| "Relay outbound-tunnel node id is invalid".to_owned())
+        })
+        .collect::<Result<BTreeSet<_>, _>>()?;
+    for required in [
+        "RelayControlIn01AuthenticatedConnect",
+        "RelayControlIn02AgentIdentity",
+        "RelayControlOut03IdentityAccepted",
+        "RelayDataIn01RequestOpen",
+        "RelayDataIn02RequestChunk",
+        "RelayDataIn03RequestEnd",
+        "RelayDataOut01ResponseOpen",
+        "RelayDataOut02ResponseChunk",
+        "RelayDataOut03ResponseEnd",
+        "RelayErrorIn01TunnelFailure",
+        "RelayErrorOut02CorrelatedFailure",
+        "RelayErrorOut03Terminal",
+    ] {
+        if !node_ids.contains(required) {
+            return Err(format!(
+                "Relay outbound-tunnel lifecycle is missing node `{required}`"
+            ));
+        }
+    }
+    let model = fs::read_to_string(root.join("crates/freehand-relay/src/model.rs"))
+        .map_err(|error| error.to_string())?;
+    let agent_client = fs::read_to_string(root.join("crates/freehand-relay/src/agent_client.rs"))
+        .map_err(|error| error.to_string())?;
+    let websocket = fs::read_to_string(root.join("crates/freehand-relay/src/websocket_tunnel.rs"))
+        .map_err(|error| error.to_string())?;
+    for (source, needle, owner) in [
+        (&model, "RelayControlOutFrame", "model.rs"),
+        (&model, "IdentityAccepted", "model.rs"),
+        (
+            &agent_client,
+            "RelayControlOutFrame::IdentityAccepted",
+            "agent_client.rs",
+        ),
+        (&agent_client, "Body::wrap_stream", "agent_client.rs"),
+        (
+            &websocket,
+            "RelayControlOutFrame::IdentityAccepted",
+            "websocket_tunnel.rs",
+        ),
+        (&websocket, "fail_active_exchange", "websocket_tunnel.rs"),
+    ] {
+        require_contains(source, needle, owner)?;
+    }
+    for forbidden in [
+        "upstreamBaseUrl",
+        "upstream_base_url",
+        "agent_upstream",
+        "resolve_upstream",
+        "build_upstream_url",
+        "build_adp_url",
+        "connect_upstream_adp",
+    ] {
+        for path in [
+            "crates/freehand-relay/src",
+            "apps/freehand-relay-server/src",
+        ] {
+            let candidate = root.join(path);
+            let mut files = BTreeSet::new();
+            collect_all_file_paths(root, &candidate, &mut files)?;
+            for file in files {
+                let source =
+                    fs::read_to_string(root.join(&file)).map_err(|error| error.to_string())?;
+                if source.contains(forbidden) {
+                    return Err(format!(
+                        "Relay outbound-tunnel removal gate found `{forbidden}` in {file}"
+                    ));
+                }
+            }
+        }
+    }
+    Ok(())
+}
+
+#[derive(Debug, Deserialize)]
+struct RelayModuleRegistry {
+    schema_version: u32,
+    registry_id: String,
+    feature_id: String,
+    status: String,
+    coverage_roots: Vec<String>,
+    modules: Vec<RelayModuleEntry>,
+    declared_edges: Vec<RelayModuleEdge>,
+}
+
+#[derive(Debug, Deserialize)]
+struct RelayModuleEntry {
+    module_id: String,
+    owner_feature_id: String,
+    status: String,
+    owned_paths: Vec<String>,
+    allowed_dependencies: Vec<String>,
+    forbidden_dependencies: Vec<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct RelayModuleEdge {
+    edge_id: String,
+    from_module_id: String,
+    to_module_id: String,
+    import_name: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct RelayVerificationMap {
+    schema_version: u32,
+    verification_map_id: String,
+    feature_id: String,
+    status: String,
+    module_registry: String,
+    function_map: String,
+    mainline_call_map: String,
+    test_design: String,
+    gates: Vec<RelayVerificationGate>,
+}
+
+#[derive(Debug, Deserialize)]
+struct RelayVerificationGate {
+    gate_id: String,
+    kind: String,
+    command: String,
+    binding_status: String,
+}
+
+fn verify_relay_module_registry(root: &Path) -> Result<(), String> {
+    let path = root.join("docs/module-registry/relay.transport.json");
+    let source = fs::read_to_string(&path).map_err(|error| error.to_string())?;
+    let registry: RelayModuleRegistry =
+        serde_json::from_str(&source).map_err(|error| error.to_string())?;
+    if registry.schema_version != 1
+        || registry.registry_id != "relay.transport.modules"
+        || registry.feature_id != "relay.transport"
+        || registry.status != "active"
+    {
+        return Err("relay.transport module registry identity/status is invalid".to_owned());
+    }
+
+    let mut module_ids = BTreeSet::new();
+    let mut owned_paths = BTreeMap::<String, String>::new();
+    for module in &registry.modules {
+        if module.owner_feature_id != "relay.transport" || module.status != "active" {
+            return Err(format!(
+                "relay module `{}` must be active and owned by relay.transport",
+                module.module_id
+            ));
+        }
+        if !module_ids.insert(module.module_id.clone()) {
+            return Err(format!(
+                "relay module registry duplicates module `{}`",
+                module.module_id
+            ));
+        }
+        if module.allowed_dependencies.is_empty() {
+            return Err(format!(
+                "relay module `{}` must declare allowed_dependencies",
+                module.module_id
+            ));
+        }
+        for dependency in &module.forbidden_dependencies {
+            if module.allowed_dependencies.contains(dependency) {
+                return Err(format!(
+                    "relay module `{}` both allows and forbids dependency `{dependency}`",
+                    module.module_id
+                ));
+            }
+        }
+        for owned_path in &module.owned_paths {
+            if !root.join(owned_path).is_file() {
+                return Err(format!(
+                    "relay module `{}` owns missing path `{owned_path}`",
+                    module.module_id
+                ));
+            }
+            if let Some(first_owner) =
+                owned_paths.insert(owned_path.clone(), module.module_id.clone())
+            {
+                return Err(format!(
+                    "relay path `{owned_path}` has two owners: `{first_owner}` and `{}`",
+                    module.module_id
+                ));
+            }
+        }
+    }
+
+    let mut covered_files = BTreeSet::new();
+    for coverage_root in &registry.coverage_roots {
+        collect_all_file_paths(root, &root.join(coverage_root), &mut covered_files)?;
+    }
+    let registered_files = owned_paths.keys().cloned().collect::<BTreeSet<_>>();
+    if covered_files != registered_files {
+        let missing = covered_files
+            .difference(&registered_files)
+            .cloned()
+            .collect::<Vec<_>>();
+        let outside = registered_files
+            .difference(&covered_files)
+            .cloned()
+            .collect::<Vec<_>>();
+        return Err(format!(
+            "relay module coverage mismatch; unowned={missing:?}; outside_roots={outside:?}"
+        ));
+    }
+
+    let expected_edges = [
+        (
+            "relay.transport.module-tests_to_library",
+            "relay.transport.module-tests",
+            "relay.transport.library",
+            "freehand_relay",
+        ),
+        (
+            "relay.transport.server-host_to_library",
+            "relay.transport.server-host",
+            "relay.transport.library",
+            "freehand_relay",
+        ),
+    ];
+    if registry.declared_edges.len() != expected_edges.len() {
+        return Err("relay module registry must declare exactly two internal edges".to_owned());
+    }
+    for (edge, expected) in registry.declared_edges.iter().zip(expected_edges) {
+        if (
+            edge.edge_id.as_str(),
+            edge.from_module_id.as_str(),
+            edge.to_module_id.as_str(),
+            edge.import_name.as_str(),
+        ) != expected
+        {
+            return Err(format!(
+                "relay module edge `{}` does not match registered source edge",
+                edge.edge_id
+            ));
+        }
+    }
+    let tests_source =
+        fs::read_to_string(root.join("crates/freehand-relay/tests/relay_http_blackbox.rs"))
+            .map_err(|error| error.to_string())?;
+    require_contains(
+        &tests_source,
+        "use freehand_relay::{",
+        "crates/freehand-relay/tests/relay_http_blackbox.rs",
+    )?;
+    let host_source = fs::read_to_string(root.join("apps/freehand-relay-server/src/main.rs"))
+        .map_err(|error| error.to_string())?;
+    require_contains(
+        &host_source,
+        "use freehand_relay::{",
+        "apps/freehand-relay-server/src/main.rs",
+    )?;
+    let daemon_source = fs::read_to_string(root.join("apps/freehand-daemon/src/main.rs"))
+        .map_err(|error| error.to_string())?;
+    require_contains(
+        &daemon_source,
+        "use freehand_relay::{",
+        "apps/freehand-daemon/src/main.rs",
+    )?;
+    require_contains(
+        &daemon_source,
+        "run_remote_relay_mode().await",
+        "apps/freehand-daemon/src/main.rs",
+    )?;
+    verify_daemon_module_registry(root, &module_ids)?;
+    Ok(())
+}
+
+fn verify_daemon_module_registry(
+    root: &Path,
+    relay_module_ids: &BTreeSet<String>,
+) -> Result<(), String> {
+    let source = fs::read_to_string(root.join("docs/module-registry/app.runtime-daemon.json"))
+        .map_err(|error| error.to_string())?;
+    let registry: RelayModuleRegistry =
+        serde_json::from_str(&source).map_err(|error| error.to_string())?;
+    if registry.schema_version != 1
+        || registry.registry_id != "app.runtime-daemon.modules"
+        || registry.feature_id != "app.runtime-daemon"
+        || registry.status != "active"
+    {
+        return Err("app.runtime-daemon module registry identity/status is invalid".to_owned());
+    }
+    if registry.coverage_roots != ["apps/freehand-daemon"] || registry.modules.len() != 1 {
+        return Err(
+            "app.runtime-daemon registry must cover exactly the daemon compatibility host"
+                .to_owned(),
+        );
+    }
+    let module = &registry.modules[0];
+    if module.module_id != "app.runtime-daemon.compatibility-host"
+        || module.owner_feature_id != "app.runtime-daemon"
+        || module.status != "active"
+    {
+        return Err("daemon compatibility-host module identity is invalid".to_owned());
+    }
+    let mut covered_files = BTreeSet::new();
+    collect_all_file_paths(root, &root.join("apps/freehand-daemon"), &mut covered_files)?;
+    let owned_files = module.owned_paths.iter().cloned().collect::<BTreeSet<_>>();
+    if covered_files != owned_files {
+        return Err(format!(
+            "daemon module coverage mismatch; covered={covered_files:?}; owned={owned_files:?}"
+        ));
+    }
+    for path in &module.owned_paths {
+        if !root.join(path).is_file() {
+            return Err(format!("daemon module owns missing path `{path}`"));
+        }
+    }
+    let edge = registry
+        .declared_edges
+        .as_slice()
+        .first()
+        .filter(|_| registry.declared_edges.len() == 1)
+        .ok_or_else(|| "daemon module registry must declare exactly one Relay edge".to_owned())?;
+    if edge.edge_id != "app.runtime-daemon.compatibility-host_to_relay.transport.library"
+        || edge.from_module_id != module.module_id
+        || edge.to_module_id != "relay.transport.library"
+        || edge.import_name != "freehand_relay"
+        || !relay_module_ids.contains(&edge.to_module_id)
+    {
+        return Err("daemon compatibility-host Relay edge is invalid".to_owned());
+    }
+    let cargo = fs::read_to_string(root.join("apps/freehand-daemon/Cargo.toml"))
+        .map_err(|error| error.to_string())?;
+    require_contains(
+        &cargo,
+        "freehand-relay = { path = \"../../crates/freehand-relay\" }",
+        "apps/freehand-daemon/Cargo.toml",
+    )?;
+    Ok(())
+}
+
+fn verify_config_module_registry(root: &Path) -> Result<(), String> {
+    let source = fs::read_to_string(root.join("docs/module-registry/config.core.json"))
+        .map_err(|error| error.to_string())?;
+    let registry: RelayModuleRegistry =
+        serde_json::from_str(&source).map_err(|error| error.to_string())?;
+    if registry.schema_version != 1
+        || registry.registry_id != "config.core.modules"
+        || registry.feature_id != "config.core"
+        || registry.status != "active"
+        || registry.coverage_roots != ["crates/freehand-config"]
+        || registry.modules.len() != 1
+        || !registry.declared_edges.is_empty()
+    {
+        return Err("config.core module registry identity/shape is invalid".to_owned());
+    }
+    let module = &registry.modules[0];
+    if module.module_id != "config.core.library"
+        || module.owner_feature_id != "config.core"
+        || module.status != "active"
+        || module.allowed_dependencies.is_empty()
+    {
+        return Err("config.core library module identity is invalid".to_owned());
+    }
+    for dependency in &module.forbidden_dependencies {
+        if module.allowed_dependencies.contains(dependency) {
+            return Err(format!(
+                "config.core module both allows and forbids dependency `{dependency}`"
+            ));
+        }
+    }
+    let mut covered_files = BTreeSet::new();
+    collect_all_file_paths(
+        root,
+        &root.join("crates/freehand-config"),
+        &mut covered_files,
+    )?;
+    let owned_files = module.owned_paths.iter().cloned().collect::<BTreeSet<_>>();
+    if covered_files != owned_files {
+        return Err(format!(
+            "config.core module coverage mismatch; covered={covered_files:?}; owned={owned_files:?}"
+        ));
+    }
+    Ok(())
+}
+
+fn collect_all_file_paths(
+    root: &Path,
+    directory: &Path,
+    files: &mut BTreeSet<String>,
+) -> Result<(), String> {
+    for entry in fs::read_dir(directory)
+        .map_err(|error| format!("read module coverage {}: {error}", directory.display()))?
+    {
+        let entry = entry.map_err(|error| error.to_string())?;
+        let path = entry.path();
+        if path.is_dir() {
+            collect_all_file_paths(root, &path, files)?;
+        } else if path.is_file() {
+            files.insert(relative_slash_path(root, &path)?);
+        }
+    }
+    Ok(())
+}
+
+fn verify_relay_verification_map(root: &Path) -> Result<(), String> {
+    let path = root.join("docs/verification-maps/relay.transport.json");
+    let source = fs::read_to_string(&path).map_err(|error| error.to_string())?;
+    let map: RelayVerificationMap =
+        serde_json::from_str(&source).map_err(|error| error.to_string())?;
+    if map.schema_version != 1
+        || map.verification_map_id != "relay.transport.verification"
+        || map.feature_id != "relay.transport"
+        || map.status != "active"
+        || map.module_registry != "docs/module-registry/relay.transport.json"
+        || map.function_map != "docs/function-maps/relay.transport.md"
+        || map.mainline_call_map != "docs/mainline-calls/relay.transport.json"
+        || map.test_design != "docs/testing/relay.transport.md"
+    {
+        return Err("relay.transport verification map identity/backlinks are invalid".to_owned());
+    }
+    let expected_active = [
+        "relay.transport.unit-module",
+        "relay.transport.module-blackbox",
+        "relay.transport.server-check",
+        "relay.transport.clippy",
+        "relay.transport.deployment-smoke",
+        "relay.transport.local-online",
+        "relay.transport.mainline",
+        "relay.transport.architecture",
+    ];
+    for gate_id in expected_active {
+        let gate = map
+            .gates
+            .iter()
+            .find(|gate| gate.gate_id == gate_id)
+            .ok_or_else(|| format!("relay verification map is missing `{gate_id}`"))?;
+        if gate.binding_status != "active"
+            || gate.command.trim().is_empty()
+            || gate.kind.trim().is_empty()
+        {
+            return Err(format!(
+                "relay verification gate `{gate_id}` is not an active executable binding"
+            ));
+        }
+    }
+    let review = map
+        .gates
+        .iter()
+        .find(|gate| gate.gate_id == "relay.transport.codex-review")
+        .ok_or_else(|| "relay verification map is missing codex-review gate".to_owned())?;
+    if review.kind != "review"
+        || review.binding_status != "manual-required"
+        || review.command.trim().is_empty()
+    {
+        return Err(
+            "relay Codex review must be an explicit manual-required completion gate".to_owned(),
+        );
+    }
+    let remote = map
+        .gates
+        .iter()
+        .find(|gate| gate.gate_id == "relay.transport.remote-network")
+        .ok_or_else(|| "relay verification map is missing remote-network gap".to_owned())?;
+    if remote.binding_status != "manual-required" || remote.command.trim().is_empty() {
+        return Err(
+            "relay remote-network verification must be an explicit manual-required gate".to_owned(),
+        );
+    }
+    let makefile = fs::read_to_string(root.join("Makefile")).map_err(|error| error.to_string())?;
+    require_contains(
+        &makefile,
+        "relay-deployment-smoke relay-local-online",
+        "Makefile ci dependencies",
+    )?;
+    require_contains(
+        &makefile,
+        "scripts/verify-relay-deployment-smoke.sh",
+        "Makefile relay deployment smoke",
+    )?;
+    require_contains(
+        &makefile,
+        "scripts/verify-remote-relay-local-online.sh",
+        "Makefile relay local-online smoke",
+    )?;
     Ok(())
 }
 

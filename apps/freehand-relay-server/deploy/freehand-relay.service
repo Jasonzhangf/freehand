@@ -1,0 +1,21 @@
+[Unit]
+Description=Freehand Relay
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=freehand-relay
+Group=freehand-relay
+EnvironmentFile=/etc/freehand-relay/relay.env
+ExecStart=/usr/local/bin/freehand-relay-server serve
+Restart=on-failure
+RestartSec=3
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/freehand-relay
+
+[Install]
+WantedBy=multi-user.target

@@ -206,6 +206,18 @@ This keeps mainline call maps code-bound instead of becoming stale review prose.
 
 This is the first gate for the resource-center model. It does not yet prove every code edge is resource-bound, but it makes the resource relation map a required precondition before function-map work.
 
+## Relay Transport Boundary Gate
+
+`xtask gates check` enforces `relay.transport` as the only account, Agent-presence, and proxy owner:
+
+- `crates/freehand-relay` may not depend on config, runtime, server, task, reason, or UI-protocol owners.
+- `apps/freehand-relay-server` remains a thin binary/deployment host over `freehand-relay`.
+- the legacy `apps/freehand-server/src/remote_relay.rs` implementation must be physically absent.
+- config cannot own Relay credential schema, and WebUI server cannot own Relay account/directory routes.
+- systemd/env deployment manifests must exist and may not contain password, token, or secret assignments.
+- Relay config has one parser, store creation is an explicit `init-store` operation, and fallback defaults are forbidden.
+- Relay call-map rows bind real caller/callee symbols; the gate checks each registered edge against source calls.
+
 ## CI/CD Command Alignment Gate
 
 `xtask gates check` validates local and remote automation routes through the same full-gate truth:

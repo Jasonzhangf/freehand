@@ -19,9 +19,11 @@ members = [
   "crates/freehand-runtime",
   "crates/freehand-gates",
   "crates/freehand-testkit",
+  "crates/freehand-relay",
   "apps/freehand-cli",
   "apps/freehand-server",
   "apps/freehand-daemon",
+  "apps/freehand-relay-server",
   "xtask",
 ]
 resolver = "2"

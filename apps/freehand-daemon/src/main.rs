@@ -2,13 +2,15 @@ use std::future::pending;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
+use freehand_relay::{
+    AgentHeartbeat, AgentRole, AgentWorkStatus, RelayAgentClient, RelayAgentClientConfig,
+    RelayServerConfig, RelayService, RelayServiceConfig, RelayStore,
+};
 use freehand_runtime::{
     ProductionMasterRunner, ProductionMasterRunnerError, ProductionWorkerRunner,
     RuntimeAgentBootstrap, RuntimeCommandDispatcher, load_default_runtime_agent,
 };
-use freehand_server::{
-    RemoteRelayDirectory, parse_bind_arg, serve_remote_relay_listener, serve_webui_listener,
-};
+use freehand_server::{parse_bind_arg, serve_webui_listener};
 use tokio::net::TcpListener;
 
 const TEST_DISABLE_MASTER_LIFECYCLE_RUNNER_ENV: &str =
@@ -54,14 +56,31 @@ async fn run() -> Result<String, String> {
             run_master_mode(agent_name, bootstrap, bind_addr).await
         }
         "remote-relay" => {
-            let bind_addr = parse_bind_arg(args)?;
-            run_remote_relay_mode(bind_addr).await
+            if args.next().is_some() {
+                return Err(
+                    "remote-relay does not accept --bind; set FREEHAND_RELAY_BIND".to_owned(),
+                );
+            }
+            run_remote_relay_mode().await
         }
         _ => Err(usage()),
     }
 }
 
-async fn run_remote_relay_mode(bind_addr: std::net::SocketAddr) -> Result<String, String> {
+async fn run_remote_relay_mode() -> Result<String, String> {
+    let config = RelayServerConfig::from_env()
+        .map_err(|error| format!("failed to load Relay server config: {error}"))?;
+    let store = RelayStore::load(&config.runtime.store_path)
+        .map_err(|error| format!("failed to load Relay store: {error}"))?;
+    let service = RelayService::new(
+        store,
+        RelayServiceConfig {
+            presence_lease_seconds: config.runtime.presence_lease_seconds,
+            secure_cookie: config.secure_cookie,
+        },
+    )
+    .map_err(|error| format!("failed to initialize Relay service: {error}"))?;
+    let bind_addr = config.bind;
     let listener = TcpListener::bind(bind_addr)
         .await
         .map_err(|err| format!("failed to bind {bind_addr}: {err}"))?;
@@ -69,13 +88,10 @@ async fn run_remote_relay_mode(bind_addr: std::net::SocketAddr) -> Result<String
         .local_addr()
         .map_err(|err| format!("failed to read local addr: {err}"))?;
     println!("freehand-daemon remote relay listening on http://{local_addr}");
-    serve_remote_relay_listener(
-        listener,
-        Arc::new(std::sync::Mutex::new(RemoteRelayDirectory::default())),
-        pending::<()>(),
-    )
-    .await
-    .map_err(|err| format!("remote relay server error: {err}"))?;
+    service
+        .serve(listener)
+        .await
+        .map_err(|err| format!("remote relay server error: {err}"))?;
     Ok(String::new())
 }
 
@@ -112,6 +128,46 @@ async fn run_master_mode(
         .local_addr()
         .map_err(|err| format!("failed to read local addr: {err}"))?;
     println!("freehand-daemon listening on http://{local_addr}");
+    let relay_client = if let Some(connection) = bootstrap.selected_agent.relay_connection.clone() {
+        let local_adp_token = std::env::var("FREEHAND_ADP_AUTH_TOKEN")
+            .map_err(|_| {
+                "configured Relay connection requires FREEHAND_ADP_AUTH_TOKEN for the local ADP bridge"
+                    .to_owned()
+            })?
+            .trim()
+            .to_owned();
+        if local_adp_token.is_empty() {
+            return Err(
+                "configured Relay connection requires non-empty FREEHAND_ADP_AUTH_TOKEN".to_owned(),
+            );
+        }
+        let role = match bootstrap.selected_agent.mode.as_str() {
+            "master" => AgentRole::Master,
+            "slave" => AgentRole::Worker,
+            mode => return Err(format!("unsupported Relay Agent mode: {mode}")),
+        };
+        let config = RelayAgentClientConfig {
+            relay_base_url: connection.relay_url,
+            access_token: connection.access_token,
+            heartbeat: AgentHeartbeat {
+                agent_id: bootstrap.selected_agent.name.clone(),
+                display_name: bootstrap.selected_agent.name.clone(),
+                node_id: bootstrap.selected_agent.node_id.clone(),
+                role,
+                status: AgentWorkStatus::Idle,
+                active_session_count: 0,
+            },
+            local_daemon_addr: local_addr,
+            local_adp_token: Some(local_adp_token),
+            heartbeat_interval: std::time::Duration::from_secs(15),
+        };
+        Some(
+            RelayAgentClient::new(config)
+                .map_err(|error| format!("failed to configure Relay Agent client: {error}"))?,
+        )
+    } else {
+        None
+    };
     let dispatch_port: Arc<dyn freehand_ui_protocol::UiCommandDispatchPort> = dispatcher.clone();
     let query_port: Arc<dyn freehand_ui_protocol::UiRuntimeQueryPort> = dispatcher.clone();
     let cancel = Arc::new(AtomicBool::new(false));
@@ -135,9 +191,22 @@ async fn run_master_mode(
         query_port,
         pending::<()>(),
     );
-    let result = server.await;
+    let result = match relay_client {
+        Some(client) => {
+            tokio::select! {
+                result = server => result.map_err(|error| format!("daemon server error: {error}")),
+                result = client.run() => Err(match result {
+                    Ok(()) => "Relay Agent client stopped unexpectedly".to_owned(),
+                    Err(error) => format!("Relay Agent client stopped: {error}"),
+                }),
+            }
+        }
+        None => server
+            .await
+            .map_err(|error| format!("daemon server error: {error}")),
+    };
     cancel.store(true, Ordering::Release);
-    result.map_err(|err| format!("daemon server error: {err}"))?;
+    result?;
     Ok(String::new())
 }
 
@@ -171,6 +240,11 @@ async fn run_worker_mode(
     agent_name: String,
     bootstrap: RuntimeAgentBootstrap,
 ) -> Result<String, String> {
+    if bootstrap.selected_agent.relay_connection.is_some() {
+        return Err(
+            "configured Slave Relay connection requires the Worker UI/ADP host wiring".to_owned(),
+        );
+    }
     let runner = ProductionWorkerRunner::from_selected_agent(
         bootstrap.selected_agent,
         bootstrap.runtime_home,
@@ -192,7 +266,7 @@ where
 }
 
 fn usage() -> String {
-    "usage: freehand-daemon serve --agent <name> [--bind HOST:PORT] | remote-relay [--bind HOST:PORT]".to_owned()
+    "usage: freehand-daemon serve --agent <name> [--bind HOST:PORT] | remote-relay (requires FREEHAND_RELAY_BIND)".to_owned()
 }
 
 #[cfg(test)]

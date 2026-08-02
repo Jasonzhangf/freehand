@@ -1,0 +1,55 @@
+{
+  "schema_version": 1,
+  "lifecycle_id": "relay.transport.outbound-tunnel.v1",
+  "status": "active",
+  "owner_feature": "relay.transport",
+  "entrypoint": "RelayControlIn01AuthenticatedConnect",
+  "return_path": "RelayDataOut03ResponseEnd or RelayErrorOut03Terminal",
+  "canonical_docs": [
+    "docs/function-maps/relay.transport.md",
+    "docs/mainline-calls/relay.transport.json",
+    "docs/testing/relay.transport.md"
+  ],
+  "nodes": [
+    {"node_id":"RelayControlIn01AuthenticatedConnect","channel":"control","owner":"relay.transport"},
+    {"node_id":"RelayControlIn02AgentIdentity","channel":"control","owner":"relay.transport"},
+    {"node_id":"RelayControlOut03IdentityAccepted","channel":"control","owner":"relay.transport"},
+    {"node_id":"RelayControlIn03PresenceHeartbeat","channel":"control","owner":"relay.transport"},
+    {"node_id":"RelayControlOut04LeaseProjection","channel":"control","owner":"relay.transport"},
+    {"node_id":"RelayDataIn01RequestOpen","channel":"data","owner":"relay.transport"},
+    {"node_id":"RelayDataIn02RequestChunk","channel":"data","owner":"relay.transport"},
+    {"node_id":"RelayDataIn03RequestEnd","channel":"data","owner":"relay.transport"},
+    {"node_id":"RelayDataOut01ResponseOpen","channel":"data","owner":"relay.transport"},
+    {"node_id":"RelayDataOut02ResponseChunk","channel":"data","owner":"relay.transport"},
+    {"node_id":"RelayDataOut03ResponseEnd","channel":"data","owner":"relay.transport"},
+    {"node_id":"RelayErrorIn01TunnelFailure","channel":"error","owner":"relay.transport"},
+    {"node_id":"RelayErrorOut02CorrelatedFailure","channel":"error","owner":"relay.transport"},
+    {"node_id":"RelayErrorOut03Terminal","channel":"error","owner":"relay.transport"},
+    {"node_id":"RelayErrorOut04ClientCancellation","channel":"error","owner":"relay.transport"}
+  ],
+  "edges": [
+    ["RelayControlIn01AuthenticatedConnect","RelayControlIn02AgentIdentity"],
+    ["RelayControlIn02AgentIdentity","RelayControlOut03IdentityAccepted"],
+    ["RelayControlOut03IdentityAccepted","RelayControlIn03PresenceHeartbeat"],
+    ["RelayControlIn03PresenceHeartbeat","RelayControlOut04LeaseProjection"],
+    ["RelayDataIn01RequestOpen","RelayDataIn02RequestChunk"],
+    ["RelayDataIn02RequestChunk","RelayDataIn03RequestEnd"],
+    ["RelayDataOut01ResponseOpen","RelayDataOut02ResponseChunk"],
+    ["RelayDataOut02ResponseChunk","RelayDataOut03ResponseEnd"],
+    ["RelayErrorIn01TunnelFailure","RelayErrorOut02CorrelatedFailure"],
+    ["RelayErrorOut02CorrelatedFailure","RelayErrorOut03Terminal"],
+    ["RelayErrorOut03Terminal","RelayErrorOut04ClientCancellation"],
+    ["RelayErrorOut04ClientCancellation","RelayDataOut03ResponseEnd"]
+  ],
+  "forbidden_relations": [
+    "control fields in RelayData* payloads",
+    "data payloads used to reconstruct presence or routing",
+    "client-selected upstream URL",
+    "automatic direct-to-relay transport fallback"
+  ],
+  "verification_gates": [
+    "relay.transport.unit-module",
+    "relay.transport.module-blackbox",
+    "relay.transport.architecture"
+  ]
+}

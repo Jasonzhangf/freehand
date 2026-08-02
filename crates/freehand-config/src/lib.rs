@@ -111,6 +111,8 @@ pub struct AgentConfig {
     pub provider_id: String,
     pub fallback_provider_id: Option<String>,
     pub model_group_id: Option<String>,
+    pub relay_url: Option<String>,
+    pub relay_token_env: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -926,6 +928,35 @@ impl LoadedConfig {
             });
         }
 
+        let relay_connection = match (&agent.relay_url, &agent.relay_token_env) {
+            (Some(relay_url), Some(token_env)) => {
+                let access_token = env::var(token_env).map_err(|_| ConfigError::MissingEnvVar {
+                    env_var: token_env.clone(),
+                    owner: ConfigEnvOwner::Agent {
+                        agent_name: agent.name.clone(),
+                    },
+                })?;
+                if access_token.trim().is_empty() {
+                    return Err(ConfigError::EmptyEnvVar {
+                        env_var: token_env.clone(),
+                        owner: ConfigEnvOwner::Agent {
+                            agent_name: agent.name.clone(),
+                        },
+                    });
+                }
+                Some(SelectedAgentRelayConnection {
+                    relay_url: relay_url.clone(),
+                    access_token,
+                })
+            }
+            (None, None) => None,
+            _ => {
+                return Err(ConfigError::IncompleteAgentRelayConnection {
+                    agent_name: agent.name.clone(),
+                });
+            }
+        };
+
         Ok(SelectedAgentConfig {
             name: agent.name.clone(),
             mode: agent.mode,
@@ -937,6 +968,7 @@ impl LoadedConfig {
             provider,
             fallback_provider,
             model_group_id: agent.model_group_id.clone(),
+            relay_connection,
             restart_required_on_change: true,
         })
     }
@@ -996,7 +1028,14 @@ pub struct SelectedAgentConfig {
     pub provider: SelectedProviderConfig,
     pub fallback_provider: Option<SelectedProviderConfig>,
     pub model_group_id: Option<String>,
+    pub relay_connection: Option<SelectedAgentRelayConnection>,
     pub restart_required_on_change: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SelectedAgentRelayConnection {
+    pub relay_url: String,
+    pub access_token: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -1198,6 +1237,12 @@ pub enum ConfigError {
     },
     #[error("agent `{agent_name}` not found in config")]
     AgentNotFound { agent_name: String },
+    #[error("agent `{agent_name}` Relay connection requires both relay_url and relay_token_env")]
+    IncompleteAgentRelayConnection { agent_name: String },
+    #[error("agent `{agent_name}` relay_url must be an http(s) URL with a host")]
+    InvalidAgentRelayUrl { agent_name: String },
+    #[error("agent `{agent_name}` relay_token_env must be non-empty when declared")]
+    EmptyAgentRelayTokenEnv { agent_name: String },
     #[error("agent resource count must be between {min} and {max}, received {resource_count}")]
     AgentResourceCountOutOfRange {
         resource_count: usize,
@@ -1405,6 +1450,10 @@ struct RawAgentConfig {
     fallback_provider: Option<String>,
     #[serde(default)]
     model_group: Option<String>,
+    #[serde(default)]
+    relay_url: Option<String>,
+    #[serde(default)]
+    relay_token_env: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -2095,6 +2144,34 @@ fn validate_config(parsed: RawConfig) -> Result<LoadedConfig, ConfigError> {
                 agent_name: raw_agent.name,
             });
         }
+        match (&raw_agent.relay_url, &raw_agent.relay_token_env) {
+            (Some(relay_url), Some(token_env)) => {
+                let parsed =
+                    url::Url::parse(relay_url).map_err(|_| ConfigError::InvalidAgentRelayUrl {
+                        agent_name: raw_agent.name.clone(),
+                    })?;
+                if !matches!(parsed.scheme(), "http" | "https")
+                    || parsed.host_str().is_none()
+                    || parsed.query().is_some()
+                    || parsed.fragment().is_some()
+                {
+                    return Err(ConfigError::InvalidAgentRelayUrl {
+                        agent_name: raw_agent.name.clone(),
+                    });
+                }
+                if token_env.trim().is_empty() {
+                    return Err(ConfigError::EmptyAgentRelayTokenEnv {
+                        agent_name: raw_agent.name.clone(),
+                    });
+                }
+            }
+            (None, None) => {}
+            _ => {
+                return Err(ConfigError::IncompleteAgentRelayConnection {
+                    agent_name: raw_agent.name.clone(),
+                });
+            }
+        }
 
         let agent = AgentConfig {
             name: raw_agent.name.clone(),
@@ -2111,6 +2188,8 @@ fn validate_config(parsed: RawConfig) -> Result<LoadedConfig, ConfigError> {
                 .map(str::trim)
                 .filter(|value| !value.is_empty())
                 .map(str::to_owned),
+            relay_url: raw_agent.relay_url,
+            relay_token_env: raw_agent.relay_token_env,
         };
         agents.insert(raw_agent.name, agent);
     }
@@ -3365,6 +3444,165 @@ provider = "claude"
         assert_eq!(mini27.protocol, ProviderProtocol::Responses);
         assert_eq!(mini27.auth.source_kind(), ProviderAuthSourceKind::Inline);
 
+        fs::remove_file(path).expect("cleanup");
+    }
+
+    #[test]
+    fn rejects_agent_relay_url_query_and_fragment_components() {
+        for relay_url in [
+            "https://relay.freehand.local/relay/?route=other",
+            "https://relay.freehand.local/relay/#other",
+        ] {
+            let path = write_temp_config(&format!(
+                r#"
+[providers.test]
+id = "test"
+enabled = true
+type = "openai"
+protocol = "responses"
+base_url = "https://provider.invalid"
+default_model = "test-model"
+
+[providers.test.auth]
+type = "apikey"
+api_key = "test-key"
+
+[agents.master]
+name = "master"
+mode = "master"
+node_id = "master-node"
+paired_agents = ["worker"]
+pair_token = "MASTER_TOKEN"
+provider = "test"
+relay_url = "{relay_url}"
+relay_token_env = "FREEHAND_RELAY_AGENT_TOKEN"
+
+[agents.worker]
+name = "worker"
+mode = "slave"
+node_id = "worker-node"
+paired_agents = ["master"]
+pair_token = "WORKER_TOKEN"
+provider = "test"
+"#
+            ));
+            let error = load_config_from_path(&path).expect_err("invalid Relay URL");
+            assert!(matches!(error, ConfigError::InvalidAgentRelayUrl { .. }));
+            fs::remove_file(path).expect("cleanup");
+        }
+    }
+
+    #[test]
+    fn agent_relay_connection_resolves_only_from_one_complete_runtime_selection() {
+        const TOKEN_ENV: &str = "FREEHAND_CONFIG_TEST_RELAY_TOKEN";
+        const MASTER_PAIR_ENV: &str = "FREEHAND_CONFIG_TEST_MASTER_PAIR_TOKEN";
+        const WORKER_PAIR_ENV: &str = "FREEHAND_CONFIG_TEST_WORKER_PAIR_TOKEN";
+        let path = write_temp_config(
+            r#"
+[providers.test]
+id = "test"
+enabled = true
+type = "openai"
+protocol = "responses"
+base_url = "https://provider.invalid"
+default_model = "test-model"
+
+[providers.test.auth]
+type = "apikey"
+api_key = "test-key"
+
+[agents.master]
+name = "master"
+mode = "master"
+node_id = "master-node"
+paired_agents = ["worker"]
+pair_token = "FREEHAND_CONFIG_TEST_MASTER_PAIR_TOKEN"
+provider = "test"
+relay_url = "https://relay.freehand.local/relay/"
+relay_token_env = "FREEHAND_CONFIG_TEST_RELAY_TOKEN"
+
+[agents.worker]
+name = "worker"
+mode = "slave"
+node_id = "worker-node"
+paired_agents = ["master"]
+pair_token = "FREEHAND_CONFIG_TEST_WORKER_PAIR_TOKEN"
+provider = "test"
+"#,
+        );
+        let config = load_config_from_path(&path).expect("load Relay config");
+
+        unsafe {
+            env::set_var(TOKEN_ENV, "runtime-relay-token");
+            env::set_var(MASTER_PAIR_ENV, "master-pair-token");
+            env::set_var(WORKER_PAIR_ENV, "worker-pair-token");
+        };
+        let selected = config.select_agent("master").expect("select Relay Agent");
+        assert_eq!(
+            selected.relay_connection,
+            Some(SelectedAgentRelayConnection {
+                relay_url: "https://relay.freehand.local/relay/".to_owned(),
+                access_token: "runtime-relay-token".to_owned(),
+            })
+        );
+
+        unsafe { env::remove_var(TOKEN_ENV) };
+        assert!(matches!(
+            config.select_agent("master"),
+            Err(ConfigError::MissingEnvVar { env_var, .. }) if env_var == TOKEN_ENV
+        ));
+        unsafe { env::set_var(TOKEN_ENV, "   ") };
+        assert!(matches!(
+            config.select_agent("master"),
+            Err(ConfigError::EmptyEnvVar { env_var, .. }) if env_var == TOKEN_ENV
+        ));
+        unsafe {
+            env::remove_var(TOKEN_ENV);
+            env::remove_var(MASTER_PAIR_ENV);
+            env::remove_var(WORKER_PAIR_ENV);
+        };
+        fs::remove_file(path).expect("cleanup");
+    }
+
+    #[test]
+    fn agent_relay_connection_rejects_partial_declaration() {
+        let path = write_temp_config(
+            r#"
+[providers.test]
+id = "test"
+enabled = true
+type = "openai"
+protocol = "responses"
+base_url = "https://provider.invalid"
+default_model = "test-model"
+
+[providers.test.auth]
+type = "apikey"
+api_key = "test-key"
+
+[agents.master]
+name = "master"
+mode = "master"
+node_id = "master-node"
+paired_agents = ["worker"]
+pair_token = "MASTER_TOKEN"
+provider = "test"
+relay_url = "https://relay.freehand.local/relay/"
+
+[agents.worker]
+name = "worker"
+mode = "slave"
+node_id = "worker-node"
+paired_agents = ["master"]
+pair_token = "WORKER_TOKEN"
+provider = "test"
+"#,
+        );
+        assert!(matches!(
+            load_config_from_path(&path),
+            Err(ConfigError::IncompleteAgentRelayConnection { agent_name })
+                if agent_name == "master"
+        ));
         fs::remove_file(path).expect("cleanup");
     }
 

@@ -9441,4 +9441,239 @@ exact_replay: "Round 12 source fixtures reproduce both static gate admissions; n
 1. Jason 在 15t 上重启 APK 验证能否进入中文主界面
 2. 接 USB 后验证 UI tree 是否符合设计
 3. lifecycle runner race 进一步追踪
+# 2026-07-31 - Relay account and Agent Dashboard implementation
 
+- Target UI hierarchy: `RelayLogin -> AgentDashboard -> AgentSessionDashboard -> SessionDetail`.
+- Existing Freehand relay already owns registered-host HTTP/ADP pass-through, but its directory is process-memory only and unauthenticated. It cannot satisfy cloud restart, account isolation, Agent heartbeat expiry, or a phone account login.
+- zterm evidence establishes the reusable mechanism: persisted users/tokens/devices, scrypt password verification, daemon login followed by host presence publication, client login followed by account directory projection, and explicit disconnect/last-seen truth.
+- Chosen first cloud slice: Rust relay persists account/token/Agent registration truth, requires Bearer authentication for registration/directory/proxy, expires online presence by heartbeat lease, renders account Agent Dashboard, and keeps each Agent's existing WebUI/ADP as the session owner behind the Agent route. Cloud host must join the same Tailscale network for direct upstream URLs; reverse WebRTC/TURN transport remains a separately gated resource, not a hidden fallback.
+- Positive coverage: register/login, authenticated heartbeat, same-account directory, online role projection, Agent route to existing WebUI/ADP. Negative coverage: wrong password, missing token, cross-account host access, expired heartbeat offline, unknown host.
+- Independent module landed as `crates/freehand-relay` plus thin `apps/freehand-relay-server`: Argon2 password hashes, persisted token hashes, account-scoped Agent presence, lease-derived online state, HTTP/ADP proxy, systemd/env deployment files, and local deployment smoke. Raw passwords/tokens are absent from the persisted store.
+- The old `apps/freehand-server/src/remote_relay.rs` owner was physically removed. `freehand-daemon remote-relay` now hosts the new public crate only; account/presence/proxy semantics remain in `relay.transport`.
+- Online proof `scripts/verify-remote-relay-local-online.sh` passed against real `freehand-server` and `freehand-daemon` processes, including account registration, heartbeat, directory, upstream daemon cookie preservation, namespaced WebUI/query proxy, cross-account rejection, and module ADP round trip.
+- Module gates, mainlines, targeted clippy, `freehand-relay` 4/4, and `freehand-server` 16/16 passed. Full `freehand-daemon` remains red on six pre-existing ADP-auth tests returning HTTP 401; 15 daemon tests passed. This is outside Relay ownership and blocks a full daemon-suite claim, not the independently verified Relay module claim.
+- Product wiring intentionally remains pending after module promotion: canonical Agent config credentials, daemon periodic heartbeat/client lifecycle, Relay account UI, Agent Dashboard, Android login, cloud deployment, and old launchd relay script migration.
+
+# 2026-07-31T16:08:15Z relay.transport review-fix closure
+
+- Codex review round 1 returned `VERDICT: FAIL` for Relay fallbacks and map drift: implicit bind/lease defaults, missing heartbeat count defaulting to 0, missing-store load creating empty truth, unsafe rewrite pass-through, system clock defaulting to 0, ADP accepting upgrade before upstream connect, call-map symbolic prose, and store mutation before durable persistence.
+- Fixes applied inside the Relay owner:
+  - added `crates/freehand-relay/src/config.rs` as the single env parser; `FREEHAND_RELAY_BIND`, `FREEHAND_RELAY_STORE`, and `FREEHAND_RELAY_PRESENCE_LEASE_SECONDS` are required where applicable.
+  - split store creation from load: `freehand-relay-server init-store` creates the versioned store once; `serve` and daemon compatibility mode require an existing complete store.
+  - removed heartbeat `activeSessionCount` serde default; incomplete heartbeat payload now fails deserialization instead of projecting zero sessions.
+  - store writes now use copy-on-write candidate data and publish in-memory truth only after durable write/rename/sync succeeds; failed persistence leaves account/token/presence maps unchanged.
+  - HTTP proxy requires valid upstream `Content-Type` and fails unsafe rewritable UTF-8 parsing with explicit 502.
+  - Relay clock returns explicit error instead of defaulting to Unix time 0.
+  - ADP proxy connects upstream before accepting WebSocket upgrade; unreachable upstream rejects the upgrade with explicit HTTP 502, and post-upgrade upstream failures send a close frame.
+  - store work runs on `spawn_blocking`, keeping Axum handlers thin and off Tokio worker threads.
+  - `docs/mainline-calls/relay.transport.json`, function map, resource edge registry, foundation shared-function map, and `xtask` gate now bind real caller/callee symbols.
+- Verification after fixes:
+  - `cargo fmt --all -- --check` passed.
+  - `CARGO_TARGET_DIR=/tmp/freehand-relay-review-target cargo test -p freehand-relay -- --nocapture` passed: 3 unit + 2 blackbox.
+  - `CARGO_TARGET_DIR=/tmp/freehand-relay-review-target cargo test -p freehand-server --lib -- --nocapture` passed: 16/16; existing panic-probe test still prints intentional panic line.
+  - targeted clippy passed for `freehand-relay`, `freehand-relay-server`, `freehand-daemon`, and `freehand-server` with `-D warnings`.
+  - `xtask mainlines check` and `xtask gates check` passed.
+  - `scripts/verify-relay-deployment-smoke.sh` passed with explicit `init-store`.
+  - `scripts/verify-remote-relay-local-online.sh` passed against real `freehand-server` + `freehand-daemon` processes and module ADP blackbox.
+  - full `cargo test -p freehand-daemon -- --nocapture` remains red exactly on six existing ADP auth 401 tests; 15 passed. This still blocks any full-daemon-suite claim, but remains outside Relay module ownership.
+- Remaining product wiring intentionally not started: canonical Agent config credentials, daemon heartbeat client/reconnect lifecycle, Relay login UI, Agent Dashboard, Android login, cloud deployment, and legacy launchd relay script migration.
+
+## 2026-08-01 - Relay local-online startup diagnosis
+
+```yaml
+symptom:
+  observed: scripts/verify-remote-relay-local-online.sh twice timed out waiting for the upstream /health endpoint; both background binaries remained alive but emitted no startup log.
+  expected: the upstream WebUI smoke server and Relay host become healthy before account and proxy checks.
+  entry: scripts/verify-remote-relay-local-online.sh
+  raw_evidence: bash -x run used upstream PID 86031 and Relay PID 86032; both stayed in sleeping state for the complete 30 second health window with empty stdout/stderr.
+sop_model_flow:
+  status: known
+  flow_id: relay.transport.local-online-verifier
+  source_docs: docs/verification-maps/relay.transport.json, docs/testing/relay.transport.md, scripts/verify-remote-relay-local-online.sh
+  lifecycle_nodes: build binaries -> initialize store -> start upstream -> prove upstream health -> start Relay -> prove Relay health -> authenticate -> heartbeat -> directory -> HTTP/ADP proxy
+  resource_edges: verifier process -> upstream test process; verifier process -> Relay test process
+  forbidden_edges: verifier startup ordering must not change Relay account, presence, or transport business semantics
+  owner_graph: relay.transport local-online project black-box verifier
+hypotheses:
+  - id: H1
+    cause: starting both large Rust processes concurrently on this macOS workspace can block both before their main startup log, so the verifier exhausts its fixed health window.
+    modules: [scripts/verify-remote-relay-local-online.sh]
+    supporting_evidence: both concurrent child PIDs stayed alive with empty logs; the same binaries started sequentially became healthy immediately at 127.0.0.1:58101 and 127.0.0.1:58102.
+    counter_evidence_or_gap: no kernel stack sample was captured before cleanup.
+    verification_action: change only verifier orchestration to wait for upstream health before starting Relay, then replay the exact script.
+    confidence: 95
+active_hypothesis: H1
+confirmed_hypothesis: H1
+first_divergence_node: concurrent process startup before upstream health admission
+root_cause_module: relay.transport local-online verifier orchestration
+unique_owner: scripts/verify-remote-relay-local-online.sh
+allowed_paths:
+  - scripts/verify-remote-relay-local-online.sh
+  - docs/testing/relay.transport.md
+  - docs/verification-maps/relay.transport.json
+  - note.md
+forbidden_paths:
+  - crates/freehand-relay/**
+  - apps/freehand-daemon/**
+  - apps/freehand-server/**
+required_verification:
+  - bash syntax check
+  - exact local-online script replay
+  - explicit startup-failure process-exit behavior
+exact_replay: scripts/verify-remote-relay-local-online.sh
+```
+
+- Online search after the same failure repeated returned five relevant process-readiness approaches, including explicit localhost readiness polling, listener notification, and waiting for process exit. The selected correction is the smallest owner-aligned option: serialize readiness, verify each child is still alive during polling, and print the owning log immediately on early exit.
+- Post-edit exact replay passed: `scripts/verify-remote-relay-local-online.sh` returned `remote_relay_local_online_ok upstream=http://127.0.0.1:59575 relay=http://127.0.0.1:59576 agent=studio`; its focused ADP module black-box test passed 1/1. `bash -n scripts/verify-remote-relay-local-online.sh` also passed.
+- A live `sample` of the sequential upstream process showed the Tokio listener runtime parked normally with one `kevent` worker, and `netstat` proved the listener plus the Relay-to-upstream connection. This confirms the prior no-log observation was not a business-handler deadlock; the verifier had admitted concurrent startup before upstream readiness.
+- Relay owner gates remain green for fmt, Relay 5/5, server 16/16, targeted clippy, mainlines, deployment smoke, and the exact local-online smoke. The repository-wide architecture gate is currently blocked by the separately claimed OpenMinis/WebUI operation `ui_projection.bind_protocol_call`, which exists in `docs/resource-maps/core.json` but is not backlinked from `docs/mainline-calls/app.webui-smoke.json`. Claim `feature_foundation.workspace_openminis-protocol-call-closeout` belongs to stale run `20260730T091702Z-Macstudio-76898-398809`; PID 76898 is absent. Relay review and commit must not absorb or silently repair that other semantic claim.
+
+## 2026-08-01 Relay outbound tunnel continuation
+
+- Confirmed the first outbound-client blocker: `RelayAgentClient::run` opened data before sending the control `AgentIdentity`, while Relay correctly requires control admission before data admission. Reordered the client to send control identity before opening data/error channels. Relay HTTP/ADP black-box tests passed 2/2 after the fix.
+- Migrated relay resource/function/mainline/test maps from removed `upstream` pull symbols to `relay_control_tunnel`, `relay_data_tunnel`, and `relay_error_tunnel`; `cargo run -p xtask -- mainlines check` and `cargo run -p xtask -- gates check` passed.
+- Added `freehand-relay-server agent-tunnel`, an env-driven deployment harness for the real `RelayAgentClient`; deployment smoke passed with a real outbound client. The local-online smoke reached the agent and proxy checks, but its embedded focused test run was interrupted after a long test-process stall; standalone replay later passed 2/2.
+- Worker daemon UI/ADP host wiring is still a real implementation blocker: `run_worker_mode` explicitly rejects configured Relay connections because `RuntimeCommandDispatcher` currently requires Master mode. Do not mark outbound tunnel lifecycle complete until Worker UI host/dispatcher ownership is implemented and online-tested.
+## 2026-08-01 — Relay continuation: WebUI protocol-call source binding restored
+
+- The repository-wide architecture gate was red because `ui_projection.bind_protocol_call` was declared `bound` in `docs/resource-maps/core.json` but omitted from `docs/mainline-calls/app.webui-smoke.json` resource operations. The registered source symbols `adpProtocolCallContract` and `settleAdpResponseFrame` were also absent from the live WebUI client; adding only a backlink would have created false source truth.
+- The unique WebUI owner is `apps/freehand-server/assets/webui/app-shell/adp-client.js`: generated ADP constructors feed `createAdpClient`, which now owns request-id-correlated settlement for query results, command receipts, subscription acceptance/events, and explicit failures. `legacy-monolith.js::handleAdpFrame` now performs presentation callbacks only.
+- Test design, function map, mainline call map, and generated wiki were updated together. Positive and negative settlement assertions cover resolved query/command/subscription, subscription event, rejected failure, and unsupported frame handling.
+- Evidence: `node scripts/verify-webui-foundation-contracts.mjs` passed; `cargo test -p freehand-server --lib -- --nocapture` passed 16/16; `cargo test -p freehand-relay -- --nocapture` passed 5/5; `cargo run -p xtask -- mainlines check` passed; `cargo run -p xtask -- gates check` passed; `bash scripts/verify-relay-deployment-smoke.sh` returned `relay_deployment_smoke_ok`; `bash scripts/verify-remote-relay-local-online.sh` returned `remote_relay_local_online_ok` with real upstream and Relay processes.
+- Remaining: Relay phase full build/clippy/review/commit, then outbound Agent tunnel and all later cloud, daemon, WebUI, and Android phases. No product wiring is claimed complete.
+
+## 2026-08-01 — Relay continuation: daemon install no longer starts stale pull relay
+
+- Installed `scripts/install-launchd.sh restartS` initially failed because it still invoked the deleted/changed daemon compatibility path as `remote-relay --bind`, then attempted old `upstreamBaseUrl` registration. The exact launchd stderr was `remote-relay does not accept --bind; set FREEHAND_RELAY_BIND`; the Relay service never became healthy.
+- Root cause was an invalid cross-owner lifecycle edge: daemon install/restart was starting and configuring Relay through the old pull model. The unique daemon owner now stages/starts only the daemon; `scripts/install-relay-launchd.sh` was physically deleted, and the app runtime mainline, test design, and freehand-dev skill now state that Relay deployment is independent and governed by `relay.transport`.
+- Positive proof after the fix: `scripts/install-launchd.sh restartS` completed, `/health` returned `ok`, and `freehand-cliS adp-smoke --url ws://127.0.0.1:4042/adp` returned `adp_smoke_ok`. Relay standalone deployment/local-online smoke remains the separate Relay verification path.
+
+## 2026-08-01 — Relay continuation: review and workspace-test external/known blockers
+
+- `codex -p asxs review --uncommitted` returned provider HTTP 403 for insufficient balance/subscription quota and produced no final verdict. The required second attempt `codex -p tcm review --uncommitted` returned provider `malformed_json` because `x-routecodex-session-id` was missing and the route pool was exhausted; it also produced no final verdict. Neither result is review PASS.
+- `cargo test --workspace` reached the separately owned `apps/freehand-cli/tests/config_startup.rs` suite and reproduced its known 18 failures / 6 passes: mock WebSocket fixtures fail with `Protocol(MissingConnectionUpgradeHeader)`, followed by client connection refused/reset. Relay and server focused suites remain green; this failure was not changed or attributed to Relay.
+- The goal remains active. Outbound tunnel implementation must not start until Relay review has a valid final PASS under the required external review route.
+
+## 2026-08-02 — Relay continuation: review provider remains unavailable
+
+- A new required review attempt reproduced the same external condition: `codex -p asxs review --uncommitted` returned HTTP 403 for insufficient balance/subscription quota; `codex -p tcm review --uncommitted` returned provider `malformed_json` because `x-routecodex-session-id` was missing and the route pool was exhausted. Neither produced a final verdict.
+- No outbound tunnel or product wiring was started. Phase 0 remains at the review gate with all local implementation, build, install, online, map, and gate evidence preserved.
+
+## 2026-08-01 — Relay review P0 architecture findings closed
+
+- The default `codex review - < ~/.claude/skills/codex-review/review-prompt.md` route returned three P0 findings: the daemon compatibility host lacked a registered module edge, its `run_remote_relay_mode` calls were absent from the runtime mainline map, and the two active Relay smoke gates were declared but not executed by `make ci`.
+- The unique ownership boundary is now explicit: `relay.transport` retains all account, token, presence, and proxy semantics; `apps/freehand-daemon` exposes only the registered compatibility-host import edge and process startup. The runtime call map binds the adjacent `run -> run_remote_relay_mode -> relay.transport public API` path using real source symbols.
+- `make ci` now executes `relay-deployment-smoke` and `relay-local-online`; xtask checks the import edge and all three Makefile bindings. Mainlines and architecture gates pass.
+- Positive evidence: Relay unit/module black-box tests passed 5/5, daemon non-ADP tests passed 15/15, workspace build and targeted clippy passed, deployment smoke returned `relay_deployment_smoke_ok`, local HTTP/ADP online smoke returned `remote_relay_local_online_ok`, installed S-profile launchd is running with health `ok`, and authenticated installed ADP smoke returned `adp_smoke_ok`.
+- Negative evidence: wrong password, cross-account access, expired presence, corrupt restart, failed persistence, missing host, and ADP command-kind mismatch are explicitly rejected. Six daemon ADP fixture tests fail with expected HTTP 401 because the separately claimed ADP-auth fixture owner has not yet injected authentication; this task did not create a competing fixture path.
+- A new default Codex review is required because code/maps/gates changed after the prior FAIL. Outbound tunnel remains blocked until that review returns a valid PASS.
+## 2026-08-02 Relay outbound lifecycle closeout continuation
+
+- Control identity now has a server acknowledgement before data/error admission; focused Relay black-box remains green.
+- Pending exchange ownership is explicit: request send/body/protocol/client disconnect and Agent bridge failures remove pending truth through `RelayTunnelRegistry::fail_exchange`; success remains pending until `ResponseEnd`. Added positive/negative unit tests.
+- Agent HTTP request forwarding is end-to-end streamed with `Body::wrap_stream`; heartbeat/error/exchange tasks are owned by `JoinSet` and are aborted with the client lifecycle instead of detached.
+- `docs/lifecycles/relay-outbound-tunnel.json` is active and architecture-gated; maps/test design/wiki were synchronized.
+- Evidence: `CARGO_TARGET_DIR=/tmp/freehand-cargo-target cargo test -p freehand-relay -- --nocapture` passed 6 unit + 2 black-box; clippy passed; mainlines/gates passed; deployment and local-online smoke passed with `outbound_tunnel=verified`.
+- Remote-network gate is still open. T2S source staging succeeded, but the first remote Rust container image pull stalled on its final layer and was stopped by explicit remote PIDs; no remote service was installed or mutated.
+## 2026-08-02 - Relay account presence subscription and generic WebSocket transport
+
+- Added authenticated `/relay/api/agents/subscribe` typed directory snapshots and account-isolated online/offline updates.
+- Added authenticated `/relay/agents/{agent_id}/connect/{path}` generic WebSocket transport. Relay validates only a local path and forwards opaque frame kinds/bytes; it does not parse session/task/provider payloads.
+- Real remote close testing exposed a lifecycle defect: a caller Close followed by request-end could terminate the whole Agent tunnel. The shared WebSocket bridge now sends request-end exactly once, waits for response-end, treats an already-closed local exchange idempotently, and keeps the Agent available for the next connection.
+- Positive evidence: module tests, clippy, mainlines/gates, deployment smoke, local-online smoke, T2S ARM64 build/restart, two sequential Mac-to-T2S-to-Mac `/connect/echo` round trips, and Android authenticated directory plus subscription snapshot.
+- Negative evidence: unauthenticated subscription, cross-account directory/connect, invalid target path, offline Agent connect, and post-disconnect online projection all fail or remain isolated as designed.
+- Protocol scope intentionally remains open: this phase owns account identity, Agent presence, connection admission, opaque frames, and terminal lifecycle only.
+
+## 2026-08-02 — Relay response ownership and HTTP terminal closure
+
+- Independent review found that inbound data/error frames were resolved only by predictable exchange id and that an HTTP parts channel closing after `ResponseOpen` could be returned as truncated success.
+- `RelayTunnelRegistry` now requires the authenticated data/error socket identity for every response or failure transition and compares it with the pending exchange owner before mutation. HTTP response assembly now requires an explicit `ResponseEnd`; channel closure first is an upstream failure.
+- Positive/negative tests cover the complete `ResponseOpen -> ResponseChunk -> ResponseEnd` path, cross-identity response/error rejection without removing owner truth, more than 32 response frames under backpressure, and incomplete HTTP rejection.
+- Evidence after the fix: Relay 9 unit + 2 black-box tests, clippy, server build, mainlines, full architecture gates, deployment smoke, and local-online outbound smoke passed. T2S ARM64 release rebuilt and container `700f10a335de2a70fa69edb0094b3575d9519ee447f63a4b8f807f726c35ae30` is healthy; a Mac Agent appeared online through T2S, Android `100.104.163.65:5555` read its authenticated directory state, explicit Agent stop immediately projected offline.
+- A subsequent review found six additional transport defects. Data attachments now carry a generation so stale socket cleanup cannot remove a replacement; invalid/late exchange frames no longer close the shared data tunnel; ordinary HTTP responses use bounded streaming while rewriteable WebUI bodies are capped at 8 MiB; close code/reason and encoded target path/query are preserved; Relay base-path prefixes are retained and query/fragment base URLs reject at configuration admission.
+- Reverification after these fixes: Relay 12 unit + 2 black-box tests, clippy, build, mainlines, gates, deployment smoke, and local-online smoke passed. T2S was rebuilt/restarted as container `31ff482b87e3550bc817914e216c18e6e7787dd6c430530a449286b1f60932f9`; remote health, proxied Agent health, Android authenticated online observation, and explicit offline projection passed.
+
+## 2026-08-02 — Relay explicit cookie deployment policy closeout
+
+- Review found two accepted/runtime configuration gaps: Agent Relay URLs with query/fragment were accepted by `freehand-config` but rejected by `RelayAgentClient`, and every login cookie was marked `Secure` even for explicitly supported direct HTTP deployments.
+- `freehand-config` now rejects Agent Relay URL query/fragment components at admission. `relay.transport` now requires `FREEHAND_RELAY_SECURE_COOKIE=true|false`; the standalone server and daemon compatibility host pass that typed deployment truth to `RelayService`, and request headers cannot alter it.
+- Positive/negative tests prove HTTP mode omits `Secure` and supports cookie-only directory authentication, TLS mode emits `Secure`, invalid boolean values fail, missing env fails real-process startup, and query/fragment URLs reject.
+- Verification passed: Relay 13 unit + 3 black-box tests, config 38 tests, workspace build/fmt/clippy, Relay server/daemon build, mainlines, gates, deployment smoke, and local-online smoke. Full workspace tests remain red only in the pre-existing `freehand-cli` ADP mock fixtures with `MissingConnectionUpgradeHeader` and connection errors.
+- T2S ARM64 release was rebuilt and restarted as container `fb6875631fa0206938430cbe644107d1256408910c22ffd0908b5e72cdd36c03`, with explicit HTTP cookie mode. Mac Agent outbound presence, proxied `/health`, Android authenticated online observation, and explicit offline projection all passed.
+
+## 2026-08-02 — Relay review round: local credential scope and base-root normalization
+
+- Review found that generic `/connect/{path}` exchanges inherited the configured local ADP bearer and that an accepted Agent URL ending in `/relay/` produced a duplicate `/relay/relay/tunnel` route.
+- `RelayDataProtocol` now remains bound through Agent-side local WebSocket request construction. Only `Adp` injects the local bearer; generic `WebSocket` explicitly has no Authorization header. `relay_channel_url` preserves arbitrary deployment prefixes and mounts `/relay` exactly once for origin, prefixed, and already-mounted API roots.
+- Positive/negative unit and black-box tests prove ADP bearer presence, generic bearer absence, the three accepted URL forms, query/fragment rejection, and generic opaque round trip without the ADP credential.
+- Reverification passed: Relay 15 unit + 3 black-box tests, config 38 tests, clippy/build, mainlines/gates, deployment smoke, and local-online smoke. T2S ARM64 was rebuilt and restarted as `cff31907d205f994203cc6a122781b9bfa1adfb74c7bf71acb30930a8fcbbc14`; a Mac Agent connected using the already-mounted `http://100.77.11.8:18443/relay/` form, proxied health passed, Android observed online, and explicit stop projected offline.
+
+## 2026-08-02 — Relay HTTP credential boundary review closure
+
+- Independent review found that the HTTP proxy removed the Relay session cookie on requests but still forwarded the Agent-local ADP cookie and upstream `Set-Cookie`. That exported a local bridge credential into the cloud Relay origin and allowed cloud-origin cookies to be replayed into the Agent HTTP bridge.
+- The unique `relay.transport` HTTP boundary owner now removes both `freehand_relay_session` and `freehand_adp_auth` from proxied requests, preserves unrelated request cookies, and blocks all upstream `Set-Cookie` response headers. Agent-side ADP WebSocket authentication remains on its typed `local_adp_token` path.
+- Positive/negative black-box coverage proves unrelated cookie preservation, absence of both authentication cookies at the Agent HTTP bridge, successful WebUI proxying, and absence of upstream `Set-Cookie` at the remote client.
+- Reverification passed: Relay 15 unit + 3 black-box tests, config 38 tests, targeted clippy, workspace build, fmt, mainlines/gates, deployment smoke, and local-online smoke. T2S ARM64 release sha256 is `769075588cc57d37e24e78c2af872feeade4e0be3449d823fde54bcd2f745e69`; container `bc58bbf831704966d1094205be15c8d63cfbffe75057b3bd252ca8a2a1fcad88` is healthy. Mac and Android observed `studio` online, proxied health passed, remote response emitted no `Set-Cookie`, and explicit Agent stop projected offline on both clients.
+
+## 2026-08-02 - Relay duplicate-open review closure and redeployment
+
+- Fresh review found that HTTP duplicate opens failed before mutation but ADP/generic WebSocket opens could replace an active exchange sender/task. `handle_data_frame` now has one protocol-independent pre-match guard, so every duplicate `exchange_id` fails before any local bridge truth changes.
+- The negative regression opens a generic WebSocket exchange twice and proves the second open fails while the first sender remains the same channel. Test design now explicitly covers duplicate HTTP, ADP, and generic WebSocket admission.
+- T2S `/tmp` was full because a prior remote test wrote debug artifacts into the production source mount. The repaired deployment built in `/data_n001/freehand-relay-build-20260802`, passed the ARM64 focused test, installed sha256 `c3c2ea4c084b6ef88cf15591cd7a8521ebed4584bebf63b0f6bb76fd3752e852`, and restarted only `freehand-relay-live-20260802`; health returned `ok`.
+- Online evidence from the rebuilt binary: Mac Agent `studio-live` projected online through T2S with master/running/one-session state, proxied `/health` returned `ok`, and the remote response had no `Set-Cookie`. Explicit Agent stop projected offline from Mac and T2S, and the proxy rejected with HTTP 404 plus `relay_agent_not_found`.
+- Local evidence: Relay 19 unit + 3 black-box tests, config Relay 3 tests, targeted clippy, workspace build, fmt, mainlines, gates, deployment smoke, and local outbound smoke passed. Android revalidation remains unproven because `15T` (`100.104.163.65`) was offline in Tailscale and ADB had no connected device.
+
+## 2026-08-02 - Relay opaque HTTP and cross-socket cancellation closeout
+
+- Review exposed an ownership violation: Relay decoded and rewrote HTML/JS/CSS response bodies. `relay.transport` now treats every HTTP body as opaque bounded data-tunnel bytes; UI base-path behavior remains outside this owner. Invalid UTF-8 and normal WebUI body tests prove byte-exact forwarding, while Relay and Agent-local authentication cookies remain blocked at the HTTP boundary.
+- ARM64 online replay exposed a cancellation race: the Relay removed pending truth as soon as it sent cancellation on the error socket, while response chunks already queued on the independent data socket arrived later and were classified as unknown, terminating the shared Agent tunnel. Pending truth now enters a typed cancelled state, absorbs queued data without payload delivery, and closes only when the Agent sends `ResponseEnd` on the data socket. Known completed cancellation is idempotent; a never-opened exchange still fails explicitly.
+- The Agent tunnel deployment entry is now bound as mainline step 13, `agent_tunnel_config_from_env -> RelayAgentClient::run`; maps, lifecycle, test design, xtask gate, and generated wiki share that binding.
+- Local proof passed 21 unit tests and 3 black-box tests. T2S ARM64 passed the same 21 + 3 tests, installed release sha256 `385ca34b6e4a0207f0d50a8124adea49c20e15d3f74163874a90a035bead984d`, and runs healthy as container `04e8fbdfb626` at `http://100.77.11.8:18443`.
+- Distinct-network proof in `/tmp/freehand-relay-final-proof-opaque-20260802` showed Mac and T2S directory projections online, proxied `/health=ok`, opaque root assets unchanged, and no `Set-Cookie`; explicit Agent stop projected offline on both views and proxying failed with HTTP 404 `relay_agent_not_found`.
+- Android `15T` (`100.104.163.65`) remained Tailscale-offline with no ADB device. The current release therefore has no Android online proof; previous Android evidence is not reused.
+
+## 2026-08-03 - Relay review generation fence and WebSocket error closure
+
+- Codex review found two P1 lifecycle defects. A rejected duplicate control socket reached unconditional cleanup and could detach the live socket's control/data/error truth; a WebSocket `Err` or response-channel close after `ResponseOpen` was classified like normal `ResponseEnd`.
+- `RelayTunnelRegistry` now assigns control attachment generations. `run_control_socket` records the generation it actually admitted and detaches data/error plus presence only when that exact generation is still current. Duplicate admission and stale generation cleanup are locked by a negative unit test.
+- WebSocket response classification now distinguishes frame, explicit `ResponseEnd`, protocol failure, and typed error-chain failure. Agent bridge errors and premature response-channel close retain their concrete error cause and cannot enter normal completion; positive `ResponseEnd` and both negative terminal cases are tested.
+- Local Relay proof passed 23 unit + 3 black-box tests. T2S ARM64 passed the same 23 + 3 test set, installed release sha256 `cdd71c5c33c54da794fefc5ac6559ae352d60b2cb888a9cf9775d914ad1fdd62`, restarted only container `freehand-relay-live-20260802` (`04e8fbdfb626`), and `/relay/health` returned `ok`.
+- Fresh distinct-network evidence in `/tmp/freehand-relay-review-fix-proof-20260803` proved matching Mac/T2S online directory truth and proxied `/health=ok`; explicit Agent process stop produced matching offline truth and HTTP 404 `relay_agent_not_found`.
+- Android remains unverified for this release because `15T` is still unavailable; no older Android observation is promoted.
+
+## 2026-08-03 - Relay second review findings
+
+- Fresh Codex review rejected the staged Relay patch on two P0 findings: raw HTTP/WebSocket route-prefix mismatches silently defaulted to Agent root, and outbound `RelayAgentClient::run` mainline step 13 was marked bound without a resource operation/source-edge binding.
+- The route defect is reproducible when Axum decodes an Agent path parameter while `OriginalUri` retains percent encoding. The unique fix point is Relay route-tail parsing: validate and decode the raw Agent segment, require it to equal the typed `Path` identity, and return an explicit invalid-route error on any prefix mismatch.
+- The map defect belongs to `relay.transport`: bind Agent-side outbound lifecycle entry to the existing `relay_control_tunnel.connect` capability, mirror it in the mainline call row, source-edge registry, relation rule, function map, and operation test coverage.
+- Both findings are fixed at their unique owners. Shared raw route parsing now compares the strict percent-decoded raw Agent segment with the typed Axum identity and rejects prefix, identity, or namespace mismatch; HTTP and generic WebSocket handlers no longer contain root fallback. Step 13 now binds `relay_control_tunnel.connect` from resource operation through source-edge, call map, function map, test design, and generated wiki.
+- Local revalidation passed 24 unit + 3 black-box tests, 3 config Relay tests, targeted clippy, workspace build, fmt, mainlines, gates, deployment smoke, and local-online smoke.
+- T2S ARM64 passed 24 unit + 3 black-box tests using the pinned installed toolchain and offline registry cache. Release sha256 `aa43eebe92d0213e3e0c9b8e1a5cf5e884931c8e9229edd7dbbea13d74ce1a17` is installed in container `04e8fbdfb626`; `/relay/health` returned `ok`.
+- Fresh Mac -> T2S -> Mac proof used encoded Agent id `studio route one`: Mac and T2S projected matching online truth, encoded route proxy `/health` returned `ok`, explicit Agent stop projected matching offline truth, and proxy returned 404 `relay_agent_not_found`.
+- Android remains unverified because `15T` is unavailable; no earlier Android evidence is reused.
+
+## 2026-08-03 - Relay third review finding
+
+- Fresh review found an attachment-order race: Agent startup opens data before error, while HTTP exchange admission checked only data. A request in that window could insert pending truth and receive `ResponseOpen`, then discover the missing error return path and exit without closing the exchange.
+- The unique fix point is `RelayTunnelRegistry`: routable exchange admission must atomically require both typed data and error attachments before inserting pending truth. HTTP and WebSocket route wrappers consume that single owner instead of performing channel checks after opening.
+- The registry fix is reverified: 25 unit + 3 black-box tests, config Relay tests, targeted clippy, workspace build/fmt, mainlines/gates, deployment smoke, and local-online smoke passed. T2S ARM64 passed 25 + 3, installed sha256 `33c837718ccbacd5e033b448937f37e00eeb0f327c17e674a4287ae0dd18eb66`, and container `04e8fbdfb626` is healthy.
+- Fresh Mac -> T2S -> Mac proof used encoded Agent id `studio admission`: account-scoped directory truth matched online on both network views, proxy `/health` returned `ok`, and explicit Agent stop produced matching offline truth plus HTTP 404 `relay_agent_not_found`. Android remains unverified because `15T` is unavailable.
+
+## 2026-08-03 - Relay fourth review findings closed
+
+- Review found four bypasses in the routable lifecycle boundary: raw `open_exchange` remained public, error admission checked control and inserted the error attachment under separate locks, that admission had no resource/mainline binding, and step 08 plus its gate still named the raw exchange opener.
+- `RelayTunnelRegistry` is now the unique owner for both boundaries. Raw exchange opening is private with a test-only crate helper; `open_routable_exchange` atomically requires data and error return paths before pending insertion; `admit_error` checks the live control attachment and inserts error truth in one registry mutation. HTTP and generic WebSocket wrappers consume the routable owner.
+- Resource operation `relay_control_tunnel.admit_error`, its allowed control-to-error relation, source edge, step 14 call binding, function map, test design, generated wiki, and xtask gate now share the same source truth. Existing node ids were not reordered.
+- Local proof passed 26 unit + 3 black-box tests, targeted clippy, workspace build/fmt, mainlines/gates, deployment smoke, and local-online smoke. T2S ARM64 passed 26 + 3 tests; release sha256 `16303654c0ea3837310ba2deb33bf2864558485d1f6b14b6e25f0ffc59bd1cbf` is healthy in container `04e8fbdfb626`.
+- Fresh Mac -> T2S -> Mac proof used encoded Agent id `studio admission`: Mac and T2S normalized account-scoped directory truth matched with `online=true`, proxied `/health` returned `ok`, explicit Agent stop produced matching `online=false`, and proxy returned HTTP 404 `relay_agent_not_found`. Android remains unverified because `15T` is unavailable.
+- The next review rejected stale `app.webui-smoke` documentation that still attributed retired Relay ADP coverage to `freehand-server`. The WebUI mainline sync status, test design, and generated wiki now explicitly leave Relay transport coverage with the independent `relay.transport` owner; unrelated in-progress WebUI hunks remain unstaged. Mainline and architecture gates pass after canonical regeneration.
+
+## 2026-08-03 - Relay sixth review findings closed
+
+- Review first found canonical resource drift: `relay_data_tunnel.operations` still advertised raw `open_exchange` after production admission moved to `open_routable_exchange`. The resource map now names only the routable boundary.
+- Review then found lossy UTF-8 decoding on both Agent-side and Relay-side WebSocket text paths. Both receive boundaries now reject invalid text bytes, invalid close-reason bytes, and one-byte close payloads into their existing correlated typed error chains; Agent-side raw Tungstenite frames also fail explicitly instead of becoming synthetic Close success.
+- Positive and negative decode tests cover valid text/close preservation and malformed text/close rejection on both sides. Local Relay verification passed 28 unit + 3 black-box tests, targeted clippy, workspace build, fmt, mainlines/gates, deployment smoke, and local-online smoke.
+- The full workspace test command is not green in the current shared worktree: 18 `freehand-cli` ADP mock-WebSocket tests fail with `MissingConnectionUpgradeHeader` while unrelated WebUI/runtime changes are unstaged. Relay-owned tests and gates remain green; no Relay code was changed to mask that external failure.
+- T2S ARM64 passed 28 unit + 3 black-box tests and release build. Release sha256 `23ac22443a26798d3b72030f5d8b17c943e8993fa2a319ae004f5b0b1db98fe0` is running healthy in exact container `04e8fbdfb626`.
+- Fresh Mac -> T2S -> Mac proof used encoded Agent id `studio utf8`: account-scoped directory truth matched online, proxied `/health` returned `ok`, explicit Agent stop produced matching offline truth, and proxy returned 404 `relay_agent_not_found`. Android remains unverified because `15T` is unavailable.
+- Final staged-only Codex architecture review returned `VERDICT: PASS`. Its only residual item is a non-blocking P3 warning that the new Relay production modules exceed 500 lines and should later be split along the already registered Agent client, HTTP tunnel, registry/admission, and WebSocket tunnel owner seams.

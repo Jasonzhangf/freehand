@@ -10,6 +10,7 @@ Generated from `docs/mainline-calls/config.core.json`. Do not edit by hand.
 
 ## Resource Operation Backlinks
 
+- config.compile_agent_relay_connection
 - config.mutate_provider_config
 - config.mutate_model_group_config
 - config.compile_remote_daemon_registry
@@ -22,6 +23,7 @@ Generated from `docs/mainline-calls/config.core.json`. Do not edit by hand.
 - Master selection returns one or more configured Slave Worker peers; Slave selection returns exactly one configured Master peer
 - selected agent references one primary `[providers.<id>]` entry and may reference one distinct fallback provider through `fallback_provider`
 - validation resolves startup mode, ordered unique reciprocal multi-peer bindings, primary/fallback provider bindings, explicit protocol declarations, auth-source invariants, and unknown-field rejection
+- optional per-Agent Relay configuration is admitted only as one atomic URL plus token-env pair and resolves the token only in the selected runtime projection
 - optional `[remote_daemon_accounts.<id>]` and `[remote_daemons.<id>]` tables compile into one account-scoped remote daemon registry with explicit endpoint candidates
 - remote daemon route selection is config-owned: direct Tailscale/IPv6/IPv4 candidates score below relay candidates, health failures make a candidate non-selectable, and relay is selected only through explicit candidate truth
 - QR/deep-link bootstrap requests enter through versioned remote daemon bootstrap bundles with expiry, nonce, selected route endpoint, and one-time credential metadata
@@ -36,6 +38,7 @@ Generated from `docs/mainline-calls/config.core.json`. Do not edit by hand.
 ## Response Mainline
 
 - validated config returns one selected agent runtime configuration plus one primary provider runtime configuration and an optional fallback provider runtime configuration
+- selected agent runtime configuration includes either one complete runtime-only Relay URL/token projection or no Relay connection; safe config projections never expose the resolved token
 - selected agent runtime configuration includes explicit local node id plus an ordered typed peer list containing peer name, mode, node id, allowed IP, and pair-token env metadata for runtime bootstrap
 - selected provider runtime configuration includes explicit protocol, auth source, fallback provider id, and safe projection metadata only
 - explicit provider capability-test selection returns one enabled provider runtime configuration with resolved auth source for a live test and does not persist or switch active config
@@ -53,7 +56,7 @@ Generated from `docs/mainline-calls/config.core.json`. Do not edit by hand.
 
 ## Error Mainline
 
-- missing config, invalid agent selection, empty/duplicate/self peer, missing peer, same-mode peer, non-reciprocal relation, Master without a Worker, Slave with zero or multiple Masters, invalid primary/fallback provider binding, invalid auth source, unknown provider fields, disabled provider selection, or permission mismatch return explicit errors
+- missing config, invalid agent selection, empty/duplicate/self peer, missing peer, same-mode peer, non-reciprocal relation, Master without a Worker, Slave with zero or multiple Masters, invalid primary/fallback provider binding, invalid auth source, incomplete or invalid Agent Relay connection, missing or empty Relay token env, unknown provider fields, disabled provider selection, or permission mismatch return explicit errors
 - legacy singular `paired_agent` is rejected by the typed parser; only `paired_agents` is valid
 - invalid remote daemon account ids, missing daemon account bindings, invalid direct endpoint host/port, relay endpoints without account relay URL, undeclared active endpoint, unknown route health endpoint, duplicate health records, no selectable route, expired bootstrap, malformed bootstrap, or empty bootstrap credential return explicit errors
 - invalid provider definition updates, missing env-var auth, missing selected agent, invalid provider selections, disabled providers, and same-primary fallback selection fail before overwrite; failed updates must leave previous config bytes intact
@@ -79,7 +82,7 @@ Generated from `docs/mainline-calls/config.core.json`. Do not edit by hand.
 | 06a | `LoadedConfig::safe_provider_registry / ProviderConfig::safe_projection` | `crates/freehand-config/src/lib.rs` | project every configured provider without credential values | loaded provider registry | safe provider registry projection | runtime.ui-command-dispatch / tests | provider registry projector |  |  |  | bound |
 | 06b | `LoadedConfig::model_groups` | `crates/freehand-config/src/lib.rs` | expose validated model group registry truth | loaded config | model group registry view | tests/runtime wiring | registry accessor |  |  |  | bound |
 | 06c | `LoadedConfig::safe_model_group_registry / ModelGroupConfig::safe_projection` | `crates/freehand-config/src/lib.rs` | project every configured model group route without credential values | loaded model group registry | safe model group registry projection | runtime.ui-command-dispatch / tests | model group registry projector |  |  |  | bound |
-| 07 | `LoadedConfig::select_agent` | `crates/freehand-config/src/lib.rs` | select one agent and resolve its provider binding, ordered typed peer topology, and env-backed auth source | agent name plus env | selected agent runtime config | CLI/server startup | env resolver |  |  |  | bound |
+| 07 | `LoadedConfig::select_agent` | `crates/freehand-config/src/lib.rs` | select one agent and resolve its provider binding, ordered typed peer topology, env-backed provider auth, and optional atomic Relay URL plus token-env connection | agent name plus env | selected agent runtime config with runtime-only resolved Relay token when configured | CLI/server startup | env resolver | config | config | config.compile_agent_relay_connection | bound |
 | 08 | `ProviderAuthConfig::source_kind` | `crates/freehand-config/src/lib.rs` | expose safe provider auth source classification without returning key material | provider auth config | inline or env source kind | config selector/runtime config projection | auth source classifier |  |  |  | bound |
 | 09 | `ProviderConfigUpdate` | `crates/freehand-config/src/lib.rs` | carry owner-backed provider/model update intent | agent/provider/model/base-url/env-var fields | validated config-owner update input | runtime.ui-command-dispatch | config owner DTO |  |  |  | bound |
 | 10 | `update_provider_config_in_path` | `crates/freehand-config/src/lib.rs` | validate, apply, reparse, select, and atomically persist legacy provider/model config changes while preserving fallback selection | config path plus provider update | selected agent projection from saved config | runtime.ui-command-dispatch / tests | config persistence owner | config | config | config.mutate_provider_config | bound |

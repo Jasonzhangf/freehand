@@ -518,7 +518,7 @@ Generated from `docs/mainline-calls/foundation.workspace.json`. Do not edit by h
 - `crate::symbol_resolves_in_files`
   - owner: `xtask/src/main.rs`
   - purpose: resolve one declared target symbol candidate against an explicit source-file set
-  - allowed callers: crate::verify_mainline_call_table_bindings, crate::verify_precise_source_edge_gate, crate::verify_resource_map
+  - allowed callers: crate::verify_mainline_call_table_bindings, crate::verify_precise_source_edge_gate, crate::verify_relay_transport_boundary, crate::verify_resource_map
   - related tests: none
   - why shared: target symbol resolution stays centralized
 
@@ -550,6 +550,7 @@ Generated from `docs/mainline-calls/foundation.workspace.json`. Do not edit by h
 | 19u | `crate::symbol_resolves_in_files` | `xtask/src/main.rs` | resolve registered resource source-edge symbols | resource source-edge files and symbols | boolean resolution result | crate::verify_resource_map | crate::symbol_resolves_in_files |  |  |  | bound |
 | 19v | `crate::symbol_resolves_in_files` | `xtask/src/main.rs` | resolve one precise source-edge gate symbol | precise gate file and symbol | boolean resolution result | crate::verify_precise_source_edge_gate | crate::symbol_resolves_in_files |  |  |  | bound |
 | 19w | `crate::symbol_resolves_in_files` | `xtask/src/main.rs` | resolve bound mainline call-table symbols | bound row files and symbols | boolean resolution result | crate::verify_mainline_call_table_bindings | crate::symbol_resolves_in_files |  |  |  | bound |
+| 19w-relay | `crate::symbol_resolves_in_files` | `xtask/src/main.rs` | resolve Relay call-map caller and callee symbols | relay.transport row files and symbols | boolean resolution result | crate::verify_relay_transport_boundary | crate::symbol_resolves_in_files |  |  |  | bound |
 | 20 | `run_release` | `scripts/release.sh` | run release regressions, build/stage host plus Android artifacts, and generate Android update sidecar from APK version truth | repo root state | dist/ artifacts including dist/android/update.json | operator / GitHub release workflow | make ci, Cargo, Gradle |  |  |  | bound |
 | 21 | `run_verify_webui_online` | `scripts/verify-webui-online.sh` | run fixed-port S-profile real browser WebUI plus ADP alpha proof, including temporary verifier credential env injection and config/env restoration | running S-profile daemon on 127.0.0.1:4042 | screenshots, summary JSON, ADP session alignment, restored S-profile config/env | operator / make verify-webui-online | curl, scripts/webui_verify_online.mjs, Chrome CDP, WebUI, freehand-cliS adp-session-query |  |  |  | bound |
 | 21a | `run` | `scripts/verify-adp-fixed-session-observability-online.py` | submit one fixed-session ADP command and query selected session plus task and agent owner truth while the turn is pending and after receipt or timeout | S-profile ADP URL plus fixed session id | JSON proof with pending/final turns and Worker/blocked-task truth | operator / online debug workflow | ADP WebSocket |  |  |  | bound |

@@ -1,0 +1,101 @@
+{
+  "schema_version": 1,
+  "registry_id": "relay.transport.modules",
+  "feature_id": "relay.transport",
+  "status": "active",
+  "coverage_roots": [
+    "crates/freehand-relay",
+    "apps/freehand-relay-server"
+  ],
+  "modules": [
+    {
+      "module_id": "relay.transport.library",
+      "owner_feature_id": "relay.transport",
+      "status": "active",
+      "owned_paths": [
+        "crates/freehand-relay/Cargo.toml",
+        "crates/freehand-relay/src/agent_client.rs",
+        "crates/freehand-relay/src/config.rs",
+        "crates/freehand-relay/src/directory_socket.rs",
+        "crates/freehand-relay/src/http_tunnel.rs",
+        "crates/freehand-relay/src/lib.rs",
+        "crates/freehand-relay/src/model.rs",
+        "crates/freehand-relay/src/service.rs",
+        "crates/freehand-relay/src/store.rs",
+        "crates/freehand-relay/src/tunnel.rs",
+        "crates/freehand-relay/src/websocket_tunnel.rs"
+      ],
+      "allowed_dependencies": [
+        "rust.std",
+        "third_party.argon2",
+        "third_party.axum",
+        "third_party.futures-util",
+        "third_party.percent-encoding",
+        "third_party.rand",
+        "third_party.reqwest",
+        "third_party.serde",
+        "third_party.serde_json",
+        "third_party.sha2",
+        "third_party.thiserror",
+        "third_party.tokio",
+        "third_party.tokio-tungstenite",
+        "third_party.url"
+      ],
+      "forbidden_dependencies": [
+        "freehand-config",
+        "freehand-runtime",
+        "freehand-server",
+        "freehand-task",
+        "freehand-reason",
+        "freehand-ui-protocol"
+      ]
+    },
+    {
+      "module_id": "relay.transport.module-tests",
+      "owner_feature_id": "relay.transport",
+      "status": "active",
+      "owned_paths": [
+        "crates/freehand-relay/tests/relay_http_blackbox.rs"
+      ],
+      "allowed_dependencies": [
+        "relay.transport.library",
+        "third_party.test-harness"
+      ],
+      "forbidden_dependencies": []
+    },
+    {
+      "module_id": "relay.transport.server-host",
+      "owner_feature_id": "relay.transport",
+      "status": "active",
+      "owned_paths": [
+        "apps/freehand-relay-server/Cargo.toml",
+        "apps/freehand-relay-server/src/main.rs",
+        "apps/freehand-relay-server/deploy/freehand-relay.service",
+        "apps/freehand-relay-server/deploy/relay.env.example"
+      ],
+      "allowed_dependencies": [
+        "relay.transport.library",
+        "third_party.tokio"
+      ],
+      "forbidden_dependencies": [
+        "freehand-config",
+        "freehand-runtime",
+        "freehand-server"
+      ]
+    }
+  ],
+  "declared_edges": [
+    {
+      "edge_id": "relay.transport.module-tests_to_library",
+      "from_module_id": "relay.transport.module-tests",
+      "to_module_id": "relay.transport.library",
+      "import_name": "freehand_relay"
+    },
+    {
+      "edge_id": "relay.transport.server-host_to_library",
+      "from_module_id": "relay.transport.server-host",
+      "to_module_id": "relay.transport.library",
+      "import_name": "freehand_relay"
+    }
+  ]
+}

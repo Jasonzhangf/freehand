@@ -68,7 +68,8 @@ Use this table before grep or implementation. Every bug or feature request must 
 | CLI reason smoke and config-selected runtime harness | `app.cli-runtime-smoke` | `apps/freehand-cli` | `docs/function-maps/app.cli-runtime-smoke.md` | `docs/testing/app.cli-runtime-smoke.md` |
 | CLI live provider turn and completion loop smoke | `app.cli-live-turn` | `apps/freehand-cli` | `docs/function-maps/app.cli-live-turn.md` | `docs/testing/app.cli-live-turn.md` |
 | WebUI/protocol-only app boundary smoke | `app.webui-smoke` | `apps/freehand-server` | `docs/function-maps/app.webui-smoke.md` | `docs/testing/app.webui-smoke.md` |
-| runtime-backed HTTP/SSE UI daemon host and local relay transport | `app.runtime-daemon` | `apps/freehand-daemon` | `docs/function-maps/app.runtime-daemon.md` | `docs/testing/app.runtime-daemon.md` |
+| account authentication, Agent presence, remote HTTP/ADP proxy, and Relay deployment | `relay.transport` | `crates/freehand-relay`, `apps/freehand-relay-server` | `docs/function-maps/relay.transport.md` | `docs/testing/relay.transport.md` |
+| runtime-backed HTTP/SSE UI daemon host | `app.runtime-daemon` | `apps/freehand-daemon` | `docs/function-maps/app.runtime-daemon.md` | `docs/testing/app.runtime-daemon.md` |
 | Android/protocol-only app boundary client | `app.android-client` | `apps/freehand-android` | `docs/function-maps/app.android-client.md` | `docs/testing/app.android-client.md` |
 
 If a problem does not fit this table, update this routing index before making code changes. Do not create a second owner by patching an adjacent module.
@@ -97,7 +98,7 @@ This table is the feature-map backlink for `docs/resource-maps/core.json`. The r
 | `runtime.ui-command-dispatch` | `runtime_command` | `docs/resource-maps/core.json` |
 | `runtime.checkpoint-rewind` | `checkpoint` | `docs/resource-maps/core.json` |
 | `node.master-slave` | `node_pairing`, `remote_daemon_directory` | `docs/resource-maps/core.json` |
-| `app.runtime-daemon` | `remote_relay_transport` | `docs/resource-maps/core.json` |
+| `relay.transport` | `relay_account`, `agent_presence`, `relay_control_tunnel`, `relay_data_tunnel`, `relay_error_tunnel` | `docs/resource-maps/core.json` |
 | `app.android-client` | `android_apk_update`, `android_file_access`, `android_notification` | `docs/resource-maps/core.json` |
 | `instruction.capability-loader` | `instruction_capability` | `docs/resource-maps/core.json` |
 
@@ -493,6 +494,7 @@ Non-violation pending items live in `docs/architecture/architecture-gaps.md`. Ea
 - required_project_black_box_tests:
   - CLI agent-start config + provider projection smoke
 - test_design_doc: `docs/testing/config.core.md`
+- module_registry: `docs/module-registry/config.core.json`
 - function_map_doc: `docs/function-maps/config.core.md`
 - mainline_call_doc: `docs/mainline-calls/config.core.json`
 - generated_wiki_doc: `docs/wiki/config.core.md`
@@ -660,6 +662,55 @@ Non-violation pending items live in `docs/architecture/architecture-gaps.md`. Ea
   - slave-card divergence remains protocol-safe
   - migrated mainline call source and generated wiki stay in sync with the function map
 
+### `relay.transport`
+
+- owner: `crates/freehand-relay` for account, presence, and proxy semantics; `apps/freehand-relay-server` is the thin process/deployment host; `apps/freehand-daemon` may only expose the registered compatibility-host edge to the Relay public API
+- allowed_paths: `crates/freehand-relay/**`, `apps/freehand-relay-server/**`, registered compatibility-host wiring in `apps/freehand-daemon/Cargo.toml` and `apps/freehand-daemon/src/main.rs`, `docs/module-registry/relay.transport.json`, `docs/verification-maps/relay.transport.json`, `docs/function-maps/relay.transport.md`, `docs/testing/relay.transport.md`, `docs/lifecycles/relay-outbound-tunnel.json`, `docs/mainline-calls/relay.transport.json`, `docs/mainline-calls/app.runtime-daemon.json`, `docs/wiki/relay.transport.md`, `docs/wiki/app.runtime-daemon.md`, `docs/resource-maps/core.json`, `docs/architecture/feature-map.md`, `docs/architecture/dev-gates.md`, `scripts/verify-relay-deployment-smoke.sh`, `scripts/verify-remote-relay-local-online.sh`, `Makefile`, `xtask/**`, `Cargo.toml`, `Cargo.lock`, `MEMORY.md`, `note.md`
+- forbidden_paths: account/password/token/presence semantic ownership in `apps/freehand-server/**`, `apps/freehand-daemon/**`, `crates/freehand-config/**`, WebUI/Android session/task truth, provider configuration payloads
+- required_checks:
+  - `cargo test -p freehand-relay -- --nocapture`
+  - `cargo test -p freehand-relay --test relay_http_blackbox -- --nocapture`
+  - `cargo clippy -p freehand-relay --all-targets -- -D warnings`
+  - `cargo check -p freehand-relay-server`
+  - `scripts/verify-relay-deployment-smoke.sh`
+  - `scripts/verify-remote-relay-local-online.sh`
+  - `cargo run -p xtask -- mainlines check`
+  - `cargo run -p xtask -- gates check`
+- required_white_box_tests:
+  - password hashes and token hashes persist while raw passwords and raw tokens do not
+  - account and Agent presence survive store restart
+  - heartbeat lease projects online/offline without rewriting Agent-owned session truth
+  - corrupt store and store write failures fail explicitly
+- required_module_black_box_tests:
+  - register/login/Bearer and cookie authentication
+  - same-account directory and cross-account isolation
+  - authenticated heartbeat and lease expiry
+  - namespaced WebUI HTTP rewrite and ADP WebSocket round trip
+- required_project_black_box_tests:
+  - standalone release binary restart preserves account/token/presence truth and deployment manifest starts without product daemon/WebUI wiring
+- test_design_doc: `docs/testing/relay.transport.md`
+- module_registry: `docs/module-registry/relay.transport.json`
+- verification_map: `docs/verification-maps/relay.transport.json`
+- function_map_doc: `docs/function-maps/relay.transport.md`
+- mainline_call_doc: `docs/mainline-calls/relay.transport.json`
+- generated_wiki_doc: `docs/wiki/relay.transport.md`
+- debug_artifacts:
+  - Relay structured HTTP errors
+  - standalone service stderr
+- runtime_paths:
+  - `/var/lib/freehand-relay/store.json`
+  - `/etc/freehand-relay/relay.env`
+- update_triggers:
+  - Relay account/token contract changes
+  - Agent heartbeat/directory projection changes
+  - HTTP/ADP proxy route changes
+  - deployment unit/env changes
+- lifecycle_checks:
+  - Relay restart restores account/token/presence truth before serving
+  - expired Agent presence is offline and cannot be proxied
+  - every request is authenticated and account-scoped before presence or proxy access
+  - Relay never reads or mutates Agent session/task/provider truth
+
 ### `app.runtime-daemon`
 
 - owner: `apps/freehand-daemon`
@@ -667,9 +718,6 @@ Non-violation pending items live in `docs/architecture/architecture-gaps.md`. Ea
 - forbidden_paths: `crates/freehand-reason/**`, `crates/freehand-node/**`, `crates/freehand-config/**`, `crates/freehand-provider-*/**` except through `crates/freehand-runtime`
 - required_checks:
   - `cargo test -p freehand-daemon`
-  - `cargo test -p freehand-server remote_relay -- --nocapture`
-  - `scripts/verify-remote-relay-local-online.sh`
-  - `scripts/install-launchd.sh restartS` with `com.freehand.relayS` health and relay asset-version proof for Android/WebView work
   - `cargo run -p xtask -- mainlines check`
   - `cargo run -p xtask -- gates check`
 - required_white_box_tests:
@@ -689,8 +737,6 @@ Non-violation pending items live in `docs/architecture/architecture-gaps.md`. Ea
   - daemon ADP query-as-command rejection smoke
   - daemon direct-message dispatch smoke
   - daemon slave-mode production Worker runner bootstrap smoke
-  - remote relay host registration/directory/HTTP/ADP pass-through smoke
-  - S-profile relay launchd restart and current relay-served asset proof
 - required_project_black_box_tests:
   - real runtime owner injection over shared HTTP/SSE/command and ADP WebSocket transport without app-owned business logic
 - test_design_doc: `docs/testing/app.runtime-daemon.md`

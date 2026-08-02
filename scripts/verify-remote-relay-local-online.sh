@@ -1,175 +1,143 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
-cd "$repo_root"
+ROOT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+TARGET_DIR="${CARGO_TARGET_DIR:-$ROOT_DIR/target}"
+TMP_DIR="$(mktemp -d "${TMPDIR:-/tmp}/freehand-remote-relay-online.XXXXXX")"
+UPSTREAM_PID=""
+RELAY_PID=""
+AGENT_PID=""
 
-tmp_dir="$(mktemp -d "${TMPDIR:-/tmp}/freehand-remote-relay-online.XXXXXX")"
-upstream_pid=""
-relay_pid=""
+stop_pid() {
+  local pid="$1"
+  if [[ -n "$pid" ]] && kill -0 "$pid" 2>/dev/null; then
+    kill "$pid"
+    wait "$pid" 2>/dev/null || true
+  fi
+}
 
 cleanup() {
-  local status=$?
-  if [[ -n "$relay_pid" ]]; then
-    kill "$relay_pid" 2>/dev/null || true
-    wait "$relay_pid" 2>/dev/null || true
-  fi
-  if [[ -n "$upstream_pid" ]]; then
-    kill "$upstream_pid" 2>/dev/null || true
-    wait "$upstream_pid" 2>/dev/null || true
-  fi
-  rm -rf "$tmp_dir"
-  exit "$status"
+  stop_pid "$RELAY_PID"
+  stop_pid "$UPSTREAM_PID"
+  stop_pid "$AGENT_PID"
+  rm -rf "$TMP_DIR"
 }
-trap cleanup EXIT INT TERM
+trap cleanup EXIT
 
-read -r upstream_port relay_port < <(python3 - <<'PY'
-import socket
+free_port() {
+  ruby -rsocket -e 'server = TCPServer.new("127.0.0.1", 0); puts server.addr[1]; server.close'
+}
 
-sockets = []
-ports = []
-for _ in range(2):
-    sock = socket.socket()
-    sock.bind(("127.0.0.1", 0))
-    sockets.append(sock)
-    ports.append(sock.getsockname()[1])
-print(*ports)
-for sock in sockets:
-    sock.close()
-PY
-)
-
-cargo build -p freehand-server -p freehand-daemon -p freehand-cli >/dev/null
-
-upstream_url="http://127.0.0.1:${upstream_port}"
-relay_url="http://127.0.0.1:${relay_port}"
-relay_adp_url="ws://127.0.0.1:${relay_port}/relay/daemon/studio-host/adp"
-
-target/debug/freehand-server webui-serve-smoke --bind "127.0.0.1:${upstream_port}" \
-  >"${tmp_dir}/upstream.stdout.log" 2>"${tmp_dir}/upstream.stderr.log" &
-upstream_pid="$!"
-
-target/debug/freehand-daemon remote-relay --bind "127.0.0.1:${relay_port}" \
-  >"${tmp_dir}/relay.stdout.log" 2>"${tmp_dir}/relay.stderr.log" &
-relay_pid="$!"
-
-wait_until_ok() {
+wait_health() {
   local url="$1"
-  for _ in {1..200}; do
+  local pid="$2"
+  local label="$3"
+  for _ in $(seq 1 300); do
     if [[ "$(curl -fsS "$url" 2>/dev/null || true)" == "ok" ]]; then
       return 0
     fi
-    sleep 0.15
+    if ! kill -0 "$pid" 2>/dev/null; then
+      echo "$label process exited before health admission: pid=$pid url=$url" >&2
+      sed -n '1,120p' "$TMP_DIR/$label.stdout.log" >&2 || true
+      sed -n '1,120p' "$TMP_DIR/$label.stderr.log" >&2 || true
+      return 1
+    fi
+    sleep 0.1
   done
-  echo "health check failed for ${url}" >&2
-  echo "upstream stdout:" >&2
-  sed -n '1,80p' "${tmp_dir}/upstream.stdout.log" >&2 || true
-  echo "upstream stderr:" >&2
-  sed -n '1,80p' "${tmp_dir}/upstream.stderr.log" >&2 || true
-  echo "relay stdout:" >&2
-  sed -n '1,80p' "${tmp_dir}/relay.stdout.log" >&2 || true
-  echo "relay stderr:" >&2
-  sed -n '1,80p' "${tmp_dir}/relay.stderr.log" >&2 || true
+  echo "health check failed: $url" >&2
+  sed -n '1,120p' "$TMP_DIR/upstream.stdout.log" >&2 || true
+  sed -n '1,120p' "$TMP_DIR/upstream.stderr.log" >&2 || true
+  sed -n '1,120p' "$TMP_DIR/relay.stdout.log" >&2 || true
+  sed -n '1,120p' "$TMP_DIR/relay.stderr.log" >&2 || true
   return 1
 }
 
-wait_until_ok "${upstream_url}/health"
-wait_until_ok "${relay_url}/relay/health"
+UPSTREAM_PORT="$(free_port)"
+RELAY_PORT="$(free_port)"
+while [[ "$RELAY_PORT" == "$UPSTREAM_PORT" ]]; do
+  RELAY_PORT="$(free_port)"
+done
+UPSTREAM_URL="http://127.0.0.1:$UPSTREAM_PORT"
+RELAY_URL="http://127.0.0.1:$RELAY_PORT"
+STORE_PATH="$TMP_DIR/relay-store.json"
+COOKIE_JAR="$TMP_DIR/cookies.txt"
 
-curl -fsS \
+cargo build -p freehand-server -p freehand-daemon -p freehand-relay-server --manifest-path "$ROOT_DIR/Cargo.toml"
+
+FREEHAND_RELAY_STORE="$STORE_PATH" \
+FREEHAND_RELAY_PRESENCE_LEASE_SECONDS=45 \
+  "$TARGET_DIR/debug/freehand-relay-server" init-store
+
+FREEHAND_ADP_AUTH_TOKEN=upstream-token "$TARGET_DIR/debug/freehand-server" webui-serve-smoke --bind "127.0.0.1:$UPSTREAM_PORT" \
+  >"$TMP_DIR/upstream.stdout.log" 2>"$TMP_DIR/upstream.stderr.log" &
+UPSTREAM_PID=$!
+
+wait_health "$UPSTREAM_URL/health" "$UPSTREAM_PID" upstream
+
+FREEHAND_RELAY_BIND="127.0.0.1:$RELAY_PORT" \
+FREEHAND_RELAY_STORE="$STORE_PATH" \
+FREEHAND_RELAY_PRESENCE_LEASE_SECONDS=45 \
+FREEHAND_RELAY_SECURE_COOKIE=false \
+  "$TARGET_DIR/debug/freehand-daemon" remote-relay \
+  >"$TMP_DIR/relay.stdout.log" 2>"$TMP_DIR/relay.stderr.log" &
+RELAY_PID=$!
+
+wait_health "$RELAY_URL/relay/health" "$RELAY_PID" relay
+
+REGISTER_JSON="$(curl -fsS -X POST "$RELAY_URL/relay/api/auth/register" \
   -H 'content-type: application/json' \
-  -X POST \
-  --data "{
-    \"accountId\":\"jason\",
-    \"daemonId\":\"studio\",
-    \"relayHostId\":\"studio-host\",
-    \"upstreamBaseUrl\":\"${upstream_url}\",
-    \"endpoints\":[{
-      \"id\":\"relay:studio-host\",
-      \"kind\":\"relay\",
-      \"webUrl\":\"/relay/daemon/studio-host/\",
-      \"adpUrl\":\"/relay/daemon/studio-host/adp\",
-      \"relayHostId\":\"studio-host\",
-      \"authRequired\":true,
-      \"lastSeenUnix\":10
-    }]
-  }" \
-  "${relay_url}/relay/hosts" >"${tmp_dir}/register.json"
+  --data '{"username":"local-online","password":"relay-password-123"}')"
+TOKEN="$(jq -er '.accessToken' <<<"$REGISTER_JSON")"
+ACCOUNT_ID="$(jq -er '.accountId' <<<"$REGISTER_JSON")"
 
-python3 - "${tmp_dir}/register.json" <<'PY'
-import json, sys
+FREEHAND_RELAY_AGENT_URL="$RELAY_URL" \
+FREEHAND_RELAY_AGENT_TOKEN="$TOKEN" \
+FREEHAND_RELAY_AGENT_ID="studio" \
+FREEHAND_RELAY_AGENT_DISPLAY_NAME="Studio Master" \
+FREEHAND_RELAY_AGENT_NODE_ID="node-studio" \
+FREEHAND_RELAY_AGENT_ROLE="master" \
+FREEHAND_RELAY_AGENT_STATUS="running" \
+FREEHAND_RELAY_AGENT_ACTIVE_SESSION_COUNT=1 \
+FREEHAND_RELAY_AGENT_LOCAL_ADDR="127.0.0.1:$UPSTREAM_PORT" \
+FREEHAND_RELAY_AGENT_LOCAL_ADP_TOKEN=upstream-token \
+  "$TARGET_DIR/debug/freehand-relay-server" agent-tunnel \
+  >"$TMP_DIR/agent.stdout.log" 2>"$TMP_DIR/agent.stderr.log" &
+AGENT_PID=$!
+for _ in $(seq 1 80); do
+  if curl -fsS "$RELAY_URL/relay/api/agents" -H "authorization: Bearer $TOKEN" \
+      | jq -e '.agents[0].agentId == "studio" and .agents[0].online == true' >/dev/null; then
+    break
+  fi
+  sleep 0.1
+done
 
-payload = json.load(open(sys.argv[1]))
-assert payload["accountId"] == "jason", payload
-assert payload["daemonId"] == "studio", payload
-assert payload["relayHostId"] == "studio-host", payload
-PY
+curl -fsS "$RELAY_URL/relay/api/agents" \
+  -H "authorization: Bearer $TOKEN" \
+  | jq -e --arg account "$ACCOUNT_ID" '.accountId == $account and .agents[0].agentId == "studio" and .agents[0].role == "master" and .agents[0].status == "running"' >/dev/null
 
-curl -fsS "${relay_url}/relay/directory/jason" >"${tmp_dir}/directory.json"
-python3 - "${tmp_dir}/directory.json" <<'PY'
-import json, sys
+curl -fsS -c "$COOKIE_JAR" \
+  -H "authorization: Bearer $TOKEN" \
+  "$RELAY_URL/relay/agents/studio/?client=android-webview" \
+  >"$TMP_DIR/relay-root.html"
+grep -F 'data-webui-shell="true"' "$TMP_DIR/relay-root.html" >/dev/null
+grep -F 'data-adp-endpoint="/adp"' "$TMP_DIR/relay-root.html" >/dev/null
 
-payload = json.load(open(sys.argv[1]))
-assert payload["schemaVersion"] == 1, payload
-assert payload["accountId"] == "jason", payload
-hosts = payload["daemons"]
-assert len(hosts) == 1, payload
-assert hosts[0]["relayHostId"] == "studio-host", payload
-PY
+curl -fsS -b "$COOKIE_JAR" \
+  -H "authorization: Bearer $TOKEN" \
+  "$RELAY_URL/relay/agents/studio/ui/query/latest-active-turn" \
+  | grep -F '"turn_id":"turn-webui-smoke"' >/dev/null
 
-health_body="$(curl -fsS "${relay_url}/relay/daemon/studio-host/health")"
-if [[ "$health_body" != "ok" ]]; then
-  echo "unexpected relay health body: ${health_body}" >&2
+SECOND_JSON="$(curl -fsS -X POST "$RELAY_URL/relay/api/auth/register" \
+  -H 'content-type: application/json' \
+  --data '{"username":"second-account","password":"relay-password-456"}')"
+SECOND_TOKEN="$(jq -er '.accessToken' <<<"$SECOND_JSON")"
+CROSS_STATUS="$(curl -sS -o "$TMP_DIR/cross.json" -w '%{http_code}' \
+  -H "authorization: Bearer $SECOND_TOKEN" \
+  "$RELAY_URL/relay/agents/studio/health")"
+if [[ "$CROSS_STATUS" != "404" ]]; then
+  echo "expected cross-account Agent route 404, got $CROSS_STATUS" >&2
   exit 1
 fi
+jq -e '.code == "relay_agent_not_found"' "$TMP_DIR/cross.json" >/dev/null
 
-curl -fsS "${relay_url}/relay/daemon/studio-host/?client=android-webview" \
-  >"${tmp_dir}/relay-root.html"
-grep -F 'data-webui-shell="true"' "${tmp_dir}/relay-root.html" >/dev/null
-grep -F 'href="/relay/daemon/studio-host/assets/theme.css?v=' "${tmp_dir}/relay-root.html" >/dev/null
-grep -F 'src="/relay/daemon/studio-host/assets/webui.js?v=' "${tmp_dir}/relay-root.html" >/dev/null
-grep -F 'data-adp-endpoint="/relay/daemon/studio-host/adp"' "${tmp_dir}/relay-root.html" >/dev/null
-grep -F 'data-turn-subscribe="/relay/daemon/studio-host/ui/subscribe/turn/latest"' "${tmp_dir}/relay-root.html" >/dev/null
-if grep -F 'href="/assets/theme.css' "${tmp_dir}/relay-root.html" >/dev/null; then
-  echo "relay root leaked daemon-root asset path" >&2
-  exit 1
-fi
-
-curl -fsS "${relay_url}/relay/daemon/studio-host/assets/webui.css?v=relay-test" \
-  >"${tmp_dir}/relay-webui.css"
-grep -F '.app-shell' "${tmp_dir}/relay-webui.css" >/dev/null
-
-curl -fsS "${relay_url}/relay/daemon/studio-host/assets/webui.js?v=relay-test" \
-  >"${tmp_dir}/relay-webui.js"
-grep -F 'from "/relay/daemon/studio-host/assets/theme.js?v=' "${tmp_dir}/relay-webui.js" >/dev/null
-if grep -F 'from "/assets/theme.js' "${tmp_dir}/relay-webui.js" >/dev/null; then
-  echo "relay webui js leaked daemon-root theme import" >&2
-  exit 1
-fi
-
-curl -fsS "${relay_url}/relay/daemon/studio-host/ui/query/latest-active-turn" \
-  >"${tmp_dir}/relay-latest-turn.json"
-grep -F '"turn_id":"turn-webui-smoke"' "${tmp_dir}/relay-latest-turn.json" >/dev/null
-
-adp_output="$(target/debug/freehand-cli adp-smoke --url "$relay_adp_url")"
-if [[ "$adp_output" != adp_smoke_ok* ]]; then
-  echo "unexpected relay ADP smoke output: ${adp_output}" >&2
-  exit 1
-fi
-
-missing_status="$(
-  curl -sS -o "${tmp_dir}/missing.json" -w '%{http_code}' \
-    "${relay_url}/relay/daemon/missing-host/health"
-)"
-if [[ "$missing_status" != "404" ]]; then
-  echo "expected missing relay host 404, got ${missing_status}" >&2
-  exit 1
-fi
-python3 - "${tmp_dir}/missing.json" <<'PY'
-import json, sys
-
-payload = json.load(open(sys.argv[1]))
-assert payload["code"] == "relay_host_not_found", payload
-PY
-
-echo "remote_relay_local_online_ok upstream_url=${upstream_url} relay_url=${relay_url} relay_host=studio-host adp=${relay_adp_url}"
+echo "remote_relay_local_online_ok upstream=$UPSTREAM_URL relay=$RELAY_URL agent=studio outbound_tunnel=verified"

@@ -7,6 +7,7 @@
   "mainline_call_doc": "docs/mainline-calls/config.core.json",
   "generated_wiki_doc": "docs/wiki/config.core.md",
   "resource_operations": [
+    "config.compile_agent_relay_connection",
     "config.mutate_provider_config",
     "config.mutate_model_group_config",
     "config.compile_remote_daemon_registry"
@@ -18,6 +19,7 @@
     "Master selection returns one or more configured Slave Worker peers; Slave selection returns exactly one configured Master peer",
     "selected agent references one primary `[providers.<id>]` entry and may reference one distinct fallback provider through `fallback_provider`",
     "validation resolves startup mode, ordered unique reciprocal multi-peer bindings, primary/fallback provider bindings, explicit protocol declarations, auth-source invariants, and unknown-field rejection",
+    "optional per-Agent Relay configuration is admitted only as one atomic URL plus token-env pair and resolves the token only in the selected runtime projection",
     "optional `[remote_daemon_accounts.<id>]` and `[remote_daemons.<id>]` tables compile into one account-scoped remote daemon registry with explicit endpoint candidates",
     "remote daemon route selection is config-owned: direct Tailscale/IPv6/IPv4 candidates score below relay candidates, health failures make a candidate non-selectable, and relay is selected only through explicit candidate truth",
     "QR/deep-link bootstrap requests enter through versioned remote daemon bootstrap bundles with expiry, nonce, selected route endpoint, and one-time credential metadata",
@@ -31,6 +33,7 @@
   ],
   "response_mainline": [
     "validated config returns one selected agent runtime configuration plus one primary provider runtime configuration and an optional fallback provider runtime configuration",
+    "selected agent runtime configuration includes either one complete runtime-only Relay URL/token projection or no Relay connection; safe config projections never expose the resolved token",
     "selected agent runtime configuration includes explicit local node id plus an ordered typed peer list containing peer name, mode, node id, allowed IP, and pair-token env metadata for runtime bootstrap",
     "selected provider runtime configuration includes explicit protocol, auth source, fallback provider id, and safe projection metadata only",
     "explicit provider capability-test selection returns one enabled provider runtime configuration with resolved auth source for a live test and does not persist or switch active config",
@@ -47,7 +50,7 @@
     "restart is required before config changes take effect"
   ],
   "error_mainline": [
-    "missing config, invalid agent selection, empty/duplicate/self peer, missing peer, same-mode peer, non-reciprocal relation, Master without a Worker, Slave with zero or multiple Masters, invalid primary/fallback provider binding, invalid auth source, unknown provider fields, disabled provider selection, or permission mismatch return explicit errors",
+    "missing config, invalid agent selection, empty/duplicate/self peer, missing peer, same-mode peer, non-reciprocal relation, Master without a Worker, Slave with zero or multiple Masters, invalid primary/fallback provider binding, invalid auth source, incomplete or invalid Agent Relay connection, missing or empty Relay token env, unknown provider fields, disabled provider selection, or permission mismatch return explicit errors",
     "legacy singular `paired_agent` is rejected by the typed parser; only `paired_agents` is valid",
     "invalid remote daemon account ids, missing daemon account bindings, invalid direct endpoint host/port, relay endpoints without account relay URL, undeclared active endpoint, unknown route health endpoint, duplicate health records, no selectable route, expired bootstrap, malformed bootstrap, or empty bootstrap credential return explicit errors",
     "invalid provider definition updates, missing env-var auth, missing selected agent, invalid provider selections, disabled providers, and same-primary fallback selection fail before overwrite; failed updates must leave previous config bytes intact",
@@ -162,11 +165,14 @@
       "step": "07",
       "symbol_path": "LoadedConfig::select_agent",
       "file_path": "crates/freehand-config/src/lib.rs",
-      "responsibility": "select one agent and resolve its provider binding, ordered typed peer topology, and env-backed auth source",
+      "responsibility": "select one agent and resolve its provider binding, ordered typed peer topology, env-backed provider auth, and optional atomic Relay URL plus token-env connection",
       "input_semantic": "agent name plus env",
-      "output_semantic": "selected agent runtime config",
+      "output_semantic": "selected agent runtime config with runtime-only resolved Relay token when configured",
       "caller": "CLI/server startup",
       "callee": "env resolver",
+      "source_resource": "config",
+      "target_resource": "config",
+      "resource_operation": "config.compile_agent_relay_connection",
       "binding_status": "bound"
     },
     {

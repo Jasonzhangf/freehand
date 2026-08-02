@@ -1,0 +1,273 @@
+{
+  "feature_id": "relay.transport",
+  "owner_crate": "crates/freehand-relay",
+  "owner_module": "crates/freehand-relay/src/lib.rs",
+  "function_map_doc": "docs/function-maps/relay.transport.md",
+  "test_design_doc": "docs/testing/relay.transport.md",
+  "mainline_call_doc": "docs/mainline-calls/relay.transport.json",
+  "generated_wiki_doc": "docs/wiki/relay.transport.md",
+  "resource_operations": [
+    "relay_account.register",
+    "relay_account.authenticate",
+    "agent_presence.heartbeat",
+    "agent_presence.query_directory",
+    "agent_presence.subscribe_directory",
+    "agent_presence.admit_control",
+    "relay_control_tunnel.connect",
+    "relay_control_tunnel.admit_data",
+    "relay_control_tunnel.admit_error",
+    "relay_data_tunnel.proxy_http",
+    "relay_data_tunnel.proxy_adp",
+    "relay_data_tunnel.proxy_websocket",
+    "relay_error_tunnel.correlate"
+  ],
+  "request_mainline": [
+    "standalone process loads explicit bind, persisted-store, lease, and HTTP/TLS session-cookie policy before binding",
+    "account register or login establishes one opaque account-scoped access token",
+    "Agent control tunnel authenticates identity and persists account-scoped presence",
+    "directory subscription and proxy requests authenticate before accessing presence",
+    "transport opens typed data exchanges only through an authenticated control tunnel"
+  ],
+  "response_mainline": [
+    "directory query and subscription project account-scoped online state, role, status, last seen, and Agent-reported active-session count",
+    "HTTP, ADP, and generic WebSocket pass through opaque typed data frames without Relay ownership of Agent business truth",
+    "restart restores persisted account, token hash, and Agent presence records"
+  ],
+  "error_mainline": [
+    "invalid credentials and tokens fail explicitly",
+    "cross-account, expired, and unknown Agent access fails explicitly",
+    "corrupt store, failed persistence, and failed tunnel or local bridge IO fail explicitly"
+  ],
+  "transport_invariants": [
+    "local ADP bearer injection is admitted only for RelayDataProtocol::Adp and never for generic WebSocket exchanges",
+    "Relay Agent channel URL construction preserves deployment prefixes and mounts the relay API root exactly once"
+  ],
+  "shared_functions": [
+    {
+      "symbol": "RelayStore::authenticate",
+      "owner": "crates/freehand-relay/src/store.rs",
+      "purpose": "provide one token-hash-to-account authority",
+      "allowed_callers": [
+        "crates/freehand-relay/src/service.rs"
+      ],
+      "related_tests": [
+        "cargo test -p freehand-relay -- --nocapture"
+      ],
+      "why_shared": "all authenticated Relay routes must resolve tokens through one account authority"
+    },
+    {
+      "symbol": "RelayTunnelRegistry::open_routable_exchange",
+      "owner": "crates/freehand-relay/src/tunnel.rs",
+      "purpose": "atomically require live data and error return attachments before creating one typed pending response channel",
+      "allowed_callers": [
+        "open_http_exchange",
+        "open_websocket_exchange"
+      ],
+      "related_tests": [
+        "cargo test -p freehand-relay --test relay_http_blackbox -- --nocapture"
+      ],
+      "why_shared": "HTTP and WebSocket transports must share one account-scoped data/error admission owner without sharing payload semantics"
+    }
+  ],
+  "call_table": [
+    {
+      "step": "01",
+      "symbol_path": "register / RelayStore::register",
+      "file_path": "crates/freehand-relay/src/service.rs / crates/freehand-relay/src/store.rs",
+      "responsibility": "persist account password/token hashes and issue opaque token",
+      "input_semantic": "username and password",
+      "output_semantic": "authenticated account",
+      "caller": "register",
+      "callee": "RelayStore::register",
+      "source_resource": "relay_account",
+      "target_resource": "relay_account",
+      "resource_operation": "relay_account.register",
+      "binding_status": "bound"
+    },
+    {
+      "step": "02",
+      "symbol_path": "authenticated_account / RelayStore::authenticate",
+      "file_path": "crates/freehand-relay/src/service.rs / crates/freehand-relay/src/store.rs",
+      "responsibility": "resolve token hash to one account",
+      "input_semantic": "request token",
+      "output_semantic": "account id",
+      "caller": "authenticated_account",
+      "callee": "RelayStore::authenticate",
+      "source_resource": "relay_account",
+      "target_resource": "relay_account",
+      "resource_operation": "relay_account.authenticate",
+      "binding_status": "bound"
+    },
+    {
+      "step": "03",
+      "symbol_path": "heartbeat / RelayStore::heartbeat",
+      "file_path": "crates/freehand-relay/src/service.rs / crates/freehand-relay/src/store.rs",
+      "responsibility": "persist Agent presence",
+      "input_semantic": "account and heartbeat",
+      "output_semantic": "Agent presence",
+      "caller": "heartbeat",
+      "callee": "RelayStore::heartbeat",
+      "source_resource": "agent_presence",
+      "target_resource": "agent_presence",
+      "resource_operation": "agent_presence.heartbeat",
+      "binding_status": "bound"
+    },
+    {
+      "step": "04",
+      "symbol_path": "directory / RelayStore::directory",
+      "file_path": "crates/freehand-relay/src/service.rs / crates/freehand-relay/src/store.rs",
+      "responsibility": "project account Agent directory",
+      "input_semantic": "account time and lease",
+      "output_semantic": "Agent directory",
+      "caller": "directory",
+      "callee": "RelayStore::directory",
+      "source_resource": "agent_presence",
+      "target_resource": "agent_presence",
+      "resource_operation": "agent_presence.query_directory",
+      "binding_status": "bound"
+    },
+    {
+      "step": "05",
+      "symbol_path": "directory_subscription / project_directory",
+      "file_path": "crates/freehand-relay/src/directory_socket.rs / crates/freehand-relay/src/service.rs",
+      "responsibility": "authenticate and stream changed account-scoped Agent directory snapshots",
+      "input_semantic": "account credential and presence revisions",
+      "output_semantic": "typed directory snapshot or terminal frame",
+      "caller": "directory_subscription",
+      "callee": "project_directory",
+      "source_resource": "agent_presence",
+      "target_resource": "agent_presence",
+      "resource_operation": "agent_presence.subscribe_directory",
+      "binding_status": "bound"
+    },
+    {
+      "step": "06",
+      "symbol_path": "control_tunnel / attach_control",
+      "file_path": "crates/freehand-relay/src/websocket_tunnel.rs",
+      "responsibility": "validate and persist one authenticated Agent control identity, attach its generation-fenced control channel, then acknowledge identity admission before data/error channels can open",
+      "input_semantic": "account and Agent identity",
+      "output_semantic": "persisted generation-fenced control tunnel admission plus matching identity acknowledgement",
+      "caller": "control_tunnel",
+      "callee": "attach_control",
+      "source_resource": "agent_presence",
+      "target_resource": "relay_control_tunnel",
+      "resource_operation": "agent_presence.admit_control",
+      "binding_status": "bound"
+    },
+    {
+      "step": "07",
+      "symbol_path": "data_tunnel / attach_data",
+      "file_path": "crates/freehand-relay/src/websocket_tunnel.rs",
+      "responsibility": "admit one data channel only after control admission",
+      "input_semantic": "authenticated Agent identity",
+      "output_semantic": "typed data tunnel",
+      "caller": "data_tunnel",
+      "callee": "attach_data",
+      "source_resource": "relay_control_tunnel",
+      "target_resource": "relay_data_tunnel",
+      "resource_operation": "relay_control_tunnel.admit_data",
+      "binding_status": "bound"
+    },
+    {
+      "step": "08",
+      "symbol_path": "open_http_exchange / RelayTunnelRegistry::open_routable_exchange",
+      "file_path": "crates/freehand-relay/src/http_tunnel.rs / crates/freehand-relay/src/tunnel.rs",
+      "responsibility": "open and stream one authenticated opaque HTTP exchange end to end, with one explicit pending-exchange failure owner",
+      "input_semantic": "namespaced HTTP request",
+      "output_semantic": "opaque HTTP response",
+      "caller": "open_http_exchange",
+      "callee": "RelayTunnelRegistry::open_routable_exchange",
+      "source_resource": "relay_data_tunnel",
+      "target_resource": "relay_data_tunnel",
+      "resource_operation": "relay_data_tunnel.proxy_http",
+      "binding_status": "bound"
+    },
+    {
+      "step": "09",
+      "symbol_path": "proxy_adp / proxy_websocket",
+      "file_path": "crates/freehand-relay/src/websocket_tunnel.rs / crates/freehand-relay/src/tunnel.rs",
+      "responsibility": "open and stream one authenticated opaque ADP exchange",
+      "input_semantic": "namespaced WebSocket upgrade",
+      "output_semantic": "opaque bidirectional ADP frames",
+      "caller": "proxy_adp",
+      "callee": "proxy_websocket",
+      "source_resource": "relay_data_tunnel",
+      "target_resource": "relay_data_tunnel",
+      "resource_operation": "relay_data_tunnel.proxy_adp",
+      "binding_status": "bound"
+    },
+    {
+      "step": "10",
+      "symbol_path": "proxy_websocket_path / proxy_websocket",
+      "file_path": "crates/freehand-relay/src/websocket_tunnel.rs",
+      "responsibility": "validate a local-only target path and stream one authenticated opaque generic WebSocket exchange",
+      "input_semantic": "namespaced generic WebSocket upgrade and local path",
+      "output_semantic": "opaque bidirectional WebSocket frames",
+      "caller": "proxy_websocket_path",
+      "callee": "proxy_websocket",
+      "source_resource": "relay_data_tunnel",
+      "target_resource": "relay_data_tunnel",
+      "resource_operation": "relay_data_tunnel.proxy_websocket",
+      "binding_status": "bound"
+    },
+    {
+      "step": "11",
+      "symbol_path": "run_error_socket / RelayTunnelRegistry::fail_exchange",
+      "file_path": "crates/freehand-relay/src/websocket_tunnel.rs / crates/freehand-relay/src/tunnel.rs",
+      "responsibility": "validate typed Agent tunnel failures, remove only the authenticated correlated exchange, deliver its exact failure, terminate malformed error channels explicitly, and generation-fence stale error-socket cleanup",
+      "input_semantic": "typed Agent error frame plus authenticated tunnel identity",
+      "output_semantic": "correlated pending-exchange failure or explicit terminal error-channel failure",
+      "caller": "run_error_socket",
+      "callee": "RelayTunnelRegistry::fail_exchange",
+      "source_resource": "relay_error_tunnel",
+      "target_resource": "relay_data_tunnel",
+      "resource_operation": "relay_error_tunnel.correlate",
+      "binding_status": "bound"
+    },
+    {
+      "step": "12",
+      "symbol_path": "main / RelayServerConfig::from_env / RelayService::serve",
+      "file_path": "apps/freehand-relay-server/src/main.rs / crates/freehand-relay/src/config.rs / crates/freehand-relay/src/service.rs",
+      "responsibility": "load explicit bind, store, lease, and cookie policy before serving standalone Relay",
+      "input_semantic": "deployment environment",
+      "output_semantic": "live Relay listener with fixed session-cookie policy",
+      "caller": "main",
+      "callee": "RelayService::serve",
+      "binding_status": "bound"
+    },
+    {
+      "step": "13",
+      "symbol_path": "agent_tunnel_config_from_env / RelayAgentClient::run",
+      "file_path": "apps/freehand-relay-server/src/main.rs / crates/freehand-relay/src/agent_client.rs",
+      "responsibility": "load explicit Agent bridge configuration and enter the typed outbound tunnel lifecycle",
+      "input_semantic": "Agent deployment environment",
+      "output_semantic": "live control, data, and error Agent tunnels",
+      "caller": "agent_tunnel_config_from_env",
+      "callee": "RelayAgentClient::run",
+      "source_resource": "relay_control_tunnel",
+      "target_resource": "relay_control_tunnel",
+      "resource_operation": "relay_control_tunnel.connect",
+      "binding_status": "bound"
+    },
+    {
+      "step": "14",
+      "symbol_path": "attach_error / RelayTunnelRegistry::admit_error",
+      "file_path": "crates/freehand-relay/src/websocket_tunnel.rs / crates/freehand-relay/src/tunnel.rs",
+      "responsibility": "atomically admit one generation-fenced error channel only while the same authenticated control identity remains attached",
+      "input_semantic": "authenticated Agent identity and typed error sender",
+      "output_semantic": "control-owned typed error tunnel generation",
+      "caller": "attach_error",
+      "callee": "RelayTunnelRegistry::admit_error",
+      "source_resource": "relay_control_tunnel",
+      "target_resource": "relay_error_tunnel",
+      "resource_operation": "relay_control_tunnel.admit_error",
+      "binding_status": "bound"
+    }
+  ],
+  "sync_status": [
+    "account, token-hash persistence, Agent presence subscription, HTTP proxy, ADP proxy, generic WebSocket proxy, and standalone deployment host are code-bound",
+    "legacy freehand-server Relay implementation is physically removed",
+    "daemon remote-relay compatibility mode calls only the relay.transport public crate and reads bind/store/lease/cookie policy through RelayServerConfig env truth, not CLI bind defaults",
+    "product config and Master daemon outbound-client wiring are bound outside this module; Worker UI/ADP hosting, dynamic heartbeat projection, Agent Dashboard, and Android login remain incomplete"
+  ]
+}

@@ -6,15 +6,9 @@
   "test_design_doc": "docs/testing/app.runtime-daemon.md",
   "mainline_call_doc": "docs/mainline-calls/app.runtime-daemon.json",
   "generated_wiki_doc": "docs/wiki/app.runtime-daemon.md",
-  "resource_operations": [
-    "remote_relay_transport.register_host",
-    "remote_relay_transport.query_account_directory",
-    "remote_relay_transport.proxy_http",
-    "remote_relay_transport.proxy_adp"
-  ],
+  "resource_operations": [],
   "request_mainline": [
     "daemon process accepts a host command to start the UI transport",
-    "daemon process accepts remote-relay [--bind HOST:PORT] to start a standalone account-scoped relay transport service",
     "daemon process may be started by macOS launchd through the installed freehand-daemon-launchd wrapper with explicit Android update manifest/APK env paths staged under runtime home",
     "each configured Worker process has an agent-specific launchd label, env file, stdout log, and stderr log; a shared workerS service is not the Worker pool",
     "daemon bootstrap selects one agent from default config and creates one runtime dispatcher",
@@ -30,9 +24,7 @@
     "session CRUD and rollback commands travel through the same ADP command path and remain runtime/reason-owned mutations",
     "explicit checkpoint rewind can travel through the same HTTP command ingress without adding app-owned business logic",
     "checkpoint summary query travels through the shared protocol-only HTTP query route from runtime-populated UI state",
-    "daemon ADP WebSocket accepts task list and error-center subscriptions through the shared protocol transport and injected runtime query port",
-    "remote relay accepts explicit host registrations at /relay/hosts, stores account/daemon/relay-host/upstream truth in RemoteRelayDirectory, and exposes account directory snapshots at /relay/directory/{account_id}",
-    "remote relay accepts registered-host HTTP requests under /relay/daemon/{relay_host_id}/..., forwards them to the upstream daemon path, preserves query strings, rewrites static WebUI HTML/JS daemon-root paths to the relay namespace, and keeps ADP WebSocket pass-through at /relay/daemon/{relay_host_id}/adp"
+    "daemon ADP WebSocket accepts task list and error-center subscriptions through the shared protocol transport and injected runtime query port"
   ],
   "response_mainline": [
     "daemon serves runtime-backed dispatch receipts over HTTP command ingress",
@@ -51,10 +43,7 @@
     "daemon serves error-center initial subscription snapshots from runtime metadata projection",
     "ADP AgentBoard and AgentLifecycle queries expose owner-projected Worker process health and restart identity without app-owned PID logic",
     "daemon ADP session management can create, rename, archive, list archived sessions, restore, submit turns, rollback latest effective turn, and query the resulting effective transcript",
-    "each Slave daemon runs one configured Worker's production claim/execute/report loop without binding WebUI or ADP transport",
-    "remote relay returns account-scoped relay directory projections without credential payloads",
-    "remote relay proxies registered daemon WebUI root/assets/query/health HTTP responses to clients under the relay host namespace",
-    "remote relay proxies registered daemon /adp WebSocket frames bidirectionally without parsing task/session semantics"
+    "each Slave daemon runs one configured Worker's production claim/execute/report loop without binding WebUI or ADP transport"
   ],
   "error_mainline": [
     "invalid daemon CLI input returns explicit startup error",
@@ -71,9 +60,7 @@
     "Slave mode rejects UI bind arguments instead of starting a mixed Worker and UI host",
     "async command ingress does not execute injected synchronous provider or runtime work inline; it returns explicit transport failure if the dispatch task itself fails",
     "task and error-center subscription initial query/projection failures surface explicit ADP failure frames",
-    "session rollback failures surface explicit ADP failure frames instead of app-owned transcript mutation",
-    "remote relay rejects invalid host registrations and unregistered relay host requests explicitly instead of synthesizing fallback endpoints",
-    "remote relay upstream URL/proxy failures surface as relay transport errors and do not become task/session success truth"
+    "session rollback failures surface explicit ADP failure frames instead of app-owned transcript mutation"
   ],
   "shared_functions": [
     {
@@ -89,19 +76,6 @@
         "daemon submit and query smoke"
       ],
       "why_shared": "avoids a duplicate second copy of UI transport behavior"
-    },
-    {
-      "symbol": "serve_remote_relay_listener",
-      "owner": "apps/freehand-server/src/remote_relay.rs",
-      "purpose": "provide one relay transport implementation for host registration, account directory query, namespaced WebUI HTTP proxy, and ADP WebSocket proxy",
-      "allowed_callers": [
-        "apps/freehand-server",
-        "apps/freehand-daemon"
-      ],
-      "related_tests": [
-        "cargo test -p freehand-server --lib remote_relay -- --nocapture"
-      ],
-      "why_shared": "avoids mixing relay pass-through IO into Master/Worker runtime host code"
     },
     {
       "symbol": "RuntimeCommandDispatcher::dispatch",
@@ -179,6 +153,72 @@
       "output_semantic": "startup result",
       "caller": "daemon process",
       "callee": "runtime and bootstrap helpers",
+      "binding_status": "bound"
+    },
+    {
+      "step": "02a",
+      "symbol_path": "run",
+      "file_path": "apps/freehand-daemon/src/main.rs",
+      "responsibility": "route the explicit remote-relay compatibility command into a host-only Relay startup path without taking Relay semantic ownership",
+      "input_semantic": "remote-relay command plus Relay environment",
+      "output_semantic": "compatibility host startup result",
+      "caller": "run",
+      "callee": "run_remote_relay_mode",
+      "binding_status": "bound"
+    },
+    {
+      "step": "02b",
+      "symbol_path": "run_remote_relay_mode",
+      "file_path": "apps/freehand-daemon/src/main.rs",
+      "responsibility": "load the Relay server environment through the concrete Relay config owner",
+      "input_semantic": "Relay environment and initialized persisted store",
+      "output_semantic": "validated Relay server config or explicit config error",
+      "caller": "run_remote_relay_mode",
+      "callee": "RelayServerConfig::from_env",
+      "binding_status": "bound"
+    },
+    {
+      "step": "02c",
+      "symbol_path": "run_remote_relay_mode",
+      "file_path": "apps/freehand-daemon/src/main.rs",
+      "responsibility": "load the initialized Relay store through its concrete persistence owner",
+      "input_semantic": "validated Relay store path",
+      "output_semantic": "loaded Relay store or explicit load error",
+      "caller": "run_remote_relay_mode",
+      "callee": "RelayStore::load",
+      "binding_status": "bound"
+    },
+    {
+      "step": "02d",
+      "symbol_path": "run_remote_relay_mode",
+      "file_path": "apps/freehand-daemon/src/main.rs",
+      "responsibility": "construct the Relay service through its semantic owner",
+      "input_semantic": "loaded store plus presence lease",
+      "output_semantic": "Relay service or explicit initialization error",
+      "caller": "run_remote_relay_mode",
+      "callee": "RelayService::new",
+      "binding_status": "bound"
+    },
+    {
+      "step": "02e",
+      "symbol_path": "run_remote_relay_mode",
+      "file_path": "apps/freehand-daemon/src/main.rs",
+      "responsibility": "bind the compatibility-host listener without owning Relay semantics",
+      "input_semantic": "validated bind address",
+      "output_semantic": "TCP listener or explicit bind error",
+      "caller": "run_remote_relay_mode",
+      "callee": "TcpListener::bind",
+      "binding_status": "bound"
+    },
+    {
+      "step": "02f",
+      "symbol_path": "run_remote_relay_mode",
+      "file_path": "apps/freehand-daemon/src/main.rs",
+      "responsibility": "hand the bound listener to the Relay service owner",
+      "input_semantic": "Relay service plus bound listener",
+      "output_semantic": "serve lifetime or explicit serve error",
+      "caller": "run_remote_relay_mode",
+      "callee": "RelayService::serve",
       "binding_status": "bound"
     },
     {
@@ -293,13 +333,13 @@
     },
     {
       "step": "09c",
-      "symbol_path": "stage_android_update_dist_if_available / restart_s_profile_relay_if_enabled",
+      "symbol_path": "stage_android_update_dist_if_available",
       "file_path": "scripts/install-launchd.sh",
-      "responsibility": "stage complete Android update artifacts for Master launchd profiles when repo dist/android is present and keep S-profile relay synchronized",
+      "responsibility": "stage complete Android update artifacts for Master launchd profiles when repo dist/android is present without starting or configuring the independently deployed Relay service",
       "input_semantic": "install or restart launchd profile plus repo dist/android artifacts",
-      "output_semantic": "runtime-home Android update artifacts plus synchronized com.freehand.relayS restart or explicit failure",
+      "output_semantic": "runtime-home Android update artifacts or explicit staging failure",
       "caller": "launchd install and restart profiles",
-      "callee": "filesystem and scripts/install-relay-launchd.sh",
+      "callee": "runtime-home Android distribution filesystem",
       "binding_status": "bound"
     },
     {
@@ -322,6 +362,17 @@
       "output_semantic": "healthy HTTP/ADP host plus explicit stderr lifecycle-runner stop/error evidence",
       "caller": "daemon CLI",
       "callee": "shared WebUI transport plus ProductionMasterRunner::run_until",
+      "binding_status": "bound"
+    },
+    {
+      "step": "10a",
+      "symbol_path": "run_master_mode",
+      "file_path": "apps/freehand-daemon/src/main.rs",
+      "responsibility": "join the configured Agent outbound Relay client to the Master host lifetime against the already-bound local daemon listener",
+      "input_semantic": "selected Agent Relay connection plus local loopback listener address",
+      "output_semantic": "WebUI host result or explicit Relay client terminal error",
+      "caller": "run_master_mode",
+      "callee": "RelayAgentClient::run",
       "binding_status": "bound"
     },
     {
@@ -356,73 +407,6 @@
       "caller": "run_worker_mode",
       "callee": "tokio::task::spawn_blocking",
       "binding_status": "bound"
-    },
-    {
-      "step": "14",
-      "symbol_path": "run_remote_relay_mode / serve_remote_relay_listener",
-      "file_path": "apps/freehand-daemon/src/main.rs / apps/freehand-server/src/remote_relay.rs",
-      "responsibility": "start standalone relay transport service with its own relay directory registry",
-      "input_semantic": "relay bind address",
-      "output_semantic": "live relay transport HTTP/WS boundary",
-      "caller": "daemon CLI",
-      "callee": "shared relay transport owner",
-      "binding_status": "bound"
-    },
-    {
-      "step": "15",
-      "symbol_path": "RemoteRelayDirectory::publish_host",
-      "file_path": "apps/freehand-server/src/remote_relay.rs",
-      "responsibility": "register one account and daemon relay host and normalize endpoint candidates",
-      "input_semantic": "host registration JSON",
-      "output_semantic": "relay host record",
-      "caller": "relay /relay/hosts route",
-      "callee": "relay directory owner",
-      "source_resource": "remote_relay_transport",
-      "target_resource": "remote_relay_transport",
-      "resource_operation": "remote_relay_transport.register_host",
-      "binding_status": "bound"
-    },
-    {
-      "step": "16",
-      "symbol_path": "RemoteRelayDirectory::account_directory",
-      "file_path": "apps/freehand-server/src/remote_relay.rs",
-      "responsibility": "return account-scoped relay directory snapshot",
-      "input_semantic": "account id",
-      "output_semantic": "sorted relay daemon host records",
-      "caller": "relay /relay/directory/{account_id} route",
-      "callee": "relay directory owner",
-      "source_resource": "remote_relay_transport",
-      "target_resource": "remote_relay_transport",
-      "resource_operation": "remote_relay_transport.query_account_directory",
-      "binding_status": "bound"
-    },
-    {
-      "step": "17",
-      "symbol_path": "proxy_relay_daemon_http",
-      "file_path": "apps/freehand-server/src/remote_relay.rs",
-      "responsibility": "proxy registered daemon HTTP requests to upstream WebUI, health, and query routes while preserving query strings and rewriting static HTML/JS daemon-root paths to the relay namespace",
-      "input_semantic": "relay host id plus namespaced HTTP path plus query",
-      "output_semantic": "proxied HTTP response or explicit relay error",
-      "caller": "relay /relay/daemon/{relay_host_id}/... routes",
-      "callee": "reqwest upstream client",
-      "source_resource": "remote_relay_transport",
-      "target_resource": "remote_relay_transport",
-      "resource_operation": "remote_relay_transport.proxy_http",
-      "binding_status": "bound"
-    },
-    {
-      "step": "18",
-      "symbol_path": "handle_relay_daemon_adp",
-      "file_path": "apps/freehand-server/src/remote_relay.rs",
-      "responsibility": "proxy registered daemon ADP WebSocket frames bidirectionally to upstream /adp",
-      "input_semantic": "relay host id plus client WebSocket",
-      "output_semantic": "proxied ADP response frames or explicit relay error",
-      "caller": "relay /relay/daemon/{relay_host_id}/adp route",
-      "callee": "tokio-tungstenite upstream client",
-      "source_resource": "remote_relay_transport",
-      "target_resource": "remote_relay_transport",
-      "resource_operation": "remote_relay_transport.proxy_adp",
-      "binding_status": "bound"
     }
   ],
   "sync_status": [
@@ -439,9 +423,9 @@
     "configured Slave runner construction is black-box checked for persisted process PID, instance, alive, and restart truth under agent.lifecycle",
     "Worker launchd defaults bind identity as com.freehand.worker[ S].<agent>, worker[ S].<agent>.env, and matching agent-specific logs",
     "agent-specific launchd naming has a non-mutating executable fixture, isolated runtime proof starts three distinct Slave daemon processes, and launchd-managed three-service recovery is proven through KeepAlive restart plus AgentBoard restart-count truth",
-    "remote relay transport is bound in code: focused tests and scripts/verify-remote-relay-local-online.sh register a relay host, query the account directory, proxy upstream namespaced WebUI root/assets/query/health HTTP, proxy upstream /adp, and prove missing hosts return explicit relay_host_not_found",
-    "relay endpoint authRequired is directory/route metadata only in this slice; relay HTTP/ADP access authentication is not implemented or claimed, so exposure must remain on trusted local/Tailscale routes until a dedicated auth owner lands with negative online proof",
-    "S-profile launchd restart stages runtime-home Android update artifacts when repo dist/android is complete before restarting the synchronized relay service, so Android/WebView clients consume the current relay-served asset/update URL",
+    "daemon remote-relay compatibility hosting is bound through run_remote_relay_mode to the relay.transport public API; daemon owns process startup only and no Relay account, token, presence, or proxy semantics",
+    "Relay authentication and account isolation are implemented by relay.transport and exercised by focused tests plus scripts/verify-remote-relay-local-online.sh",
+    "S-profile launchd restart may stage complete runtime-home Android update artifacts but does not start, configure, or restart the independently deployed Relay service",
     "generated wiki must be regenerated from `docs/mainline-calls/app.runtime-daemon.json` when this function-map truth changes"
   ]
 }

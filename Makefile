@@ -1,4 +1,4 @@
-.PHONY: provision-openminis-source build fmt clippy test mainlines gates ci verify-webui-online verify-webui-release-online release install-global install-symlink install-launchd install-launchdS install-worker-launchd install-worker-launchdS restart-launchd restart-launchdS restart-worker-launchd restart-worker-launchdS uninstall-launchd uninstall-launchdS uninstall-worker-launchd uninstall-worker-launchdS launchd-status launchd-statusS worker-launchd-status worker-launchd-statusS launchd-logs launchd-logsS worker-launchd-logs worker-launchd-logsS hooks
+.PHONY: provision-openminis-source build fmt clippy test mainlines gates relay-deployment-smoke relay-local-online ci verify-webui-online verify-webui-release-online release install-global install-symlink install-launchd install-launchdS install-worker-launchd install-worker-launchdS restart-launchd restart-launchdS restart-worker-launchd restart-worker-launchdS uninstall-launchd uninstall-launchdS uninstall-worker-launchd uninstall-worker-launchdS launchd-status launchd-statusS worker-launchd-status worker-launchd-statusS launchd-logs launchd-logsS worker-launchd-logs worker-launchd-logsS hooks
 
 provision-openminis-source:
 	scripts/provision-openminis-source.sh
@@ -21,7 +21,13 @@ mainlines:
 gates: provision-openminis-source
 	cargo run -p xtask -- gates check
 
-ci: provision-openminis-source build fmt clippy test mainlines gates
+relay-deployment-smoke:
+	scripts/verify-relay-deployment-smoke.sh
+
+relay-local-online:
+	scripts/verify-remote-relay-local-online.sh
+
+ci: provision-openminis-source build fmt clippy test mainlines gates relay-deployment-smoke relay-local-online
 
 verify-webui-online:
 	scripts/verify-webui-online.sh

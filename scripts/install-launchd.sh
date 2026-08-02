@@ -455,16 +455,6 @@ run_file_permission_preflight() {
     scripts/freehand-file-permission-preflight.sh
 }
 
-restart_s_profile_relay_if_enabled() {
-  if [[ "$service_role" != "master" || "$service_suffix" != "S" ]]; then
-    return 0
-  fi
-  if [[ "${FREEHAND_SKIP_RELAY_S_RESTART:-0}" == "1" ]]; then
-    return 0
-  fi
-  FREEHAND_RELAY_SKIP_BINARY_INSTALL=1 scripts/install-relay-launchd.sh restartS
-}
-
 case "$command" in
   install)
     env -u FREEHAND_DAEMON_WORKDIR -u FREEHAND_WORKSPACE_ROOT scripts/install-global.sh
@@ -481,7 +471,6 @@ case "$command" in
     write_launchd_env
     write_launchd_plist
     run_install_launchd
-    restart_s_profile_relay_if_enabled
     ;;
   restart)
     run_file_permission_preflight
@@ -497,7 +486,6 @@ case "$command" in
     write_launchd_env
     write_launchd_plist
     restart_launchd
-    restart_s_profile_relay_if_enabled
     ;;
   installWorker)
     env -u FREEHAND_DAEMON_WORKDIR -u FREEHAND_WORKSPACE_ROOT scripts/install-global.sh

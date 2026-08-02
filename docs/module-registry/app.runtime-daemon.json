@@ -1,0 +1,48 @@
+{
+  "schema_version": 1,
+  "registry_id": "app.runtime-daemon.modules",
+  "feature_id": "app.runtime-daemon",
+  "status": "active",
+  "coverage_roots": [
+    "apps/freehand-daemon"
+  ],
+  "modules": [
+    {
+      "module_id": "app.runtime-daemon.compatibility-host",
+      "owner_feature_id": "app.runtime-daemon",
+      "status": "active",
+      "owned_paths": [
+        "apps/freehand-daemon/Cargo.toml",
+        "apps/freehand-daemon/src/main.rs"
+      ],
+      "allowed_dependencies": [
+        "freehand-contracts",
+        "freehand-metadata",
+        "freehand-relay",
+        "freehand-runtime",
+        "freehand-server",
+        "freehand-task",
+        "freehand-ui-protocol",
+        "third_party.futures-util",
+        "third_party.reqwest",
+        "third_party.serde-json",
+        "third_party.serial-test",
+        "third_party.tokio",
+        "third_party.tokio-tungstenite"
+      ],
+      "forbidden_dependencies": [
+        "freehand-config",
+        "freehand-node",
+        "freehand-reason"
+      ]
+    }
+  ],
+  "declared_edges": [
+    {
+      "edge_id": "app.runtime-daemon.compatibility-host_to_relay.transport.library",
+      "from_module_id": "app.runtime-daemon.compatibility-host",
+      "to_module_id": "relay.transport.library",
+      "import_name": "freehand_relay"
+    }
+  ]
+}

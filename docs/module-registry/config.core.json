@@ -1,0 +1,39 @@
+{
+  "schema_version": 1,
+  "registry_id": "config.core.modules",
+  "feature_id": "config.core",
+  "status": "active",
+  "coverage_roots": [
+    "crates/freehand-config"
+  ],
+  "modules": [
+    {
+      "module_id": "config.core.library",
+      "owner_feature_id": "config.core",
+      "status": "active",
+      "owned_paths": [
+        "crates/freehand-config/Cargo.toml",
+        "crates/freehand-config/src/lib.rs"
+      ],
+      "allowed_dependencies": [
+        "rust.std",
+        "freehand-contracts",
+        "third_party.base64",
+        "third_party.serde",
+        "third_party.serde-json",
+        "third_party.thiserror",
+        "third_party.toml",
+        "third_party.url"
+      ],
+      "forbidden_dependencies": [
+        "freehand-relay",
+        "freehand-runtime",
+        "freehand-server",
+        "freehand-node",
+        "freehand-reason",
+        "freehand-ui-protocol"
+      ]
+    }
+  ],
+  "declared_edges": []
+}

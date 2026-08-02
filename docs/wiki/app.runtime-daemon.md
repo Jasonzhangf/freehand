@@ -8,17 +8,9 @@ Generated from `docs/mainline-calls/app.runtime-daemon.json`. Do not edit by han
 - generated wiki: `docs/wiki/app.runtime-daemon.md`
 - test design: `docs/testing/app.runtime-daemon.md`
 
-## Resource Operation Backlinks
-
-- remote_relay_transport.register_host
-- remote_relay_transport.query_account_directory
-- remote_relay_transport.proxy_http
-- remote_relay_transport.proxy_adp
-
 ## Request Mainline
 
 - daemon process accepts a host command to start the UI transport
-- daemon process accepts remote-relay [--bind HOST:PORT] to start a standalone account-scoped relay transport service
 - daemon process may be started by macOS launchd through the installed freehand-daemon-launchd wrapper with explicit Android update manifest/APK env paths staged under runtime home
 - each configured Worker process has an agent-specific launchd label, env file, stdout log, and stderr log; a shared workerS service is not the Worker pool
 - daemon bootstrap selects one agent from default config and creates one runtime dispatcher
@@ -35,8 +27,6 @@ Generated from `docs/mainline-calls/app.runtime-daemon.json`. Do not edit by han
 - explicit checkpoint rewind can travel through the same HTTP command ingress without adding app-owned business logic
 - checkpoint summary query travels through the shared protocol-only HTTP query route from runtime-populated UI state
 - daemon ADP WebSocket accepts task list and error-center subscriptions through the shared protocol transport and injected runtime query port
-- remote relay accepts explicit host registrations at /relay/hosts, stores account/daemon/relay-host/upstream truth in RemoteRelayDirectory, and exposes account directory snapshots at /relay/directory/{account_id}
-- remote relay accepts registered-host HTTP requests under /relay/daemon/{relay_host_id}/..., forwards them to the upstream daemon path, preserves query strings, rewrites static WebUI HTML/JS daemon-root paths to the relay namespace, and keeps ADP WebSocket pass-through at /relay/daemon/{relay_host_id}/adp
 
 ## Response Mainline
 
@@ -57,9 +47,6 @@ Generated from `docs/mainline-calls/app.runtime-daemon.json`. Do not edit by han
 - ADP AgentBoard and AgentLifecycle queries expose owner-projected Worker process health and restart identity without app-owned PID logic
 - daemon ADP session management can create, rename, archive, list archived sessions, restore, submit turns, rollback latest effective turn, and query the resulting effective transcript
 - each Slave daemon runs one configured Worker's production claim/execute/report loop without binding WebUI or ADP transport
-- remote relay returns account-scoped relay directory projections without credential payloads
-- remote relay proxies registered daemon WebUI root/assets/query/health HTTP responses to clients under the relay host namespace
-- remote relay proxies registered daemon /adp WebSocket frames bidirectionally without parsing task/session semantics
 
 ## Error Mainline
 
@@ -78,8 +65,6 @@ Generated from `docs/mainline-calls/app.runtime-daemon.json`. Do not edit by han
 - async command ingress does not execute injected synchronous provider or runtime work inline; it returns explicit transport failure if the dispatch task itself fails
 - task and error-center subscription initial query/projection failures surface explicit ADP failure frames
 - session rollback failures surface explicit ADP failure frames instead of app-owned transcript mutation
-- remote relay rejects invalid host registrations and unregistered relay host requests explicitly instead of synthesizing fallback endpoints
-- remote relay upstream URL/proxy failures surface as relay transport errors and do not become task/session success truth
 
 ## Shared Multi-Reference Functions
 
@@ -89,12 +74,6 @@ Generated from `docs/mainline-calls/app.runtime-daemon.json`. Do not edit by han
   - allowed callers: apps/freehand-server, apps/freehand-daemon
   - related tests: WebUI transport smoke, daemon submit and query smoke
   - why shared: avoids a duplicate second copy of UI transport behavior
-- `serve_remote_relay_listener`
-  - owner: `apps/freehand-server/src/remote_relay.rs`
-  - purpose: provide one relay transport implementation for host registration, account directory query, namespaced WebUI HTTP proxy, and ADP WebSocket proxy
-  - allowed callers: apps/freehand-server, apps/freehand-daemon
-  - related tests: cargo test -p freehand-server --lib remote_relay -- --nocapture
-  - why shared: avoids mixing relay pass-through IO into Master/Worker runtime host code
 - `RuntimeCommandDispatcher::dispatch`
   - owner: `crates/freehand-runtime/src/lib.rs`
   - purpose: execute protocol-owned dispatch envelope against runtime owner modules
@@ -126,6 +105,12 @@ Generated from `docs/mainline-calls/app.runtime-daemon.json`. Do not edit by han
 | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | 01 | `main` | `apps/freehand-daemon/src/main.rs` | launch daemon process entrypoint and forward to CLI runner | process entry | process exit result | operator or service manager | app host entrypoint |  |  |  | bound |
 | 02 | `run` | `apps/freehand-daemon/src/main.rs` | parse daemon command and bind address, then start runtime-backed host | daemon CLI input | startup result | daemon process | runtime and bootstrap helpers |  |  |  | bound |
+| 02a | `run` | `apps/freehand-daemon/src/main.rs` | route the explicit remote-relay compatibility command into a host-only Relay startup path without taking Relay semantic ownership | remote-relay command plus Relay environment | compatibility host startup result | run | run_remote_relay_mode |  |  |  | bound |
+| 02b | `run_remote_relay_mode` | `apps/freehand-daemon/src/main.rs` | load the Relay server environment through the concrete Relay config owner | Relay environment and initialized persisted store | validated Relay server config or explicit config error | run_remote_relay_mode | RelayServerConfig::from_env |  |  |  | bound |
+| 02c | `run_remote_relay_mode` | `apps/freehand-daemon/src/main.rs` | load the initialized Relay store through its concrete persistence owner | validated Relay store path | loaded Relay store or explicit load error | run_remote_relay_mode | RelayStore::load |  |  |  | bound |
+| 02d | `run_remote_relay_mode` | `apps/freehand-daemon/src/main.rs` | construct the Relay service through its semantic owner | loaded store plus presence lease | Relay service or explicit initialization error | run_remote_relay_mode | RelayService::new |  |  |  | bound |
+| 02e | `run_remote_relay_mode` | `apps/freehand-daemon/src/main.rs` | bind the compatibility-host listener without owning Relay semantics | validated bind address | TCP listener or explicit bind error | run_remote_relay_mode | TcpListener::bind |  |  |  | bound |
+| 02f | `run_remote_relay_mode` | `apps/freehand-daemon/src/main.rs` | hand the bound listener to the Relay service owner | Relay service plus bound listener | serve lifetime or explicit serve error | run_remote_relay_mode | RelayService::serve |  |  |  | bound |
 | 03 | `parse_bind_arg` | `apps/freehand-daemon/src/main.rs` | parse CLI bind address and default host and port semantics | bind flag value | socket address | daemon CLI runner | bind parser |  |  |  | bound |
 | 04 | `build_runtime_dispatcher_from_default_config` | `apps/freehand-daemon/src/main.rs` | select one agent from default config and create the daemon-owned runtime host dependency set | daemon agent name | runtime dispatcher | daemon startup or tests | `freehand-runtime` |  |  |  | bound |
 | 05 | `serve_webui_listener` | `apps/freehand-server/src/lib.rs` | serve protocol-only routes while using injected runtime dispatch and shared state | listener plus shared state plus dispatch port | live HTTP and SSE boundary | daemon host | shared transport owner |  |  |  | bound |
@@ -136,17 +121,13 @@ Generated from `docs/mainline-calls/app.runtime-daemon.json`. Do not edit by han
 | 09 | `run_launchd_wrapper` | `scripts/freehand-daemon-launchd.sh` | load daemon env and exec the configured installed daemon binary plus Android update distribution env paths on the fixed service bind | ~/.freehand/daemon.env including FREEHAND_ANDROID_UPDATE_MANIFEST_PATH and FREEHAND_ANDROID_APK_PATH | daemon process exec | macOS launchd | FREEHAND_DAEMON_BIN serve |  |  |  | bound |
 | 09a | `sanitize_launchd_component` | `scripts/install-launchd.sh` | derive deterministic agent-specific Worker label, env, and log components | configured Worker agent id | launchd-safe identity component | launchd worker install and restart profiles | Worker service path builder |  |  |  | bound |
 | 09b | `enable_launchd_service` | `scripts/install-launchd.sh` | enable persistent production LaunchAgents unless an isolated verifier explicitly skips enable overrides | install or restart launchd profile | launchctl enable or no persistent override | launchd install and restart profiles | launchctl enable |  |  |  | bound |
-| 09c | `stage_android_update_dist_if_available / restart_s_profile_relay_if_enabled` | `scripts/install-launchd.sh` | stage complete Android update artifacts for Master launchd profiles when repo dist/android is present and keep S-profile relay synchronized | install or restart launchd profile plus repo dist/android artifacts | runtime-home Android update artifacts plus synchronized com.freehand.relayS restart or explicit failure | launchd install and restart profiles | filesystem and scripts/install-relay-launchd.sh |  |  |  | bound |
+| 09c | `stage_android_update_dist_if_available` | `scripts/install-launchd.sh` | stage complete Android update artifacts for Master launchd profiles when repo dist/android is present without starting or configuring the independently deployed Relay service | install or restart launchd profile plus repo dist/android artifacts | runtime-home Android update artifacts or explicit staging failure | launchd install and restart profiles | runtime-home Android distribution filesystem |  |  |  | bound |
 | 09 | `handle_adp_socket / RuntimeCommandDispatcher::query_runtime` | `apps/freehand-server/src/lib.rs / crates/freehand-runtime/src/lib.rs` | serve daemon ADP task list/error-center query and subscribe surfaces from runtime owner truth | ADP task or error-center query/subscribe frame | ADP task/error-center query result or subscription event | daemon-hosted ADP client | shared WebUI transport plus runtime query/projection owner |  |  |  | bound |
 | 10 | `run_master_mode / monitor_master_lifecycle_runner` | `apps/freehand-daemon/src/main.rs` | run WebUI/ADP as the Master host lifetime while monitoring the background Master lifecycle runner stop/error without treating it as a daemon host crash | Master bootstrap plus bind plus lifecycle runner task | healthy HTTP/ADP host plus explicit stderr lifecycle-runner stop/error evidence | daemon CLI | shared WebUI transport plus ProductionMasterRunner::run_until |  |  |  | bound |
+| 10a | `run_master_mode` | `apps/freehand-daemon/src/main.rs` | join the configured Agent outbound Relay client to the Master host lifetime against the already-bound local daemon listener | selected Agent Relay connection plus local loopback listener address | WebUI host result or explicit Relay client terminal error | run_master_mode | RelayAgentClient::run |  |  |  | bound |
 | 11 | `handle_adp_socket / RuntimeCommandDispatcher::dispatch` | `apps/freehand-server/src/lib.rs / crates/freehand-runtime/src/lib.rs` | serve daemon ADP session CRUD and rollback commands through shared protocol transport and runtime owner dispatch | ADP session management command or session transcript query frame | ADP command receipt plus active/archived/effective transcript query projection | daemon-hosted ADP client | shared WebUI transport plus runtime.ui-command-dispatch |  |  |  | bound |
 | 12 | `run_worker_mode` | `apps/freehand-daemon/src/main.rs` | route configured Slave mode into the production Worker runner without UI transport or app-owned health inference | selected Slave bootstrap | long-running Worker service whose process truth is written by agent.lifecycle | daemon CLI | run_blocking_worker_service |  |  |  | bound |
 | 13 | `run_blocking_worker_service` | `apps/freehand-daemon/src/main.rs` | isolate the synchronous Worker and provider loop from the daemon async runtime thread | Worker service closure | Worker service result or explicit blocking-task join failure | run_worker_mode | tokio::task::spawn_blocking |  |  |  | bound |
-| 14 | `run_remote_relay_mode / serve_remote_relay_listener` | `apps/freehand-daemon/src/main.rs / apps/freehand-server/src/remote_relay.rs` | start standalone relay transport service with its own relay directory registry | relay bind address | live relay transport HTTP/WS boundary | daemon CLI | shared relay transport owner |  |  |  | bound |
-| 15 | `RemoteRelayDirectory::publish_host` | `apps/freehand-server/src/remote_relay.rs` | register one account and daemon relay host and normalize endpoint candidates | host registration JSON | relay host record | relay /relay/hosts route | relay directory owner | remote_relay_transport | remote_relay_transport | remote_relay_transport.register_host | bound |
-| 16 | `RemoteRelayDirectory::account_directory` | `apps/freehand-server/src/remote_relay.rs` | return account-scoped relay directory snapshot | account id | sorted relay daemon host records | relay /relay/directory/{account_id} route | relay directory owner | remote_relay_transport | remote_relay_transport | remote_relay_transport.query_account_directory | bound |
-| 17 | `proxy_relay_daemon_http` | `apps/freehand-server/src/remote_relay.rs` | proxy registered daemon HTTP requests to upstream WebUI, health, and query routes while preserving query strings and rewriting static HTML/JS daemon-root paths to the relay namespace | relay host id plus namespaced HTTP path plus query | proxied HTTP response or explicit relay error | relay /relay/daemon/{relay_host_id}/... routes | reqwest upstream client | remote_relay_transport | remote_relay_transport | remote_relay_transport.proxy_http | bound |
-| 18 | `handle_relay_daemon_adp` | `apps/freehand-server/src/remote_relay.rs` | proxy registered daemon ADP WebSocket frames bidirectionally to upstream /adp | relay host id plus client WebSocket | proxied ADP response frames or explicit relay error | relay /relay/daemon/{relay_host_id}/adp route | tokio-tungstenite upstream client | remote_relay_transport | remote_relay_transport | remote_relay_transport.proxy_adp | bound |
 
 ## Sync Status Against Mainline Call
 
@@ -163,7 +144,7 @@ Generated from `docs/mainline-calls/app.runtime-daemon.json`. Do not edit by han
 - configured Slave runner construction is black-box checked for persisted process PID, instance, alive, and restart truth under agent.lifecycle
 - Worker launchd defaults bind identity as com.freehand.worker[ S].<agent>, worker[ S].<agent>.env, and matching agent-specific logs
 - agent-specific launchd naming has a non-mutating executable fixture, isolated runtime proof starts three distinct Slave daemon processes, and launchd-managed three-service recovery is proven through KeepAlive restart plus AgentBoard restart-count truth
-- remote relay transport is bound in code: focused tests and scripts/verify-remote-relay-local-online.sh register a relay host, query the account directory, proxy upstream namespaced WebUI root/assets/query/health HTTP, proxy upstream /adp, and prove missing hosts return explicit relay_host_not_found
-- relay endpoint authRequired is directory/route metadata only in this slice; relay HTTP/ADP access authentication is not implemented or claimed, so exposure must remain on trusted local/Tailscale routes until a dedicated auth owner lands with negative online proof
-- S-profile launchd restart stages runtime-home Android update artifacts when repo dist/android is complete before restarting the synchronized relay service, so Android/WebView clients consume the current relay-served asset/update URL
+- daemon remote-relay compatibility hosting is bound through run_remote_relay_mode to the relay.transport public API; daemon owns process startup only and no Relay account, token, presence, or proxy semantics
+- Relay authentication and account isolation are implemented by relay.transport and exercised by focused tests plus scripts/verify-remote-relay-local-online.sh
+- S-profile launchd restart may stage complete runtime-home Android update artifacts but does not start, configure, or restart the independently deployed Relay service
 - generated wiki must be regenerated from `docs/mainline-calls/app.runtime-daemon.json` when this function-map truth changes

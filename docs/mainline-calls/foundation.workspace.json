@@ -1280,6 +1280,7 @@
       "allowed_callers": [
         "crate::verify_mainline_call_table_bindings",
         "crate::verify_precise_source_edge_gate",
+        "crate::verify_relay_transport_boundary",
         "crate::verify_resource_map"
       ],
       "related_tests": [],
@@ -1548,6 +1549,17 @@
       "input_semantic": "bound row files and symbols",
       "output_semantic": "boolean resolution result",
       "caller": "crate::verify_mainline_call_table_bindings",
+      "callee": "crate::symbol_resolves_in_files",
+      "binding_status": "bound"
+    },
+    {
+      "step": "19w-relay",
+      "symbol_path": "crate::symbol_resolves_in_files",
+      "file_path": "xtask/src/main.rs",
+      "responsibility": "resolve Relay call-map caller and callee symbols",
+      "input_semantic": "relay.transport row files and symbols",
+      "output_semantic": "boolean resolution result",
+      "caller": "crate::verify_relay_transport_boundary",
       "callee": "crate::symbol_resolves_in_files",
       "binding_status": "bound"
     },
