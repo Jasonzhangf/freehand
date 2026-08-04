@@ -1,6 +1,7 @@
 //! Runtime wiring owner for UI command dispatch.
 
 mod checkpoint_store;
+mod lifecycle_wait;
 mod live_context;
 mod master_runner;
 mod path_diagnostics;
@@ -567,6 +568,29 @@ pub fn run_worker_live_reason_turn(
         |_| {},
         |_| {},
         |_| {},
+    )
+}
+
+pub fn run_worker_live_reason_turn_with_hooks<FB, FD, FT>(
+    selected: &SelectedAgentConfig,
+    request: LiveReasonTurnRequest,
+    on_broadcast: FB,
+    on_debug: FD,
+    on_task_list_projection: FT,
+) -> Result<LiveReasonTurnOutcome, RuntimeLiveBridgeError>
+where
+    FB: FnMut(&ReasonBroadcastEvent),
+    FD: FnMut(&DebugEvent),
+    FT: FnMut(&UiTaskListProjection),
+{
+    run_live_reason_turn_with_policy(
+        selected,
+        request,
+        LiveReasonExecutionRole::Worker,
+        None,
+        on_broadcast,
+        on_debug,
+        on_task_list_projection,
     )
 }
 
@@ -2768,6 +2792,46 @@ pub struct RuntimeAgentBootstrap {
     pub runtime_home: PathBuf,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum RuntimeAgentActivityStatus {
+    Idle,
+    Running,
+    Waiting,
+    Error,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RuntimeAgentActivityProjection {
+    pub status: RuntimeAgentActivityStatus,
+    pub active_session_count: u32,
+}
+
+impl RuntimeAgentActivityProjection {
+    pub fn merge(self, other: Self) -> Self {
+        let status = if self.status == RuntimeAgentActivityStatus::Running
+            || other.status == RuntimeAgentActivityStatus::Running
+        {
+            RuntimeAgentActivityStatus::Running
+        } else if self.status == RuntimeAgentActivityStatus::Error
+            || other.status == RuntimeAgentActivityStatus::Error
+        {
+            RuntimeAgentActivityStatus::Error
+        } else if self.status == RuntimeAgentActivityStatus::Waiting
+            || other.status == RuntimeAgentActivityStatus::Waiting
+        {
+            RuntimeAgentActivityStatus::Waiting
+        } else {
+            RuntimeAgentActivityStatus::Idle
+        };
+        Self {
+            status,
+            active_session_count: self
+                .active_session_count
+                .saturating_add(other.active_session_count),
+        }
+    }
+}
+
 #[derive(Debug, Error, PartialEq, Eq)]
 pub enum RuntimeAgentBootstrapError {
     #[error("agent name must not be empty")]
@@ -2853,8 +2917,8 @@ pub enum RuntimeCommandDispatcherError {
     EmptyAgentName,
     #[error("model must not be empty")]
     EmptyModel,
-    #[error("runtime host requires a master agent, but `{agent_name}` is configured as `{mode}`")]
-    HostRequiresMasterMode { agent_name: String, mode: String },
+    #[error("runtime Worker host `{agent_name}` requires one configured Master peer")]
+    HostRequiresMasterPeer { agent_name: String },
     #[error("runtime host master `{agent_name}` requires at least one configured worker peer")]
     HostRequiresWorkerPeer { agent_name: String },
     #[error("config load failed: {0}")]
@@ -3077,6 +3141,8 @@ fn owner_turn_matches_target(owner_turn_id: Option<&TurnId>, target_turn_id: &Tu
 
 struct RuntimeCommandDispatcherState {
     config: RuntimeCommandDispatcherConfig,
+    execution_role: LiveReasonExecutionRole,
+    reason_node_id: String,
     reason_engine: ReasonTurnEngine,
     session_history: SessionHistory,
     turns: Vec<TurnRecord>,
@@ -3099,8 +3165,9 @@ struct ActiveRuntimeTurn {
 
 struct PreparedLiveSubmit {
     live: RuntimeLiveDispatcherConfig,
+    execution_role: LiveReasonExecutionRole,
     reason_agent_id: AgentId,
-    master_node_id: String,
+    reason_node_id: String,
     session_id: SessionId,
     cwd: PathBuf,
     turn_id: TurnId,
@@ -3155,34 +3222,75 @@ impl RuntimeCommandDispatcher {
         if selected.name.trim().is_empty() {
             return Err(RuntimeCommandDispatcherError::EmptyAgentName);
         }
-        if selected.mode != AgentMode::Master {
-            return Err(RuntimeCommandDispatcherError::HostRequiresMasterMode {
-                agent_name: selected.name.clone(),
-                mode: selected.mode.as_str().to_owned(),
-            });
-        }
-        let first_worker_peer = selected.worker_peers().next().ok_or_else(|| {
-            RuntimeCommandDispatcherError::HostRequiresWorkerPeer {
-                agent_name: selected.name.clone(),
+        let (
+            execution_role,
+            master_agent_id,
+            master_node_id,
+            slave_agent_id,
+            slave_node_id,
+            allowed_pair_ip,
+        ) = match selected.mode {
+            AgentMode::Master => {
+                let first_worker_peer = selected.worker_peers().next().ok_or_else(|| {
+                    RuntimeCommandDispatcherError::HostRequiresWorkerPeer {
+                        agent_name: selected.name.clone(),
+                    }
+                })?;
+                (
+                    LiveReasonExecutionRole::Master,
+                    AgentId::new(selected.name.clone()),
+                    selected.node_id.clone(),
+                    AgentId::new(first_worker_peer.name.clone()),
+                    first_worker_peer.node_id.clone(),
+                    first_worker_peer.allowed_pair_ip.map(|ip| ip.to_string()),
+                )
             }
-        })?;
+            AgentMode::Slave => {
+                let master_peer = selected.master_peer().ok_or_else(|| {
+                    RuntimeCommandDispatcherError::HostRequiresMasterPeer {
+                        agent_name: selected.name.clone(),
+                    }
+                })?;
+                (
+                    LiveReasonExecutionRole::Worker,
+                    AgentId::new(master_peer.name.clone()),
+                    master_peer.node_id.clone(),
+                    AgentId::new(selected.name.clone()),
+                    selected.node_id.clone(),
+                    selected.allowed_pair_ip.map(|ip| ip.to_string()),
+                )
+            }
+        };
 
-        Self::new(RuntimeCommandDispatcherConfig {
-            session_id: SessionId::new(format!("runtime-session-{}", selected.name)),
-            reason_agent_id: AgentId::new(selected.name.clone()),
-            master_agent_id: AgentId::new(selected.name.clone()),
-            master_node_id: selected.node_id.clone(),
-            slave_agent_id: AgentId::new(first_worker_peer.name.clone()),
-            slave_node_id: first_worker_peer.node_id.clone(),
-            pair_token: selected.pair_token.clone(),
-            allowed_pair_ip: first_worker_peer.allowed_pair_ip.map(|ip| ip.to_string()),
-            model: selected.provider.default_model.clone(),
-            live,
-        })
+        Self::new_for_selected_role(
+            RuntimeCommandDispatcherConfig {
+                session_id: SessionId::new(format!("runtime-session-{}", selected.name)),
+                reason_agent_id: AgentId::new(selected.name.clone()),
+                master_agent_id,
+                master_node_id,
+                slave_agent_id,
+                slave_node_id,
+                pair_token: selected.pair_token.clone(),
+                allowed_pair_ip,
+                model: selected.provider.default_model.clone(),
+                live,
+            },
+            execution_role,
+            selected.node_id.clone(),
+        )
     }
 
     pub fn new(
         config: RuntimeCommandDispatcherConfig,
+    ) -> Result<Self, RuntimeCommandDispatcherError> {
+        let reason_node_id = config.master_node_id.clone();
+        Self::new_for_selected_role(config, LiveReasonExecutionRole::Master, reason_node_id)
+    }
+
+    fn new_for_selected_role(
+        config: RuntimeCommandDispatcherConfig,
+        execution_role: LiveReasonExecutionRole,
+        reason_node_id: String,
     ) -> Result<Self, RuntimeCommandDispatcherError> {
         if config.master_node_id.trim().is_empty() {
             return Err(RuntimeCommandDispatcherError::EmptyMasterNodeId);
@@ -3254,7 +3362,7 @@ impl RuntimeCommandDispatcher {
                 &persistence,
                 &ui_state,
                 &config.reason_agent_id,
-                &config.master_node_id,
+                &reason_node_id,
             )
             .map_err(|err| {
                 RuntimeCommandDispatcherError::ReasonPersistenceBootstrap(err.to_string())
@@ -3312,6 +3420,8 @@ impl RuntimeCommandDispatcher {
             ui_state,
             state: Mutex::new(RuntimeCommandDispatcherState {
                 config,
+                execution_role,
+                reason_node_id,
                 reason_engine: ReasonTurnEngine::new(),
                 session_history,
                 turns,
@@ -3335,6 +3445,24 @@ impl RuntimeCommandDispatcher {
 
     pub fn ui_state(&self) -> Arc<Mutex<UiProtocolState>> {
         Arc::clone(&self.ui_state)
+    }
+
+    pub fn current_agent_activity(&self) -> RuntimeAgentActivityProjection {
+        let state = self.state.lock().expect("lock runtime dispatcher state");
+        let active_session_count = state
+            .active_turns
+            .iter()
+            .map(|active| active.session_id.clone())
+            .collect::<std::collections::BTreeSet<_>>()
+            .len() as u32;
+        RuntimeAgentActivityProjection {
+            status: if active_session_count == 0 {
+                RuntimeAgentActivityStatus::Idle
+            } else {
+                RuntimeAgentActivityStatus::Running
+            },
+            active_session_count,
+        }
     }
 
     pub fn query_runtime(
@@ -3412,7 +3540,7 @@ impl RuntimeCommandDispatcher {
                 };
                 let task_runtime = TaskRuntime::boot_read_only(
                     &live.runtime_home,
-                    state.config.reason_agent_id.clone(),
+                    state.config.master_agent_id.clone(),
                 )
                 .map_err(map_task_query_error)?;
                 let status_filter = status
@@ -3427,7 +3555,7 @@ impl RuntimeCommandDispatcher {
                     })
                     .map_err(map_task_query_error)?;
                 Ok(Some(UiQueryResult::TaskList(project_task_list_for_ui(
-                    state.config.reason_agent_id.clone(),
+                    state.config.master_agent_id.clone(),
                     status.clone(),
                     agent_id.clone(),
                     tasks,
@@ -3443,7 +3571,7 @@ impl RuntimeCommandDispatcher {
                 };
                 let task_runtime = TaskRuntime::boot_read_only(
                     &live.runtime_home,
-                    state.config.reason_agent_id.clone(),
+                    state.config.master_agent_id.clone(),
                 )
                 .map_err(map_task_query_error)?;
                 let status_filter = status
@@ -3459,7 +3587,7 @@ impl RuntimeCommandDispatcher {
                     })
                     .map_err(map_task_query_error)?;
                 Ok(Some(UiQueryResult::TaskBoard(project_task_board_for_ui(
-                    state.config.reason_agent_id.clone(),
+                    state.config.master_agent_id.clone(),
                     status.clone(),
                     agent_id.clone(),
                     *include_terminal,
@@ -3472,14 +3600,14 @@ impl RuntimeCommandDispatcher {
                 };
                 let task_runtime = TaskRuntime::boot_read_only(
                     &live.runtime_home,
-                    state.config.reason_agent_id.clone(),
+                    state.config.master_agent_id.clone(),
                 )
                 .map_err(map_task_query_error)?;
                 let board = task_runtime
                     .query_agent_board()
                     .map_err(map_task_query_error)?;
                 Ok(Some(UiQueryResult::AgentBoard(project_agent_board_for_ui(
-                    state.config.reason_agent_id.clone(),
+                    state.config.master_agent_id.clone(),
                     board.agents,
                 ))))
             }
@@ -3489,7 +3617,7 @@ impl RuntimeCommandDispatcher {
                 };
                 let task_runtime = TaskRuntime::boot_read_only(
                     &live.runtime_home,
-                    state.config.reason_agent_id.clone(),
+                    state.config.master_agent_id.clone(),
                 )
                 .map_err(map_task_query_error)?;
                 let lifecycle = task_runtime
@@ -3505,7 +3633,7 @@ impl RuntimeCommandDispatcher {
                 };
                 let task_runtime = TaskRuntime::boot_read_only(
                     &live.runtime_home,
-                    state.config.reason_agent_id.clone(),
+                    state.config.master_agent_id.clone(),
                 )
                 .map_err(map_task_query_error)?;
                 let events = task_runtime
@@ -3513,7 +3641,7 @@ impl RuntimeCommandDispatcher {
                     .map_err(map_task_query_error)?;
                 Ok(Some(UiQueryResult::TaskHistory(
                     project_task_history_for_ui(
-                        state.config.reason_agent_id.clone(),
+                        state.config.master_agent_id.clone(),
                         task_id.clone(),
                         events,
                     ),
@@ -3528,7 +3656,7 @@ impl RuntimeCommandDispatcher {
                 };
                 let task_runtime = TaskRuntime::boot_read_only(
                     &live.runtime_home,
-                    state.config.reason_agent_id.clone(),
+                    state.config.master_agent_id.clone(),
                 )
                 .map_err(map_task_query_error)?;
                 let events = task_runtime
@@ -3536,7 +3664,7 @@ impl RuntimeCommandDispatcher {
                     .map_err(map_task_query_error)?;
                 Ok(Some(UiQueryResult::WorkerControl(Box::new(
                     project_worker_control_events_for_ui(
-                        state.config.reason_agent_id.clone(),
+                        state.config.master_agent_id.clone(),
                         events,
                     ),
                 ))))
@@ -3582,7 +3710,7 @@ impl RuntimeCommandDispatcher {
                 };
                 let task_runtime = TaskRuntime::boot_read_only(
                     &live.runtime_home,
-                    state.config.reason_agent_id.clone(),
+                    state.config.master_agent_id.clone(),
                 )
                 .map_err(map_task_query_error)?;
                 let inbox = task_runtime
@@ -3592,7 +3720,7 @@ impl RuntimeCommandDispatcher {
                     })
                     .map_err(map_task_query_error)?;
                 Ok(Some(UiQueryResult::EventInbox(project_event_inbox_for_ui(
-                    state.config.reason_agent_id.clone(),
+                    state.config.master_agent_id.clone(),
                     inbox,
                 ))))
             }
@@ -3607,7 +3735,7 @@ impl RuntimeCommandDispatcher {
                 };
                 let task_runtime = TaskRuntime::boot_read_only(
                     &live.runtime_home,
-                    state.config.reason_agent_id.clone(),
+                    state.config.master_agent_id.clone(),
                 )
                 .map_err(map_task_query_error)?;
                 let outcome = task_runtime
@@ -3616,12 +3744,12 @@ impl RuntimeCommandDispatcher {
                         limit: limit.unwrap_or(0),
                         include_terminal: *include_terminal,
                         replay_from_start: *replay_from_start,
-                        actor: ui_task_actor(&state.config.reason_agent_id, None, None),
+                        actor: ui_task_actor(&state.config.master_agent_id, None, None),
                         watermark: ui_task_watermark("query_master_poll"),
                     })
                     .map_err(map_task_query_error)?;
                 Ok(Some(UiQueryResult::MasterPoll(project_master_poll_for_ui(
-                    state.config.reason_agent_id.clone(),
+                    state.config.master_agent_id.clone(),
                     outcome,
                 ))))
             }
@@ -3696,7 +3824,7 @@ impl RuntimeCommandDispatcher {
 
         let projection = project_runtime_turn_history(
             &state.config.reason_agent_id,
-            &state.config.master_node_id,
+            &state.reason_node_id,
             std::slice::from_ref(&turn),
             Some(cwd.to_string_lossy().into_owned()),
         );
@@ -3724,7 +3852,9 @@ impl RuntimeCommandDispatcher {
         let Some(live) = state.config.live.clone() else {
             return Ok(None);
         };
-        self.recover_stale_master_active_work_before_live_submit(state, &live)?;
+        if state.execution_role == LiveReasonExecutionRole::Master {
+            self.recover_stale_master_active_work_before_live_submit(state, &live)?;
+        }
         let session_id = requested_session_id.unwrap_or_else(|| state.config.session_id.clone());
         let cwd = resolve_session_cwd(state, &session_id, requested_cwd, Some(&live.runtime_home))?;
         let next_turn_ordinal = state.next_turn_ordinal.saturating_add(1);
@@ -3732,14 +3862,16 @@ impl RuntimeCommandDispatcher {
         let trace_id = TraceId::new(format!("runtime-trace-{next_turn_ordinal}"));
         let cancel_token = Arc::new(AtomicBool::new(false));
         let (attachments, attachment_metadata) = submit_attachment_inputs(metadata);
-        master_runner::register_master_active_work(
-            &live.runtime_home,
-            &state.config.reason_agent_id,
-            &session_id,
-            &turn_id,
-            &trace_id,
-        )
-        .map_err(UiCommandDispatchPortError::DispatchFailed)?;
+        if state.execution_role == LiveReasonExecutionRole::Master {
+            master_runner::register_master_active_work(
+                &live.runtime_home,
+                &state.config.reason_agent_id,
+                &session_id,
+                &turn_id,
+                &trace_id,
+            )
+            .map_err(UiCommandDispatchPortError::DispatchFailed)?;
+        }
         state.next_turn_ordinal = next_turn_ordinal;
         state.active_turns.push(ActiveRuntimeTurn {
             turn_id: turn_id.clone(),
@@ -3751,8 +3883,9 @@ impl RuntimeCommandDispatcher {
         });
         let prepared = PreparedLiveSubmit {
             live,
+            execution_role: state.execution_role,
             reason_agent_id: state.config.reason_agent_id.clone(),
-            master_node_id: state.config.master_node_id.clone(),
+            reason_node_id: state.reason_node_id.clone(),
             session_id,
             cwd,
             turn_id,
@@ -3769,17 +3902,19 @@ impl RuntimeCommandDispatcher {
                 if state.next_turn_ordinal == next_turn_ordinal {
                     state.next_turn_ordinal = next_turn_ordinal.saturating_sub(1);
                 }
-                let _ = master_runner::clear_master_active_work_if_current(
-                    &prepared.live.runtime_home,
-                    &prepared.reason_agent_id,
-                    &prepared.turn_id,
-                );
+                if prepared.execution_role == LiveReasonExecutionRole::Master {
+                    let _ = master_runner::clear_master_active_work_if_current(
+                        &prepared.live.runtime_home,
+                        &prepared.reason_agent_id,
+                        &prepared.turn_id,
+                    );
+                }
                 return Err(err);
             }
         };
         let projection = project_runtime_turn_history(
             &state.config.reason_agent_id,
-            &state.config.master_node_id,
+            &state.reason_node_id,
             std::slice::from_ref(&current_turn),
             Some(prepared.cwd.to_string_lossy().into_owned()),
         );
@@ -3794,6 +3929,9 @@ impl RuntimeCommandDispatcher {
         &self,
     ) -> Result<(), UiCommandDispatchPortError> {
         let mut state = self.state.lock().expect("lock runtime dispatcher state");
+        if state.execution_role != LiveReasonExecutionRole::Master {
+            return Ok(());
+        }
         let Some(live) = state.config.live.clone() else {
             return Ok(());
         };
@@ -3807,47 +3945,55 @@ impl RuntimeCommandDispatcher {
     ) -> Result<UiCommandDispatchReceipt, UiCommandDispatchPortError> {
         let ui_state = Arc::clone(&self.ui_state);
         let reason_agent_id = prepared.reason_agent_id.clone();
-        let master_node_id = prepared.master_node_id.clone();
+        let reason_node_id = prepared.reason_node_id.clone();
         let cancel_token = Arc::clone(&prepared.cancel_token);
-        let outcome = run_live_reason_turn_with_hooks(
-            &prepared.live.selected_agent,
-            LiveReasonTurnRequest {
-                runtime_home: prepared.live.runtime_home.clone(),
-                session_id: prepared.session_id.clone(),
-                turn_id: prepared.turn_id.clone(),
-                trace_id: prepared.trace_id.clone(),
-                prompt: prepared.prompt.clone(),
-                attachments: prepared.attachments.clone(),
-                attachment_metadata: prepared.attachment_metadata.clone(),
-                cwd: Some(prepared.cwd.clone()),
-                execution_profile: LiveReasonExecutionProfile::Workspace,
-                stream: prepared.live.stream,
-                cancel_token: Some(Arc::clone(&cancel_token)),
-            },
-            |event| {
-                if !cancel_token.load(Ordering::SeqCst) {
-                    apply_runtime_reason_broadcast(
-                        &ui_state,
-                        &reason_agent_id,
-                        &master_node_id,
-                        event,
-                    );
-                }
-            },
-            |event| {
-                if !cancel_token.load(Ordering::SeqCst) {
-                    apply_runtime_debug_event(&ui_state, &reason_agent_id, &master_node_id, event);
-                }
-            },
-            |projection| {
-                if !cancel_token.load(Ordering::SeqCst) {
-                    ui_state
-                        .lock()
-                        .expect("lock ui state")
-                        .publish_task_list_projection(projection.clone());
-                }
-            },
-        );
+        let request = LiveReasonTurnRequest {
+            runtime_home: prepared.live.runtime_home.clone(),
+            session_id: prepared.session_id.clone(),
+            turn_id: prepared.turn_id.clone(),
+            trace_id: prepared.trace_id.clone(),
+            prompt: prepared.prompt.clone(),
+            attachments: prepared.attachments.clone(),
+            attachment_metadata: prepared.attachment_metadata.clone(),
+            cwd: Some(prepared.cwd.clone()),
+            execution_profile: LiveReasonExecutionProfile::Workspace,
+            stream: prepared.live.stream,
+            cancel_token: Some(Arc::clone(&cancel_token)),
+        };
+        let on_broadcast = |event: &ReasonBroadcastEvent| {
+            if !cancel_token.load(Ordering::SeqCst) {
+                apply_runtime_reason_broadcast(&ui_state, &reason_agent_id, &reason_node_id, event);
+            }
+        };
+        let on_debug = |event: &DebugEvent| {
+            if !cancel_token.load(Ordering::SeqCst) {
+                apply_runtime_debug_event(&ui_state, &reason_agent_id, &reason_node_id, event);
+            }
+        };
+        let on_task_list_projection = |projection: &UiTaskListProjection| {
+            if !cancel_token.load(Ordering::SeqCst) {
+                ui_state
+                    .lock()
+                    .expect("lock ui state")
+                    .publish_task_list_projection(projection.clone());
+            }
+        };
+        let outcome = match prepared.execution_role {
+            LiveReasonExecutionRole::Master => run_live_reason_turn_with_hooks(
+                &prepared.live.selected_agent,
+                request,
+                on_broadcast,
+                on_debug,
+                on_task_list_projection,
+            ),
+            LiveReasonExecutionRole::Worker => run_worker_live_reason_turn_with_hooks(
+                &prepared.live.selected_agent,
+                request,
+                on_broadcast,
+                on_debug,
+                on_task_list_projection,
+            ),
+        };
         let outcome = self.finish_live_submit(&prepared, outcome)?;
         Ok(UiCommandDispatchReceipt {
             ingress: envelope.ingress,
@@ -3873,16 +4019,21 @@ impl RuntimeCommandDispatcher {
             .as_ref()
             .is_some_and(|turn| turn.cancel_token.load(Ordering::SeqCst))
             || prepared.cancel_token.load(Ordering::SeqCst);
-        if let Err(error) = master_runner::clear_master_active_work_if_current(
-            &prepared.live.runtime_home,
-            &prepared.reason_agent_id,
-            &prepared.turn_id,
-        ) {
+        let clear_result = if prepared.execution_role == LiveReasonExecutionRole::Master {
+            master_runner::clear_master_active_work_if_current(
+                &prepared.live.runtime_home,
+                &prepared.reason_agent_id,
+                &prepared.turn_id,
+            )
+        } else {
+            Ok(())
+        };
+        if let Err(error) = clear_result {
             let current_turn =
                 restore_or_materialize_failed_live_submit(&mut state, prepared, &error)?;
             let projection = project_runtime_turn_history(
                 &state.config.reason_agent_id,
-                &state.config.master_node_id,
+                &state.reason_node_id,
                 std::slice::from_ref(&current_turn),
                 Some(prepared.cwd.to_string_lossy().into_owned()),
             );
@@ -3900,7 +4051,7 @@ impl RuntimeCommandDispatcher {
             )?;
             let projection = project_runtime_turn_history(
                 &state.config.reason_agent_id,
-                &state.config.master_node_id,
+                &state.reason_node_id,
                 std::slice::from_ref(&current_turn),
                 Some(prepared.cwd.to_string_lossy().into_owned()),
             );
@@ -3916,7 +4067,7 @@ impl RuntimeCommandDispatcher {
             Ok(outcome) => {
                 let projection = project_runtime_turn_history(
                     &state.config.reason_agent_id,
-                    &state.config.master_node_id,
+                    &state.reason_node_id,
                     std::slice::from_ref(&outcome.turn),
                     Some(prepared.cwd.to_string_lossy().into_owned()),
                 );
@@ -3950,7 +4101,7 @@ impl RuntimeCommandDispatcher {
                 )?;
                 let projection = project_runtime_turn_history(
                     &state.config.reason_agent_id,
-                    &state.config.master_node_id,
+                    &state.reason_node_id,
                     std::slice::from_ref(&current_turn),
                     Some(prepared.cwd.to_string_lossy().into_owned()),
                 );
@@ -4084,7 +4235,7 @@ impl RuntimeCommandDispatcher {
             .or_else(|| current_turn.cwd.clone());
         let projection = project_runtime_turn_history(
             &state.config.reason_agent_id,
-            &state.config.master_node_id,
+            &state.reason_node_id,
             std::slice::from_ref(&current_turn),
             cwd,
         );
@@ -4111,8 +4262,9 @@ impl RuntimeCommandDispatcher {
             if let Some(live) = state.config.live.clone() {
                 let prepared = PreparedLiveSubmit {
                     live,
+                    execution_role: state.execution_role,
                     reason_agent_id: state.config.reason_agent_id.clone(),
-                    master_node_id: state.config.master_node_id.clone(),
+                    reason_node_id: state.reason_node_id.clone(),
                     session_id: active.session_id.clone(),
                     cwd: active.cwd.clone(),
                     turn_id: active.turn_id.clone(),
@@ -4127,15 +4279,19 @@ impl RuntimeCommandDispatcher {
                     &prepared,
                     "cancelled by ui command",
                 )?;
-                let clear_result = master_runner::clear_master_active_work_if_current(
-                    &prepared.live.runtime_home,
-                    &prepared.reason_agent_id,
-                    &prepared.turn_id,
-                );
+                let clear_result = if prepared.execution_role == LiveReasonExecutionRole::Master {
+                    master_runner::clear_master_active_work_if_current(
+                        &prepared.live.runtime_home,
+                        &prepared.reason_agent_id,
+                        &prepared.turn_id,
+                    )
+                } else {
+                    Ok(())
+                };
                 remove_active_turn(&mut state.active_turns, &prepared.turn_id);
                 let projection = project_runtime_turn_history(
                     &state.config.reason_agent_id,
-                    &state.config.master_node_id,
+                    &state.reason_node_id,
                     std::slice::from_ref(&current_turn),
                     Some(prepared.cwd.to_string_lossy().into_owned()),
                 );
@@ -4150,7 +4306,7 @@ impl RuntimeCommandDispatcher {
                 publish_live_cancelled_projection(
                     &self.ui_state,
                     &state.config.reason_agent_id,
-                    &state.config.master_node_id,
+                    &state.reason_node_id,
                     &active,
                 );
             }
@@ -4178,7 +4334,7 @@ impl RuntimeCommandDispatcher {
             .map(|path| path.to_string_lossy().into_owned());
         let projection = project_runtime_turn(
             &state.config.reason_agent_id,
-            &state.config.master_node_id,
+            &state.reason_node_id,
             turn,
             cwd,
         );
@@ -4280,7 +4436,7 @@ impl RuntimeCommandDispatcher {
                             .or_else(|| turn.cwd.clone());
                         project_runtime_turn(
                             &state.config.reason_agent_id,
-                            &state.config.master_node_id,
+                            &state.reason_node_id,
                             turn,
                             cwd,
                         )
@@ -4390,7 +4546,7 @@ impl RuntimeCommandDispatcher {
         )?;
         let snapshot = checkpoint_projection_from_runtime_summary(
             config.reason_agent_id.clone(),
-            config.master_node_id.clone(),
+            reason_node_id_for_config(config),
             summaries
                 .into_iter()
                 .map(checkpoint_summary_to_ui)
@@ -5184,6 +5340,20 @@ impl UiCommandDispatchPort for RuntimeCommandDispatcher {
         &self,
         envelope: UiCommandDispatchEnvelope,
     ) -> Result<UiCommandDispatchReceipt, UiCommandDispatchPortError> {
+        let worker_host = self
+            .state
+            .lock()
+            .expect("lock runtime dispatcher state")
+            .execution_role
+            == LiveReasonExecutionRole::Worker;
+        if worker_host
+            && let Some(command_kind) = worker_host_restricted_command_kind(&envelope.command)
+        {
+            return Err(UiCommandDispatchPortError::Unsupported(format!(
+                "Worker host cannot dispatch Master-only command `{}`",
+                command_kind
+            )));
+        }
         if let UiCommand::SubmitUserInput {
             text,
             session_id,
@@ -5305,6 +5475,27 @@ impl UiCommandDispatchPort for RuntimeCommandDispatcher {
                 "command is not a runtime dispatch target".to_owned(),
             )),
         }
+    }
+}
+
+fn worker_host_restricted_command_kind(command: &UiCommand) -> Option<&'static str> {
+    match command {
+        UiCommand::ScheduleTimer { .. } => Some("schedule_timer"),
+        UiCommand::CancelTimer { .. } => Some("cancel_timer"),
+        UiCommand::CreateTask { .. } => Some("create_task"),
+        UiCommand::CreateTaskAgent { .. } => Some("create_task_agent"),
+        UiCommand::AssignTask { .. } => Some("assign_task"),
+        UiCommand::ClaimNextTask { .. } => Some("claim_next_task"),
+        UiCommand::SubmitTaskReview { .. } => Some("submit_task_review"),
+        UiCommand::RejectTaskReview { .. } => Some("reject_task_review"),
+        UiCommand::ApproveTaskReview { .. } => Some("approve_task_review"),
+        UiCommand::CloseTask { .. } => Some("close_task"),
+        UiCommand::ApplyExecutionFact { .. } => Some("apply_execution_fact"),
+        UiCommand::RunSchedulerTick { .. } => Some("run_scheduler_tick"),
+        UiCommand::RunMasterPoll { .. } => Some("run_master_poll"),
+        UiCommand::WorkerControl { .. } => Some("worker_control"),
+        UiCommand::SendDirectMessageToSlave { .. } => Some("send_direct_message_to_slave"),
+        _ => None,
     }
 }
 
@@ -6330,7 +6521,7 @@ fn node_id_for_query_agent(
     agent_id: &AgentId,
 ) -> Result<String, UiCommandDispatchPortError> {
     if agent_id == &config.reason_agent_id {
-        return Ok(config.master_node_id.clone());
+        return Ok(reason_node_id_for_config(config));
     }
     if agent_id == &config.slave_agent_id {
         return Ok(config.slave_node_id.clone());
@@ -6347,6 +6538,14 @@ fn node_id_for_query_agent(
         "query agent `{}` has no configured node",
         agent_id.as_str()
     )))
+}
+
+fn reason_node_id_for_config(config: &RuntimeCommandDispatcherConfig) -> String {
+    config
+        .live
+        .as_ref()
+        .map(|live| live.selected_agent.node_id.clone())
+        .unwrap_or_else(|| config.master_node_id.clone())
 }
 
 fn session_metadata_to_ui(entry: PersistedSessionMetadataEntry) -> UiSessionMetadataProjection {

@@ -1,5 +1,6 @@
 use std::collections::{BTreeMap, BTreeSet};
 use std::net::SocketAddr;
+use std::sync::Arc;
 use std::time::Duration;
 
 use futures_util::{SinkExt, StreamExt, stream};
@@ -27,9 +28,21 @@ pub struct RelayAgentClientConfig {
     pub heartbeat_interval: Duration,
 }
 
+/// Control-side activity supplied to Relay heartbeats.
+///
+/// This is deliberately distinct from ADP/UI payloads: the Relay client may
+/// only project this typed value into the authenticated control channel.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub struct RelayAgentPresenceProjection {
+    pub status: crate::model::AgentWorkStatus,
+    pub active_session_count: u32,
+}
+
+#[derive(Clone)]
 pub struct RelayAgentClient {
     config: RelayAgentClientConfig,
     http: Client,
+    presence_source: Arc<dyn Fn() -> Result<RelayAgentPresenceProjection, String> + Send + Sync>,
 }
 
 struct HttpExchange {
@@ -58,6 +71,23 @@ enum AgentExchange {
 
 impl RelayAgentClient {
     pub fn new(config: RelayAgentClientConfig) -> Result<Self, String> {
+        let status = config.heartbeat.status;
+        let active_session_count = config.heartbeat.active_session_count;
+        Self::new_with_presence_source(config, move || {
+            Ok(RelayAgentPresenceProjection {
+                status,
+                active_session_count,
+            })
+        })
+    }
+
+    pub fn new_with_presence_source<F>(
+        config: RelayAgentClientConfig,
+        presence_source: F,
+    ) -> Result<Self, String>
+    where
+        F: Fn() -> Result<RelayAgentPresenceProjection, String> + Send + Sync + 'static,
+    {
         if config.access_token.trim().is_empty() {
             return Err("Relay Agent access token is empty".to_owned());
         }
@@ -71,13 +101,15 @@ impl RelayAgentClient {
                 .redirect(reqwest::redirect::Policy::none())
                 .build()
                 .map_err(|error| error.to_string())?,
+            presence_source: Arc::new(presence_source),
         })
     }
 
     pub async fn run(self) -> Result<(), String> {
         let control = connect_channel(&self.config, "control").await?;
         let (mut control_sink, mut control_stream) = control.split();
-        send_control_identity(&mut control_sink, &self.config.heartbeat).await?;
+        let identity = self.current_heartbeat()?;
+        send_control_identity(&mut control_sink, &identity).await?;
         let accepted = tokio::time::timeout(Duration::from_secs(10), control_stream.next())
             .await
             .map_err(|_| "Relay control identity admission timed out".to_owned())?
@@ -105,13 +137,14 @@ impl RelayAgentClient {
         let (mut data_sink, mut data_stream) = data.split();
         let (mut error_sink, mut error_stream) = error.split();
 
-        let heartbeat = self.config.heartbeat.clone();
+        let heartbeat_client = self.clone();
         let heartbeat_interval = self.config.heartbeat_interval;
         let mut channel_tasks: JoinSet<Result<(), String>> = JoinSet::new();
         channel_tasks.spawn(async move {
             let mut interval = tokio::time::interval(heartbeat_interval);
             loop {
                 interval.tick().await;
+                let heartbeat = heartbeat_client.current_heartbeat()?;
                 let frame = RelayControlInFrame::PresenceHeartbeat {
                     status: heartbeat.status,
                     active_session_count: heartbeat.active_session_count,
@@ -231,6 +264,14 @@ impl RelayAgentClient {
                 }
             }
         }
+    }
+
+    fn current_heartbeat(&self) -> Result<AgentHeartbeat, String> {
+        let mut heartbeat = self.config.heartbeat.clone();
+        let projection = (self.presence_source)()?;
+        heartbeat.status = projection.status;
+        heartbeat.active_session_count = projection.active_session_count;
+        Ok(heartbeat)
     }
 }
 
@@ -741,6 +782,44 @@ mod url_tests {
         assert_eq!(
             RelayAgentClient::new(base).err().as_deref(),
             Some("Relay Agent URL cannot contain a query or fragment")
+        );
+    }
+
+    #[test]
+    fn relay_client_reads_typed_presence_source_without_static_heartbeat_fallback() {
+        let config = RelayAgentClientConfig {
+            relay_base_url: "https://relay.example".to_owned(),
+            access_token: "token".to_owned(),
+            heartbeat: AgentHeartbeat {
+                agent_id: "studio".to_owned(),
+                display_name: "Studio".to_owned(),
+                node_id: "node-studio".to_owned(),
+                role: crate::model::AgentRole::Master,
+                status: crate::model::AgentWorkStatus::Idle,
+                active_session_count: 0,
+            },
+            local_daemon_addr: "127.0.0.1:4042".parse().expect("local address"),
+            local_adp_token: None,
+            heartbeat_interval: Duration::from_secs(15),
+        };
+        let client = RelayAgentClient::new_with_presence_source(config.clone(), || {
+            Ok(RelayAgentPresenceProjection {
+                status: crate::model::AgentWorkStatus::Running,
+                active_session_count: 2,
+            })
+        })
+        .expect("dynamic presence client");
+        let heartbeat = client.current_heartbeat().expect("dynamic heartbeat");
+        assert_eq!(heartbeat.status, crate::model::AgentWorkStatus::Running);
+        assert_eq!(heartbeat.active_session_count, 2);
+
+        let failing = RelayAgentClient::new_with_presence_source(config, || {
+            Err("owner presence unavailable".to_owned())
+        })
+        .expect("failing source is admitted until read");
+        assert_eq!(
+            failing.current_heartbeat().expect_err("source failure"),
+            "owner presence unavailable"
         );
     }
 

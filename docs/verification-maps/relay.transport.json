@@ -45,6 +45,12 @@
       "binding_status": "active"
     },
     {
+      "gate_id": "relay.transport.worker-host-contract",
+      "kind": "test",
+      "command": "cargo test -p freehand-runtime production_worker_runner_host_cancellation -- --nocapture && cargo test -p freehand-runtime agent_activity -- --nocapture && cargo test -p freehand-daemon relay_ -- --nocapture",
+      "binding_status": "active"
+    },
+    {
       "gate_id": "relay.transport.mainline",
       "kind": "architecture",
       "command": "cargo run -p xtask -- mainlines check",

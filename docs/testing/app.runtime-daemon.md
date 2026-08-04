@@ -23,18 +23,48 @@
   - latest-turn SSE reflects restored projections and continues streaming later runtime updates on the same connection
   - ADP WebSocket query/command/subscribe uses the same protocol truth without browser UI
   - provider execution failures surface through protocol-mapped HTTP failure payloads
-  - slave-mode agent selection starts one configured Worker's production runner
-    without UI transport
+  - slave-mode agent selection without Relay starts one configured Worker's
+    production runner without UI transport
+  - Relay-configured Slave mode binds a loopback-only WebUI/ADP host, the
+    configured outbound Relay client, and the production Worker runner to one
+    cancellable daemon lifetime; any host, tunnel, or runner terminal result is
+    explicit and cancels the remaining owned work
   - Slave runner construction persists typed process PID/instance health
     through `agent.lifecycle`; daemon and launchd remain non-owner hosts
   - three configured Workers receive unique launchd labels, env files, and log
     files so their processes cannot overwrite one another's service truth
 - resource operations under test:
+  - `runtime_agent_activity.merge_for_presence`
+
+## Resource Operation Test Coverage
+
+| resource operation | status | white-box | module black-box | project black-box |
+| --- | --- | --- | --- | --- |
+| `runtime_agent_activity.merge_for_presence` | bound | `cargo test -p freehand-daemon relay_presence_projection_maps_only_typed_control_activity -- --nocapture` verifies typed foreground/background activity merge and Relay control projection mapping | `cargo test -p freehand-daemon relay_worker_requires_local_adp_auth_before_host_start -- --nocapture` verifies the Relay Worker host does not start without local ADP auth; `cargo test -p freehand-runtime production_master_runner_activity -- --nocapture` verifies the background owner projection | `scripts/verify-remote-relay-local-online.sh` plus authenticated directory observation verifies online Relay presence status/count during real background Master work without ADP payload copying |
+
 - white-box plan:
   - daemon bootstrap helper coverage
   - config-selected bootstrap coverage
   - Worker service runs through a blocking boundary so provider-owned blocking runtimes are never created or dropped on the daemon async runtime thread
   - Worker blocking-task panic/join failure is returned as an explicit daemon startup/service error
+  - Relay-configured Worker startup requires local ADP auth, publishes Worker
+    role through the typed Relay control channel, and never copies role or
+    lifecycle state into HTTP/ADP payloads
+  - Worker Relay presence merges direct-session activity from the dispatcher
+    with delegated-task activity from the Worker lifecycle owner; either source
+    can make the Agent active and neither is reconstructed from HTTP/ADP payloads
+    through `RelayAgentPresenceProjection`; source errors terminate the Relay
+    client instead of reusing the static bootstrap heartbeat
+  - Master Relay presence merges direct-session dispatcher activity with the
+    background `ProductionMasterRunner` projection; test-disabled lifecycle
+    mode contributes explicit typed Idle, while terminal runner failure remains
+    Error and the HTTP/ADP host stays available for diagnosis
+  - positive: running/error runtime activity maps to the matching Relay control
+    status and exact active-session count
+  - negative: missing or empty local ADP authentication rejects Worker Relay
+    host startup before the listener is exposed
+  - Worker host startup proves the selected Worker reason/session namespace is
+    queryable through ADP while Master-only commands fail explicitly
   - launchd wrapper env validation coverage through shell syntax, explicit daemon binary validation, Tailscale bind selection, and runtime smoke
   - launchd source audit rejects any call to the removed Relay launchd helper or any `upstreamBaseUrl` registration path
   - bind-arg parsing coverage
@@ -54,6 +84,11 @@
   - daemon checkpoint rewind HTTP smoke
   - daemon missing-checkpoint rewind HTTP failure smoke
   - daemon slave-mode production Worker runner bootstrap smoke
+  - daemon Relay Worker host smoke proves selected Slave config binds loopback
+    WebUI/ADP and stops when the runner, host, or Relay client terminates
+  - daemon Relay Worker host negative smoke proves missing/empty ADP auth and
+    Master-only dispatch fail explicitly without leaving a detached Worker
+    runner
   - daemon Worker bootstrap queries the same agent id and verifies owner-backed
     PID, process-instance identity, `alive=true`, and initial restart count
   - daemon Worker blocking-boundary positive and negative smoke

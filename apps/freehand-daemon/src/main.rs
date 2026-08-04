@@ -4,11 +4,12 @@ use std::sync::atomic::{AtomicBool, Ordering};
 
 use freehand_relay::{
     AgentHeartbeat, AgentRole, AgentWorkStatus, RelayAgentClient, RelayAgentClientConfig,
-    RelayServerConfig, RelayService, RelayServiceConfig, RelayStore,
+    RelayAgentPresenceProjection, RelayServerConfig, RelayService, RelayServiceConfig, RelayStore,
 };
 use freehand_runtime::{
     ProductionMasterRunner, ProductionMasterRunnerError, ProductionWorkerRunner,
-    RuntimeAgentBootstrap, RuntimeCommandDispatcher, load_default_runtime_agent,
+    RuntimeAgentActivityProjection, RuntimeAgentActivityStatus, RuntimeAgentBootstrap,
+    RuntimeCommandDispatcher, load_default_runtime_agent,
 };
 use freehand_server::{parse_bind_arg, serve_webui_listener};
 use tokio::net::TcpListener;
@@ -112,14 +113,14 @@ async fn run_master_mode(
     let master_runner = if master_lifecycle_runner_disabled_for_test() {
         None
     } else {
-        Some(
+        Some(Arc::new(
             ProductionMasterRunner::from_selected_agent_with_ui_state(
                 bootstrap.selected_agent.clone(),
                 runtime_home,
                 Arc::clone(&ui_state),
             )
             .map_err(|err| format!("failed to build production master runner: {err}"))?,
-        )
+        ))
     };
     let listener = TcpListener::bind(bind_addr)
         .await
@@ -129,18 +130,7 @@ async fn run_master_mode(
         .map_err(|err| format!("failed to read local addr: {err}"))?;
     println!("freehand-daemon listening on http://{local_addr}");
     let relay_client = if let Some(connection) = bootstrap.selected_agent.relay_connection.clone() {
-        let local_adp_token = std::env::var("FREEHAND_ADP_AUTH_TOKEN")
-            .map_err(|_| {
-                "configured Relay connection requires FREEHAND_ADP_AUTH_TOKEN for the local ADP bridge"
-                    .to_owned()
-            })?
-            .trim()
-            .to_owned();
-        if local_adp_token.is_empty() {
-            return Err(
-                "configured Relay connection requires non-empty FREEHAND_ADP_AUTH_TOKEN".to_owned(),
-            );
-        }
+        let local_adp_token = required_local_adp_token()?;
         let role = match bootstrap.selected_agent.mode.as_str() {
             "master" => AgentRole::Master,
             "slave" => AgentRole::Worker,
@@ -161,9 +151,23 @@ async fn run_master_mode(
             local_adp_token: Some(local_adp_token),
             heartbeat_interval: std::time::Duration::from_secs(15),
         };
+        let presence_dispatcher = Arc::clone(&dispatcher);
+        let presence_runner = master_runner.clone();
         Some(
-            RelayAgentClient::new(config)
-                .map_err(|error| format!("failed to configure Relay Agent client: {error}"))?,
+            RelayAgentClient::new_with_presence_source(config, move || {
+                let background_activity = match presence_runner.as_ref() {
+                    Some(runner) => runner.current_agent_activity(),
+                    None => RuntimeAgentActivityProjection {
+                        status: RuntimeAgentActivityStatus::Idle,
+                        active_session_count: 0,
+                    },
+                };
+                let activity = presence_dispatcher
+                    .current_agent_activity()
+                    .merge(background_activity);
+                Ok(relay_presence_from_runtime(activity))
+            })
+            .map_err(|error| format!("failed to configure Relay Agent client: {error}"))?,
         )
     } else {
         None
@@ -173,10 +177,13 @@ async fn run_master_mode(
     let cancel = Arc::new(AtomicBool::new(false));
     if let Some(master_runner) = master_runner {
         let runner_cancel = Arc::clone(&cancel);
+        let runner_owner = Arc::clone(&master_runner);
         let runner_task =
-            tokio::task::spawn_blocking(move || master_runner.run_until(runner_cancel));
+            tokio::task::spawn_blocking(move || runner_owner.run_until(runner_cancel));
         tokio::spawn(monitor_master_lifecycle_runner(
             agent_name.clone(),
+            master_runner,
+            Arc::clone(&cancel),
             runner_task,
         ));
     } else {
@@ -221,16 +228,27 @@ fn master_lifecycle_runner_disabled_for_test() -> bool {
 
 async fn monitor_master_lifecycle_runner(
     agent_name: String,
+    runner: Arc<ProductionMasterRunner>,
+    cancel: Arc<AtomicBool>,
     runner_task: tokio::task::JoinHandle<Result<(), ProductionMasterRunnerError>>,
 ) {
     match runner_task.await {
         Ok(Ok(())) => {
+            if !cancel.load(Ordering::Acquire) {
+                runner.record_terminal_failure();
+            }
             eprintln!("master lifecycle runner stopped for {agent_name}");
         }
         Ok(Err(error)) => {
+            if !cancel.load(Ordering::Acquire) {
+                runner.record_terminal_failure();
+            }
             eprintln!("master lifecycle runner stopped: {error}");
         }
         Err(error) => {
+            if !cancel.load(Ordering::Acquire) {
+                runner.record_terminal_failure();
+            }
             eprintln!("master lifecycle runner task failed: {error}");
         }
     }
@@ -241,9 +259,7 @@ async fn run_worker_mode(
     bootstrap: RuntimeAgentBootstrap,
 ) -> Result<String, String> {
     if bootstrap.selected_agent.relay_connection.is_some() {
-        return Err(
-            "configured Slave Relay connection requires the Worker UI/ADP host wiring".to_owned(),
-        );
+        return run_relay_worker_mode(agent_name, bootstrap).await;
     }
     let runner = ProductionWorkerRunner::from_selected_agent(
         bootstrap.selected_agent,
@@ -253,6 +269,131 @@ async fn run_worker_mode(
     println!("freehand-daemon worker runner started for {agent_name}");
     run_blocking_worker_service(move || runner.run()).await?;
     Ok(String::new())
+}
+
+async fn run_relay_worker_mode(
+    agent_name: String,
+    bootstrap: RuntimeAgentBootstrap,
+) -> Result<String, String> {
+    let connection = bootstrap
+        .selected_agent
+        .relay_connection
+        .clone()
+        .ok_or_else(|| "Relay Worker host requires a configured Relay connection".to_owned())?;
+    let local_adp_token = required_local_adp_token()?;
+    let dispatcher = RuntimeCommandDispatcher::from_selected_agent_with_live(
+        &bootstrap.selected_agent,
+        bootstrap.runtime_home.clone(),
+        false,
+    )
+    .map(Arc::new)
+    .map_err(|error| format!("failed to build Worker runtime dispatcher: {error}"))?;
+    let runner = Arc::new(
+        ProductionWorkerRunner::from_selected_agent(
+            bootstrap.selected_agent.clone(),
+            bootstrap.runtime_home,
+        )
+        .map_err(|error| format!("failed to build production worker runner: {error}"))?,
+    );
+    let listener = TcpListener::bind("127.0.0.1:0")
+        .await
+        .map_err(|error| format!("failed to bind Worker loopback host: {error}"))?;
+    let local_addr = listener
+        .local_addr()
+        .map_err(|error| format!("failed to read Worker loopback address: {error}"))?;
+    let presence_runner = Arc::clone(&runner);
+    let presence_dispatcher = Arc::clone(&dispatcher);
+    let relay_client = RelayAgentClient::new_with_presence_source(
+        RelayAgentClientConfig {
+            relay_base_url: connection.relay_url,
+            access_token: connection.access_token,
+            heartbeat: AgentHeartbeat {
+                agent_id: bootstrap.selected_agent.name.clone(),
+                display_name: bootstrap.selected_agent.name.clone(),
+                node_id: bootstrap.selected_agent.node_id.clone(),
+                role: AgentRole::Worker,
+                status: AgentWorkStatus::Idle,
+                active_session_count: 0,
+            },
+            local_daemon_addr: local_addr,
+            local_adp_token: Some(local_adp_token),
+            heartbeat_interval: std::time::Duration::from_secs(15),
+        },
+        move || {
+            let delegated_activity = presence_runner
+                .current_agent_activity()
+                .map_err(|error| error.to_string())?;
+            let activity = presence_dispatcher
+                .current_agent_activity()
+                .merge(delegated_activity);
+            Ok(relay_presence_from_runtime(activity))
+        },
+    )
+    .map_err(|error| format!("failed to configure Worker Relay client: {error}"))?;
+    let ui_state = dispatcher.ui_state();
+    let dispatch_port: Arc<dyn freehand_ui_protocol::UiCommandDispatchPort> = dispatcher.clone();
+    let query_port: Arc<dyn freehand_ui_protocol::UiRuntimeQueryPort> = dispatcher;
+    let cancel = Arc::new(AtomicBool::new(false));
+    let runner_cancel = Arc::clone(&cancel);
+    let mut runner_task = tokio::task::spawn_blocking(move || runner.run_until(runner_cancel));
+    println!("freehand-daemon Relay Worker host started for {agent_name}");
+    let server = serve_webui_listener(
+        listener,
+        ui_state,
+        dispatch_port,
+        query_port,
+        pending::<()>(),
+    );
+    let result = tokio::select! {
+        result = server => result.map_err(|error| format!("Worker daemon server stopped: {error}")),
+        result = relay_client.run() => Err(match result {
+            Ok(()) => "Worker Relay client stopped unexpectedly".to_owned(),
+            Err(error) => format!("Worker Relay client stopped: {error}"),
+        }),
+        result = &mut runner_task => match result {
+            Ok(Ok(())) => Err("production worker runner stopped unexpectedly".to_owned()),
+            Ok(Err(error)) => Err(format!("production worker runner stopped: {error}")),
+            Err(error) => Err(format!("worker runner task failed: {error}")),
+        },
+    };
+    cancel.store(true, Ordering::Release);
+    if !runner_task.is_finished() {
+        runner_task
+            .await
+            .map_err(|error| format!("worker runner task failed during shutdown: {error}"))?
+            .map_err(|error| format!("worker runner stopped during shutdown: {error}"))?;
+    }
+    result?;
+    Ok(String::new())
+}
+
+fn required_local_adp_token() -> Result<String, String> {
+    let token = std::env::var("FREEHAND_ADP_AUTH_TOKEN").map_err(|_| {
+        "configured Relay connection requires FREEHAND_ADP_AUTH_TOKEN for the local ADP bridge"
+            .to_owned()
+    })?;
+    let token = token.trim().to_owned();
+    if token.is_empty() {
+        return Err(
+            "configured Relay connection requires non-empty FREEHAND_ADP_AUTH_TOKEN".to_owned(),
+        );
+    }
+    Ok(token)
+}
+
+fn relay_presence_from_runtime(
+    projection: freehand_runtime::RuntimeAgentActivityProjection,
+) -> RelayAgentPresenceProjection {
+    let status = match projection.status {
+        freehand_runtime::RuntimeAgentActivityStatus::Idle => AgentWorkStatus::Idle,
+        freehand_runtime::RuntimeAgentActivityStatus::Running => AgentWorkStatus::Running,
+        freehand_runtime::RuntimeAgentActivityStatus::Waiting => AgentWorkStatus::Waiting,
+        freehand_runtime::RuntimeAgentActivityStatus::Error => AgentWorkStatus::Error,
+    };
+    RelayAgentPresenceProjection {
+        status,
+        active_session_count: projection.active_session_count,
+    }
 }
 
 async fn run_blocking_worker_service<F>(service: F) -> Result<(), String>
@@ -320,8 +461,11 @@ mod tests {
     use tokio::time::timeout;
     use tokio_tungstenite::connect_async;
     use tokio_tungstenite::tungstenite::Message;
+    use tokio_tungstenite::tungstenite::client::IntoClientRequest;
+    use tokio_tungstenite::tungstenite::http::{HeaderValue, header};
 
     static HOME_LOCK: Mutex<()> = Mutex::new(());
+    const TEST_ADP_AUTH_TOKEN: &str = "test-adp-auth-token";
 
     struct TestServer {
         base_url: String,
@@ -343,21 +487,29 @@ mod tests {
             let _guard = HOME_LOCK.lock().unwrap_or_else(|err| err.into_inner());
             let old_home = env::var_os("HOME");
             let old_pair_token = env::var_os("FREEHAND_PAIR_TOKEN_SHARED");
+            let old_adp_auth_token = env::var_os("FREEHAND_ADP_AUTH_TOKEN");
             unsafe { env::set_var("HOME", &home) };
             unsafe { env::set_var("FREEHAND_PAIR_TOKEN_SHARED", "pair-token-shared") };
+            unsafe { env::set_var("FREEHAND_ADP_AUTH_TOKEN", TEST_ADP_AUTH_TOKEN) };
             let dispatcher =
                 build_runtime_dispatcher_from_default_config("master").expect("runtime dispatcher");
-            restore_env(old_home, "FREEHAND_PAIR_TOKEN_SHARED", old_pair_token);
             let ui_state = dispatcher.ui_state();
             let dispatch_port: Arc<dyn freehand_ui_protocol::UiCommandDispatchPort> =
                 dispatcher.clone();
             let query_port: Arc<dyn freehand_ui_protocol::UiRuntimeQueryPort> = dispatcher.clone();
             let (shutdown_tx, shutdown_rx) = oneshot::channel();
+            let router = freehand_server::build_webui_router(ui_state, dispatch_port, query_port);
+            restore_env(old_home, "FREEHAND_PAIR_TOKEN_SHARED", old_pair_token);
+            match old_adp_auth_token {
+                Some(value) => unsafe { env::set_var("FREEHAND_ADP_AUTH_TOKEN", value) },
+                None => unsafe { env::remove_var("FREEHAND_ADP_AUTH_TOKEN") },
+            }
             let task = tokio::spawn(async move {
                 let shutdown = async move {
                     let _ = shutdown_rx.await;
                 };
-                serve_webui_listener(listener, ui_state, dispatch_port, query_port, shutdown)
+                axum::serve(listener, router)
+                    .with_graceful_shutdown(shutdown)
                     .await
                     .expect("serve");
             });
@@ -379,6 +531,18 @@ mod tests {
                 let _ = fs::remove_dir_all(&self.home);
             }
         }
+    }
+
+    async fn connect_test_adp(
+        ws_url: &str,
+    ) -> tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>>
+    {
+        let mut request = ws_url.into_client_request().expect("test ADP request");
+        request.headers_mut().insert(
+            header::AUTHORIZATION,
+            HeaderValue::from_static("Bearer test-adp-auth-token"),
+        );
+        connect_async(request).await.expect("connect adp").0
     }
 
     async fn read_next_sse_event(response: &mut reqwest::Response, buffer: &mut String) -> String {
@@ -755,7 +919,7 @@ mod tests {
         );
         let server = TestServer::spawn(master_config_text(&provider_url)).await;
         let ws_url = server.base_url.replace("http://", "ws://") + "/adp";
-        let (mut socket, _) = connect_async(ws_url).await.expect("connect adp");
+        let mut socket = connect_test_adp(&ws_url).await;
         perform_adp_handshake(&mut socket).await;
 
         socket
@@ -890,7 +1054,7 @@ mod tests {
         );
         let server = TestServer::spawn(master_config_text(&provider_url)).await;
         let ws_url = server.base_url.replace("http://", "ws://") + "/adp";
-        let (mut socket, _) = connect_async(ws_url).await.expect("connect adp");
+        let mut socket = connect_test_adp(&ws_url).await;
         perform_adp_handshake(&mut socket).await;
         let session_id = SessionId::new("daemon-adp-session-crud-rollback");
 
@@ -1084,7 +1248,7 @@ mod tests {
             spawn_sequence_server("application/json", Vec::new());
         let server = TestServer::spawn(master_config_text(&provider_url)).await;
         let ws_url = server.base_url.replace("http://", "ws://") + "/adp";
-        let (mut socket, _) = connect_async(ws_url).await.expect("connect adp");
+        let mut socket = connect_test_adp(&ws_url).await;
         perform_adp_handshake(&mut socket).await;
 
         socket
@@ -1160,7 +1324,7 @@ mod tests {
 
         let server = TestServer::spawn_existing_home(home, true).await;
         let ws_url = server.base_url.replace("http://", "ws://") + "/adp";
-        let (mut socket, _) = connect_async(ws_url).await.expect("connect adp");
+        let mut socket = connect_test_adp(&ws_url).await;
         perform_adp_handshake(&mut socket).await;
 
         socket
@@ -1341,7 +1505,7 @@ mod tests {
 
         let server = TestServer::spawn_existing_home(home, true).await;
         let ws_url = server.base_url.replace("http://", "ws://") + "/adp";
-        let (mut socket, _) = connect_async(ws_url).await.expect("connect adp");
+        let mut socket = connect_test_adp(&ws_url).await;
         perform_adp_handshake(&mut socket).await;
 
         socket
@@ -1406,7 +1570,7 @@ mod tests {
         );
         let server = TestServer::spawn(master_config_text(&provider_url)).await;
         let ws_url = server.base_url.replace("http://", "ws://") + "/adp";
-        let (mut socket, _) = connect_async(ws_url).await.expect("connect adp");
+        let mut socket = connect_test_adp(&ws_url).await;
         perform_adp_handshake(&mut socket).await;
 
         socket
@@ -2125,6 +2289,52 @@ mod tests {
 
     #[test]
     #[serial]
+    fn relay_worker_requires_local_adp_auth_before_host_start() {
+        let old = env::var_os("FREEHAND_ADP_AUTH_TOKEN");
+        unsafe { env::remove_var("FREEHAND_ADP_AUTH_TOKEN") };
+        let missing = required_local_adp_token().expect_err("missing token must fail");
+        assert!(missing.contains("requires FREEHAND_ADP_AUTH_TOKEN"));
+
+        unsafe { env::set_var("FREEHAND_ADP_AUTH_TOKEN", "   ") };
+        let empty = required_local_adp_token().expect_err("empty token must fail");
+        assert!(empty.contains("requires non-empty FREEHAND_ADP_AUTH_TOKEN"));
+
+        unsafe { env::set_var("FREEHAND_ADP_AUTH_TOKEN", " worker-adp-token ") };
+        assert_eq!(
+            required_local_adp_token().expect("token"),
+            "worker-adp-token"
+        );
+        match old {
+            Some(value) => unsafe { env::set_var("FREEHAND_ADP_AUTH_TOKEN", value) },
+            None => unsafe { env::remove_var("FREEHAND_ADP_AUTH_TOKEN") },
+        }
+    }
+
+    #[test]
+    fn relay_presence_projection_maps_only_typed_control_activity() {
+        let running = relay_presence_from_runtime(
+            freehand_runtime::RuntimeAgentActivityProjection {
+                status: freehand_runtime::RuntimeAgentActivityStatus::Running,
+                active_session_count: 2,
+            }
+            .merge(freehand_runtime::RuntimeAgentActivityProjection {
+                status: freehand_runtime::RuntimeAgentActivityStatus::Waiting,
+                active_session_count: 1,
+            }),
+        );
+        assert_eq!(running.status, AgentWorkStatus::Running);
+        assert_eq!(running.active_session_count, 3);
+
+        let error = relay_presence_from_runtime(freehand_runtime::RuntimeAgentActivityProjection {
+            status: freehand_runtime::RuntimeAgentActivityStatus::Error,
+            active_session_count: 0,
+        });
+        assert_eq!(error.status, AgentWorkStatus::Error);
+        assert_eq!(error.active_session_count, 0);
+    }
+
+    #[test]
+    #[serial]
     fn daemon_bootstrap_rejects_corrupt_checkpoint_projection_truth() {
         let _guard = HOME_LOCK.lock().unwrap_or_else(|err| err.into_inner());
         let home =
@@ -2216,6 +2426,55 @@ mod tests {
 
         server_task.abort();
         let _ = server_task.await;
+        let _ = fs::remove_dir_all(home);
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn master_lifecycle_runner_terminal_error_marks_background_activity_error() {
+        let (home, bootstrap) = {
+            let _guard = HOME_LOCK.lock().unwrap_or_else(|err| err.into_inner());
+            let home =
+                write_test_home(&master_config_text("https://example.invalid")).expect("test home");
+            let old_home = env::var_os("HOME");
+            let old_pair_token = env::var_os("FREEHAND_PAIR_TOKEN_SHARED");
+            unsafe { env::set_var("HOME", &home) };
+            unsafe { env::set_var("FREEHAND_PAIR_TOKEN_SHARED", "pair-token-shared") };
+            let bootstrap = load_default_runtime_agent("master").expect("bootstrap");
+            restore_env(old_home, "FREEHAND_PAIR_TOKEN_SHARED", old_pair_token);
+            (home, bootstrap)
+        };
+        let runner = Arc::new(
+            ProductionMasterRunner::from_selected_agent_with_ui_state(
+                bootstrap.selected_agent,
+                bootstrap.runtime_home,
+                Arc::new(Mutex::new(freehand_ui_protocol::UiProtocolState::default())),
+            )
+            .expect("master runner"),
+        );
+        let cancel = Arc::new(AtomicBool::new(false));
+        let runner_task = tokio::spawn(async {
+            Err::<(), ProductionMasterRunnerError>(ProductionMasterRunnerError::State(
+                "terminal runner stop".to_owned(),
+            ))
+        });
+
+        let runner_observer = Arc::clone(&runner);
+        monitor_master_lifecycle_runner(
+            "master".to_owned(),
+            runner,
+            Arc::clone(&cancel),
+            runner_task,
+        )
+        .await;
+
+        let activity = runner_observer.current_agent_activity();
+        assert_eq!(
+            activity.status,
+            freehand_runtime::RuntimeAgentActivityStatus::Error
+        );
+        assert_eq!(activity.active_session_count, 0);
+
         let _ = fs::remove_dir_all(home);
     }
 

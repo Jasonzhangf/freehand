@@ -13,6 +13,7 @@ freehand-ui-protocol = { path = "../../crates/freehand-ui-protocol" }
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "net", "sync", "time"] }
 
 [dev-dependencies]
+axum = "0.8"
 freehand-metadata = { path = "../../crates/freehand-metadata" }
 freehand-task = { path = "../../crates/freehand-task" }
 futures-util = "0.3"

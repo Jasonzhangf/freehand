@@ -1,0 +1,2 @@
+{"timestamp":"2026-08-03T00:55:18Z","event":"claim_acquired","semantic_id":"feature_app.runtime-daemon_relay-worker-host"}
+{"timestamp":"2026-08-04T02:05:00Z","event":"goal_closed","semantic_id":"feature_app.runtime-daemon_relay-worker-host","evidence":"relay stale control generation replacement deployed and online-verified; final ASXS review found no discrete issues"}

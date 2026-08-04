@@ -250,6 +250,20 @@
       "binding_status": "bound"
     },
     {
+      "step": "13a",
+      "symbol_path": "RelayAgentClient::run / RelayAgentClient::current_heartbeat",
+      "file_path": "crates/freehand-relay/src/agent_client.rs",
+      "responsibility": "read the typed Agent status and active-session count at control admission and every heartbeat; terminate the tunnel explicitly when the source fails",
+      "input_semantic": "typed presence source closure",
+      "output_semantic": "current authenticated Agent presence heartbeat or explicit source error",
+      "caller": "RelayAgentClient::run",
+      "callee": "RelayAgentClient::current_heartbeat",
+      "source_resource": "agent_presence",
+      "target_resource": "agent_presence",
+      "resource_operation": "agent_presence.heartbeat",
+      "binding_status": "bound"
+    },
+    {
       "step": "14",
       "symbol_path": "attach_error / RelayTunnelRegistry::admit_error",
       "file_path": "crates/freehand-relay/src/websocket_tunnel.rs / crates/freehand-relay/src/tunnel.rs",
@@ -268,6 +282,6 @@
     "account, token-hash persistence, Agent presence subscription, HTTP proxy, ADP proxy, generic WebSocket proxy, and standalone deployment host are code-bound",
     "legacy freehand-server Relay implementation is physically removed",
     "daemon remote-relay compatibility mode calls only the relay.transport public crate and reads bind/store/lease/cookie policy through RelayServerConfig env truth, not CLI bind defaults",
-    "product config and Master daemon outbound-client wiring are bound outside this module; Worker UI/ADP hosting, dynamic heartbeat projection, Agent Dashboard, and Android login remain incomplete"
+    "product config plus Master/Worker daemon outbound-client wiring and dynamic typed heartbeat projection are bound outside this module; Agent Dashboard and Android login remain incomplete"
   ]
 }

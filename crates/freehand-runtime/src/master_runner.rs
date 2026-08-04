@@ -3,7 +3,6 @@ use std::fs::{self, OpenOptions};
 use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
-use std::thread;
 use std::time::Duration;
 
 use freehand_config::{AgentMode, SelectedAgentConfig};
@@ -20,13 +19,15 @@ use thiserror::Error;
 
 use super::{
     DueTimerSchedule, LiveReasonExecutionProfile, LiveReasonTaskDecisionBoundary,
-    LiveReasonTaskDecisionMode, LiveReasonTurnRequest, RuntimeAgentBootstrapError,
-    apply_runtime_debug_event, apply_runtime_reason_broadcast, claim_due_timer_schedule,
-    complete_due_timer_schedule, fail_due_timer_schedule, load_default_runtime_agent,
-    now_unix_seconds, run_live_reason_turn, run_live_reason_turn_with_hooks,
-    run_master_lifecycle_reason_turn, run_master_lifecycle_reason_turn_with_hooks,
-    runtime_turn_position, sanitize_identifier, ui_user_text_for_turn,
+    LiveReasonTaskDecisionMode, LiveReasonTurnRequest, RuntimeAgentActivityProjection,
+    RuntimeAgentActivityStatus, RuntimeAgentBootstrapError, apply_runtime_debug_event,
+    apply_runtime_reason_broadcast, claim_due_timer_schedule, complete_due_timer_schedule,
+    fail_due_timer_schedule, load_default_runtime_agent, now_unix_seconds, run_live_reason_turn,
+    run_live_reason_turn_with_hooks, run_master_lifecycle_reason_turn,
+    run_master_lifecycle_reason_turn_with_hooks, runtime_turn_position, sanitize_identifier,
+    ui_user_text_for_turn,
 };
+use crate::lifecycle_wait::sleep_with_cancel;
 
 #[cfg(test)]
 mod tests;
@@ -36,7 +37,6 @@ const MASTER_RETRY_INITIAL_BACKOFF_MILLIS: u64 = 1_000;
 const MASTER_RETRY_MAX_BACKOFF_MILLIS: u64 = 30_000;
 const MASTER_LIFECYCLE_DECISION_MAX_ROUNDS: usize = 8;
 const MASTER_BLOCKED_DECISION_AUTO_APPEND_ATTEMPTS: u32 = 16;
-const CANCEL_POLL_MILLIS: u64 = 100;
 const MASTER_ATTENTION_KIND_WEIGHT: i128 = 10_000;
 const MASTER_ATTENTION_TASK_PRIORITY_WEIGHT: i128 = 100;
 const MASTER_ATTENTION_ADMISSION_AGE_WEIGHT: i128 = 5_000;
@@ -799,6 +799,23 @@ pub struct ProductionMasterRunner {
     runtime_home: PathBuf,
     master_agent_id: AgentId,
     executor: Arc<dyn MasterTurnExecutor>,
+    activity: Mutex<RuntimeAgentActivityProjection>,
+}
+
+struct MasterRunnerWorkGuard<'a> {
+    activity: &'a Mutex<RuntimeAgentActivityProjection>,
+}
+
+impl Drop for MasterRunnerWorkGuard<'_> {
+    fn drop(&mut self) {
+        let mut activity = self.activity.lock().expect("lock Master runner activity");
+        if activity.status == RuntimeAgentActivityStatus::Running {
+            *activity = RuntimeAgentActivityProjection {
+                status: RuntimeAgentActivityStatus::Idle,
+                active_session_count: 0,
+            };
+        }
+    }
 }
 
 impl ProductionMasterRunner {
@@ -848,7 +865,34 @@ impl ProductionMasterRunner {
             selected,
             runtime_home,
             executor,
+            activity: Mutex::new(RuntimeAgentActivityProjection {
+                status: RuntimeAgentActivityStatus::Idle,
+                active_session_count: 0,
+            }),
         })
+    }
+
+    pub fn current_agent_activity(&self) -> RuntimeAgentActivityProjection {
+        *self.activity.lock().expect("lock Master runner activity")
+    }
+
+    pub fn record_terminal_failure(&self) {
+        self.set_activity(RuntimeAgentActivityStatus::Error, 0);
+    }
+
+    fn begin_actionable_work(&self) -> MasterRunnerWorkGuard<'_> {
+        self.set_activity(RuntimeAgentActivityStatus::Running, 1);
+        MasterRunnerWorkGuard {
+            activity: &self.activity,
+        }
+    }
+
+    fn set_activity(&self, status: RuntimeAgentActivityStatus, active_session_count: u32) {
+        *self.activity.lock().expect("lock Master runner activity") =
+            RuntimeAgentActivityProjection {
+                status,
+                active_session_count,
+            };
     }
 
     pub fn run_once(&self) -> Result<ProductionMasterTickOutcome, ProductionMasterRunnerError> {
@@ -1139,10 +1183,9 @@ impl ProductionMasterRunner {
         else {
             return Ok(None);
         };
-        let summary = match self.executor.execute_timer(
-            &self.selected,
-            timer_live_request(&self.runtime_home, &self.master_agent_id, &due)?,
-        ) {
+        let request = timer_live_request(&self.runtime_home, &self.master_agent_id, &due)?;
+        let _activity = self.begin_actionable_work();
+        let summary = match self.executor.execute_timer(&self.selected, request) {
             Ok(summary) => summary,
             Err(error) => {
                 fail_due_timer_schedule(&self.runtime_home, &self.master_agent_id, &due, &error)
@@ -1193,13 +1236,18 @@ impl ProductionMasterRunner {
                         consecutive_retryable_failures,
                         delay.as_millis()
                     );
+                    self.set_activity(RuntimeAgentActivityStatus::Waiting, 0);
                     sleep_with_cancel(&cancel, delay);
                     continue;
                 }
-                Err(error) => return Err(error),
+                Err(error) => {
+                    self.record_terminal_failure();
+                    return Err(error);
+                }
             }
             sleep_with_cancel(&cancel, interval);
         }
+        self.set_activity(RuntimeAgentActivityStatus::Idle, 0);
         Ok(())
     }
 
@@ -1270,6 +1318,7 @@ impl ProductionMasterRunner {
                 .map_err(task_center_error)?,
         )
         .map_err(|error| ProductionMasterRunnerError::State(error.to_string()))?;
+        let _activity = self.begin_actionable_work();
         let summary = self
             .executor
             .execute(
@@ -1542,6 +1591,7 @@ impl ProductionMasterRunner {
                 &user_objectives,
                 &blocked,
             )?;
+            let _activity = self.begin_actionable_work();
             let summary = self
                 .executor
                 .execute_parent_evaluation(&self.selected, request)
@@ -1635,6 +1685,7 @@ impl ProductionMasterRunner {
             &user_objectives,
             &completed_subtasks,
         )?;
+        let _activity = self.begin_actionable_work();
         let summary = self
             .executor
             .execute_parent_evaluation(&self.selected, request)
@@ -2506,15 +2557,5 @@ fn master_loop_watermark(hook: &str) -> TaskWatermark {
         metadata_id: None,
         hook: Some(format!("runtime.master-worker-loop.{hook}")),
         action_tool_call_id: None,
-    }
-}
-
-fn sleep_with_cancel(cancel: &AtomicBool, duration: Duration) {
-    let poll = Duration::from_millis(CANCEL_POLL_MILLIS);
-    let mut remaining = duration;
-    while !remaining.is_zero() && !cancel.load(Ordering::Acquire) {
-        let step = remaining.min(poll);
-        thread::sleep(step);
-        remaining = remaining.saturating_sub(step);
     }
 }

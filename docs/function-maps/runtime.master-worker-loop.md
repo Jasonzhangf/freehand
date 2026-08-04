@@ -26,10 +26,16 @@
   - `master_work.resolve_attention`
   - `master_work.admit_resolution_context`
   - `agent.heartbeat`
+  - `agent.project_runtime_agent_activity`
 - owner entry symbols:
   - `ProductionWorkerRunner::from_default_config`
   - `ProductionWorkerRunner::run_once`
   - `ProductionWorkerRunner::run`
+  - `ProductionWorkerRunner::run_until`
+  - `ProductionWorkerRunner::close_host_cancelled_execution`
+  - `ProductionMasterRunner::current_agent_activity`
+  - `ProductionMasterRunner::record_terminal_failure`
+  - `sleep_with_cancel`
   - `WorkerPauseMonitor::start`
   - `worker_pause_requested`
   - `run_worker_live_reason_turn`
@@ -55,6 +61,7 @@
   - `task`
   - `agent`
   - `ui_projection`
+  - `runtime_agent_activity`
 - resource operations:
   - `timer.fire_master_wakeup`
   - `timer.schedule`
@@ -63,6 +70,7 @@
   - `master_work.resolve_attention`
   - `master_work.admit_resolution_context`
   - `agent.heartbeat`
+  - `agent.project_runtime_agent_activity`
 - forbidden shortcuts:
   - Timer schedules must not be encoded as task lifecycle state.
   - Runtime command workspace mutation must go through checkpoint owner admission.
@@ -465,7 +473,8 @@ continue other ready work rather than dead-waiting in the current turn
 | step | symbol path | file path | responsibility | input semantic | output semantic | caller | callee | binding status |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | 01 | `ProductionWorkerRunner::from_default_config` | `crates/freehand-runtime/src/worker_runner.rs` | load selected Slave config and bind paired Master Task Center namespace | configured agent name | Worker runner | daemon Slave startup | config + runtime owner | bound |
-| 02 | `ProductionWorkerRunner::run` | `crates/freehand-runtime/src/worker_runner.rs` | run periodic Worker ticks with explicit cadence | runner + interval | long-running Worker service | daemon Slave mode | `run_once` | bound |
+| 02 | `ProductionWorkerRunner::run / ProductionWorkerRunner::run_until / sleep_with_cancel` | `crates/freehand-runtime/src/worker_runner.rs / crates/freehand-runtime/src/lifecycle_wait.rs` | run periodic Worker ticks with explicit cadence until the owning daemon host cancels; cancellation during an active execution enters typed interruption closeout before exit | runner + interval + host cancellation token | long-running Worker service or explicit host-cancelled terminal closeout | daemon Slave mode | `ProductionWorkerRunner::run_once / ProductionWorkerRunner::close_host_cancelled_execution` | bound |
+| 02p | `ProductionWorkerRunner::current_agent_activity` | `crates/freehand-runtime/src/worker_runner.rs` | read Worker AgentLifecycle truth and project a typed control-side activity value for Relay presence | Worker identity + read-only TaskRuntime lifecycle snapshot | typed Worker activity projection or explicit lifecycle read error | daemon Relay presence source | `TaskRuntime::query_agent_lifecycle` | bound |
 | 03 | `ProductionWorkerRunner::run_once` | `crates/freehand-runtime/src/worker_runner.rs` | claim one Assigned task or resumed controlled task, canonicalize target cwd with `~` expansion and symlink resolution, heartbeat, monitor pause truth, execute, and report | Task Center + Worker identity + WorkerControl truth | idle/review-ready/interrupted/blocked outcome without stale paused overwrite | Worker service loop/tests | task owner + live bridge | bound |
 | 04 | `TaskRuntime::claim_next_task` | `crates/freehand-task/src/lib.rs` | choose and claim highest-priority Assigned task for Worker | worker id + execution id + lease TTL | claimed task + TaskResumed/heartbeat truth | Worker runner | task owner | bound |
 | 05 | `WorkerHeartbeat::start` | `crates/freehand-runtime/src/worker_runner/heartbeat.rs` | renew the claimed task lease and same process-instance heartbeat while provider execution remains active | claimed task/execution/worker/process identity | periodic TaskHeartbeat plus agent heartbeat truth or explicit heartbeat error | `ProductionWorkerRunner::run_once` | task owner + agent.lifecycle owner | bound |
@@ -482,6 +491,7 @@ continue other ready work rather than dead-waiting in the current turn
 | 11d | `ProductionMasterRunner::apply_busy_attention_policy` | `crates/freehand-runtime/src/master_runner.rs` | compare pending attention score with foreground work priority, defer lower-priority attention, and request/suspend higher-priority attention only at declared safe points | pending attention + master_work checkpoint | deferred attention, suspend request, or suspended active work | `ProductionMasterRunner::run_once` | active-work store + weighted attention score | bound |
 | 11e | `ProductionMasterRunner::restore_active_work_after_attention` | `crates/freehand-runtime/src/master_runner.rs` | persist typed attention resolution from the event-scoped isolated control decision and restore the exact foreground work identity without copying control transcript text | suspended master_work + Task Center decision outcome | running active work with typed resolution and original work/session/turn/trace identity | `ProductionMasterRunner::run_once` | active-work store | bound |
 | 11f | `admit_master_attention_resolution_for_next_round` | `crates/freehand-runtime/src/lib.rs` | consume one validated resolution, refresh TaskSpaceSnapshot, and admit volatile/no-cache AttentionResolution before the original foreground work continues | running master_work typed resolution + current task truth | next-round request-context candidates without stale task/terminal semantics | Master live safe-point continuation paths | context planner candidate admission | bound |
+| 11g | `ProductionMasterRunner::current_agent_activity` / `ProductionMasterRunner::run_until_with_policy` / `ProductionMasterRunner::record_terminal_failure` | `crates/freehand-runtime/src/master_runner.rs` | own the typed background Master activity lifecycle: actionable task/timer/parent execution is Running, retry backoff is Waiting, terminal runner failure is Error, and idle/cancelled/completed work is Idle | Master runner action/retry/terminal outcome | typed Master activity projection with exact active-session count | daemon Relay presence source and runner monitor | runtime activity owner state | bound |
 | 12 | `ProductionMasterRunner::handle_due_timer` | `crates/freehand-runtime/src/master_runner.rs` | execute a due independent timer wakeup and complete/reschedule/release timer truth | due timer schedule | timer-fired outcome or retryable execution error | `run_once` | timer store + live reason turn | bound |
 | 13 | `TimerStore::claim_due` / `TimerStore::complete_due` / `TimerStore::fail_due` | `crates/freehand-runtime/src/timer_store.rs` | persist independent timer schedule state and timer ledger events outside Task Center truth | timer state json + timer ledger | running/completed/active timer truth | Master timer tool + Master runner | timer store owner | bound |
 | 14 | `ProductionMasterRunner::handle_event` | `crates/freehand-runtime/src/master_runner.rs` | invoke the Master model for current review-ready, blocked, interrupted, or all-children-closed parent evaluation truth; interrupted decisions receive AgentBoard resource truth, may replace the existing task assignment, and remain retryable after provider/system exit until Task Center truth changes | task snapshot + trigger event + AgentBoard | same task advanced, blocked observed, parent evaluated, no-op, or explicit error | `run_once` | Master live reason turn + task owner | bound |

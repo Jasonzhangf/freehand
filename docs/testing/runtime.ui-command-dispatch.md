@@ -9,6 +9,7 @@
   - `session.restore`
   - `session.list_persisted`
   - `debug_trace.read_snapshot`
+  - `turn.project_runtime_agent_activity`
 
 ## Resource Operation Test Coverage
 
@@ -19,10 +20,19 @@
 | `session.restore` | bound | `cargo test -p freehand-runtime runtime_query_session_turns -- --nocapture --test-threads=1` verifies runtime `QuerySessionTurns` restores owner transcripts and replaces protocol projection without browser-local recovery | `cargo test -p freehand-reason ui_restore_ -- --nocapture` verifies reason-owned partial transcript warning and active incomplete hard-error behavior consumed by runtime | `node scripts/verify-webui-session-restore-error-exit-online.mjs` proves production ADP `QuerySessionTurns` returns the legacy partial transcript with visible warning instead of dispatch-port failure |
 | `session.list_persisted` | bound | `cargo test -p freehand-runtime runtime_query_session_search_returns_worker_hits_under_parent_session -- --nocapture --test-threads=1` verifies persisted session Search rows and nested Worker child matches | `cargo test -p freehand-ui-protocol session_search -- --nocapture --test-threads=1` verifies route separation and protocol-state rejection | `node scripts/verify-webui-session-search-online.mjs` proves browser Search queries owner-backed persisted session truth and does not create/promote top-level Worker sessions |
 | `debug_trace.read_snapshot` | bound | `cargo test -p freehand-runtime runtime_query_projects_diagnostics_without_raw_secrets_or_absolute_home -- --nocapture --test-threads=1` verifies .log metadata, bounded redacted tails, and no absolute home path | `cargo test -p freehand-ui-protocol diagnostics_query -- --nocapture` verifies protocol route separation and safe DTO serialization | `node scripts/verify-webui-diagnostics-online.mjs` proves the WebUI Diagnostics entry matches owner projection and does not create sessions |
+| `turn.project_runtime_agent_activity` | bound | `cargo test -p freehand-runtime runtime_agent_activity_merge_preserves_active_truth_and_saturates_count -- --nocapture` verifies direct activity and count merge, including Idle/Running/Error cases | `cargo test -p freehand-daemon relay_presence_projection_maps_only_typed_control_activity -- --nocapture` verifies only the typed Relay control projection is produced | `scripts/verify-remote-relay-local-online.sh` plus authenticated directory observation verifies Relay presence status/count without ADP payload copying |
 - lifecycle path under test:
-  - config-selected bootstrap becomes one runtime dispatcher
+  - config-selected Master or Worker bootstrap becomes one runtime dispatcher
+    whose reason/session projection identity remains the selected Agent
   - config-selected live bootstrap may seed one shared node metadata ledger before the first command
   - accepted command ingress becomes a dispatch envelope
+  - Worker-selected live submit executes through Worker reason policy without
+    creating Master active-work control truth; Master-only task/control/direct
+    message commands fail before owner mutation
+  - direct-session activity is projected only from active-turn truth into
+    `RuntimeAgentActivityProjection`; zero active sessions stays Idle, active
+    sessions become Running, and merge saturates count without touching UI/ADP
+    business payloads
   - submit commands may carry an optional selected session id and selected cwd and must create or continue that cwd-bound session instead of silently flattening everything into the default session
   - runtime dispatch routes to the declared owner module
   - runtime-backed read-only task queries route to task owner APIs and return UI-safe projections without becoming task truth writers
@@ -172,6 +182,19 @@
   - live reason dispatch failure projection coverage proves bridge-materialized failed turns update `UiProtocolState` before the dispatch error is returned
   - live reason pre-provider active snapshot coverage proves cancellation, cancel command dispatch, and pre-provider failure close the same prepared turn instead of losing it, leaving active-work behind, or replacing it with a previous session turn
   - live reason pre-provider success coverage proves the prepared active snapshot writes `RewriteStateUpdated` only, provider execution writes exactly one canonical `TurnStarted`, and the prepared current turn is not replayed as historical context to the model
+  - Worker-selected dispatcher coverage proves the configured Master/Worker
+    node pair remains accurate, Worker session projection uses the Worker
+    agent/node identity, and no Master active-work checkpoint is created
+  - `worker_selected_task_queries_route_to_master_owner_truth` proves Worker
+    TaskBoard and TaskList queries preserve Worker reason identity while reading
+    the paired Master's Task Center owner namespace; a Worker-local empty
+    namespace must never replace real master-owned task truth
+  - Worker-selected negative coverage proves Master-only task orchestration,
+    Master poll, Worker control, and direct-to-Slave commands return explicit
+    dispatch failures without task/node mutation
+  - typed Agent activity projection coverage proves active-session counts merge
+    without overflow and an actually running direct/task source takes precedence
+    over stale idle, waiting, or error projections
   - early live provider/protocol failure projection coverage proves the selected session keeps the original user prompt and a persisted failed terminal turn even when the provider bridge exits before recovery truth exists
   - runtime query-session-turns projection coverage proves `runtime_query_session_turns_restores_background_parent_evaluation` restores a background parent evaluation turn from reason persistence, hides the `<freehand_parent_evaluation>` synthetic user text, and keeps the Master evaluation decision/final assistant answer visible
   - runtime query-session-turns projection coverage proves `runtime_query_session_turns_restores_worker_task_namespace` restores Worker-owned `worker-task-*` turns, hides internal task/continuation prompts from `user_text`, keeps Worker source-agent attribution, keeps terminal/final text visible, and still fails missing Worker sessions explicitly

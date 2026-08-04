@@ -9,10 +9,10 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 use freehand_config::{AgentMode, SelectedAgentConfig};
 use freehand_contracts::{AgentId, SessionId, TerminalStatus, TraceId, TurnId};
 use freehand_task::{
-    AgentCreateRequest, AgentLifecycleEvent, ExecutionFact, ExecutionFactKind, TaskActor,
-    TaskAssignRequest, TaskClaimOutcome, TaskClaimRequest, TaskError, TaskExecutionProfile, TaskId,
-    TaskListQuery, TaskRuntime, TaskSnapshot, TaskStatus, TaskWatermark, WorkerControlEvent,
-    WorkerControlOp,
+    AgentCreateRequest, AgentLifecycleEvent, AgentLifecycleState, ExecutionFact, ExecutionFactKind,
+    TaskActor, TaskAssignRequest, TaskClaimOutcome, TaskClaimRequest, TaskError,
+    TaskExecutionProfile, TaskId, TaskListQuery, TaskRuntime, TaskSnapshot, TaskStatus,
+    TaskWatermark, WorkerControlEvent, WorkerControlOp,
 };
 use thiserror::Error;
 
@@ -21,6 +21,7 @@ use super::{
     RuntimeAgentBootstrapError, expand_leading_tilde_path, load_default_runtime_agent,
     path_resolution_diagnostic_text, provider_descriptor, run_worker_live_reason_turn,
 };
+use crate::lifecycle_wait::sleep_with_cancel;
 
 mod heartbeat;
 #[cfg(test)]
@@ -163,6 +164,35 @@ struct SelectedWorkerTask {
 }
 
 impl ProductionWorkerRunner {
+    pub fn current_agent_activity(
+        &self,
+    ) -> Result<super::RuntimeAgentActivityProjection, ProductionWorkerRunnerError> {
+        let runtime =
+            TaskRuntime::boot_read_only(&self.runtime_home, self.task_owner_agent_id.clone())
+                .map_err(task_center_error)?;
+        let snapshot = runtime
+            .query_agent_lifecycle(&self.worker_agent_id)
+            .map_err(task_center_error)?;
+        let status = match snapshot.state {
+            AgentLifecycleState::Running
+            | AgentLifecycleState::Progressing
+            | AgentLifecycleState::ModelThinking
+            | AgentLifecycleState::ToolRunning
+            | AgentLifecycleState::Retrying => super::RuntimeAgentActivityStatus::Running,
+            AgentLifecycleState::Blocked
+            | AgentLifecycleState::WaitingReview
+            | AgentLifecycleState::Recovering => super::RuntimeAgentActivityStatus::Waiting,
+            AgentLifecycleState::Failed => super::RuntimeAgentActivityStatus::Error,
+            _ => super::RuntimeAgentActivityStatus::Idle,
+        };
+        Ok(super::RuntimeAgentActivityProjection {
+            status,
+            active_session_count: u32::from(snapshot.current_task_id.is_some()),
+        })
+    }
+}
+
+impl ProductionWorkerRunner {
     pub fn from_default_config(agent_name: &str) -> Result<Self, ProductionWorkerRunnerError> {
         let bootstrap = load_default_runtime_agent(agent_name)?;
         Self::from_selected_agent(bootstrap.selected_agent, bootstrap.runtime_home)
@@ -226,6 +256,13 @@ impl ProductionWorkerRunner {
     }
 
     pub fn run_once(&self) -> Result<ProductionWorkerTickOutcome, ProductionWorkerRunnerError> {
+        self.run_once_with_cancel(Arc::new(AtomicBool::new(false)))
+    }
+
+    fn run_once_with_cancel(
+        &self,
+        host_cancel: Arc<AtomicBool>,
+    ) -> Result<ProductionWorkerTickOutcome, ProductionWorkerRunnerError> {
         let task_runtime = Arc::new(self.open_task_center()?);
         self.ensure_worker_registered_in(&task_runtime)?;
         self.record_process_heartbeat_in(&task_runtime)?;
@@ -282,6 +319,7 @@ impl ProductionWorkerRunner {
             task.task_id.clone(),
             execution_id.clone(),
             Arc::clone(&pause_token),
+            Arc::clone(&host_cancel),
         );
         let request = worker_live_request(
             &self.runtime_home,
@@ -291,11 +329,20 @@ impl ProductionWorkerRunner {
             retry_kind,
             Some(Arc::clone(&pause_token)),
         );
+        let worker_turn_id = request.turn_id.clone();
         let execution = self.executor.execute(&self.selected, request);
         let pause_monitor_result = pause_monitor.stop();
         let pause_requested = worker_pause_requested(&task_runtime, &task.task_id, &execution_id)?;
         pause_monitor_result?;
         if let Err(error) = heartbeat.stop() {
+            if host_cancel.load(Ordering::Acquire) {
+                return self.close_host_cancelled_execution(
+                    &task_runtime,
+                    &task,
+                    &execution_id,
+                    &worker_turn_id,
+                );
+            }
             if pause_requested {
                 return Ok(ProductionWorkerTickOutcome::Idle);
             }
@@ -309,6 +356,14 @@ impl ProductionWorkerRunner {
         }
         if pause_requested {
             return Ok(ProductionWorkerTickOutcome::Idle);
+        }
+        if host_cancel.load(Ordering::Acquire) {
+            return self.close_host_cancelled_execution(
+                &task_runtime,
+                &task,
+                &execution_id,
+                &worker_turn_id,
+            );
         }
 
         match execution {
@@ -371,12 +426,16 @@ impl ProductionWorkerRunner {
     }
 
     pub fn run(&self) -> Result<(), ProductionWorkerRunnerError> {
+        self.run_until(Arc::new(AtomicBool::new(false)))
+    }
+
+    pub fn run_until(&self, cancel: Arc<AtomicBool>) -> Result<(), ProductionWorkerRunnerError> {
         let interval = Duration::from_millis(DEFAULT_POLL_INTERVAL_MILLIS);
         let initial_backoff = Duration::from_millis(WORKER_RETRY_INITIAL_BACKOFF_MILLIS);
         let max_backoff = Duration::from_millis(WORKER_RETRY_MAX_BACKOFF_MILLIS);
         let mut consecutive_retryable_failures = 0_u32;
-        loop {
-            match self.run_once() {
+        while !cancel.load(Ordering::Acquire) {
+            match self.run_once_with_cancel(Arc::clone(&cancel)) {
                 Ok(ProductionWorkerTickOutcome::Idle) => {
                     consecutive_retryable_failures = 0;
                 }
@@ -396,13 +455,14 @@ impl ProductionWorkerRunner {
                         consecutive_retryable_failures,
                         delay.as_millis()
                     );
-                    thread::sleep(delay);
+                    sleep_with_cancel(&cancel, delay);
                     continue;
                 }
                 Err(error) => return Err(error),
             }
-            thread::sleep(interval);
+            sleep_with_cancel(&cancel, interval);
         }
+        Ok(())
     }
 
     fn open_task_center(&self) -> Result<TaskRuntime, ProductionWorkerRunnerError> {
@@ -632,6 +692,28 @@ impl ProductionWorkerRunner {
         })
     }
 
+    fn close_host_cancelled_execution(
+        &self,
+        task_runtime: &TaskRuntime,
+        task: &TaskSnapshot,
+        execution_id: &str,
+        turn_id: &TurnId,
+    ) -> Result<ProductionWorkerTickOutcome, ProductionWorkerRunnerError> {
+        let current = task_runtime
+            .query_task(&task.task_id)
+            .map_err(task_center_error)?;
+        if matches!(current.status, TaskStatus::Assigned | TaskStatus::Running) {
+            return self.report_interrupted(
+                task_runtime,
+                task,
+                execution_id,
+                Some(turn_id.clone()),
+                "Worker host shutdown interrupted the active execution".to_owned(),
+            );
+        }
+        Ok(ProductionWorkerTickOutcome::Idle)
+    }
+
     fn report_attention_required(
         &self,
         task_runtime: &TaskRuntime,
@@ -703,6 +785,7 @@ impl WorkerPauseMonitor {
         task_id: TaskId,
         execution_id: String,
         pause_token: LiveReasonCancelToken,
+        host_cancel: Arc<AtomicBool>,
     ) -> Self {
         let (stop, receiver) = mpsc::channel();
         let error = Arc::new(Mutex::new(None));
@@ -710,6 +793,10 @@ impl WorkerPauseMonitor {
         let interval = Duration::from_millis(WORKER_CONTROL_MONITOR_INTERVAL_MILLIS);
         let handle = thread::spawn(move || {
             loop {
+                if host_cancel.load(Ordering::Acquire) {
+                    pause_token.store(true, Ordering::SeqCst);
+                    break;
+                }
                 match task_runtime.query_worker_control_events(&task_id, &execution_id) {
                     Ok(events) => {
                         if latest_task_state_worker_control(&events).is_some_and(|event| {

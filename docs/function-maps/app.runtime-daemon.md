@@ -4,7 +4,10 @@
 - owner crate: `apps/freehand-daemon`
 - owner module: `apps/freehand-daemon/src/main.rs`
 - resource map: `docs/resource-maps/core.json`
+- owned resources:
+  - `runtime_daemon_host`
 - resource operations:
+  - `runtime_agent_activity.merge_for_presence`
 - owner entry symbols:
   - `main`
   - `run`
@@ -19,13 +22,17 @@
 
 - resource map: `docs/resource-maps/core.json`
 - owned resources:
+  - `runtime_daemon_host`
 - touched resources:
   - `runtime_command`
   - `ui_projection`
   - `agent`
+  - `runtime_agent_activity`
 - resource operations:
+  - `runtime_agent_activity.merge_for_presence` (`runtime_agent_activity` -> `agent_presence`)
 - forbidden shortcuts:
   - runtime daemon may host `RelayService` only through the `relay.transport` public API; it must not own account, presence, or proxy semantics.
+  - daemon may map typed activity into Relay control heartbeats only; it must not merge activity into ADP/UI business payloads.
 
 ## Request Mainline
 
@@ -35,7 +42,10 @@
 - each configured Worker process has an agent-specific launchd label, env file,
   stdout log, and stderr log; a shared `workerS` service is not the Worker pool
 - daemon bootstrap selects one agent from default config and creates one runtime dispatcher
-- daemon bootstrap routes Master mode to the runtime-backed UI host and Slave mode to `runtime.master-worker-loop`
+- daemon bootstrap routes Master mode to the runtime-backed UI host; Slave mode
+  without Relay runs only `runtime.master-worker-loop`, while Relay-configured
+  Slave mode also binds a loopback UI/ADP host for that Worker's own session
+  namespace
 - Master mode starts the WebUI/ADP host as the daemon lifetime and supervises
   the background Master lifecycle runner separately, so a lifecycle runner
   owner-truth stop is observable without taking down HTTP/ADP status surfaces
@@ -65,8 +75,10 @@
 - daemon SSE subscriptions stay open across later runtime turn updates and observe the same protocol-owned projections as query consumers
 - daemon can rewind a previously checkpointed writable-tool mutation through runtime owner dispatch while leaving turn/session/UI truth untouched
 - daemon remains a host process and does not own reason or node semantics itself
-- each Slave daemon runs one configured Worker's production
-  claim/execute/report loop without binding WebUI/ADP transport
+- each Slave daemon runs one configured Worker's production claim/execute/report
+  loop; only an explicitly Relay-configured Slave binds a loopback WebUI/ADP
+  transport, and that host uses Worker execution policy rather than Master
+  orchestration semantics
 - ADP AgentBoard/AgentLifecycle queries expose owner-projected Worker process
   health and restart identity without app-owned PID logic
 
@@ -150,10 +162,11 @@
 | 07b | `sanitize_launchd_component` | `scripts/install-launchd.sh` | derive deterministic agent-specific Worker label/env/log components | configured Worker agent id | launchd-safe identity component | launchd installer | Worker service path builder | bound |
 | 07c | `enable_launchd_service` | `scripts/install-launchd.sh` | enable persistent production LaunchAgents unless an isolated verifier explicitly skips enable overrides | install/restart profile | launchctl enable or no persistent override | launchd installer | `launchctl enable` | bound |
 | 08 | `handle_adp_socket` / `RuntimeCommandDispatcher::query_runtime` | `apps/freehand-server/src/lib.rs` / `crates/freehand-runtime/src/lib.rs` | serve daemon ADP error-center query and initial subscription snapshots from runtime metadata truth | ADP error-center query or subscribe frame | ADP error-center query result or initial subscription event | daemon-hosted ADP client | shared WebUI transport plus runtime metadata projection owner | bound |
-| 09 | `run_master_mode` / `monitor_master_lifecycle_runner` | `apps/freehand-daemon/src/main.rs` | run WebUI/ADP as the Master host lifetime while monitoring the background Master lifecycle runner stop/error without treating it as a daemon host crash | Master bootstrap + bind + lifecycle runner task | healthy HTTP/ADP host plus explicit stderr lifecycle-runner stop/error evidence | daemon CLI | shared WebUI transport + `ProductionMasterRunner::run_until` | bound |
-| 10 | `run_worker_mode` | `apps/freehand-daemon/src/main.rs` | route configured Slave mode into the production Worker runner without UI transport or app-owned health inference | selected Slave bootstrap | long-running Worker service whose process truth is written by agent.lifecycle | daemon CLI | `run_blocking_worker_service` | bound |
-| 10a | `run_master_mode` | `apps/freehand-daemon/src/main.rs` | join one configured Agent outbound Relay client to the Master host lifetime using the already-bound loopback daemon address | selected Relay connection + loopback listener | WebUI host result or explicit Relay client terminal error | `run_master_mode` | `RelayAgentClient::run` | bound |
-| 11 | `run_blocking_worker_service` | `apps/freehand-daemon/src/main.rs` | isolate the synchronous Worker/provider loop from the daemon async runtime thread | Worker service closure | Worker service result or explicit join failure | `run_worker_mode` | `tokio::task::spawn_blocking` | bound |
+| 09 | `run_master_mode` / `monitor_master_lifecycle_runner` | `apps/freehand-daemon/src/main.rs` | run WebUI/ADP as the Master host lifetime while monitoring the background Master lifecycle runner stop/error without treating it as a daemon host crash; host-observed unexpected stop/panic returns to the runner activity owner as terminal Error | Master bootstrap + bind + lifecycle runner task + cancellation truth | healthy HTTP/ADP host plus explicit stderr lifecycle-runner stop/error evidence and typed terminal activity | daemon CLI | shared WebUI transport + `ProductionMasterRunner::run_until` | bound |
+| 10 | `run_worker_mode` | `apps/freehand-daemon/src/main.rs` | route configured Slave mode into either the production Worker-only lifetime or one Relay-configured loopback UI/ADP + tunnel + cancellable Worker lifetime without app-owned health inference | selected Slave bootstrap | long-running Worker service whose process truth is written by agent.lifecycle plus optional Relay transport result | daemon CLI | `run_blocking_worker_service` / `serve_webui_listener` / `RelayAgentClient::run` | bound |
+| 10a | `run_master_mode` / `run_relay_worker_mode` / `relay_presence_from_runtime` | `apps/freehand-daemon/src/main.rs` | join one configured Agent outbound Relay client to its role-correct host lifetime, merge foreground dispatcher activity with background Master/Worker owner activity, and project only the typed result into the Relay control side-channel | selected Relay connection + loopback listener + foreground/background runtime activity projections | WebUI host result or explicit Relay client terminal error plus typed role/status/count heartbeat | daemon role host | `RelayAgentClient::run` | bound |
+| 11 | `run_blocking_worker_service` | `apps/freehand-daemon/src/main.rs` | isolate the non-Relay synchronous Worker/provider loop from the daemon async runtime thread | Worker service closure | Worker service result or explicit join failure | `run_worker_mode` | `tokio::task::spawn_blocking` | bound |
+| 11a | `run_relay_worker_mode` | `apps/freehand-daemon/src/main.rs` | spawn `ProductionWorkerRunner::run_until` with the same explicit cancellation token owned by the loopback host and Relay client lifetime | Relay-configured Worker runner + host cancellation token | cancellable blocking Worker result or explicit join failure | `run_worker_mode` | `ProductionWorkerRunner::run_until` | bound |
 
 ## Sync Status Against Code
 

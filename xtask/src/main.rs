@@ -3692,12 +3692,15 @@ fn verify_relay_transport_boundary(root: &Path) -> Result<(), String> {
             "agent_tunnel_config_from_env",
             "RelayAgentClient::run",
         ),
+        (
+            "13a",
+            "RelayAgentClient::run",
+            "RelayAgentClient::current_heartbeat",
+        ),
         ("14", "attach_error", "RelayTunnelRegistry::admit_error"),
     ];
     if relay_doc.call_table.len() != expected_edges.len() {
-        return Err(
-            "relay.transport call map must contain exactly fourteen bound edges".to_owned(),
-        );
+        return Err("relay.transport call map must contain exactly fifteen bound edges".to_owned());
     }
     for (row, (step, caller, callee)) in relay_doc.call_table.iter().zip(expected_edges) {
         if row.step != step || row.caller != caller || row.callee != callee {
@@ -4254,6 +4257,7 @@ fn verify_relay_verification_map(root: &Path) -> Result<(), String> {
         "relay.transport.clippy",
         "relay.transport.deployment-smoke",
         "relay.transport.local-online",
+        "relay.transport.worker-host-contract",
         "relay.transport.mainline",
         "relay.transport.architecture",
     ];

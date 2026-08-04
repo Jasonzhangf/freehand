@@ -5810,6 +5810,7 @@ fn selected_master_agent() -> SelectedAgentConfig {
         fallback_provider: None,
         model_group_id: None,
         restart_required_on_change: true,
+        relay_connection: None,
     }
 }
 
@@ -5852,6 +5853,7 @@ fn live_selected_agent(
         fallback_provider: None,
         model_group_id: None,
         restart_required_on_change: true,
+        relay_connection: None,
     }
 }
 
@@ -14541,18 +14543,229 @@ fn bootstrap_rejects_unwritable_node_metadata_ledger_explicitly() {
 }
 
 #[test]
-fn bootstrap_rejects_slave_mode_agent_for_ui_host() {
+fn bootstrap_rejects_slave_mode_agent_without_master_peer() {
     let mut selected = selected_master_agent();
     selected.mode = AgentMode::Slave;
     let err = match RuntimeCommandDispatcher::from_selected_agent(&selected) {
-        Ok(_) => panic!("slave-mode agent must be rejected"),
+        Ok(_) => panic!("slave-mode agent without a master peer must be rejected"),
         Err(err) => err,
     };
     assert_eq!(
         err,
-        RuntimeCommandDispatcherError::HostRequiresMasterMode {
+        RuntimeCommandDispatcherError::HostRequiresMasterPeer {
             agent_name: "master".to_owned(),
-            mode: "slave".to_owned(),
         }
+    );
+}
+
+#[test]
+fn worker_selected_dispatcher_uses_worker_identity_and_rejects_master_only_command() {
+    let mut selected = selected_master_agent();
+    selected.name = "worker".to_owned();
+    selected.mode = AgentMode::Slave;
+    selected.node_id = "worker-node".to_owned();
+    selected.paired_agents = vec![SelectedPeerAgentConfig {
+        name: "master".to_owned(),
+        mode: AgentMode::Master,
+        node_id: "master-node".to_owned(),
+        allowed_pair_ip: None,
+        pair_token_env: "FREEHAND_PAIR_TOKEN_MASTER".to_owned(),
+        provider_id: "provider-master".to_owned(),
+        fallback_provider_id: None,
+        model_group_id: None,
+    }];
+    let runtime = RuntimeCommandDispatcher::from_selected_agent(&selected)
+        .expect("worker-selected dispatcher");
+    runtime
+        .state
+        .lock()
+        .expect("lock runtime state")
+        .active_turns
+        .push(ActiveRuntimeTurn {
+            turn_id: TurnId::new("runtime-turn-owner-status"),
+            session_id: SessionId::new("runtime-session-worker"),
+            cwd: std::env::temp_dir(),
+            trace_id: TraceId::new("runtime-trace-owner-status"),
+            user_text: "owner status probe".to_owned(),
+            cancel_token: Arc::new(AtomicBool::new(false)),
+        });
+    assert_eq!(
+        runtime.current_agent_activity(),
+        RuntimeAgentActivityProjection {
+            status: RuntimeAgentActivityStatus::Running,
+            active_session_count: 1,
+        }
+    );
+
+    runtime
+        .dispatch(
+            build_command_dispatch_envelope(&UiCommand::SubmitUserInput {
+                text: "worker-owned input".to_owned(),
+                session_id: None,
+                cwd: None,
+                metadata: None,
+            })
+            .expect("submit envelope"),
+        )
+        .expect("worker local turn");
+    let latest = runtime
+        .ui_state()
+        .lock()
+        .expect("lock ui state")
+        .query(&UiCommand::QueryLatestActiveTurn)
+        .expect("latest worker turn");
+    match latest {
+        UiQueryResult::Turn(Some(turn)) => {
+            assert_eq!(turn.source.source_agent_id, AgentId::new("worker"));
+            assert_eq!(turn.source.source_node_id, "worker-node");
+        }
+        other => panic!("unexpected worker projection: {other:?}"),
+    }
+
+    let error = runtime
+        .dispatch(
+            build_command_dispatch_envelope(&UiCommand::SendDirectMessageToSlave {
+                node_id: "worker-node".to_owned(),
+                text: "must not route as Master".to_owned(),
+            })
+            .expect("direct-message envelope"),
+        )
+        .expect_err("Worker host must reject Master-only direct messaging");
+    assert!(
+        matches!(error, UiCommandDispatchPortError::Unsupported(message) if message.contains("Worker host"))
+    );
+}
+
+#[test]
+fn worker_selected_task_queries_route_to_master_owner_truth() {
+    let runtime_home = temp_runtime_home();
+    let master_runtime =
+        TaskRuntime::boot(&runtime_home, AgentId::new("master")).expect("master task runtime");
+    let task_id = TaskId::new("worker-query-task");
+    master_runtime
+        .create_task(TaskCreateRequest {
+            task_id: Some(task_id.clone()),
+            title: "worker query task".to_owned(),
+            content: "Worker-selected TaskBoard must read paired Master truth".to_owned(),
+            goal: "Route Worker task queries to the Task Center owner".to_owned(),
+            deliverables: vec!["master-owned task projection".to_owned()],
+            acceptance: vec!["done".to_owned()],
+            priority: 10,
+            target_cwd: Some(runtime_home.to_string_lossy().into_owned()),
+            execution_profile: TaskExecutionProfile::Workspace,
+            dispatch: TaskDispatchRequest::SelfAgent,
+            parent: TaskParentRef {
+                session_id: None,
+                turn_id: None,
+                trace_id: None,
+            },
+            actor: TaskActor {
+                agent_id: AgentId::new("master"),
+                source: "worker_selected_task_queries_route_to_master_owner_truth".to_owned(),
+                session_id: None,
+                turn_id: None,
+                trace_id: None,
+            },
+            watermark: TaskWatermark {
+                metadata_id: None,
+                hook: Some("worker_selected_task_queries_route_to_master_owner_truth".to_owned()),
+                action_tool_call_id: None,
+            },
+        })
+        .expect("seed master task truth");
+
+    let mut selected = selected_master_agent();
+    selected.name = "worker".to_owned();
+    selected.mode = AgentMode::Slave;
+    selected.node_id = "worker-node".to_owned();
+    selected.paired_agents = vec![SelectedPeerAgentConfig {
+        name: "master".to_owned(),
+        mode: AgentMode::Master,
+        node_id: "master-node".to_owned(),
+        allowed_pair_ip: None,
+        pair_token_env: "FREEHAND_PAIR_TOKEN_MASTER".to_owned(),
+        provider_id: "provider-master".to_owned(),
+        fallback_provider_id: None,
+        model_group_id: None,
+    }];
+    let runtime = RuntimeCommandDispatcher::from_selected_agent_with_live(
+        &selected,
+        runtime_home.clone(),
+        false,
+    )
+    .expect("worker-selected runtime");
+
+    let task_board = runtime
+        .query_runtime(&UiCommand::QueryTaskBoard {
+            status: None,
+            agent_id: None,
+            include_terminal: false,
+        })
+        .expect("task board query")
+        .expect("task board projection");
+    match task_board {
+        UiQueryResult::TaskBoard(board) => {
+            assert_eq!(board.source_agent_id.as_str(), "master");
+            assert!(
+                board
+                    .tasks
+                    .iter()
+                    .any(|task| task.task_id == "worker-query-task")
+            );
+        }
+        other => panic!("unexpected task board result: {other:?}"),
+    }
+
+    let task_list = runtime
+        .query_runtime(&UiCommand::QueryTaskList {
+            status: None,
+            agent_id: None,
+        })
+        .expect("task list query")
+        .expect("task list projection");
+    match task_list {
+        UiQueryResult::TaskList(list) => {
+            assert_eq!(list.source_agent_id.as_str(), "master");
+            assert!(
+                list.tasks
+                    .iter()
+                    .any(|task| task.task_id == "worker-query-task")
+            );
+        }
+        other => panic!("unexpected task list result: {other:?}"),
+    }
+
+    fs::remove_dir_all(runtime_home).expect("cleanup runtime home");
+}
+
+#[test]
+fn runtime_agent_activity_merge_preserves_active_truth_and_saturates_count() {
+    let merged = RuntimeAgentActivityProjection {
+        status: RuntimeAgentActivityStatus::Error,
+        active_session_count: u32::MAX,
+    }
+    .merge(RuntimeAgentActivityProjection {
+        status: RuntimeAgentActivityStatus::Running,
+        active_session_count: 1,
+    });
+
+    assert_eq!(
+        merged,
+        RuntimeAgentActivityProjection {
+            status: RuntimeAgentActivityStatus::Running,
+            active_session_count: u32::MAX,
+        }
+    );
+    assert_eq!(
+        RuntimeAgentActivityProjection {
+            status: RuntimeAgentActivityStatus::Idle,
+            active_session_count: 0,
+        }
+        .merge(RuntimeAgentActivityProjection {
+            status: RuntimeAgentActivityStatus::Waiting,
+            active_session_count: 0,
+        })
+        .status,
+        RuntimeAgentActivityStatus::Waiting
     );
 }

@@ -20,6 +20,8 @@
   - `RelayService::new`
   - `RelayService::router`
   - `RelayService::serve`
+  - `RelayAgentClient::new_with_presence_source`
+  - `RelayAgentClient::current_heartbeat`
   - `RelayAgentClient::run`
   - `control_tunnel`
   - `data_tunnel`
@@ -135,4 +137,5 @@ Deployment uses two explicit commands: `freehand-relay-server init-store` initia
 | 11 | `run_error_socket / RelayTunnelRegistry::fail_exchange` | `crates/freehand-relay/src/websocket_tunnel.rs / crates/freehand-relay/src/tunnel.rs` | correlate an authenticated Agent failure to exactly one pending data exchange | typed Agent error frame and tunnel identity | exact pending-exchange failure or explicit terminal channel failure | `run_error_socket` | `RelayTunnelRegistry::fail_exchange` | bound |
 | 12 | `main / RelayServerConfig::from_env / RelayService::serve` | `apps/freehand-relay-server/src/main.rs / crates/freehand-relay/src/config.rs / crates/freehand-relay/src/service.rs` | load explicit bind/store/lease/cookie-policy env and serve | deployment env | live listener with fixed cookie policy | `main` | `RelayService::serve` | bound |
 | 13 | `agent_tunnel_config_from_env / RelayAgentClient::run` | `apps/freehand-relay-server/src/main.rs / crates/freehand-relay/src/agent_client.rs` | load explicit Agent bridge config and enter the typed outbound tunnel lifecycle through authenticated control admission | Agent deployment env | live control-owned lifecycle with dependent data/error Agent tunnels | `agent_tunnel_config_from_env` | `RelayAgentClient::run` | bound (`relay_control_tunnel.connect`: `relay_control_tunnel` -> `relay_control_tunnel`) |
+| 13a | `RelayAgentClient::run / RelayAgentClient::current_heartbeat` | `crates/freehand-relay/src/agent_client.rs` | read typed status/count at identity admission and every control heartbeat; source failure terminates the tunnel instead of reusing stale projection | typed presence source closure | current authenticated Agent heartbeat or explicit source error | `RelayAgentClient::run` | `RelayAgentClient::current_heartbeat` | bound (`agent_presence.heartbeat`: `agent_presence` -> `agent_presence`) |
 | 14 | `attach_error / RelayTunnelRegistry::admit_error` | `crates/freehand-relay/src/websocket_tunnel.rs / crates/freehand-relay/src/tunnel.rs` | atomically admit error only while matching control identity remains attached | authenticated Agent identity and typed error sender | generation-fenced error tunnel | `attach_error` | `RelayTunnelRegistry::admit_error` | bound (`relay_control_tunnel.admit_error`: `relay_control_tunnel` -> `relay_error_tunnel`) |

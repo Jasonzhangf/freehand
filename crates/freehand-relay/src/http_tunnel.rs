@@ -503,6 +503,7 @@ mod tests {
             .lock()
             .expect("registry")
             .attach_control(identity.clone())
+            .map(|admission| admission.generation)
             .expect("control tunnel");
         state
             .tunnels
@@ -607,6 +608,7 @@ mod tests {
             .lock()
             .expect("registry")
             .attach_control(identity.clone())
+            .map(|admission| admission.generation)
             .expect("control tunnel");
         state
             .tunnels

@@ -32,6 +32,12 @@ pub struct RelayRoutableExchange {
     pub pending: RelayPendingResponse,
 }
 
+#[derive(Debug)]
+pub struct RelayControlAdmission {
+    pub generation: u64,
+    pub replaced_deliveries: Vec<RelayDataDelivery>,
+}
+
 #[derive(Debug, PartialEq, Eq, thiserror::Error)]
 pub enum RelayExchangeAdmissionError {
     #[error("Relay data tunnel is not attached")]
@@ -45,6 +51,10 @@ pub enum RelayExchangeAdmissionError {
 #[derive(Debug)]
 pub enum RelayDataDelivery {
     Cancelled,
+    OpenFailure {
+        sender: oneshot::Sender<Result<RelayResponseOpen, String>>,
+        message: String,
+    },
     Open {
         sender: oneshot::Sender<Result<RelayResponseOpen, String>>,
         response: RelayResponseOpen,
@@ -59,6 +69,9 @@ impl RelayDataDelivery {
     pub async fn deliver(self) -> Result<(), String> {
         match self {
             Self::Cancelled => Ok(()),
+            Self::OpenFailure { sender, message } => sender
+                .send(Err(message))
+                .map_err(|_| "Relay response receiver is closed".to_owned()),
             Self::Open { sender, response } => sender
                 .send(Ok(response))
                 .map_err(|_| "Relay response receiver is closed".to_owned()),
@@ -144,14 +157,23 @@ pub struct RelayTunnelRegistry {
 }
 
 impl RelayTunnelRegistry {
-    pub fn attach_control(&mut self, identity: RelayTunnelIdentity) -> Result<u64, String> {
-        if self.control_channels.contains_key(&identity) {
-            return Err("Relay control tunnel is already attached".to_owned());
-        }
+    pub fn attach_control(
+        &mut self,
+        identity: RelayTunnelIdentity,
+    ) -> Result<RelayControlAdmission, String> {
+        let replaced_deliveries = if self.control_channels.contains_key(&identity) {
+            self.detach_current_error(&identity);
+            self.detach_current_data(&identity)?
+        } else {
+            Vec::new()
+        };
         self.next_control_generation = self.next_control_generation.wrapping_add(1);
         let generation = self.next_control_generation;
         self.control_channels.insert(identity, generation);
-        Ok(generation)
+        Ok(RelayControlAdmission {
+            generation,
+            replaced_deliveries,
+        })
     }
 
     pub fn detach_control(&mut self, identity: &RelayTunnelIdentity, generation: u64) -> bool {
@@ -163,6 +185,10 @@ impl RelayTunnelRegistry {
 
     pub fn has_control(&self, identity: &RelayTunnelIdentity) -> bool {
         self.control_channels.contains_key(identity)
+    }
+
+    pub fn has_control_generation(&self, identity: &RelayTunnelIdentity, generation: u64) -> bool {
+        self.control_channels.get(identity).copied() == Some(generation)
     }
 
     pub fn attach_data(
@@ -412,9 +438,10 @@ impl RelayTunnelRegistry {
             .remove(exchange_id)
             .ok_or_else(|| "Relay error references an unknown exchange".to_owned())?;
         if let Some(open) = pending.open.take() {
-            open.send(Err(message))
-                .map_err(|_| "Relay response receiver is closed".to_owned())?;
-            Ok(None)
+            Ok(Some(RelayDataDelivery::OpenFailure {
+                sender: open,
+                message,
+            }))
         } else {
             Ok(Some(RelayDataDelivery::Part {
                 sender: pending.parts,
@@ -728,7 +755,11 @@ mod tests {
 
         registry
             .fail_exchange(&identity(), "exchange-1", "bridge failed".to_owned())
-            .expect("active exchange must fail");
+            .expect("active exchange must fail")
+            .expect("pre-open failure delivery")
+            .deliver()
+            .await
+            .expect("failure delivery");
         assert!(!registry.pending.contains_key("exchange-1"));
         assert_eq!(
             pending.open.await.expect("failure must reach receiver"),
@@ -787,9 +818,12 @@ mod tests {
             .open_exchange(identity.clone(), "exchange-2".to_owned())
             .expect("second exchange must open");
 
-        registry
+        let deliveries = registry
             .detach_current_data(&identity)
             .expect("disconnect cleanup must close all exchanges");
+        for delivery in deliveries {
+            delivery.deliver().await.expect("disconnect delivery");
+        }
         assert!(registry.pending.is_empty());
         assert_eq!(
             first.open.await.expect("first failure must arrive"),
@@ -833,59 +867,50 @@ mod tests {
         let identity = identity();
         let first = registry
             .attach_control(identity.clone())
-            .expect("first control tunnel");
-        assert_eq!(
-            registry
-                .attach_control(identity.clone())
-                .expect_err("duplicate control tunnel must fail"),
-            "Relay control tunnel is already attached"
-        );
-        assert!(!registry.detach_control(&identity, first.wrapping_add(1)));
+            .expect("first control tunnel")
+            .generation;
+        let second = registry
+            .attach_control(identity.clone())
+            .expect("new control generation replaces stale tunnel")
+            .generation;
+        assert_ne!(first, second);
+        assert!(!registry.detach_control(&identity, first));
         assert!(registry.has_control(&identity));
-        assert!(registry.detach_control(&identity, first));
+        assert!(registry.detach_control(&identity, second));
         assert!(!registry.has_control(&identity));
     }
 
     #[tokio::test]
-    async fn duplicate_and_stale_error_attachments_cannot_replace_current_tunnel() {
+    async fn control_replacement_fails_old_exchange_and_stale_cleanup_is_fenced() {
         let mut registry = RelayTunnelRegistry::default();
         let identity = identity();
-        registry
+        let first_control_generation = registry
             .attach_control(identity.clone())
-            .expect("control tunnel");
-        let (first_tx, mut first_rx) = mpsc::channel(1);
-        let first = registry
+            .expect("control tunnel")
+            .generation;
+        let (first_tx, _first_rx) = mpsc::channel(1);
+        let first_error_generation = registry
             .admit_error(identity.clone(), RelayErrorTunnelSender::new(first_tx))
             .expect("first error tunnel");
-        let (duplicate_tx, mut duplicate_rx) = mpsc::channel(1);
-        assert_eq!(
-            registry
-                .admit_error(identity.clone(), RelayErrorTunnelSender::new(duplicate_tx))
-                .expect_err("duplicate error tunnel must fail"),
-            "Relay error tunnel is already attached"
-        );
-        let frame = RelayErrorOutFrame::Terminal {
-            code: "first-current".to_owned(),
-            message: "first attachment remains current".to_owned(),
-        };
-        registry
-            .error_sender(&identity)
-            .expect("current error sender")
-            .send(frame.clone())
-            .await
-            .expect("current error delivery");
-        assert_eq!(first_rx.recv().await, Some(frame));
-        assert_eq!(duplicate_rx.recv().await, None);
-
-        assert!(registry.detach_error(&identity, first));
-        let (second_tx, _second_rx) = mpsc::channel(1);
-        let second = registry
-            .admit_error(identity.clone(), RelayErrorTunnelSender::new(second_tx))
-            .expect("second error tunnel");
-        assert!(!registry.detach_error(&identity, first));
-        assert!(registry.error_sender(&identity).is_some());
-        assert!(registry.detach_error(&identity, second));
+        let pending = registry
+            .open_exchange_for_test(identity.clone(), "stale-exchange".to_owned())
+            .expect("pending exchange");
+        let admission = registry
+            .attach_control(identity.clone())
+            .expect("new control replaces stale channels");
+        assert_eq!(admission.replaced_deliveries.len(), 1);
+        let second_control_generation = admission.generation;
+        for delivery in admission.replaced_deliveries {
+            delivery
+                .deliver()
+                .await
+                .expect("replacement failure delivery");
+        }
+        assert!(pending.open.await.expect("failure receiver").is_err());
         assert!(registry.error_sender(&identity).is_none());
+        assert!(!registry.detach_control(&identity, first_control_generation));
+        assert!(registry.has_control_generation(&identity, second_control_generation));
+        assert!(!registry.detach_error(&identity, first_error_generation));
     }
 
     #[test]

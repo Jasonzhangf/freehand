@@ -95,7 +95,8 @@ This table is the feature-map backlink for `docs/resource-maps/core.json`. The r
 | `debug.core` | `debug_trace` | `docs/resource-maps/core.json` |
 | `ui.protocol` | `ui_projection`, `input_attachment` | `docs/resource-maps/core.json` |
 | `app.webui-smoke` | `ui_surface` | `docs/resource-maps/core.json` |
-| `runtime.ui-command-dispatch` | `runtime_command` | `docs/resource-maps/core.json` |
+| `runtime.ui-command-dispatch` | `runtime_command`, `runtime_agent_activity` | `docs/resource-maps/core.json` |
+| `app.runtime-daemon` | `runtime_daemon_host` | `docs/resource-maps/core.json` |
 | `runtime.checkpoint-rewind` | `checkpoint` | `docs/resource-maps/core.json` |
 | `node.master-slave` | `node_pairing`, `remote_daemon_directory` | `docs/resource-maps/core.json` |
 | `relay.transport` | `relay_account`, `agent_presence`, `relay_control_tunnel`, `relay_data_tunnel`, `relay_error_tunnel` | `docs/resource-maps/core.json` |
@@ -680,6 +681,8 @@ Non-violation pending items live in `docs/architecture/architecture-gaps.md`. Ea
   - password hashes and token hashes persist while raw passwords and raw tokens do not
   - account and Agent presence survive store restart
   - heartbeat lease projects online/offline without rewriting Agent-owned session truth
+  - Agent client heartbeat reads typed runtime status/count on every tick and
+    source failure closes the control-owned tunnel instead of reusing stale truth
   - corrupt store and store write failures fail explicitly
 - required_module_black_box_tests:
   - register/login/Bearer and cookie authentication
@@ -737,6 +740,8 @@ Non-violation pending items live in `docs/architecture/architecture-gaps.md`. Ea
   - daemon ADP query-as-command rejection smoke
   - daemon direct-message dispatch smoke
   - daemon slave-mode production Worker runner bootstrap smoke
+  - Relay-configured Slave loopback WebUI/ADP, outbound tunnel, typed presence,
+    and shared-cancellation lifecycle smoke
 - required_project_black_box_tests:
   - real runtime owner injection over shared HTTP/SSE/command and ADP WebSocket transport without app-owned business logic
 - test_design_doc: `docs/testing/app.runtime-daemon.md`
@@ -759,7 +764,9 @@ Non-violation pending items live in `docs/architecture/architecture-gaps.md`. Ea
   - daemon depends on `freehand-runtime`, not directly on reason/node/provider/config owners
   - app transport remains shared and protocol-only
   - runtime dispatch and UI projection stay closed-loop through one shared state handle
-  - config-selected bootstrap remains one-process-one-agent; Master hosts UI transport and Slave hosts the production Worker runner
+  - config-selected bootstrap remains one-process-one-agent; Master hosts UI
+    transport, while an explicitly Relay-configured Slave hosts only its own
+    loopback UI/ADP namespace beside the production Worker runner
   - migrated mainline call source and generated wiki stay in sync with the function map
 ### `app.android-client`
 
@@ -1562,6 +1569,8 @@ Non-violation pending items live in `docs/architecture/architecture-gaps.md`. Ea
   - resume-turn unsupported dispatch tests
   - runtime task query bridge tests
   - runtime ui-state projection update tests
+  - Worker-selected identity, Master-only command rejection, and typed activity
+    projection merge tests
 - required_module_black_box_tests:
   - command dispatch receipt smoke
   - command dispatch owner-routing smoke
@@ -1597,6 +1606,8 @@ Non-violation pending items live in `docs/architecture/architecture-gaps.md`. Ea
   - reason turn truth mutation still stays inside `freehand-reason`
   - node direct-message/task semantics still stay inside `freehand-node`
   - task truth and filtering stay inside `freehand-task`
+  - direct-session activity comes only from runtime active-turn truth; delegated
+    activity comes from agent.lifecycle and is merged as typed control projection
 
 ### `runtime.master-worker-loop`
 

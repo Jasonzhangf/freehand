@@ -1,4 +1,6 @@
 use std::path::Path;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicU8, Ordering};
 use std::time::Duration;
 
 use axum::Router;
@@ -10,7 +12,8 @@ use axum::response::{Html, IntoResponse, Response};
 use axum::routing::get;
 use freehand_relay::{
     AgentDirectory, AgentHeartbeat, AgentRole, AgentWorkStatus, AuthResponse, RelayAgentClient,
-    RelayAgentClientConfig, RelayDirectoryOutFrame, RelayService, RelayServiceConfig, RelayStore,
+    RelayAgentClientConfig, RelayAgentPresenceProjection, RelayDirectoryOutFrame, RelayService,
+    RelayServiceConfig, RelayStore,
 };
 use futures_util::{SinkExt, StreamExt};
 use reqwest::Client;
@@ -324,6 +327,127 @@ async fn start_agent(
     }
     task.abort();
     panic!("Agent outbound tunnel did not become online");
+}
+
+#[tokio::test]
+async fn agent_presence_tracks_typed_runtime_source_and_closes_on_source_failure() {
+    let temp = TempDir::new().expect("tempdir");
+    let upstream = spawn_upstream().await;
+    let relay = spawn_relay(&temp.path().join("relay.json"), 45).await;
+    let client = Client::new();
+    let auth = register(&client, &relay, "dynamic-presence").await;
+    let local_addr = upstream
+        .base_url
+        .strip_prefix("http://")
+        .expect("local daemon URL")
+        .parse()
+        .expect("local daemon address");
+    let source_state = Arc::new(AtomicU8::new(0));
+    let client_state = Arc::clone(&source_state);
+    let agent = RelayAgentClient::new_with_presence_source(
+        RelayAgentClientConfig {
+            relay_base_url: relay.base_url.clone(),
+            access_token: auth.access_token.clone(),
+            heartbeat: AgentHeartbeat {
+                agent_id: "dynamic-agent".to_owned(),
+                display_name: "Dynamic Agent".to_owned(),
+                node_id: "dynamic-node".to_owned(),
+                role: AgentRole::Worker,
+                status: AgentWorkStatus::Idle,
+                active_session_count: 0,
+            },
+            local_daemon_addr: local_addr,
+            local_adp_token: Some("upstream-token".to_owned()),
+            heartbeat_interval: Duration::from_millis(20),
+        },
+        move || match client_state.load(Ordering::Acquire) {
+            0 => Ok(RelayAgentPresenceProjection {
+                status: AgentWorkStatus::Idle,
+                active_session_count: 0,
+            }),
+            1 => Ok(RelayAgentPresenceProjection {
+                status: AgentWorkStatus::Running,
+                active_session_count: 2,
+            }),
+            _ => Err("runtime activity source unavailable".to_owned()),
+        },
+    )
+    .expect("dynamic Agent client");
+    let agent_task = tokio::spawn(agent.run());
+
+    for _ in 0..100 {
+        let directory = client
+            .get(format!("{}/relay/api/agents", relay.base_url))
+            .bearer_auth(&auth.access_token)
+            .send()
+            .await
+            .expect("directory")
+            .json::<AgentDirectory>()
+            .await
+            .expect("directory body");
+        if directory
+            .agents
+            .first()
+            .is_some_and(|agent| agent.online && agent.status == AgentWorkStatus::Idle)
+        {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+
+    source_state.store(1, Ordering::Release);
+    let mut running_observed = false;
+    for _ in 0..100 {
+        let directory = client
+            .get(format!("{}/relay/api/agents", relay.base_url))
+            .bearer_auth(&auth.access_token)
+            .send()
+            .await
+            .expect("running directory")
+            .json::<AgentDirectory>()
+            .await
+            .expect("running directory body");
+        running_observed = directory.agents.first().is_some_and(|agent| {
+            agent.online
+                && agent.status == AgentWorkStatus::Running
+                && agent.active_session_count == 2
+        });
+        if running_observed {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    assert!(
+        running_observed,
+        "dynamic Running presence was not observed"
+    );
+
+    source_state.store(2, Ordering::Release);
+    let error = tokio::time::timeout(Duration::from_secs(2), agent_task)
+        .await
+        .expect("Agent source failure timeout")
+        .expect("Agent task join")
+        .expect_err("source failure must terminate the Agent tunnel");
+    assert_eq!(error, "runtime activity source unavailable");
+
+    let mut offline_observed = false;
+    for _ in 0..100 {
+        let directory = client
+            .get(format!("{}/relay/api/agents", relay.base_url))
+            .bearer_auth(&auth.access_token)
+            .send()
+            .await
+            .expect("offline directory")
+            .json::<AgentDirectory>()
+            .await
+            .expect("offline directory body");
+        offline_observed = directory.agents.first().is_some_and(|agent| !agent.online);
+        if offline_observed {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(10)).await;
+    }
+    assert!(offline_observed, "failed source left stale online presence");
 }
 
 #[tokio::test]

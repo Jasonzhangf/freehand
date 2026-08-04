@@ -8,7 +8,7 @@ mod store;
 mod tunnel;
 mod websocket_tunnel;
 
-pub use agent_client::{RelayAgentClient, RelayAgentClientConfig};
+pub use agent_client::{RelayAgentClient, RelayAgentClientConfig, RelayAgentPresenceProjection};
 pub use config::{RelayRuntimeConfig, RelayServerConfig};
 pub use model::{
     AgentDirectory, AgentHeartbeat, AgentPresence, AgentRole, AgentWorkStatus, AuthRequest,

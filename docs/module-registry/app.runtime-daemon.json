@@ -16,6 +16,7 @@
         "apps/freehand-daemon/src/main.rs"
       ],
       "allowed_dependencies": [
+        "third_party.axum",
         "freehand-contracts",
         "freehand-metadata",
         "freehand-relay",

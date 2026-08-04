@@ -57,6 +57,26 @@
       "projections": ["authenticated tunnel admission", "presence lease updates", "explicit disconnect"]
     },
     {
+      "resource_type": "runtime_agent_activity",
+      "owner_feature_id": "runtime.ui-command-dispatch",
+      "owner_crate": "crates/freehand-runtime",
+      "identity": "configured agent id plus typed activity snapshot",
+      "truth_store": "none; derived control-side projection read from turn and AgentLifecycle truth",
+      "operations": ["project_direct", "project_worker", "merge_for_presence"],
+      "projections": ["Relay control heartbeat status and active-session count"],
+      "forbidden": ["ADP request/response payload", "UiProtocolState business transcript", "metadata/debug payload"]
+    },
+    {
+      "resource_type": "runtime_daemon_host",
+      "owner_feature_id": "app.runtime-daemon",
+      "owner_crate": "apps/freehand-daemon",
+      "identity": "configured agent id plus daemon service instance",
+      "truth_store": "process and service lifetime only; no session, task, presence, or payload truth",
+      "operations": ["host_runtime_transport"],
+      "projections": ["HTTP/WebUI/ADP listener lifetime", "role-selected runtime host", "explicit host termination error"],
+      "forbidden": ["business payload ownership", "Relay account/presence ownership", "reason/task lifecycle ownership"]
+    },
+    {
       "resource_type": "relay_data_tunnel",
       "owner_feature_id": "relay.transport",
       "owner_crate": "crates/freehand-relay",
@@ -116,7 +136,7 @@
       "owner_crate": "crates/freehand-reason",
       "identity": "session_id plus turn_id",
       "truth_store": "~/.freehand/state/turns and reason ledger rows",
-      "operations": ["start", "apply_provider_output", "apply_tool_result", "terminalize", "plan_request_context"],
+      "operations": ["start", "apply_provider_output", "apply_tool_result", "terminalize", "plan_request_context", "project_runtime_agent_activity"],
       "projections": ["public conversation", "runtime turn status"]
     },
     {
@@ -206,7 +226,7 @@
       "owner_crate": "crates/freehand-task",
       "identity": "agent_id independent of session; task assignment, lease, and execution are temporary bindings",
       "truth_store": "AgentBoard projection from lifecycle events",
-      "operations": ["register", "heartbeat", "claim_task", "release_task"],
+      "operations": ["register", "heartbeat", "claim_task", "release_task", "project_runtime_agent_activity"],
       "projections": ["AgentBoard reusable resource pool", "TaskSpaceSnapshot", "current task/execution occupancy"]
     },
     {
@@ -774,6 +794,33 @@
       "target_resource": "agent_presence",
       "effect": "persist one authenticated Agent identity, role, work status, active-session count projection, and last-seen timestamp",
       "mainline_call_doc": "docs/mainline-calls/relay.transport.json",
+      "binding_status": "bound"
+    },
+    {
+      "operation_id": "turn.project_runtime_agent_activity",
+      "owner_feature_id": "runtime.ui-command-dispatch",
+      "source_resource": "turn",
+      "target_resource": "runtime_agent_activity",
+      "effect": "derive direct-session activity from runtime active-turn truth as a typed control projection without reading or mutating ADP payloads",
+      "mainline_call_doc": "docs/mainline-calls/runtime.ui-command-dispatch.json",
+      "binding_status": "bound"
+    },
+    {
+      "operation_id": "agent.project_runtime_agent_activity",
+      "owner_feature_id": "runtime.master-worker-loop",
+      "source_resource": "agent",
+      "target_resource": "runtime_agent_activity",
+      "effect": "derive Worker activity from the owning AgentLifecycle snapshot or background Master activity from the owning ProductionMasterRunner state as a typed control projection; lifecycle errors remain explicit source errors",
+      "mainline_call_doc": "docs/mainline-calls/runtime.master-worker-loop.json",
+      "binding_status": "bound"
+    },
+    {
+      "operation_id": "runtime_agent_activity.merge_for_presence",
+      "owner_feature_id": "app.runtime-daemon",
+      "source_resource": "runtime_agent_activity",
+      "target_resource": "agent_presence",
+      "effect": "map the typed runtime activity projection into the authenticated Relay heartbeat control frame only; no business payload copy is permitted",
+      "mainline_call_doc": "docs/mainline-calls/app.runtime-daemon.json",
       "binding_status": "bound"
     },
     {
@@ -1538,6 +1585,50 @@
       "binding_status": "bound"
     },
     {
+      "edge_id": "runtime.ui-command-dispatch#08p",
+      "operation_id": "turn.project_runtime_agent_activity",
+      "source_resource": "turn",
+      "target_resource": "runtime_agent_activity",
+      "mainline_call_doc": "docs/mainline-calls/runtime.ui-command-dispatch.json",
+      "call_table_step": "08p",
+      "file_path": "crates/freehand-runtime/src/lib.rs",
+      "symbol_path": "RuntimeCommandDispatcher::current_agent_activity / RuntimeAgentActivityProjection::merge",
+      "binding_status": "bound"
+    },
+    {
+      "edge_id": "runtime.master-worker-loop#02p",
+      "operation_id": "agent.project_runtime_agent_activity",
+      "source_resource": "agent",
+      "target_resource": "runtime_agent_activity",
+      "mainline_call_doc": "docs/mainline-calls/runtime.master-worker-loop.json",
+      "call_table_step": "02p",
+      "file_path": "crates/freehand-runtime/src/worker_runner.rs",
+      "symbol_path": "ProductionWorkerRunner::current_agent_activity",
+      "binding_status": "bound"
+    },
+    {
+      "edge_id": "runtime.master-worker-loop#11g",
+      "operation_id": "agent.project_runtime_agent_activity",
+      "source_resource": "agent",
+      "target_resource": "runtime_agent_activity",
+      "mainline_call_doc": "docs/mainline-calls/runtime.master-worker-loop.json",
+      "call_table_step": "11g",
+      "file_path": "crates/freehand-runtime/src/master_runner.rs",
+      "symbol_path": "ProductionMasterRunner::current_agent_activity / ProductionMasterRunner::run_until_with_policy / ProductionMasterRunner::record_terminal_failure",
+      "binding_status": "bound"
+    },
+    {
+      "edge_id": "app.runtime-daemon#10a",
+      "operation_id": "runtime_agent_activity.merge_for_presence",
+      "source_resource": "runtime_agent_activity",
+      "target_resource": "agent_presence",
+      "mainline_call_doc": "docs/mainline-calls/app.runtime-daemon.json",
+      "call_table_step": "10a",
+      "file_path": "apps/freehand-daemon/src/main.rs",
+      "symbol_path": "run_master_mode / run_relay_worker_mode / relay_presence_from_runtime",
+      "binding_status": "bound"
+    },
+    {
       "edge_id": "relay.transport#01",
       "operation_id": "relay_account.register",
       "source_resource": "relay_account",
@@ -1678,6 +1769,17 @@
       "call_table_step": "13",
       "file_path": "apps/freehand-relay-server/src/main.rs / crates/freehand-relay/src/agent_client.rs",
       "symbol_path": "agent_tunnel_config_from_env / RelayAgentClient::run",
+      "binding_status": "bound"
+    },
+    {
+      "edge_id": "relay.transport#13a",
+      "operation_id": "agent_presence.heartbeat",
+      "source_resource": "agent_presence",
+      "target_resource": "agent_presence",
+      "mainline_call_doc": "docs/mainline-calls/relay.transport.json",
+      "call_table_step": "13a",
+      "file_path": "crates/freehand-relay/src/agent_client.rs",
+      "symbol_path": "RelayAgentClient::run / RelayAgentClient::current_heartbeat",
       "binding_status": "bound"
     },
     {
@@ -1997,6 +2099,30 @@
       "allowed_direct": true,
       "via_resources": [],
       "reason": "Agent lifecycle owner may update one agent's typed process identity and heartbeat projection without a second health resource."
+    },
+    {
+      "rule_id": "agent-projects-runtime-activity-direct",
+      "source_resource": "agent",
+      "target_resource": "runtime_agent_activity",
+      "allowed_direct": true,
+      "via_resources": [],
+      "reason": "The Worker runner may read AgentLifecycle truth and derive one ephemeral typed control activity projection; it may not write UI or ADP payloads."
+    },
+    {
+      "rule_id": "turn-projects-runtime-activity-direct",
+      "source_resource": "turn",
+      "target_resource": "runtime_agent_activity",
+      "allowed_direct": true,
+      "via_resources": [],
+      "reason": "Runtime may derive direct-session activity from active-turn truth into the same typed control projection without mutating turn or UI truth."
+    },
+    {
+      "rule_id": "runtime-activity-projects-relay-presence-direct",
+      "source_resource": "runtime_agent_activity",
+      "target_resource": "agent_presence",
+      "allowed_direct": true,
+      "via_resources": [],
+      "reason": "The daemon host may map the typed runtime activity projection into Relay control heartbeat status/count only; business payload copying is forbidden."
     },
     {
       "rule_id": "timer-fires-master-wakeup-direct",

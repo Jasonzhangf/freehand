@@ -1,8 +1,8 @@
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
-use std::sync::Mutex;
 use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
+use std::sync::{Arc, Mutex, mpsc};
+use std::thread;
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use freehand_config::{
@@ -2333,6 +2333,136 @@ fn production_master_resume_rejects_mismatched_return_identity() {
 }
 
 #[test]
+fn production_master_runner_activity_projects_actionable_work_and_resets_after_completion() {
+    let runtime_home = temp_path("master-activity-running");
+    bootstrap_runner(&runtime_home);
+    let task_id = seed_review_ready_task(&runtime_home);
+    let action_task_id = task_id.clone();
+    let (entered_tx, entered_rx) = mpsc::sync_channel(1);
+    let (release_tx, release_rx) = mpsc::sync_channel(1);
+    let executor_release = Arc::new(Mutex::new(release_rx));
+    let executor = Arc::new(StubMasterExecutor::new(move |request| {
+        entered_tx
+            .send(())
+            .map_err(|error| format!("failed to report entered activity: {error}"))?;
+        executor_release
+            .lock()
+            .expect("lock activity release")
+            .recv_timeout(Duration::from_secs(10))
+            .map_err(|error| format!("failed to release activity: {error}"))?;
+        let runtime =
+            TaskRuntime::boot(&request.runtime_home, AgentId::new("master")).map_err(to_string)?;
+        runtime
+            .approve_review(TaskMutationRequest {
+                task_id: action_task_id.clone(),
+                actor: test_actor("master"),
+                watermark: test_watermark("activity-approve"),
+            })
+            .map_err(to_string)?;
+        runtime
+            .close_task(TaskMutationRequest {
+                task_id: action_task_id.clone(),
+                actor: test_actor("master"),
+                watermark: test_watermark("activity-close"),
+            })
+            .map_err(to_string)?;
+        Ok("activity work completed".to_owned())
+    }));
+    let runner = Arc::new(test_runner(runtime_home.clone(), executor));
+    assert_eq!(
+        runner.current_agent_activity(),
+        RuntimeAgentActivityProjection {
+            status: RuntimeAgentActivityStatus::Idle,
+            active_session_count: 0,
+        }
+    );
+    let running_runner = Arc::clone(&runner);
+    let handle = thread::spawn(move || running_runner.run_once());
+    entered_rx
+        .recv_timeout(Duration::from_secs(10))
+        .expect("Master activity executor did not start");
+    assert_eq!(
+        runner.current_agent_activity(),
+        RuntimeAgentActivityProjection {
+            status: RuntimeAgentActivityStatus::Running,
+            active_session_count: 1,
+        }
+    );
+    release_tx.send(()).expect("release Master activity");
+    assert!(matches!(
+        handle
+            .join()
+            .expect("join activity tick")
+            .expect("activity tick"),
+        ProductionMasterTickOutcome::TaskAdvanced {
+            to: TaskStatus::Closed,
+            ..
+        }
+    ));
+    assert_eq!(
+        runner.current_agent_activity(),
+        RuntimeAgentActivityProjection {
+            status: RuntimeAgentActivityStatus::Idle,
+            active_session_count: 0,
+        }
+    );
+
+    fs::remove_dir_all(runtime_home).expect("cleanup");
+}
+
+#[test]
+fn production_master_runner_activity_projects_retry_wait_and_cancellation_reset() {
+    let runtime_home = temp_path("master-activity-waiting");
+    bootstrap_runner(&runtime_home);
+    seed_review_ready_task(&runtime_home);
+    let executor = Arc::new(StubMasterExecutor::new(|_| {
+        Err("provider temporarily unavailable".to_owned())
+    }));
+    let runner = Arc::new(test_runner(runtime_home.clone(), executor.clone()));
+    let cancel = Arc::new(AtomicBool::new(false));
+    let loop_runner = Arc::clone(&runner);
+    let loop_cancel = Arc::clone(&cancel);
+    let handle = thread::spawn(move || {
+        loop_runner.run_until_with_policy(
+            loop_cancel,
+            MasterLoopRetryPolicy {
+                initial_backoff: Duration::from_secs(5),
+                max_backoff: Duration::from_secs(5),
+            },
+        )
+    });
+
+    for _ in 0..200 {
+        if runner.current_agent_activity().status == RuntimeAgentActivityStatus::Waiting {
+            break;
+        }
+        thread::sleep(Duration::from_millis(10));
+    }
+    assert_eq!(executor.calls.load(Ordering::Acquire), 1);
+    assert_eq!(
+        runner.current_agent_activity(),
+        RuntimeAgentActivityProjection {
+            status: RuntimeAgentActivityStatus::Waiting,
+            active_session_count: 0,
+        }
+    );
+    cancel.store(true, Ordering::Release);
+    handle
+        .join()
+        .expect("join retry loop")
+        .expect("cancel retry loop");
+    assert_eq!(
+        runner.current_agent_activity(),
+        RuntimeAgentActivityProjection {
+            status: RuntimeAgentActivityStatus::Idle,
+            active_session_count: 0,
+        }
+    );
+
+    fs::remove_dir_all(runtime_home).expect("cleanup");
+}
+
+#[test]
 fn production_master_loop_retries_executor_failure_and_closes_same_event() {
     let runtime_home = temp_path("loop-executor-retry");
     bootstrap_runner(&runtime_home);
@@ -2465,6 +2595,13 @@ fn production_master_loop_stops_on_corrupt_cursor_state() {
         .expect_err("corrupt owner truth must stop the loop");
     assert!(matches!(error, ProductionMasterRunnerError::State(_)));
     assert_eq!(executor.calls.load(Ordering::Relaxed), 0);
+    assert_eq!(
+        runner.current_agent_activity(),
+        RuntimeAgentActivityProjection {
+            status: RuntimeAgentActivityStatus::Error,
+            active_session_count: 0,
+        }
+    );
 
     fs::remove_dir_all(runtime_home).expect("cleanup");
 }
@@ -4649,6 +4786,7 @@ fn selected_master_with_workers(worker_ids: &[&str]) -> SelectedAgentConfig {
         fallback_provider: None,
         model_group_id: None,
         restart_required_on_change: true,
+        relay_connection: None,
     }
 }
 

@@ -10,7 +10,8 @@
     "input_attachment.prepare_provider_input",
     "input_attachment.project_to_ui",
     "session.restore",
-    "debug_trace.read_snapshot"
+    "debug_trace.read_snapshot",
+    "turn.project_runtime_agent_activity"
   ],
   "request_mainline": [
     "accepted UI command ingress arrives as a `UiCommandDispatchEnvelope`",
@@ -333,7 +334,7 @@
       "step": "02",
       "symbol_path": "RuntimeCommandDispatcher::from_selected_agent",
       "file_path": "crates/freehand-runtime/src/lib.rs",
-      "responsibility": "derive runtime bootstrap config from one selected agent config",
+      "responsibility": "derive runtime bootstrap config from one selected Master or Worker while preserving the configured pair and selected reason identity",
       "input_semantic": "selected agent config",
       "output_semantic": "runtime dispatcher",
       "caller": "daemon/bootstrap tests",
@@ -375,9 +376,9 @@
     },
     {
       "step": "06",
-      "symbol_path": "run_live_reason_turn_with_hooks",
+      "symbol_path": "run_live_reason_turn_with_hooks / run_worker_live_reason_turn_with_hooks",
       "file_path": "crates/freehand-runtime/src/lib.rs",
-      "responsibility": "execute a live provider turn while streaming reason/debug/tool-result callbacks to runtime-owned consumers",
+      "responsibility": "execute a role-correct live provider turn while streaming reason/debug/tool-result callbacks to runtime-owned consumers",
       "input_semantic": "selected live config plus live request plus callbacks",
       "output_semantic": "live turn outcome plus incremental callbacks",
       "caller": "runtime dispatch/tests",
@@ -438,11 +439,11 @@
       "step": "08",
       "symbol_path": "RuntimeCommandDispatcher::dispatch_prepared_live_submit",
       "file_path": "crates/freehand-runtime/src/lib.rs",
-      "responsibility": "run provider-backed live turn outside runtime mutex while honoring active cancel token",
+      "responsibility": "run provider-backed Master or Worker live turn outside runtime mutex while honoring active cancel token and keeping Master active-work truth Master-only",
       "input_semantic": "prepared live submit",
       "output_semantic": "live receipt or cancelled dispatch failure",
       "caller": "RuntimeCommandDispatcher::dispatch",
-      "callee": "run_live_reason_turn_with_hooks",
+      "callee": "run_live_reason_turn_with_hooks / run_worker_live_reason_turn_with_hooks",
       "binding_status": "bound"
     },
     {
@@ -465,6 +466,20 @@
       "output_semantic": "cancelled turn projection and persisted cancelled turn truth",
       "caller": "RuntimeCommandDispatcher::finish_live_submit",
       "callee": "reason persistence plus UI projection",
+      "binding_status": "bound"
+    },
+    {
+      "step": "08p",
+      "symbol_path": "RuntimeCommandDispatcher::current_agent_activity / RuntimeAgentActivityProjection::merge",
+      "file_path": "crates/freehand-runtime/src/lib.rs",
+      "responsibility": "project direct-session activity and merge it with a separate owner-projected activity source without reading UI or ADP payloads",
+      "input_semantic": "runtime active-turn truth plus typed external activity projection",
+      "output_semantic": "typed status and saturating active-session count projection",
+      "caller": "daemon Relay presence wiring",
+      "callee": "Relay control-side heartbeat projection",
+      "source_resource": "turn",
+      "target_resource": "runtime_agent_activity",
+      "resource_operation": "turn.project_runtime_agent_activity",
       "binding_status": "bound"
     },
     {

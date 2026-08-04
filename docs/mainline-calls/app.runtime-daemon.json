@@ -6,7 +6,9 @@
   "test_design_doc": "docs/testing/app.runtime-daemon.md",
   "mainline_call_doc": "docs/mainline-calls/app.runtime-daemon.json",
   "generated_wiki_doc": "docs/wiki/app.runtime-daemon.md",
-  "resource_operations": [],
+  "resource_operations": [
+    "runtime_agent_activity.merge_for_presence"
+  ],
   "request_mainline": [
     "daemon process accepts a host command to start the UI transport",
     "daemon process may be started by macOS launchd through the installed freehand-daemon-launchd wrapper with explicit Android update manifest/APK env paths staged under runtime home",
@@ -357,22 +359,25 @@
       "step": "10",
       "symbol_path": "run_master_mode / monitor_master_lifecycle_runner",
       "file_path": "apps/freehand-daemon/src/main.rs",
-      "responsibility": "run WebUI/ADP as the Master host lifetime while monitoring the background Master lifecycle runner stop/error without treating it as a daemon host crash",
-      "input_semantic": "Master bootstrap plus bind plus lifecycle runner task",
-      "output_semantic": "healthy HTTP/ADP host plus explicit stderr lifecycle-runner stop/error evidence",
+      "responsibility": "run WebUI/ADP as the Master host lifetime while monitoring the background Master lifecycle runner stop/error without treating it as a daemon host crash, and return host-observed unexpected stop or panic to the runner activity owner as terminal Error",
+      "input_semantic": "Master bootstrap plus bind plus lifecycle runner task plus cancellation truth",
+      "output_semantic": "healthy HTTP/ADP host plus explicit stderr lifecycle-runner stop/error evidence and typed terminal activity",
       "caller": "daemon CLI",
       "callee": "shared WebUI transport plus ProductionMasterRunner::run_until",
       "binding_status": "bound"
     },
     {
       "step": "10a",
-      "symbol_path": "run_master_mode",
+      "symbol_path": "run_master_mode / run_relay_worker_mode / relay_presence_from_runtime",
       "file_path": "apps/freehand-daemon/src/main.rs",
-      "responsibility": "join the configured Agent outbound Relay client to the Master host lifetime against the already-bound local daemon listener",
-      "input_semantic": "selected Agent Relay connection plus local loopback listener address",
-      "output_semantic": "WebUI host result or explicit Relay client terminal error",
-      "caller": "run_master_mode",
+      "responsibility": "join one configured Agent outbound Relay client to its role-correct host lifetime, merge foreground dispatcher activity with background Master or Worker owner activity, and project only the typed result into the Relay control side-channel",
+      "input_semantic": "selected Relay connection plus local loopback listener plus foreground and background runtime activity projections",
+      "output_semantic": "WebUI host result or explicit Relay client terminal error plus typed role/status/count heartbeat",
+      "caller": "daemon role host",
       "callee": "RelayAgentClient::run",
+      "source_resource": "runtime_agent_activity",
+      "target_resource": "agent_presence",
+      "resource_operation": "runtime_agent_activity.merge_for_presence",
       "binding_status": "bound"
     },
     {
@@ -390,22 +395,33 @@
       "step": "12",
       "symbol_path": "run_worker_mode",
       "file_path": "apps/freehand-daemon/src/main.rs",
-      "responsibility": "route configured Slave mode into the production Worker runner without UI transport or app-owned health inference",
+      "responsibility": "route configured Slave mode into either the production Worker-only lifetime or one Relay-configured loopback UI/ADP, outbound tunnel, and cancellable Worker lifetime without app-owned health inference",
       "input_semantic": "selected Slave bootstrap",
-      "output_semantic": "long-running Worker service whose process truth is written by agent.lifecycle",
+      "output_semantic": "long-running Worker service whose process truth is written by agent.lifecycle plus optional explicit host or Relay terminal result",
       "caller": "daemon CLI",
-      "callee": "run_blocking_worker_service",
+      "callee": "run_blocking_worker_service / serve_webui_listener / RelayAgentClient::run",
       "binding_status": "bound"
     },
     {
       "step": "13",
       "symbol_path": "run_blocking_worker_service",
       "file_path": "apps/freehand-daemon/src/main.rs",
-      "responsibility": "isolate the synchronous Worker and provider loop from the daemon async runtime thread",
+      "responsibility": "isolate the non-Relay synchronous Worker and provider loop from the daemon async runtime thread",
       "input_semantic": "Worker service closure",
       "output_semantic": "Worker service result or explicit blocking-task join failure",
       "caller": "run_worker_mode",
       "callee": "tokio::task::spawn_blocking",
+      "binding_status": "bound"
+    },
+    {
+      "step": "13a",
+      "symbol_path": "run_relay_worker_mode / ProductionWorkerRunner::run_until",
+      "file_path": "apps/freehand-daemon/src/main.rs / crates/freehand-runtime/src/worker_runner.rs",
+      "responsibility": "spawn the Relay-configured Worker runner with the same explicit cancellation token owned by the loopback host and Relay client lifetime",
+      "input_semantic": "Relay-configured Worker runner plus owner-supplied cancellation token",
+      "output_semantic": "cancellable blocking Worker result or explicit join failure",
+      "caller": "run_relay_worker_mode",
+      "callee": "ProductionWorkerRunner::run_until",
       "binding_status": "bound"
     }
   ],

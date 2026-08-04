@@ -236,7 +236,10 @@ fn valid_websocket_target_path(path: &str) -> bool {
         && !decoded.split('/').any(|part| part == "..")
 }
 
-fn attach_control(state: &RelayState, identity: RelayTunnelIdentity) -> Result<u64, String> {
+fn attach_control(
+    state: &RelayState,
+    identity: RelayTunnelIdentity,
+) -> Result<crate::tunnel::RelayControlAdmission, String> {
     state
         .tunnels
         .lock()
@@ -354,9 +357,31 @@ async fn run_control_socket(
         };
         if control_generation.is_none() {
             match attach_control(&state, identity.clone()) {
-                Ok(generation) => control_generation = Some(generation),
+                Ok(admission) => {
+                    control_generation = Some(admission.generation);
+                    for delivery in admission.replaced_deliveries {
+                        if let Err(error) = delivery.deliver().await {
+                            eprintln!(
+                                "Relay stale control replacement delivery failed for {identity:?}: {error}"
+                            );
+                            break;
+                        }
+                    }
+                }
                 Err(_) => break,
             }
+        } else if !state
+            .tunnels
+            .lock()
+            .map(|tunnels| {
+                tunnels.has_control_generation(
+                    &identity,
+                    control_generation.expect("control generation is present"),
+                )
+            })
+            .unwrap_or(false)
+        {
+            break;
         }
         if record_heartbeat(&state, identity.account_id.clone(), next.clone())
             .await

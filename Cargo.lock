@@ -406,6 +406,7 @@ dependencies = [
 name = "freehand-daemon"
 version = "0.1.0"
 dependencies = [
+ "axum",
  "freehand-contracts",
  "freehand-metadata",
  "freehand-relay",

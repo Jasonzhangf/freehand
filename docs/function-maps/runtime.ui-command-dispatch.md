@@ -22,6 +22,7 @@
   - `input_attachment`
   - `provider_request`
   - `ui_projection`
+  - `runtime_agent_activity`
   - `session`
   - `task`
   - `timer`
@@ -31,18 +32,23 @@
   - `input_attachment.prepare_provider_input` (`input_attachment` -> `provider_request`)
   - `input_attachment.project_to_ui` (`input_attachment` -> `ui_projection`)
   - `debug_trace.read_snapshot` (`debug_trace` -> `ui_projection`)
+  - `turn.project_runtime_agent_activity` (`turn` -> `runtime_agent_activity`)
   - session transcript bridge references `reason.persistence` owner operation `session.restore`
   - timer bridge references `runtime.master-worker-loop` owner operations `timer.schedule`, `timer.cancel`, and `timer.list`
   - tool registry bridge references `tool.registry` owner operation `tool_call.project_registry_to_ui`
   - search bridge references `reason.persistence` owner operation `session.list_persisted` and `task.orchestration` parent-session truth for Worker child nesting
 - forbidden shortcuts:
   - Runtime must not persist image base64 in reason/session history or project it to UI history.
+  - Runtime activity is a typed control-side projection only; it must not be copied into ADP or UI business payloads.
   - Provider adapters must consume only provider-neutral attachment semantics; runtime must not construct protocol-specific image wire payloads.
 
 ## Request Mainline
 
 - accepted UI command ingress arrives as a `UiCommandDispatchEnvelope`
-- runtime bootstrap may first select one configured agent from `~/.freehand/config.toml`
+- runtime bootstrap may first select one configured agent from
+  `~/.freehand/config.toml`; Master and Worker selections preserve the same
+  configured node pair but bind reason/session projection to the selected
+  Agent's own identity and node
 - config-selected bootstrap consumes local node id and the ordered configured
   peer set, including each peer node id, allowed IP, and pair-token env, from
   `config.core`
@@ -52,10 +58,20 @@
 - live bootstrap may restore persisted session truth and prior turn projections before the next command runs, then recover or clear dead-owner Master active-work checkpoints before accepting user work
 - runtime dispatch owner reads the declared owner target from the envelope
 - session management commands route through runtime into `reason.persistence` session metadata and rollback APIs; runtime refreshes `UiProtocolState` from persistence-owned metadata/effective transcript projections after mutation
-- live submit registers active turn cancellation state, persists a prepared active turn snapshot before context/provider work, and releases the runtime mutex before provider IO
+- live submit registers active turn cancellation state, persists a prepared
+  active turn snapshot before context/provider work, and releases the runtime
+  mutex before provider IO; Master selection uses Master active-work control
+  truth and Master reason policy, while Worker selection uses Worker reason
+  policy and must not create or clear Master active-work truth
+- Worker-selected dispatch rejects Master-only task orchestration, Master poll,
+  Worker control, and direct-to-Slave commands before owner mutation
+- `RuntimeCommandDispatcher::current_agent_activity` projects direct-session
+  activity from runtime-owned active turns; `RuntimeAgentActivityProjection::merge`
+  combines it with lifecycle-owner delegated activity without reading UI or ADP
+  payloads
 - `CancelLatestActiveTurn` resolves to the newest active live turn before falling back to latest persisted runtime turn
 - runtime dispatch routes the command into reason, node, or checkpoint owner adapters without letting the app own those semantics
-- ADP/read-only task query requests enter through `UiRuntimeQueryPort` and route to `TaskRuntime::list_tasks` or `TaskRuntime::task_history` without duplicating task filtering or ledger ordering in runtime
+- ADP/read-only task query requests enter through `UiRuntimeQueryPort` and route to `TaskRuntime::list_tasks` or `TaskRuntime::task_history` without duplicating task filtering or ledger ordering in runtime; Worker-selected hosts preserve the Worker reason/session namespace while reading Task Center projections from the paired Master owner namespace
 - `QuerySessionTurns` enters through `RuntimeCommandDispatcher::query_runtime`, searches only the master and configured Worker reason-persistence namespaces, restores the requested effective logical-turn snapshots with their owning agent/node source, hides framework-owned `worker-task-*` input prompts from `user_text`, and replaces the derived session transcript so parent and Worker task conversations are visible without daemon restart while preserving live provider/model waiting and tool activity already published into `UiProtocolState` only for the latest nonterminal replacement turn; if the latest background lifecycle turn has no live hook projection yet, the runtime derives same-session/same-turn model-waiting state from ErrorCenter metadata truth before projection, while terminal turn snapshots and historical earlier rounds remain authoritative and cannot be re-lit as active
 - ADP/read-only error-center query requests enter through `UiRuntimeQueryPort` and route to runtime-owned metadata ledger projection without exposing raw provider/tool/request text
 - ADP/read-only config status query requests enter through `UiRuntimeQueryPort`, reload config-owner truth from the runtime home, and project the selected live agent/provider config plus complete safe provider registry, complete safe model group registry, active model group id, and web_search configured/effective route diagnostics without exposing API keys, pair tokens, or credential-bearing URLs

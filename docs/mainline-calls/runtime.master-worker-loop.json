@@ -13,7 +13,8 @@
     "timer.list",
     "master_work.resolve_attention",
     "master_work.admit_resolution_context",
-    "agent.heartbeat"
+    "agent.heartbeat",
+    "agent.project_runtime_agent_activity"
   ],
   "request_mainline": [
     "one daemon process selects one configured agent",
@@ -189,6 +190,20 @@
       "why_shared": "path and symlink diagnosis must not diverge between Worker preflight and Master task dispatch failure text"
     },
     {
+      "symbol": "sleep_with_cancel",
+      "owner": "crates/freehand-runtime/src/lifecycle_wait.rs",
+      "purpose": "wait in bounded increments while observing one owner-supplied host cancellation token",
+      "allowed_callers": [
+        "ProductionWorkerRunner::run_until",
+        "ProductionMasterRunner cancellation waits"
+      ],
+      "related_tests": [
+        "production_worker_runner_honors_preexisting_host_cancellation",
+        "production_worker_runner_host_cancellation_interrupts_active_task_before_exit"
+      ],
+      "why_shared": "Master and Worker lifecycle loops must use one cancellation-aware wait primitive instead of duplicating polling semantics"
+    },
+    {
       "symbol": "recover_stale_lifecycle_waits_on_bootstrap / session_has_lifecycle_owner_for_turn",
       "owner": "crates/freehand-runtime/src/lib.rs",
       "purpose": "close no-owner persisted ToolPending session turns during live runtime bootstrap while preserving owner-backed lifecycle waits",
@@ -217,13 +232,13 @@
     },
     {
       "step": "02",
-      "symbol_path": "ProductionWorkerRunner::run",
-      "file_path": "crates/freehand-runtime/src/worker_runner.rs",
-      "responsibility": "run periodic Worker ticks with explicit cadence",
-      "input_semantic": "runner and interval",
-      "output_semantic": "long-running Worker service",
+      "symbol_path": "ProductionWorkerRunner::run / ProductionWorkerRunner::run_until / sleep_with_cancel / ProductionWorkerRunner::close_host_cancelled_execution",
+      "file_path": "crates/freehand-runtime/src/worker_runner.rs / crates/freehand-runtime/src/lifecycle_wait.rs",
+      "responsibility": "run periodic Worker ticks until host cancellation and durably interrupt any still-active owned execution before service exit",
+      "input_semantic": "runner, interval, and owner-supplied host cancellation token",
+      "output_semantic": "long-running Worker service or explicit host-cancelled interruption closeout",
       "caller": "daemon Slave mode",
-      "callee": "ProductionWorkerRunner::run_once",
+      "callee": "ProductionWorkerRunner::run_once / ProductionWorkerRunner::close_host_cancelled_execution",
       "binding_status": "bound"
     },
     {
@@ -235,6 +250,20 @@
       "output_semantic": "idle, review-ready, interrupted, or blocked outcome without stale paused overwrite",
       "caller": "Worker service loop and tests",
       "callee": "task owner and live bridge",
+      "binding_status": "bound"
+    },
+    {
+      "step": "02p",
+      "symbol_path": "ProductionWorkerRunner::current_agent_activity",
+      "file_path": "crates/freehand-runtime/src/worker_runner.rs",
+      "responsibility": "read the owning AgentLifecycle snapshot and project Worker activity into a typed control-side activity value without entering UI or ADP payloads",
+      "input_semantic": "Worker identity plus read-only TaskRuntime lifecycle snapshot",
+      "output_semantic": "typed Worker activity projection or explicit lifecycle read error",
+      "caller": "daemon Relay presence source",
+      "callee": "TaskRuntime::query_agent_lifecycle",
+      "source_resource": "agent",
+      "target_resource": "runtime_agent_activity",
+      "resource_operation": "agent.project_runtime_agent_activity",
       "binding_status": "bound"
     },
     {
@@ -406,6 +435,20 @@
       "source_resource": "master_work",
       "target_resource": "request_context",
       "resource_operation": "master_work.admit_resolution_context",
+      "binding_status": "bound"
+    },
+    {
+      "step": "11g",
+      "symbol_path": "ProductionMasterRunner::current_agent_activity / ProductionMasterRunner::run_until_with_policy / ProductionMasterRunner::record_terminal_failure",
+      "file_path": "crates/freehand-runtime/src/master_runner.rs",
+      "responsibility": "own the typed background Master activity lifecycle so actionable task, timer, and parent execution is Running, retry backoff is Waiting, terminal runner failure is Error, and idle, cancelled, or completed work is Idle",
+      "input_semantic": "Master runner action, retry, cancellation, and terminal result",
+      "output_semantic": "typed Master runtime activity projection with exact active-session count",
+      "caller": "daemon Relay presence source and Master runner monitor",
+      "callee": "runtime activity owner state",
+      "source_resource": "agent",
+      "target_resource": "runtime_agent_activity",
+      "resource_operation": "agent.project_runtime_agent_activity",
       "binding_status": "bound"
     },
     {

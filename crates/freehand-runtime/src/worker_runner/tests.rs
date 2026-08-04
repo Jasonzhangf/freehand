@@ -1,6 +1,6 @@
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex, OnceLock};
 use std::thread;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -19,6 +19,7 @@ use freehand_task::{
 use serde_json::Value;
 
 use super::*;
+use crate::{RuntimeAgentActivityProjection, RuntimeAgentActivityStatus};
 
 fn home_lock() -> &'static Mutex<()> {
     static LOCK: OnceLock<Mutex<()>> = OnceLock::new();
@@ -1414,6 +1415,105 @@ fn production_worker_runner_rejects_master_mode() {
     }
 }
 
+#[test]
+fn production_worker_runner_honors_preexisting_host_cancellation() {
+    let runtime_home = temp_path("host-cancelled");
+    let runner =
+        ProductionWorkerRunner::from_selected_agent(selected_worker(), runtime_home.clone())
+            .expect("worker runner");
+    let cancelled = Arc::new(AtomicBool::new(true));
+    assert_eq!(
+        runner.current_agent_activity().expect("owner activity"),
+        RuntimeAgentActivityProjection {
+            status: RuntimeAgentActivityStatus::Idle,
+            active_session_count: 0,
+        }
+    );
+
+    runner
+        .run_until(cancelled)
+        .expect("cancelled worker lifetime closes cleanly");
+
+    if runtime_home.exists() {
+        fs::remove_dir_all(runtime_home).expect("cleanup");
+    }
+}
+
+#[derive(Clone)]
+struct HostCancellationAwareExecutor {
+    started: Arc<AtomicBool>,
+    cancel_token_observed: Arc<AtomicBool>,
+}
+
+impl WorkerTurnExecutor for HostCancellationAwareExecutor {
+    fn execute(
+        &self,
+        _selected: &SelectedAgentConfig,
+        request: LiveReasonTurnRequest,
+    ) -> Result<WorkerTurnExecution, String> {
+        self.started.store(true, Ordering::Release);
+        let cancel_token = request
+            .cancel_token
+            .expect("Worker runner must pass a live cancel token");
+        for _ in 0..160 {
+            if cancel_token.load(Ordering::Acquire) {
+                self.cancel_token_observed.store(true, Ordering::Release);
+                return Err("live turn cancelled by Worker host shutdown".to_owned());
+            }
+            thread::sleep(Duration::from_millis(25));
+        }
+        Err("Worker host cancellation did not reach the live turn".to_owned())
+    }
+}
+
+#[test]
+fn production_worker_runner_host_cancellation_interrupts_active_task_before_exit() {
+    let runtime_home = temp_path("host-cancelled-active-task");
+    let workspace = temp_path("host-cancelled-active-task-workspace");
+    fs::create_dir_all(&workspace).expect("workspace");
+    let started = Arc::new(AtomicBool::new(false));
+    let cancel_token_observed = Arc::new(AtomicBool::new(false));
+    let executor = Arc::new(HostCancellationAwareExecutor {
+        started: Arc::clone(&started),
+        cancel_token_observed: Arc::clone(&cancel_token_observed),
+    });
+    let runner = test_runner(runtime_home.clone(), executor);
+    let task_id = seed_assigned_task(&runtime_home, Some(&workspace));
+    let cancel = Arc::new(AtomicBool::new(false));
+    let runner_cancel = Arc::clone(&cancel);
+    let handle = thread::spawn(move || runner.run_until(runner_cancel));
+
+    for _ in 0..80 {
+        if started.load(Ordering::Acquire) {
+            break;
+        }
+        thread::sleep(Duration::from_millis(25));
+    }
+    assert!(started.load(Ordering::Acquire));
+    cancel.store(true, Ordering::Release);
+    handle
+        .join()
+        .expect("worker runner thread")
+        .expect("cancelled worker runner closes cleanly");
+
+    assert!(cancel_token_observed.load(Ordering::Acquire));
+    let runtime = TaskRuntime::boot(&runtime_home, AgentId::new("master")).expect("runtime");
+    assert_eq!(
+        runtime.query_task(&task_id).expect("task").status,
+        TaskStatus::Interrupted
+    );
+    assert!(
+        runtime
+            .task_history(&task_id)
+            .expect("history")
+            .iter()
+            .any(|event| event.event_type == "TaskInterrupted")
+    );
+
+    fs::remove_dir_all(runtime_home).expect("cleanup runtime");
+    fs::remove_dir_all(workspace).expect("cleanup workspace");
+}
+
 fn test_runner(
     runtime_home: PathBuf,
     executor: Arc<dyn WorkerTurnExecutor>,
@@ -1583,6 +1683,7 @@ fn selected_worker() -> SelectedAgentConfig {
         fallback_provider: None,
         model_group_id: None,
         restart_required_on_change: true,
+        relay_connection: None,
     }
 }
 
