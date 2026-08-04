@@ -1,0 +1,15 @@
+{
+  "schema_version": 1,
+  "verification_map_id": "runtime.master-worker-loop.verification",
+  "feature_id": "runtime.master-worker-loop",
+  "status": "active",
+  "module_registry": "docs/module-registry/runtime.master-worker-loop.json",
+  "function_map": "docs/function-maps/runtime.master-worker-loop.md",
+  "mainline_call_map": "docs/mainline-calls/runtime.master-worker-loop.json",
+  "test_design": "docs/testing/runtime.master-worker-loop.md",
+  "gates": [
+    {"gate_id":"runtime.master-worker-loop.unit","kind":"test","command":"cargo test -p freehand-runtime --lib -- --nocapture","binding_status":"active"},
+    {"gate_id":"runtime.master-worker-loop.clippy","kind":"lint","command":"cargo clippy -p freehand-runtime --all-targets -- -D warnings","binding_status":"active"},
+    {"gate_id":"runtime.master-worker-loop.architecture","kind":"architecture","command":"cargo run -p xtask -- gates check","binding_status":"active"}
+  ]
+}

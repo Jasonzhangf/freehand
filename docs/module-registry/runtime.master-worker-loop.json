@@ -1,0 +1,22 @@
+{
+  "schema_version": 1,
+  "registry_id": "runtime.master-worker-loop.modules",
+  "feature_id": "runtime.master-worker-loop",
+  "status": "active",
+  "coverage_roots": ["crates/freehand-runtime/src/worker_runner.rs", "crates/freehand-runtime/src/worker_runner"],
+  "modules": [
+    {
+      "module_id": "runtime.master-worker-loop.worker",
+      "owner_feature_id": "runtime.master-worker-loop",
+      "status": "active",
+      "owned_paths": [
+        "crates/freehand-runtime/src/worker_runner.rs",
+        "crates/freehand-runtime/src/worker_runner/heartbeat.rs",
+        "crates/freehand-runtime/src/worker_runner/tests.rs"
+      ],
+      "allowed_dependencies": ["freehand-config", "freehand-contracts", "freehand-reason", "freehand-task", "freehand-tools", "rust.std", "third_party.tokio"],
+      "forbidden_dependencies": ["freehand-relay", "freehand-server", "freehand-ui-protocol"]
+    }
+  ],
+  "declared_edges": []
+}

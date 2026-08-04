@@ -14,8 +14,9 @@ use tokio_tungstenite::tungstenite::http::header::AUTHORIZATION;
 use tokio_tungstenite::tungstenite::protocol::{CloseFrame, frame::coding::CloseCode};
 
 use crate::model::{
-    AgentHeartbeat, RelayControlInFrame, RelayControlOutFrame, RelayDataFrameKind,
-    RelayDataInFrame, RelayDataOutFrame, RelayDataProtocol, RelayErrorInFrame, RelayErrorOutFrame,
+    AgentHeartbeat, RELAY_TUNNEL_PROTOCOL_VERSION, RelayControlInFrame, RelayControlOutFrame,
+    RelayDataFrameKind, RelayDataInFrame, RelayDataOutFrame, RelayDataProtocol, RelayErrorInFrame,
+    RelayErrorOutFrame,
 };
 
 #[derive(Debug, Clone)]
@@ -106,7 +107,7 @@ impl RelayAgentClient {
     }
 
     pub async fn run(self) -> Result<(), String> {
-        let control = connect_channel(&self.config, "control").await?;
+        let control = connect_channel(&self.config, "control", None).await?;
         let (mut control_sink, mut control_stream) = control.split();
         let identity = self.current_heartbeat()?;
         send_control_identity(&mut control_sink, &identity).await?;
@@ -120,20 +121,25 @@ impl RelayAgentClient {
         };
         let accepted: RelayControlOutFrame = serde_json::from_str(accepted.as_str())
             .map_err(|error| format!("Relay control admission frame is invalid: {error}"))?;
-        if accepted
-            != (RelayControlOutFrame::IdentityAccepted {
-                agent_id: self.config.heartbeat.agent_id.clone(),
-            })
-        {
-            return Err("Relay control identity admission does not match the Agent".to_owned());
-        }
+        let control_generation = match accepted {
+            RelayControlOutFrame::IdentityAccepted {
+                protocol_version,
+                agent_id,
+                control_generation,
+            } if protocol_version == RELAY_TUNNEL_PROTOCOL_VERSION
+                && agent_id == self.config.heartbeat.agent_id =>
+            {
+                control_generation
+            }
+            _ => return Err("Relay control identity admission does not match the Agent".to_owned()),
+        };
 
         // The Relay only admits data/error channels after the control channel
         // has authenticated the Agent identity. Keep this ordering explicit:
         // the three sockets are separate typed channels, but admission is
         // established by the control channel first.
-        let data = connect_channel(&self.config, "data").await?;
-        let error = connect_channel(&self.config, "error").await?;
+        let data = connect_channel(&self.config, "data", Some(control_generation)).await?;
+        let error = connect_channel(&self.config, "error", Some(control_generation)).await?;
         let (mut data_sink, mut data_stream) = data.split();
         let (mut error_sink, mut error_stream) = error.split();
 
@@ -297,6 +303,7 @@ fn cancel_local_exchange(
 async fn connect_channel(
     config: &RelayAgentClientConfig,
     channel: &str,
+    control_generation: Option<u64>,
 ) -> Result<
     tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>>,
     String,
@@ -312,6 +319,15 @@ async fn connect_channel(
             .parse()
             .map_err(|error| format!("Relay authorization header is invalid: {error}"))?,
     );
+    if let Some(generation) = control_generation {
+        request.headers_mut().insert(
+            "x-freehand-relay-control-generation",
+            generation
+                .to_string()
+                .parse()
+                .map_err(|error| format!("Relay control generation header is invalid: {error}"))?,
+        );
+    }
     connect_async(request)
         .await
         .map(|(socket, _)| socket)

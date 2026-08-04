@@ -9,8 +9,9 @@ use futures_util::{SinkExt, StreamExt};
 use tokio::sync::mpsc;
 
 use crate::model::{
-    AgentHeartbeat, RelayControlInFrame, RelayControlOutFrame, RelayDataFrameKind,
-    RelayDataInFrame, RelayDataOutFrame, RelayDataProtocol, RelayErrorInFrame, RelayErrorOutFrame,
+    AgentHeartbeat, RELAY_TUNNEL_PROTOCOL_VERSION, RelayControlInFrame, RelayControlOutFrame,
+    RelayDataFrameKind, RelayDataInFrame, RelayDataOutFrame, RelayDataProtocol, RelayErrorInFrame,
+    RelayErrorOutFrame,
 };
 use crate::service::{
     RelayState, authenticated_account, error_response, raw_agent_route_path, record_disconnect,
@@ -23,6 +24,20 @@ use crate::tunnel::{
 };
 
 const RESPONSE_OPEN_TIMEOUT: Duration = Duration::from_secs(30);
+const CONTROL_GENERATION_HEADER: &str = "x-freehand-relay-control-generation";
+
+fn control_generation(headers: &HeaderMap) -> Result<u64, RelayStoreError> {
+    headers
+        .get(CONTROL_GENERATION_HEADER)
+        .and_then(|value| value.to_str().ok())
+        .ok_or_else(|| {
+            RelayStoreError::Invalid("Relay channel control generation is missing".to_owned())
+        })?
+        .parse()
+        .map_err(|_| {
+            RelayStoreError::Invalid("Relay channel control generation is invalid".to_owned())
+        })
+}
 
 pub(crate) async fn control_tunnel(
     Path(agent_id): Path<String>,
@@ -57,9 +72,17 @@ pub(crate) async fn data_tunnel(
         account_id,
         agent_id,
     };
+    let control_generation = match control_generation(&headers) {
+        Ok(generation) => generation,
+        Err(error) => return error_response(error),
+    };
     let (sender, receiver) = mpsc::channel(32);
-    let generation = match attach_data(&state, identity.clone(), RelayDataTunnelSender::new(sender))
-    {
+    let generation = match attach_data(
+        &state,
+        identity.clone(),
+        control_generation,
+        RelayDataTunnelSender::new(sender),
+    ) {
         Ok(generation) => generation,
         Err(error) => return error_response(RelayStoreError::Invalid(error)),
     };
@@ -82,10 +105,15 @@ pub(crate) async fn error_tunnel(
         account_id,
         agent_id,
     };
+    let control_generation = match control_generation(&headers) {
+        Ok(generation) => generation,
+        Err(error) => return error_response(error),
+    };
     let (sender, receiver) = mpsc::channel(32);
     let generation = match attach_error(
         &state,
         identity.clone(),
+        control_generation,
         RelayErrorTunnelSender::new(sender),
     ) {
         Ok(generation) => generation,
@@ -250,6 +278,7 @@ fn attach_control(
 fn attach_data(
     state: &RelayState,
     identity: RelayTunnelIdentity,
+    control_generation: u64,
     sender: RelayDataTunnelSender,
 ) -> Result<u64, String> {
     let mut tunnels = state
@@ -259,19 +288,20 @@ fn attach_data(
     if !tunnels.has_control(&identity) {
         return Err("Relay data tunnel requires an active control tunnel".to_owned());
     }
-    tunnels.attach_data(identity, sender)
+    tunnels.attach_data_for_control(identity, control_generation, sender)
 }
 
 fn attach_error(
     state: &RelayState,
     identity: RelayTunnelIdentity,
+    control_generation: u64,
     sender: RelayErrorTunnelSender,
 ) -> Result<u64, String> {
     state
         .tunnels
         .lock()
         .map_err(|_| "Relay tunnel registry lock poisoned".to_owned())?
-        .admit_error(identity, sender)
+        .admit_error_for_control(identity, control_generation, sender)
 }
 
 fn open_websocket_exchange(
@@ -391,7 +421,9 @@ async fn run_control_socket(
         }
         if heartbeat.is_none() {
             let frame = RelayControlOutFrame::IdentityAccepted {
+                protocol_version: RELAY_TUNNEL_PROTOCOL_VERSION,
                 agent_id: identity.agent_id.clone(),
+                control_generation: control_generation.expect("admitted control generation"),
             };
             let Ok(text) = serde_json::to_string(&frame) else {
                 break;
@@ -496,7 +528,7 @@ async fn run_data_socket(
                     let delivery = state.tunnels.lock()
                         .map_err(|_| "Relay tunnel registry lock poisoned".to_owned())
                         .and_then(|mut tunnels| {
-                            tunnels.accept_data(&identity, frame)
+                            tunnels.accept_data_generation(&identity, generation, frame)
                         });
                     let delivery = match delivery {
                         Ok(delivery) => delivery,
@@ -517,11 +549,7 @@ async fn run_data_socket(
             .tunnels
             .lock()
             .map_err(|_| "Relay tunnel registry lock poisoned".to_owned())
-            .and_then(|tunnels| {
-                tunnels
-                    .error_sender(&identity)
-                    .ok_or_else(|| "Relay error tunnel is not attached".to_owned())
-            });
+            .and_then(|tunnels| tunnels.error_sender_for_data_generation(&identity, generation));
         match error_sender {
             Ok(sender) => {
                 if let Err(error) = sender
@@ -600,8 +628,12 @@ async fn run_error_socket(
             .lock()
             .map_err(|_| "Relay tunnel registry lock poisoned".to_owned())
             .and_then(|mut tunnels| {
-                tunnels
-                    .fail_exchange(&identity, &exchange_id, format!("{code}: {message}"))
+                tunnels.fail_exchange_from_error_generation(
+                    &identity,
+                    generation,
+                    &exchange_id,
+                    format!("{code}: {message}"),
+                )
             })?;
         if let Some(delivery) = delivery {
             delivery.deliver().await?;

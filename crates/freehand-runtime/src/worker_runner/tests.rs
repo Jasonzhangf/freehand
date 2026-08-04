@@ -1439,6 +1439,29 @@ fn production_worker_runner_honors_preexisting_host_cancellation() {
     }
 }
 
+#[test]
+fn production_worker_runner_projects_assigned_task_as_waiting_activity() {
+    let runtime_home = temp_path("assigned-activity");
+    let bootstrap =
+        ProductionWorkerRunner::from_selected_agent(selected_worker(), runtime_home.clone())
+            .expect("worker runner");
+    let _task_id = seed_assigned_task(&runtime_home, None);
+    drop(bootstrap);
+    let runner =
+        ProductionWorkerRunner::from_selected_agent(selected_worker(), runtime_home.clone())
+            .expect("restarted worker runner");
+
+    assert_eq!(
+        runner.current_agent_activity().expect("assigned activity"),
+        RuntimeAgentActivityProjection {
+            status: RuntimeAgentActivityStatus::Waiting,
+            active_session_count: 1,
+        }
+    );
+
+    fs::remove_dir_all(runtime_home).expect("cleanup");
+}
+
 #[derive(Clone)]
 struct HostCancellationAwareExecutor {
     started: Arc<AtomicBool>,

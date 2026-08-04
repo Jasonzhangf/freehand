@@ -13,7 +13,7 @@
   "nodes": [
     {"node_id":"RelayControlIn01AuthenticatedConnect","channel":"control","owner":"relay.transport"},
     {"node_id":"RelayControlIn02AgentIdentity","channel":"control","owner":"relay.transport"},
-    {"node_id":"RelayControlOut03IdentityAccepted","channel":"control","owner":"relay.transport"},
+    {"node_id":"RelayControlOut03IdentityAccepted","channel":"control","owner":"relay.transport","contract":"protocol_version plus agent_id plus server-issued control_generation; dependent data/error handshakes must echo the generation in the typed control header"},
     {"node_id":"RelayControlIn03PresenceHeartbeat","channel":"control","owner":"relay.transport"},
     {"node_id":"RelayControlOut04LeaseProjection","channel":"control","owner":"relay.transport"},
     {"node_id":"RelayDataIn01RequestOpen","channel":"data","owner":"relay.transport"},

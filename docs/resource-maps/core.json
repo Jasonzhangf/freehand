@@ -54,7 +54,7 @@
       "identity": "authenticated account id plus agent id plus control connection generation",
       "truth_store": "live control connection registry and persisted presence projection",
       "operations": ["connect", "heartbeat", "disconnect", "admit_data", "admit_error"],
-      "projections": ["authenticated tunnel admission", "presence lease updates", "explicit disconnect"]
+      "projections": ["authenticated tunnel admission with server-issued control generation", "presence lease updates", "explicit disconnect"]
     },
     {
       "resource_type": "runtime_agent_activity",
@@ -82,7 +82,7 @@
       "owner_crate": "crates/freehand-relay",
       "identity": "authenticated account id plus agent id plus exchange id",
       "truth_store": "ephemeral typed request/response exchange registry; no business truth",
-      "operations": ["open_routable_exchange", "stream_request", "stream_response", "close_exchange", "fail_exchange", "proxy_http", "proxy_adp", "proxy_websocket"],
+      "operations": ["open_routable_exchange", "stream_request", "accept_generation", "stream_response", "close_exchange", "fail_exchange", "proxy_http", "proxy_adp", "proxy_websocket"],
       "projections": ["opaque HTTP bytes", "opaque ADP frames", "opaque generic WebSocket frames"]
     },
     {
@@ -905,11 +905,20 @@
       "binding_status": "bound"
     },
     {
+      "operation_id": "relay_data_tunnel.accept_generation",
+      "owner_feature_id": "relay.transport",
+      "source_resource": "relay_data_tunnel",
+      "target_resource": "relay_data_tunnel",
+      "effect": "validate the authenticated data attachment generation before an inbound response frame may mutate current pending-exchange truth",
+      "mainline_call_doc": "docs/mainline-calls/relay.transport.json",
+      "binding_status": "bound"
+    },
+    {
       "operation_id": "relay_error_tunnel.correlate",
       "owner_feature_id": "relay.transport",
       "source_resource": "relay_error_tunnel",
       "target_resource": "relay_data_tunnel",
-      "effect": "validate one typed Agent tunnel failure, remove only its authenticated pending exchange, and deliver the exact correlated failure to that exchange receiver",
+      "effect": "validate the authenticated error attachment generation, remove only its correlated pending exchange, and deliver the exact failure to that exchange receiver",
       "mainline_call_doc": "docs/mainline-calls/relay.transport.json",
       "binding_status": "bound"
     },
@@ -1701,8 +1710,8 @@
       "target_resource": "relay_data_tunnel",
       "mainline_call_doc": "docs/mainline-calls/relay.transport.json",
       "call_table_step": "07",
-      "file_path": "crates/freehand-relay/src/websocket_tunnel.rs",
-      "symbol_path": "data_tunnel / attach_data",
+      "file_path": "crates/freehand-relay/src/websocket_tunnel.rs / crates/freehand-relay/src/tunnel.rs",
+      "symbol_path": "data_tunnel / attach_data / RelayTunnelRegistry::attach_data_for_control",
       "binding_status": "bound"
     },
     {
@@ -1713,7 +1722,7 @@
       "mainline_call_doc": "docs/mainline-calls/relay.transport.json",
       "call_table_step": "14",
       "file_path": "crates/freehand-relay/src/websocket_tunnel.rs / crates/freehand-relay/src/tunnel.rs",
-      "symbol_path": "attach_error / RelayTunnelRegistry::admit_error",
+      "symbol_path": "attach_error / RelayTunnelRegistry::admit_error_for_control",
       "binding_status": "bound"
     },
     {
@@ -1750,6 +1759,17 @@
       "binding_status": "bound"
     },
     {
+      "edge_id": "relay.transport#15",
+      "operation_id": "relay_data_tunnel.accept_generation",
+      "source_resource": "relay_data_tunnel",
+      "target_resource": "relay_data_tunnel",
+      "mainline_call_doc": "docs/mainline-calls/relay.transport.json",
+      "call_table_step": "15",
+      "file_path": "crates/freehand-relay/src/websocket_tunnel.rs / crates/freehand-relay/src/tunnel.rs",
+      "symbol_path": "run_data_socket / RelayTunnelRegistry::accept_data_generation / RelayTunnelRegistry::accept_data",
+      "binding_status": "bound"
+    },
+    {
       "edge_id": "relay.transport#11",
       "operation_id": "relay_error_tunnel.correlate",
       "source_resource": "relay_error_tunnel",
@@ -1757,7 +1777,7 @@
       "mainline_call_doc": "docs/mainline-calls/relay.transport.json",
       "call_table_step": "11",
       "file_path": "crates/freehand-relay/src/websocket_tunnel.rs / crates/freehand-relay/src/tunnel.rs",
-      "symbol_path": "run_error_socket / RelayTunnelRegistry::fail_exchange",
+      "symbol_path": "run_error_socket / RelayTunnelRegistry::fail_exchange_from_error_generation / RelayTunnelRegistry::fail_exchange",
       "binding_status": "bound"
     },
     {

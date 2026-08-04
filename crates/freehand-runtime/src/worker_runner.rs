@@ -179,7 +179,8 @@ impl ProductionWorkerRunner {
             | AgentLifecycleState::ModelThinking
             | AgentLifecycleState::ToolRunning
             | AgentLifecycleState::Retrying => super::RuntimeAgentActivityStatus::Running,
-            AgentLifecycleState::Blocked
+            AgentLifecycleState::Assigned
+            | AgentLifecycleState::Blocked
             | AgentLifecycleState::WaitingReview
             | AgentLifecycleState::Recovering => super::RuntimeAgentActivityStatus::Waiting,
             AgentLifecycleState::Failed => super::RuntimeAgentActivityStatus::Error,

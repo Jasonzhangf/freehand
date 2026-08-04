@@ -191,11 +191,29 @@ impl RelayTunnelRegistry {
         self.control_channels.get(identity).copied() == Some(generation)
     }
 
+    #[cfg(test)]
     pub fn attach_data(
         &mut self,
         identity: RelayTunnelIdentity,
         sender: RelayDataTunnelSender,
     ) -> Result<u64, String> {
+        let control_generation = self
+            .control_channels
+            .get(&identity)
+            .copied()
+            .ok_or_else(|| "Relay data tunnel requires an active control tunnel".to_owned())?;
+        self.attach_data_for_control(identity, control_generation, sender)
+    }
+
+    pub fn attach_data_for_control(
+        &mut self,
+        identity: RelayTunnelIdentity,
+        control_generation: u64,
+        sender: RelayDataTunnelSender,
+    ) -> Result<u64, String> {
+        if !self.has_control_generation(&identity, control_generation) {
+            return Err("Relay data tunnel control generation is stale".to_owned());
+        }
         if self.data_channels.contains_key(&identity) {
             return Err("Relay data tunnel is already attached".to_owned());
         }
@@ -252,13 +270,28 @@ impl RelayTunnelRegistry {
             .map(|attachment| attachment.sender.clone())
     }
 
+    #[cfg(test)]
     pub(crate) fn admit_error(
         &mut self,
         identity: RelayTunnelIdentity,
         sender: RelayErrorTunnelSender,
     ) -> Result<u64, String> {
-        if !self.has_control(&identity) {
-            return Err("Relay error tunnel requires an active control tunnel".to_owned());
+        let control_generation = self
+            .control_channels
+            .get(&identity)
+            .copied()
+            .ok_or_else(|| "Relay error tunnel requires an active control tunnel".to_owned())?;
+        self.admit_error_for_control(identity, control_generation, sender)
+    }
+
+    pub(crate) fn admit_error_for_control(
+        &mut self,
+        identity: RelayTunnelIdentity,
+        control_generation: u64,
+        sender: RelayErrorTunnelSender,
+    ) -> Result<u64, String> {
+        if !self.has_control_generation(&identity, control_generation) {
+            return Err("Relay error tunnel control generation is stale".to_owned());
         }
         if self.error_channels.contains_key(&identity) {
             return Err("Relay error tunnel is already attached".to_owned());
@@ -289,6 +322,16 @@ impl RelayTunnelRegistry {
         self.error_channels
             .get(identity)
             .map(|attachment| attachment.sender.clone())
+    }
+
+    pub fn error_sender_for_data_generation(
+        &self,
+        identity: &RelayTunnelIdentity,
+        data_generation: u64,
+    ) -> Result<RelayErrorTunnelSender, String> {
+        self.require_data_generation(identity, data_generation)?;
+        self.error_sender(identity)
+            .ok_or_else(|| "Relay error tunnel is not attached".to_owned())
     }
 
     #[cfg(test)]
@@ -418,6 +461,32 @@ impl RelayTunnelRegistry {
         }
     }
 
+    pub fn accept_data_generation(
+        &mut self,
+        identity: &RelayTunnelIdentity,
+        generation: u64,
+        frame: RelayDataInFrame,
+    ) -> Result<RelayDataDelivery, String> {
+        self.require_data_generation(identity, generation)?;
+        self.accept_data(identity, frame)
+    }
+
+    fn require_data_generation(
+        &self,
+        identity: &RelayTunnelIdentity,
+        generation: u64,
+    ) -> Result<(), String> {
+        if self
+            .data_channels
+            .get(identity)
+            .is_some_and(|attachment| attachment.generation == generation)
+        {
+            Ok(())
+        } else {
+            Err("Relay data tunnel generation is stale".to_owned())
+        }
+    }
+
     pub fn fail_exchange(
         &mut self,
         identity: &RelayTunnelIdentity,
@@ -448,6 +517,23 @@ impl RelayTunnelRegistry {
                 part: Err(message),
             }))
         }
+    }
+
+    pub fn fail_exchange_from_error_generation(
+        &mut self,
+        identity: &RelayTunnelIdentity,
+        generation: u64,
+        exchange_id: &str,
+        message: String,
+    ) -> Result<Option<RelayDataDelivery>, String> {
+        if self
+            .error_channels
+            .get(identity)
+            .is_none_or(|attachment| attachment.generation != generation)
+        {
+            return Err("Relay error tunnel generation is stale".to_owned());
+        }
+        self.fail_exchange(identity, exchange_id, message)
     }
 
     pub fn cancel_exchange(
@@ -497,6 +583,9 @@ mod tests {
         );
         assert!(!registry.has_pending_exchange("missing-data"));
 
+        registry
+            .attach_control(identity.clone())
+            .expect("control attachment");
         let (data_tx, _data_rx) = mpsc::channel(1);
         registry
             .attach_data(identity.clone(), RelayDataTunnelSender::new(data_tx))
@@ -510,9 +599,6 @@ mod tests {
         assert!(!registry.has_pending_exchange("missing-error"));
 
         let (error_tx, _error_rx) = mpsc::channel(1);
-        registry
-            .attach_control(identity.clone())
-            .expect("control attachment");
         registry
             .admit_error(identity.clone(), RelayErrorTunnelSender::new(error_tx))
             .expect("error attachment");
@@ -839,6 +925,9 @@ mod tests {
     fn stale_data_generation_cannot_detach_reconnected_tunnel() {
         let mut registry = RelayTunnelRegistry::default();
         let identity = identity();
+        registry
+            .attach_control(identity.clone())
+            .expect("control tunnel");
         let (first_tx, _first_rx) = mpsc::channel(1);
         let first = registry
             .attach_data(identity.clone(), RelayDataTunnelSender::new(first_tx))
@@ -859,6 +948,110 @@ mod tests {
             .detach_data(&identity, second)
             .expect("current disconnect");
         assert!(registry.data_sender(&identity).is_none());
+    }
+
+    #[test]
+    fn stale_data_generation_cannot_deliver_into_current_exchange() {
+        let mut registry = RelayTunnelRegistry::default();
+        let identity = identity();
+        registry
+            .attach_control(identity.clone())
+            .expect("control tunnel");
+        let (first_tx, _first_rx) = mpsc::channel(1);
+        let first = registry
+            .attach_data(identity.clone(), RelayDataTunnelSender::new(first_tx))
+            .expect("first data tunnel");
+        registry
+            .detach_data(&identity, first)
+            .expect("first disconnect");
+        let (second_tx, _second_rx) = mpsc::channel(1);
+        let second = registry
+            .attach_data(identity.clone(), RelayDataTunnelSender::new(second_tx))
+            .expect("second data tunnel");
+        registry
+            .open_exchange_for_test(identity.clone(), "current-exchange".to_owned())
+            .expect("current exchange");
+
+        assert_eq!(
+            registry
+                .accept_data_generation(
+                    &identity,
+                    first,
+                    RelayDataInFrame::ResponseEnd {
+                        exchange_id: "current-exchange".to_owned(),
+                    },
+                )
+                .expect_err("stale data must be rejected"),
+            "Relay data tunnel generation is stale"
+        );
+        assert!(registry.has_pending_exchange("current-exchange"));
+        assert!(
+            registry
+                .accept_data_generation(
+                    &identity,
+                    second,
+                    RelayDataInFrame::ResponseEnd {
+                        exchange_id: "current-exchange".to_owned(),
+                    },
+                )
+                .is_ok()
+        );
+    }
+
+    #[test]
+    fn stale_control_generation_cannot_attach_data_or_error_channels() {
+        let mut registry = RelayTunnelRegistry::default();
+        let identity = identity();
+        let first = registry
+            .attach_control(identity.clone())
+            .expect("first control")
+            .generation;
+        let second = registry
+            .attach_control(identity.clone())
+            .expect("replacement control")
+            .generation;
+        let (data_tx, _data_rx) = mpsc::channel(1);
+        assert_eq!(
+            registry
+                .attach_data_for_control(
+                    identity.clone(),
+                    first,
+                    RelayDataTunnelSender::new(data_tx)
+                )
+                .expect_err("stale data admission"),
+            "Relay data tunnel control generation is stale"
+        );
+        let (error_tx, _error_rx) = mpsc::channel(1);
+        assert_eq!(
+            registry
+                .admit_error_for_control(
+                    identity.clone(),
+                    first,
+                    RelayErrorTunnelSender::new(error_tx)
+                )
+                .expect_err("stale error admission"),
+            "Relay error tunnel control generation is stale"
+        );
+        let (current_data_tx, _current_data_rx) = mpsc::channel(1);
+        assert!(
+            registry
+                .attach_data_for_control(
+                    identity.clone(),
+                    second,
+                    RelayDataTunnelSender::new(current_data_tx)
+                )
+                .is_ok()
+        );
+        let (current_error_tx, _current_error_rx) = mpsc::channel(1);
+        assert!(
+            registry
+                .admit_error_for_control(
+                    identity,
+                    second,
+                    RelayErrorTunnelSender::new(current_error_tx)
+                )
+                .is_ok()
+        );
     }
 
     #[test]
@@ -934,5 +1127,49 @@ mod tests {
             .admit_error(identity.clone(), RelayErrorTunnelSender::new(accepted_tx))
             .expect("error with control");
         assert!(registry.error_sender(&identity).is_some());
+    }
+
+    #[test]
+    fn stale_error_generation_cannot_fail_current_exchange() {
+        let mut registry = RelayTunnelRegistry::default();
+        let identity = identity();
+        registry
+            .attach_control(identity.clone())
+            .expect("control tunnel");
+        let (first_tx, _first_rx) = mpsc::channel(1);
+        let first = registry
+            .admit_error(identity.clone(), RelayErrorTunnelSender::new(first_tx))
+            .expect("first error tunnel");
+        registry.detach_error(&identity, first);
+        let (second_tx, _second_rx) = mpsc::channel(1);
+        let second = registry
+            .admit_error(identity.clone(), RelayErrorTunnelSender::new(second_tx))
+            .expect("second error tunnel");
+        registry
+            .open_exchange_for_test(identity.clone(), "current-exchange".to_owned())
+            .expect("current exchange");
+
+        assert_eq!(
+            registry
+                .fail_exchange_from_error_generation(
+                    &identity,
+                    first,
+                    "current-exchange",
+                    "stale failure".to_owned(),
+                )
+                .expect_err("stale error must be rejected"),
+            "Relay error tunnel generation is stale"
+        );
+        assert!(registry.has_pending_exchange("current-exchange"));
+        assert!(
+            registry
+                .fail_exchange_from_error_generation(
+                    &identity,
+                    second,
+                    "current-exchange",
+                    "current failure".to_owned(),
+                )
+                .is_ok()
+        );
     }
 }

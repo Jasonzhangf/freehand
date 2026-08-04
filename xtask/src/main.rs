@@ -249,11 +249,138 @@ fn run_gates_check() -> Result<(), String> {
     verify_webui_foundation_contracts(&root)?;
     verify_runtime_daemon_boundary(&root)?;
     verify_relay_transport_boundary(&root)?;
+    verify_runtime_master_worker_loop_boundary(&root)?;
     verify_dependency_graph(&root)?;
     verify_task_status_single_writer(&root)?;
     verify_adp_protocol_artifacts(&root)?;
     openminis_ui_migration::verify_openminis_ui_migration_manifest(&root)?;
     Ok(())
+}
+
+fn verify_runtime_master_worker_loop_boundary(root: &Path) -> Result<(), String> {
+    let registry_path = root.join("docs/module-registry/runtime.master-worker-loop.json");
+    let registry_source = fs::read_to_string(&registry_path).map_err(|error| error.to_string())?;
+    let registry: RelayModuleRegistry =
+        serde_json::from_str(&registry_source).map_err(|error| {
+            format!("runtime.master-worker-loop module registry is invalid: {error}")
+        })?;
+    if registry.schema_version != 1
+        || registry.registry_id != "runtime.master-worker-loop.modules"
+        || registry.feature_id != "runtime.master-worker-loop"
+        || registry.status != "active"
+        || registry.modules.len() != 1
+        || !registry.declared_edges.is_empty()
+    {
+        return Err(
+            "runtime.master-worker-loop module registry identity/status is invalid".to_owned(),
+        );
+    }
+    let module = &registry.modules[0];
+    if module.module_id != "runtime.master-worker-loop.worker"
+        || module.owner_feature_id != "runtime.master-worker-loop"
+        || module.status != "active"
+        || module.allowed_dependencies.is_empty()
+    {
+        return Err(
+            "runtime.master-worker-loop worker module identity/status is invalid".to_owned(),
+        );
+    }
+    for dependency in &module.forbidden_dependencies {
+        if module.allowed_dependencies.contains(dependency) {
+            return Err(format!(
+                "runtime worker module both allows and forbids dependency `{dependency}`"
+            ));
+        }
+    }
+    for owned_path in &module.owned_paths {
+        let source =
+            fs::read_to_string(root.join(owned_path)).map_err(|error| error.to_string())?;
+        for dependency in &module.forbidden_dependencies {
+            let import_name = dependency.replace('-', "_");
+            if rust_source_contains_identifier(&source, &import_name) {
+                return Err(format!(
+                    "runtime worker module references forbidden dependency `{dependency}` in `{owned_path}`"
+                ));
+            }
+        }
+    }
+    let mut covered_files = BTreeSet::new();
+    for coverage_root in &registry.coverage_roots {
+        let coverage_path = root.join(coverage_root);
+        if coverage_path.is_file() {
+            covered_files.insert(coverage_root.clone());
+        } else {
+            collect_all_file_paths(root, &coverage_path, &mut covered_files)?;
+        }
+    }
+    let owned_files = module.owned_paths.iter().cloned().collect::<BTreeSet<_>>();
+    if covered_files != owned_files {
+        return Err(format!(
+            "runtime.master-worker-loop module coverage mismatch; covered={covered_files:?}; owned={owned_files:?}"
+        ));
+    }
+    for path in &module.owned_paths {
+        if !root.join(path).is_file() {
+            return Err(format!("runtime worker module owns missing path `{path}`"));
+        }
+    }
+
+    let verification_path = root.join("docs/verification-maps/runtime.master-worker-loop.json");
+    let verification_source =
+        fs::read_to_string(&verification_path).map_err(|error| error.to_string())?;
+    let verification: RelayVerificationMap =
+        serde_json::from_str(&verification_source).map_err(|error| {
+            format!("runtime.master-worker-loop verification map is invalid: {error}")
+        })?;
+    if verification.schema_version != 1
+        || verification.verification_map_id != "runtime.master-worker-loop.verification"
+        || verification.feature_id != "runtime.master-worker-loop"
+        || verification.status != "active"
+        || verification.module_registry != "docs/module-registry/runtime.master-worker-loop.json"
+        || verification.function_map != "docs/function-maps/runtime.master-worker-loop.md"
+        || verification.mainline_call_map != "docs/mainline-calls/runtime.master-worker-loop.json"
+        || verification.test_design != "docs/testing/runtime.master-worker-loop.md"
+    {
+        return Err(
+            "runtime.master-worker-loop verification map identity/backlinks are invalid".to_owned(),
+        );
+    }
+    for gate in &verification.gates {
+        if gate.binding_status == "active"
+            && (gate.kind.trim().is_empty() || gate.command.trim().is_empty())
+        {
+            return Err(format!(
+                "runtime verification gate `{}` is missing executable binding",
+                gate.gate_id
+            ));
+        }
+    }
+    for gate_id in [
+        "runtime.master-worker-loop.unit",
+        "runtime.master-worker-loop.clippy",
+        "runtime.master-worker-loop.architecture",
+    ] {
+        let gate = verification
+            .gates
+            .iter()
+            .find(|gate| gate.gate_id == gate_id)
+            .ok_or_else(|| format!("runtime verification map is missing `{gate_id}`"))?;
+        if gate.binding_status != "active" {
+            return Err(format!(
+                "runtime verification gate `{gate_id}` is not active"
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn rust_source_contains_identifier(source: &str, identifier: &str) -> bool {
+    source.match_indices(identifier).any(|(start, _)| {
+        let before = source[..start].chars().next_back();
+        let after = source[start + identifier.len()..].chars().next();
+        !before.is_some_and(|character| character == '_' || character.is_ascii_alphanumeric())
+            && !after.is_some_and(|character| character == '_' || character.is_ascii_alphanumeric())
+    })
 }
 
 fn verify_webui_foundation_contracts(root: &Path) -> Result<(), String> {
@@ -3673,7 +3800,11 @@ fn verify_relay_transport_boundary(root: &Path) -> Result<(), String> {
         ("04", "directory", "RelayStore::directory"),
         ("05", "directory_subscription", "project_directory"),
         ("06", "control_tunnel", "attach_control"),
-        ("07", "data_tunnel", "attach_data"),
+        (
+            "07",
+            "data_tunnel",
+            "RelayTunnelRegistry::attach_data_for_control",
+        ),
         (
             "08",
             "open_http_exchange",
@@ -3684,7 +3815,7 @@ fn verify_relay_transport_boundary(root: &Path) -> Result<(), String> {
         (
             "11",
             "run_error_socket",
-            "RelayTunnelRegistry::fail_exchange",
+            "RelayTunnelRegistry::fail_exchange_from_error_generation",
         ),
         ("12", "main", "RelayService::serve"),
         (
@@ -3697,10 +3828,19 @@ fn verify_relay_transport_boundary(root: &Path) -> Result<(), String> {
             "RelayAgentClient::run",
             "RelayAgentClient::current_heartbeat",
         ),
-        ("14", "attach_error", "RelayTunnelRegistry::admit_error"),
+        (
+            "14",
+            "attach_error",
+            "RelayTunnelRegistry::admit_error_for_control",
+        ),
+        (
+            "15",
+            "run_data_socket",
+            "RelayTunnelRegistry::accept_data_generation",
+        ),
     ];
     if relay_doc.call_table.len() != expected_edges.len() {
-        return Err("relay.transport call map must contain exactly fifteen bound edges".to_owned());
+        return Err("relay.transport call map must contain exactly sixteen bound edges".to_owned());
     }
     for (row, (step, caller, callee)) in relay_doc.call_table.iter().zip(expected_edges) {
         if row.step != step || row.caller != caller || row.callee != callee {
@@ -3749,7 +3889,8 @@ fn verify_relay_transport_boundary(root: &Path) -> Result<(), String> {
         "open_routable_exchange(",
         "proxy_websocket(",
         "proxy_websocket_path(",
-        "fail_exchange(",
+        "accept_data_generation(",
+        "fail_exchange_from_error_generation(",
     ] {
         require_contains(
             &relay_websocket,

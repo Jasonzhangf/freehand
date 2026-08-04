@@ -62,8 +62,14 @@ pub enum RelayControlInFrame {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case", deny_unknown_fields)]
 pub enum RelayControlOutFrame {
-    IdentityAccepted { agent_id: String },
+    IdentityAccepted {
+        protocol_version: u16,
+        agent_id: String,
+        control_generation: u64,
+    },
 }
+
+pub const RELAY_TUNNEL_PROTOCOL_VERSION: u16 = 1;
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(rename_all = "snake_case")]

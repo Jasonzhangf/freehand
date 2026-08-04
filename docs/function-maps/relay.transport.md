@@ -33,6 +33,10 @@
   - `run_error_socket`
   - `RelayTunnelRegistry::open_routable_exchange`
   - `RelayTunnelRegistry::fail_exchange`
+  - `RelayTunnelRegistry::accept_data_generation`
+  - `RelayTunnelRegistry::fail_exchange_from_error_generation`
+  - `RelayTunnelRegistry::attach_data_for_control`
+  - `RelayTunnelRegistry::admit_error_for_control`
 
 ## Resource Map Binding
 
@@ -62,6 +66,7 @@
   - `relay_data_tunnel.proxy_http`
   - `relay_data_tunnel.proxy_adp`
   - `relay_data_tunnel.proxy_websocket`
+  - `relay_data_tunnel.accept_generation`
   - `relay_error_tunnel.correlate`
 - forbidden shortcuts:
   - config, daemon, WebUI, and Android must not own password hashing, token persistence, Agent presence, or route authorization
@@ -76,7 +81,8 @@
 - API and proxy requests authenticate Bearer or HttpOnly-cookie credentials to one account id; the deployment-owned cookie mode controls only the `Secure` response attribute
 - Agent control identity validates Agent identity, role, work status, and active-session count projection before atomic presence persistence
 - directory query and subscription scope records to the authenticated account and derive online state from heartbeat lease freshness
-- data and error tunnels are admitted only after the same account/Agent control identity is active; control, data, and error attachments are generation-fenced, so rejected duplicate or stale socket cleanup cannot detach the current channel
+- control admission returns a server-issued control generation; the Agent must echo it only in the typed data/error channel handshake header, and Relay admits those channels only while that exact control generation still owns the account/Agent identity
+- control, data, and error attachments are generation-fenced, so stale control owners cannot attach new dependent channels, stale data frames cannot mutate current exchanges, stale error frames cannot fail current exchanges, and stale socket cleanup cannot detach the current channel
 - HTTP/ADP/generic WebSocket requests open typed exchanges to the Agent's outbound data tunnel; Relay never connects to an Agent-provided destination
 - control identity is acknowledged before the Agent opens data/error channels, and the Agent streams HTTP request chunks directly into the local request body instead of assembling a full request in memory
 - Agent-side local WebSocket request construction retains the typed ADP/generic discriminator; only ADP may receive the configured local bearer
@@ -96,7 +102,7 @@
 - corrupt store fails process startup; store writes, tunnel disconnects, and local bridge errors fail explicitly through their owning chain
 - routable exchange admission atomically requires both the same identity's data attachment and typed error return attachment before pending truth is inserted; every later request-side send/body/protocol/client-disconnect failure closes the matching pending exchange through `RelayTunnelRegistry::fail_exchange` or explicit streamed-response cancellation
 - terminal error delivery awaits bounded capacity, and unknown/already-terminal exchange errors fail explicitly
-- Agent tunnel failures enter `run_error_socket`, which binds the authenticated error identity and attachment generation to `RelayTunnelRegistry::fail_exchange`; malformed, uncorrelated, unknown, or undeliverable error frames emit/log one concrete terminal cause before generation-conditioned error attachment cleanup
+- Agent tunnel failures enter `run_error_socket`, which binds the authenticated error identity and attachment generation through `RelayTunnelRegistry::fail_exchange_from_error_generation` before the unique `RelayTunnelRegistry::fail_exchange` owner mutates pending truth; malformed, stale, uncorrelated, unknown, or undeliverable error frames emit/log one concrete terminal cause before generation-conditioned error attachment cleanup
 - a WebSocket response error after `ResponseOpen` remains an explicit error-chain termination; channel closure before `ResponseEnd` cannot be projected as successful completion
 - malformed UTF-8 text or close-reason bytes fail at the receiving WebSocket decode boundary and enter the correlated typed error chain; Relay never normalizes invalid bytes into a successful text payload
 - expired presence remains visible as offline in directory but cannot be proxied
@@ -130,12 +136,13 @@ Deployment uses two explicit commands: `freehand-relay-server init-store` initia
 | 04 | `directory / RelayStore::directory` | `crates/freehand-relay/src/service.rs / crates/freehand-relay/src/store.rs` | project sorted online/offline Agent rows | account/time/lease | Agent directory | `directory` | `RelayStore::directory` | bound |
 | 05 | `directory_subscription / project_directory` | `crates/freehand-relay/src/directory_socket.rs / crates/freehand-relay/src/service.rs` | stream account-scoped directory revisions | authenticated account and presence revision | current Agent directory projection | `directory_subscription` | `project_directory` | bound |
 | 06 | `control_tunnel / attach_control` | `crates/freehand-relay/src/websocket_tunnel.rs` | admit generation-fenced authenticated Agent control identity | account/Agent identity | generation-fenced control admission | `control_tunnel` | `attach_control` | bound |
-| 07 | `data_tunnel / attach_data` | `crates/freehand-relay/src/websocket_tunnel.rs` | admit data only after control | authenticated Agent identity | typed data tunnel | `data_tunnel` | `attach_data` | bound |
+| 07 | `data_tunnel / attach_data / RelayTunnelRegistry::attach_data_for_control` | `crates/freehand-relay/src/websocket_tunnel.rs / crates/freehand-relay/src/tunnel.rs` | admit data only while the server-issued control generation still owns the authenticated Agent identity | authenticated Agent identity, control generation header, and typed data sender | control-generation-bound typed data tunnel or explicit stale-generation failure | `data_tunnel` | `RelayTunnelRegistry::attach_data_for_control` | bound |
 | 08 | `open_http_exchange / RelayTunnelRegistry::open_routable_exchange` | `crates/freehand-relay/src/http_tunnel.rs / crates/freehand-relay/src/tunnel.rs` | atomically require data/error return paths before streaming one opaque HTTP exchange | authenticated namespaced request | routable HTTP exchange | `open_http_exchange` | `RelayTunnelRegistry::open_routable_exchange` | bound |
 | 09 | `proxy_adp / proxy_websocket` | `crates/freehand-relay/src/websocket_tunnel.rs` | validate the ADP target and enter the shared WebSocket proxy owner | namespaced ADP upgrade | opaque bidirectional WebSocket exchange | `proxy_adp` | `proxy_websocket` | bound |
 | 10 | `proxy_websocket_path / proxy_websocket` | `crates/freehand-relay/src/websocket_tunnel.rs` | validate a local-only generic WebSocket target and enter the shared proxy owner | namespaced generic WebSocket upgrade and local path | opaque bidirectional WebSocket exchange | `proxy_websocket_path` | `proxy_websocket` | bound |
-| 11 | `run_error_socket / RelayTunnelRegistry::fail_exchange` | `crates/freehand-relay/src/websocket_tunnel.rs / crates/freehand-relay/src/tunnel.rs` | correlate an authenticated Agent failure to exactly one pending data exchange | typed Agent error frame and tunnel identity | exact pending-exchange failure or explicit terminal channel failure | `run_error_socket` | `RelayTunnelRegistry::fail_exchange` | bound |
+| 11 | `run_error_socket / RelayTunnelRegistry::fail_exchange_from_error_generation / RelayTunnelRegistry::fail_exchange` | `crates/freehand-relay/src/websocket_tunnel.rs / crates/freehand-relay/src/tunnel.rs` | generation-fence an authenticated Agent error before correlating it to exactly one pending data exchange | typed Agent error frame, tunnel identity, and attachment generation | exact pending-exchange failure or explicit stale/terminal channel failure | `run_error_socket` | `RelayTunnelRegistry::fail_exchange_from_error_generation` | bound |
 | 12 | `main / RelayServerConfig::from_env / RelayService::serve` | `apps/freehand-relay-server/src/main.rs / crates/freehand-relay/src/config.rs / crates/freehand-relay/src/service.rs` | load explicit bind/store/lease/cookie-policy env and serve | deployment env | live listener with fixed cookie policy | `main` | `RelayService::serve` | bound |
 | 13 | `agent_tunnel_config_from_env / RelayAgentClient::run` | `apps/freehand-relay-server/src/main.rs / crates/freehand-relay/src/agent_client.rs` | load explicit Agent bridge config and enter the typed outbound tunnel lifecycle through authenticated control admission | Agent deployment env | live control-owned lifecycle with dependent data/error Agent tunnels | `agent_tunnel_config_from_env` | `RelayAgentClient::run` | bound (`relay_control_tunnel.connect`: `relay_control_tunnel` -> `relay_control_tunnel`) |
 | 13a | `RelayAgentClient::run / RelayAgentClient::current_heartbeat` | `crates/freehand-relay/src/agent_client.rs` | read typed status/count at identity admission and every control heartbeat; source failure terminates the tunnel instead of reusing stale projection | typed presence source closure | current authenticated Agent heartbeat or explicit source error | `RelayAgentClient::run` | `RelayAgentClient::current_heartbeat` | bound (`agent_presence.heartbeat`: `agent_presence` -> `agent_presence`) |
-| 14 | `attach_error / RelayTunnelRegistry::admit_error` | `crates/freehand-relay/src/websocket_tunnel.rs / crates/freehand-relay/src/tunnel.rs` | atomically admit error only while matching control identity remains attached | authenticated Agent identity and typed error sender | generation-fenced error tunnel | `attach_error` | `RelayTunnelRegistry::admit_error` | bound (`relay_control_tunnel.admit_error`: `relay_control_tunnel` -> `relay_error_tunnel`) |
+| 14 | `attach_error / RelayTunnelRegistry::admit_error_for_control` | `crates/freehand-relay/src/websocket_tunnel.rs / crates/freehand-relay/src/tunnel.rs` | admit error only while the server-issued control generation still owns the authenticated Agent identity | authenticated Agent identity, control generation header, and typed error sender | control-generation-bound typed error tunnel or explicit stale-generation failure | `attach_error` | `RelayTunnelRegistry::admit_error_for_control` | bound (`relay_control_tunnel.admit_error`: `relay_control_tunnel` -> `relay_error_tunnel`) |
+| 15 | `run_data_socket / RelayTunnelRegistry::accept_data_generation / RelayTunnelRegistry::accept_data` | `crates/freehand-relay/src/websocket_tunnel.rs / crates/freehand-relay/src/tunnel.rs` | generation-fence an authenticated Agent response before it can mutate current pending-exchange truth | typed Agent response frame, tunnel identity, and attachment generation | current-generation correlated delivery or explicit stale terminal failure | `run_data_socket` | `RelayTunnelRegistry::accept_data_generation` | bound |
