@@ -48,10 +48,15 @@ async fn run() -> Result<String, String> {
             let bootstrap = load_default_runtime_agent(&agent_name)
                 .map_err(|err| format!("failed to load daemon agent: {err}"))?;
             if bootstrap.selected_agent.mode.as_str() == "slave" {
-                if !trailing_args.is_empty() {
-                    return Err("slave worker mode does not accept --bind".to_owned());
+                if bootstrap.local_web_url.is_some() || !trailing_args.is_empty() {
+                    let bind_addr = parse_worker_bind_arg(
+                        trailing_args.into_iter(),
+                        &agent_name,
+                        bootstrap.local_web_url.as_deref(),
+                    )?;
+                    return run_worker_mode(agent_name, bootstrap, Some(bind_addr)).await;
                 }
-                return run_worker_mode(agent_name, bootstrap).await;
+                return run_worker_mode(agent_name, bootstrap, None).await;
             }
             let bind_addr = parse_bind_arg(trailing_args.into_iter())?;
             run_master_mode(agent_name, bootstrap, bind_addr).await
@@ -257,23 +262,78 @@ async fn monitor_master_lifecycle_runner(
 async fn run_worker_mode(
     agent_name: String,
     bootstrap: RuntimeAgentBootstrap,
+    bind_addr: Option<std::net::SocketAddr>,
 ) -> Result<String, String> {
     if bootstrap.selected_agent.relay_connection.is_some() {
-        return run_relay_worker_mode(agent_name, bootstrap).await;
+        return run_relay_worker_mode(agent_name, bootstrap, bind_addr).await;
     }
-    let runner = ProductionWorkerRunner::from_selected_agent(
-        bootstrap.selected_agent,
-        bootstrap.runtime_home,
+    let Some(bind_addr) = bind_addr else {
+        let runner = ProductionWorkerRunner::from_selected_agent(
+            bootstrap.selected_agent,
+            bootstrap.runtime_home,
+        )
+        .map_err(|err| format!("failed to build production worker runner: {err}"))?;
+        println!("freehand-daemon worker runner started for {agent_name}");
+        run_blocking_worker_service(move || runner.run()).await?;
+        return Ok(String::new());
+    };
+    let dispatcher = RuntimeCommandDispatcher::from_selected_agent_with_live(
+        &bootstrap.selected_agent,
+        bootstrap.runtime_home.clone(),
+        false,
     )
-    .map_err(|err| format!("failed to build production worker runner: {err}"))?;
-    println!("freehand-daemon worker runner started for {agent_name}");
-    run_blocking_worker_service(move || runner.run()).await?;
+    .map(Arc::new)
+    .map_err(|error| format!("failed to build Worker runtime dispatcher: {error}"))?;
+    let runner = Arc::new(
+        ProductionWorkerRunner::from_selected_agent(
+            bootstrap.selected_agent,
+            bootstrap.runtime_home,
+        )
+        .map_err(|err| format!("failed to build production worker runner: {err}"))?,
+    );
+    let listener = TcpListener::bind(bind_addr)
+        .await
+        .map_err(|error| format!("failed to bind Worker WebUI host {bind_addr}: {error}"))?;
+    let ui_state = dispatcher.ui_state();
+    let dispatch_port: Arc<dyn freehand_ui_protocol::UiCommandDispatchPort> = dispatcher.clone();
+    let query_port: Arc<dyn freehand_ui_protocol::UiRuntimeQueryPort> = dispatcher;
+    let cancel = Arc::new(AtomicBool::new(false));
+    let runner_cancel = Arc::clone(&cancel);
+    let mut runner_task = tokio::task::spawn_blocking(move || runner.run_until(runner_cancel));
+    println!("freehand-daemon local Worker host started for {agent_name} on {bind_addr}");
+    let server = serve_webui_listener(
+        listener,
+        ui_state,
+        dispatch_port,
+        query_port,
+        pending::<()>(),
+    );
+    let result = tokio::select! {
+        result = server => result.map_err(|error| format!("Worker daemon server stopped: {error}")),
+        result = &mut runner_task => match result {
+            Ok(Ok(())) => Err("production worker runner stopped unexpectedly".to_owned()),
+            Ok(Err(error)) => Err(format!("production worker runner stopped: {error}")),
+            Err(error) => Err(format!("worker runner task failed: {error}")),
+        },
+    };
+    cancel.store(true, Ordering::Release);
+    if !runner_task.is_finished() {
+        let runner_result = runner_task
+            .await
+            .map_err(|error| format!("worker runner task failed: {error}"))?
+            .map_err(|error| format!("worker runner stopped: {error}"));
+        if result.is_ok() {
+            runner_result?;
+        }
+    }
+    result?;
     Ok(String::new())
 }
 
 async fn run_relay_worker_mode(
     agent_name: String,
     bootstrap: RuntimeAgentBootstrap,
+    bind_addr: Option<std::net::SocketAddr>,
 ) -> Result<String, String> {
     let connection = bootstrap
         .selected_agent
@@ -295,9 +355,13 @@ async fn run_relay_worker_mode(
         )
         .map_err(|error| format!("failed to build production worker runner: {error}"))?,
     );
-    let listener = TcpListener::bind("127.0.0.1:0")
+    let selected_bind_addr =
+        bind_addr.unwrap_or_else(|| "127.0.0.1:0".parse().expect("valid loopback bind"));
+    let listener = TcpListener::bind(selected_bind_addr)
         .await
-        .map_err(|error| format!("failed to bind Worker loopback host: {error}"))?;
+        .map_err(|error| {
+            format!("failed to bind Worker loopback host {selected_bind_addr}: {error}")
+        })?;
     let local_addr = listener
         .local_addr()
         .map_err(|error| format!("failed to read Worker loopback address: {error}"))?;
@@ -379,6 +443,57 @@ fn required_local_adp_token() -> Result<String, String> {
         );
     }
     Ok(token)
+}
+
+fn parse_worker_bind_arg(
+    args: impl Iterator<Item = String>,
+    agent_name: &str,
+    configured_url: Option<&str>,
+) -> Result<std::net::SocketAddr, String> {
+    let args = args.collect::<Vec<_>>();
+    if args.len() == 2 && args[0] == "--bind" {
+        let explicit = parse_bind_arg(args.into_iter())?;
+        if let Some(configured_url) = configured_url {
+            let configured = parse_configured_worker_bind(configured_url)?;
+            if configured == explicit {
+                return Ok(explicit);
+            }
+            return Err(format!(
+                "explicit Worker bind `{explicit}` conflicts with configured local_web_url `{configured_url}`"
+            ));
+        }
+        return Ok(explicit);
+    }
+    if !args.is_empty() {
+        return Err("worker mode accepts only --bind HOST:PORT".to_owned());
+    }
+    let configured_url = configured_url.ok_or_else(|| {
+        format!(
+            "Worker `{agent_name}` requires configured local_web_url when a WebUI bind is requested"
+        )
+    })?;
+    parse_configured_worker_bind(configured_url)
+}
+
+fn parse_configured_worker_bind(configured_url: &str) -> Result<std::net::SocketAddr, String> {
+    let parsed = url::Url::parse(configured_url)
+        .map_err(|_| format!("invalid configured Worker WebUI URL `{configured_url}`"))?;
+    let host = parsed
+        .host()
+        .ok_or_else(|| format!("configured Worker WebUI URL has no host: `{configured_url}`"))?;
+    let port = parsed.port().ok_or_else(|| {
+        format!("configured Worker WebUI URL requires an explicit port: `{configured_url}`")
+    })?;
+    let ip = match host {
+        url::Host::Ipv4(ip) => std::net::IpAddr::V4(ip),
+        url::Host::Ipv6(ip) => std::net::IpAddr::V6(ip),
+        url::Host::Domain(domain) => {
+            return Err(format!(
+                "configured Worker WebUI host must be an IP address: `{domain}`"
+            ));
+        }
+    };
+    Ok(std::net::SocketAddr::new(ip, port))
 }
 
 fn relay_presence_from_runtime(
@@ -646,6 +761,72 @@ mod tests {
                     .map(str::to_owned)
             })
             .expect("checkpoint id")
+    }
+
+    #[test]
+    fn worker_bind_uses_typed_config_and_explicit_cli_override() {
+        let configured = parse_worker_bind_arg(
+            Vec::<String>::new().into_iter(),
+            "worker-alpha",
+            Some("http://127.0.0.1:4143"),
+        )
+        .expect("configured bind");
+        assert_eq!(configured.to_string(), "127.0.0.1:4143");
+
+        let ipv6 = parse_worker_bind_arg(
+            Vec::<String>::new().into_iter(),
+            "worker-alpha",
+            Some("http://[::1]:4144/"),
+        )
+        .expect("IPv6 configured bind");
+        assert_eq!(ipv6.to_string(), "[::1]:4144");
+
+        let matching = parse_worker_bind_arg(
+            vec!["--bind".to_owned(), "127.0.0.1:4143".to_owned()].into_iter(),
+            "worker-alpha",
+            Some("http://127.0.0.1:4143"),
+        )
+        .expect("matching explicit bind");
+        assert_eq!(matching.to_string(), "127.0.0.1:4143");
+    }
+
+    #[test]
+    fn worker_bind_preserves_worker_only_compatibility_and_rejects_conflicts() {
+        let missing = parse_worker_bind_arg(Vec::<String>::new().into_iter(), "worker-alpha", None)
+            .expect_err("missing WebUI request has no bind");
+        assert!(missing.contains("when a WebUI bind is requested"));
+
+        let explicit_without_config = parse_worker_bind_arg(
+            vec!["--bind".to_owned(), "127.0.0.1:4243".to_owned()].into_iter(),
+            "worker-alpha",
+            None,
+        )
+        .expect("explicit bind preserves old configs while opting into WebUI");
+        assert_eq!(explicit_without_config.to_string(), "127.0.0.1:4243");
+
+        let invalid = parse_worker_bind_arg(
+            Vec::<String>::new().into_iter(),
+            "worker-alpha",
+            Some("http://localhost:4143"),
+        )
+        .expect_err("unbound endpoint must fail");
+        assert!(invalid.contains("host must be an IP address"));
+
+        let missing_port = parse_worker_bind_arg(
+            Vec::<String>::new().into_iter(),
+            "worker-alpha",
+            Some("http://127.0.0.1"),
+        )
+        .expect_err("implicit HTTP port must fail");
+        assert!(missing_port.contains("requires an explicit port"));
+
+        let conflicting = parse_worker_bind_arg(
+            vec!["--bind".to_owned(), "127.0.0.1:4243".to_owned()].into_iter(),
+            "worker-alpha",
+            Some("http://127.0.0.1:4143"),
+        )
+        .expect_err("conflicting advertised endpoint must fail");
+        assert!(conflicting.contains("conflicts with configured local_web_url"));
     }
 
     async fn next_adp_response(

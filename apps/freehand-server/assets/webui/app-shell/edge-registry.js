@@ -65,6 +65,15 @@ export const webuiEdges = Object.freeze([
     forbiddenEffects: ["random_verifier_spam", "create_without_owner_receipt"],
   },
   {
+    id: "home.open_agent_directory",
+    from: WebUiSurface.HomeDashboard,
+    event: "agent_directory.open",
+    to: "configured_agent_directory_sheet",
+    requires: [],
+    allowedEffects: ["open_configured_agent_directory"],
+    forbiddenEffects: ["show_session_worker_tasks", "mutate_worker_capacity"],
+  },
+  {
     id: "root.open_tools",
     from: WebUiSurface.Root,
     event: "tools.open",

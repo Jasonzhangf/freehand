@@ -243,11 +243,11 @@
       "why_shared": "keeps ErrorCenter-to-UI retry projection in the runtime query bridge instead of making UI guess from raw error text or AgentBoard state"
     },
     {
-      "symbol": "project_config_status_for_ui",
+      "symbol": "project_config_status_for_ui / project_config_status_from_path_for_ui / RuntimeCommandDispatcher::query_runtime_with_scope",
       "owner": "crates/freehand-runtime/src/lib.rs",
-      "purpose": "build UI-safe active or pending config projection plus complete provider and model group registries from config.core selected agent truth",
+      "purpose": "build UI-safe active or pending config projection plus complete provider and model group registries from config.core selected agent truth while omitting loopback Agent endpoints for typed remote scope",
       "allowed_callers": [
-        "RuntimeCommandDispatcher::query_runtime",
+        "RuntimeCommandDispatcher::query_runtime_with_scope",
         "RuntimeCommandDispatcher::dispatch_update_provider_config",
         "RuntimeCommandDispatcher::dispatch_upsert_provider_config",
         "RuntimeCommandDispatcher::dispatch_update_agent_provider_selection",
@@ -517,11 +517,11 @@
     },
     {
       "step": "10q",
-      "symbol_path": "RuntimeCommandDispatcher::query_runtime",
+      "symbol_path": "RuntimeCommandDispatcher::query_runtime / RuntimeCommandDispatcher::query_runtime_with_scope / RuntimeCommandDispatcher::query_runtime_for_scope",
       "file_path": "crates/freehand-runtime/src/lib.rs",
-      "responsibility": "execute runtime-backed read-only session-turn, task list/history, config, and error-center queries",
-      "input_semantic": "UI query command",
-      "output_semantic": "optional UI query result or dispatch failure",
+      "responsibility": "execute runtime-backed read-only session-turn, task list/history, config, and error-center queries while carrying typed local/remote scope to ConfigStatus projection",
+      "input_semantic": "UI query command plus typed access scope",
+      "output_semantic": "optional scoped UI query result or dispatch failure",
       "caller": "ADP query transport",
       "callee": "reason persistence / task runtime owner / config projection / metadata center",
       "binding_status": "bound"

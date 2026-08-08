@@ -90,6 +90,7 @@ node_id = "master-node"
 paired_agents = ["worker-alpha", "worker-beta", "worker-gamma"]
 pair_token = "FREEHAND_PAIR_TOKEN_SHARED"
 provider = "minimax"
+local_web_url = "http://127.0.0.1:4142"
 
 [agents.worker-alpha]
 name = "worker-alpha"
@@ -98,6 +99,7 @@ node_id = "worker-alpha-node"
 paired_agents = ["master"]
 pair_token = "FREEHAND_PAIR_TOKEN_SHARED"
 provider = "minimax"
+local_web_url = "http://127.0.0.1:4143"
 
 [agents.worker-beta]
 name = "worker-beta"
@@ -106,6 +108,7 @@ node_id = "worker-beta-node"
 paired_agents = ["master"]
 pair_token = "FREEHAND_PAIR_TOKEN_SHARED"
 provider = "minimax"
+local_web_url = "http://127.0.0.1:4144"
 
 [agents.worker-gamma]
 name = "worker-gamma"
@@ -114,6 +117,7 @@ node_id = "worker-gamma-node"
 paired_agents = ["master"]
 pair_token = "FREEHAND_PAIR_TOKEN_SHARED"
 provider = "minimax"
+local_web_url = "http://127.0.0.1:4145"
 EOF
 }
 

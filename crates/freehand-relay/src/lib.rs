@@ -12,9 +12,9 @@ pub use agent_client::{RelayAgentClient, RelayAgentClientConfig, RelayAgentPrese
 pub use config::{RelayRuntimeConfig, RelayServerConfig};
 pub use model::{
     AgentDirectory, AgentHeartbeat, AgentPresence, AgentRole, AgentWorkStatus, AuthRequest,
-    AuthResponse, ErrorBody, RelayControlInFrame, RelayControlOutFrame, RelayDataFrameKind,
-    RelayDataInFrame, RelayDataOutFrame, RelayDataProtocol, RelayDirectoryOutFrame,
-    RelayErrorInFrame, RelayErrorOutFrame,
+    AuthResponse, ErrorBody, RelayControlInFrame, RelayControlOutFrame, RelayDataAccessScope,
+    RelayDataFrameKind, RelayDataInFrame, RelayDataOutFrame, RelayDataProtocol,
+    RelayDirectoryOutFrame, RelayErrorInFrame, RelayErrorOutFrame,
 };
 pub use service::{RelayService, RelayServiceConfig};
 pub use store::{RelayStore, RelayStoreError};

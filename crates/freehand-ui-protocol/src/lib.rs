@@ -911,6 +911,8 @@ pub struct UiConfigStatusProjection {
     pub node_id: String,
     pub paired_agents: Vec<UiConfigPeerProjection>,
     #[serde(default)]
+    pub local_agent_directory: Vec<UiLocalAgentProjection>,
+    #[serde(default)]
     pub provider_registry: Vec<UiProviderConfigSummaryProjection>,
     #[serde(default)]
     pub model_group_registry: Vec<UiModelGroupConfigProjection>,
@@ -941,6 +943,19 @@ pub struct UiConfigStatusProjection {
     pub provider_auth_type: String,
     pub provider_auth_source: String,
     pub restart_required_on_change: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct UiLocalAgentProjection {
+    pub agent_name: String,
+    pub agent_mode: String,
+    pub node_id: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub web_url: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub relay_web_url: Option<String>,
+    #[serde(default)]
+    pub is_local: bool,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -1003,6 +1018,8 @@ pub struct UiConfigPeerProjection {
     pub fallback_provider_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub model_group_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub local_web_url: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -1885,6 +1902,20 @@ pub trait UiRuntimeQueryPort: Send + Sync {
         &self,
         command: &UiCommand,
     ) -> Result<Option<UiQueryResult>, UiCommandDispatchPortError>;
+
+    fn query_runtime_with_scope(
+        &self,
+        command: &UiCommand,
+        _scope: UiQueryAccessScope,
+    ) -> Result<Option<UiQueryResult>, UiCommandDispatchPortError> {
+        self.query_runtime(command)
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum UiQueryAccessScope {
+    LocalLoopback,
+    Remote,
 }
 
 pub struct UiProtocolOnlyQueryPort;
@@ -2149,6 +2180,48 @@ impl UiProtocolState {
                     .last()
                     .map(|projection| projection.turn_id.clone())
             });
+        }
+    }
+
+    pub fn merge_persisted_turn_projections_without_publish(
+        &mut self,
+        projections: impl IntoIterator<Item = UiTurnProjection>,
+    ) {
+        for projection in projections {
+            let should_replace =
+                !self.turns.contains_key(&projection.turn_id) || turn_is_terminal(&projection);
+            if should_replace {
+                self.turns.insert(projection.turn_id.clone(), projection);
+            }
+        }
+    }
+
+    pub fn replace_persisted_turn_projections_without_publish(
+        &mut self,
+        session_id: &SessionId,
+        projections: impl IntoIterator<Item = UiTurnProjection>,
+    ) {
+        let projections = projections.into_iter().collect::<Vec<_>>();
+        let persisted_ids = projections
+            .iter()
+            .map(|projection| projection.turn_id.clone())
+            .collect::<std::collections::BTreeSet<_>>();
+        self.turns.retain(|turn_id, projection| {
+            projection.session_id != *session_id
+                || persisted_ids.contains(turn_id)
+                || !turn_is_terminal(projection)
+        });
+        self.merge_persisted_turn_projections_without_publish(projections);
+        if self
+            .latest_active_turn_id
+            .as_ref()
+            .is_some_and(|turn_id| !self.turns.contains_key(turn_id))
+        {
+            self.latest_active_turn_id = self
+                .turns
+                .values()
+                .rfind(|projection| !turn_is_terminal(projection))
+                .map(|projection| projection.turn_id.clone());
         }
     }
 
@@ -3634,6 +3707,10 @@ fn session_latest_status(turn: &UiTurnProjection) -> String {
 
 fn turn_is_nonterminal(turn: &UiTurnProjection) -> bool {
     turn.terminal_status.is_none() && turn.terminal_text.is_none()
+}
+
+fn turn_is_terminal(turn: &UiTurnProjection) -> bool {
+    !turn_is_nonterminal(turn)
 }
 
 fn session_latest_summary(turn: &UiTurnProjection) -> Option<String> {
@@ -6776,6 +6853,106 @@ mod tests {
     }
 
     #[test]
+    fn persisted_session_merge_is_silent_and_preserves_live_projection() {
+        let mut state = UiProtocolState::default();
+        let session_id = SessionId::new("session-background-refresh");
+        let turn_id = TurnId::new("runtime-turn-1");
+        state.set_session_metadata(UiSessionMetadataProjection {
+            session_id: session_id.clone(),
+            title: Some("Background refresh".to_owned()),
+            archived: false,
+            cwd: None,
+        });
+        state.apply_model_request_waiting_kind(UiModelRequestWaiting {
+            source_agent_id: AgentId::new("agent-1"),
+            source_node_id: "node-1".to_owned(),
+            session_id: session_id.clone(),
+            turn_id: turn_id.clone(),
+            kind: UiModelRequestKind::Thinking,
+            detail: Some("live request".to_owned()),
+            transport: None,
+            slave_substream_card: false,
+        });
+        let mut receiver = state.subscribe();
+        state.merge_persisted_turn_projections_without_publish(vec![active_refresh_projection(
+            &session_id,
+            &turn_id,
+        )]);
+
+        assert!(receiver.try_recv().is_err());
+        match state
+            .query(&UiCommand::QuerySessionTurns {
+                session_id: session_id.clone(),
+            })
+            .expect("transcript")
+        {
+            UiQueryResult::SessionTurns(transcript) => {
+                assert!(transcript.turns[0].model_request.is_some());
+            }
+            other => panic!("unexpected transcript: {other:?}"),
+        }
+        match state.query(&UiCommand::QuerySessionList).expect("list") {
+            UiQueryResult::SessionList(list) => {
+                assert_eq!(list.sessions[0].active_turn_id.as_ref(), Some(&turn_id));
+            }
+            other => panic!("unexpected list: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn persisted_terminal_merge_silently_closes_live_projection() {
+        let mut state = UiProtocolState::default();
+        let session_id = SessionId::new("session-background-terminal");
+        let turn_id = TurnId::new("runtime-turn-2");
+        state.set_session_metadata(UiSessionMetadataProjection {
+            session_id: session_id.clone(),
+            title: Some("Background terminal".to_owned()),
+            archived: false,
+            cwd: None,
+        });
+        state.apply_model_request_waiting_kind(UiModelRequestWaiting {
+            source_agent_id: AgentId::new("agent-1"),
+            source_node_id: "node-1".to_owned(),
+            session_id: session_id.clone(),
+            turn_id: turn_id.clone(),
+            kind: UiModelRequestKind::Thinking,
+            detail: Some("live request".to_owned()),
+            transport: None,
+            slave_substream_card: false,
+        });
+        let mut receiver = state.subscribe();
+        state.merge_persisted_turn_projections_without_publish(vec![terminal_refresh_projection(
+            &session_id,
+            &turn_id,
+            TerminalStatus::Success,
+        )]);
+
+        assert!(receiver.try_recv().is_err());
+        match state
+            .query(&UiCommand::QuerySessionTurns {
+                session_id: session_id.clone(),
+            })
+            .expect("transcript")
+        {
+            UiQueryResult::SessionTurns(transcript) => {
+                assert!(transcript.turns[0].model_request.is_none());
+                assert_eq!(
+                    transcript.turns[0].terminal_status,
+                    Some(TerminalStatus::Success)
+                );
+            }
+            other => panic!("unexpected transcript: {other:?}"),
+        }
+        match state.query(&UiCommand::QuerySessionList).expect("list") {
+            UiQueryResult::SessionList(list) => {
+                assert_eq!(list.sessions[0].active_turn_id, None);
+                assert_eq!(list.sessions[0].latest_status, "success");
+            }
+            other => panic!("unexpected list: {other:?}"),
+        }
+    }
+
+    #[test]
     fn schema_mismatch_projects_as_model_polishing_activity() {
         let mut state = UiProtocolState::default();
         let session_id = SessionId::new("session-schema-retry");
@@ -7503,7 +7680,9 @@ mod tests {
                 provider_id: "minimonth".to_owned(),
                 fallback_provider_id: None,
                 model_group_id: None,
+                local_web_url: None,
             }],
+            local_agent_directory: Vec::new(),
             provider_registry: vec![UiProviderConfigSummaryProjection {
                 provider_id: "minimonth".to_owned(),
                 enabled: true,

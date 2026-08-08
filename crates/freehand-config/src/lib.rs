@@ -113,6 +113,7 @@ pub struct AgentConfig {
     pub model_group_id: Option<String>,
     pub relay_url: Option<String>,
     pub relay_token_env: Option<String>,
+    pub local_web_url: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -1241,6 +1242,10 @@ pub enum ConfigError {
     IncompleteAgentRelayConnection { agent_name: String },
     #[error("agent `{agent_name}` relay_url must be an http(s) URL with a host")]
     InvalidAgentRelayUrl { agent_name: String },
+    #[error(
+        "agent `{agent_name}` local_web_url must be an http URL with a loopback IP host and no query or fragment"
+    )]
+    InvalidAgentLocalWebUrl { agent_name: String },
     #[error("agent `{agent_name}` relay_token_env must be non-empty when declared")]
     EmptyAgentRelayTokenEnv { agent_name: String },
     #[error("agent resource count must be between {min} and {max}, received {resource_count}")]
@@ -1251,6 +1256,10 @@ pub enum ConfigError {
     },
     #[error("agent resource count can be updated only for a master agent, got `{agent_name}`")]
     AgentResourceUpdateRequiresMaster { agent_name: String },
+    #[error(
+        "agent resource growth would duplicate Worker local_web_url `{local_web_url}`; explicit per-Worker endpoints are required"
+    )]
+    AgentResourceGrowthRequiresExplicitEndpoints { local_web_url: String },
     #[error("remote daemon account table `{table_name}` has mismatched id field `{field_id}`")]
     RemoteDaemonAccountIdMismatch {
         table_name: String,
@@ -1454,6 +1463,8 @@ struct RawAgentConfig {
     relay_url: Option<String>,
     #[serde(default)]
     relay_token_env: Option<String>,
+    #[serde(default)]
+    local_web_url: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -2172,6 +2183,29 @@ fn validate_config(parsed: RawConfig) -> Result<LoadedConfig, ConfigError> {
                 });
             }
         }
+        if let Some(local_web_url) = raw_agent.local_web_url.as_ref() {
+            let parsed = url::Url::parse(local_web_url).map_err(|_| {
+                ConfigError::InvalidAgentLocalWebUrl {
+                    agent_name: raw_agent.name.clone(),
+                }
+            })?;
+            let loopback_host = match parsed.host() {
+                Some(url::Host::Ipv4(ip)) => ip.is_loopback(),
+                Some(url::Host::Ipv6(ip)) => ip.is_loopback(),
+                _ => false,
+            };
+            if parsed.scheme() != "http"
+                || !loopback_host
+                || parsed.port().is_none()
+                || (parsed.path() != "" && parsed.path() != "/")
+                || parsed.query().is_some()
+                || parsed.fragment().is_some()
+            {
+                return Err(ConfigError::InvalidAgentLocalWebUrl {
+                    agent_name: raw_agent.name.clone(),
+                });
+            }
+        }
 
         let agent = AgentConfig {
             name: raw_agent.name.clone(),
@@ -2190,6 +2224,7 @@ fn validate_config(parsed: RawConfig) -> Result<LoadedConfig, ConfigError> {
                 .map(str::to_owned),
             relay_url: raw_agent.relay_url,
             relay_token_env: raw_agent.relay_token_env,
+            local_web_url: raw_agent.local_web_url,
         };
         agents.insert(raw_agent.name, agent);
     }
@@ -2823,6 +2858,15 @@ fn apply_agent_resource_config_update(
         .ok_or_else(|| ConfigError::AgentNotFound {
             agent_name: first_peer.clone(),
         })?;
+    if update.resource_count > current_peers.len()
+        && let Some(local_web_url) = worker_template
+            .get("local_web_url")
+            .and_then(toml::Value::as_str)
+    {
+        return Err(ConfigError::AgentResourceGrowthRequiresExplicitEndpoints {
+            local_web_url: local_web_url.to_owned(),
+        });
+    }
 
     let mut desired_peers = current_peers
         .iter()
@@ -3445,6 +3489,102 @@ provider = "claude"
         assert_eq!(mini27.auth.source_kind(), ProviderAuthSourceKind::Inline);
 
         fs::remove_file(path).expect("cleanup");
+    }
+
+    #[test]
+    fn accepts_only_loopback_agent_local_web_urls() {
+        for local_web_url in ["http://127.0.0.1:4042", "http://[::1]:4043/"] {
+            let path = write_temp_config(&format!(
+                r#"
+[providers.test]
+id = "test"
+enabled = true
+type = "openai"
+protocol = "responses"
+base_url = "https://provider.invalid"
+default_model = "test-model"
+
+[providers.test.auth]
+type = "apikey"
+api_key = "test-key"
+
+[agents.master]
+name = "master"
+mode = "master"
+node_id = "master-node"
+paired_agents = ["worker"]
+pair_token = "MASTER_TOKEN"
+provider = "test"
+local_web_url = "{local_web_url}"
+
+[agents.worker]
+name = "worker"
+mode = "slave"
+node_id = "worker-node"
+paired_agents = ["master"]
+pair_token = "WORKER_TOKEN"
+provider = "test"
+"#
+            ));
+            let config = load_config_from_path(&path).expect("loopback local WebUI URL");
+            assert_eq!(
+                config
+                    .agents()
+                    .get("master")
+                    .and_then(|agent| agent.local_web_url.as_deref()),
+                Some(local_web_url)
+            );
+            fs::remove_file(path).expect("cleanup");
+        }
+    }
+
+    #[test]
+    fn rejects_non_loopback_agent_local_web_urls() {
+        for local_web_url in [
+            "http://0.0.0.0:4042",
+            "http://192.168.1.10:4042",
+            "http://8.8.8.8:4042",
+            "http://localhost:4042",
+            "http://127.0.0.1",
+            "http://127.0.0.1:4042/?view=all",
+            "http://127.0.0.1:4042/#all",
+        ] {
+            let path = write_temp_config(&format!(
+                r#"
+[providers.test]
+id = "test"
+enabled = true
+type = "openai"
+protocol = "responses"
+base_url = "https://provider.invalid"
+default_model = "test-model"
+
+[providers.test.auth]
+type = "apikey"
+api_key = "test-key"
+
+[agents.master]
+name = "master"
+mode = "master"
+node_id = "master-node"
+paired_agents = ["worker"]
+pair_token = "MASTER_TOKEN"
+provider = "test"
+local_web_url = "{local_web_url}"
+
+[agents.worker]
+name = "worker"
+mode = "slave"
+node_id = "worker-node"
+paired_agents = ["master"]
+pair_token = "WORKER_TOKEN"
+provider = "test"
+"#
+            ));
+            let error = load_config_from_path(&path).expect_err("remote local WebUI URL");
+            assert!(matches!(error, ConfigError::InvalidAgentLocalWebUrl { .. }));
+            fs::remove_file(path).expect("cleanup");
+        }
     }
 
     #[test]
@@ -6141,6 +6281,61 @@ provider = "primary"
             before
         );
 
+        fs::remove_file(path).expect("cleanup");
+    }
+
+    #[test]
+    fn update_agent_resource_config_rejects_growth_with_worker_local_web_url() {
+        let path = write_temp_config(
+            r#"
+[providers.primary]
+id = "primary"
+enabled = true
+type = "openai"
+protocol = "responses"
+base_url = "https://primary.example.test/v1"
+default_model = "primary-model"
+
+[providers.primary.auth]
+type = "apikey"
+api_key = "primary-secret"
+
+[agents.master]
+name = "master"
+mode = "master"
+node_id = "master-node"
+paired_agents = ["worker"]
+pair_token = "MASTER_TOKEN"
+provider = "primary"
+
+[agents.worker]
+name = "worker"
+mode = "slave"
+node_id = "worker-node"
+paired_agents = ["master"]
+pair_token = "WORKER_TOKEN"
+provider = "primary"
+local_web_url = "http://127.0.0.1:4043"
+"#,
+        );
+        let before = fs::read_to_string(&path).expect("read original config");
+        let error = update_agent_resource_config_in_path(
+            &path,
+            AgentResourceConfigUpdate {
+                agent_name: "master".to_owned(),
+                resource_count: 2,
+            },
+        )
+        .expect_err("growth must require explicit endpoints");
+        assert!(matches!(
+            error,
+            ConfigError::AgentResourceGrowthRequiresExplicitEndpoints { local_web_url }
+                if local_web_url == "http://127.0.0.1:4043"
+        ));
+        assert_eq!(
+            fs::read_to_string(&path).expect("read unchanged config"),
+            before
+        );
         fs::remove_file(path).expect("cleanup");
     }
 }

@@ -43,7 +43,8 @@
   - CLI ADP session manage sends create/rename/archive/restore/delete-as-archive/rollback command frames and reports command receipts without owning session truth
   - CLI ADP task query sends task list/history query frames and reports task projection summaries without WebUI
   - CLI ADP task subscribe sends task list subscribe frames and reports the first task projection event without WebUI
-  - CLI ADP error query sends error-center query frames and reports metadata projection summaries without WebUI
+- CLI ADP error query sends error-center query frames and reports metadata projection summaries without WebUI
+- CLI ADP mock integration tests inject a non-secret test bearer through the shared subprocess helper so the client uses the authenticated WebSocket Upgrade path and does not trigger the production HTTP cookie-discovery probe against a WebSocket-only mock
 - white-box plan:
   - none in app crate beyond argument dispatch helpers
 - module black-box plan:

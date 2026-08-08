@@ -252,9 +252,9 @@
       "why_shared": "every UI/control client must negotiate the same versioned transport contract before command/query/subscribe frames are accepted"
     },
     {
-      "symbol": "UiRuntimeQueryPort::query_runtime",
+      "symbol": "UiRuntimeQueryPort::query_runtime / UiRuntimeQueryPort::query_runtime_with_scope / UiQueryAccessScope",
       "owner": "crates/freehand-ui-protocol/src/lib.rs",
-      "purpose": "define a protocol-owned runtime query extension point for read-only owner-backed projections",
+      "purpose": "define a protocol-owned runtime query extension point for read-only owner-backed projections with typed local/remote visibility scope beside the business query payload",
       "allowed_callers": [
         "WebUI ADP query transport",
         "daemon ADP query transport"
@@ -626,11 +626,11 @@
     },
     {
       "step": "20",
-      "symbol_path": "UiRuntimeQueryPort::query_runtime",
+      "symbol_path": "UiRuntimeQueryPort::query_runtime / UiRuntimeQueryPort::query_runtime_with_scope / UiQueryAccessScope",
       "file_path": "crates/freehand-ui-protocol/src/lib.rs",
-      "responsibility": "define runtime-backed read-only query port shape",
-      "input_semantic": "UI query command",
-      "output_semantic": "optional UI query result or dispatch failure",
+      "responsibility": "define runtime-backed read-only query port shape and typed local/remote visibility scope without adding control fields to the UI query payload",
+      "input_semantic": "UI query command plus typed access scope",
+      "output_semantic": "optional scoped UI query result or dispatch failure",
       "caller": "WebUI/daemon ADP query transport",
       "callee": "runtime owner query implementation",
       "binding_status": "bound"

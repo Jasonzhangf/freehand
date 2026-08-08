@@ -4,7 +4,7 @@ use std::time::Duration;
 use axum::body::{Body, Bytes};
 use axum::extract::{Path, Request, State};
 use axum::http::{HeaderMap, HeaderName, HeaderValue, StatusCode, header};
-use axum::response::Response;
+use axum::response::{IntoResponse, Redirect, Response};
 use futures_util::StreamExt;
 use tokio::sync::mpsc;
 
@@ -21,11 +21,26 @@ pub(crate) async fn proxy_http_root(
     State(state): State<RelayState>,
     request: Request,
 ) -> Response {
+    if let Some(location) = canonical_root_redirect(request.uri()) {
+        return Redirect::permanent(&location).into_response();
+    }
     let path = match raw_http_agent_path(&agent_id, request.uri()) {
         Ok(path) => path,
         Err(error) => return error_response(error),
     };
     proxy_http(state, agent_id, path, request).await
+}
+
+fn canonical_root_redirect(uri: &axum::http::Uri) -> Option<String> {
+    if uri.path().ends_with('/') {
+        return None;
+    }
+    let mut location = format!("{}/", uri.path());
+    if let Some(query) = uri.query() {
+        location.push('?');
+        location.push_str(query);
+    }
+    Some(location)
 }
 
 pub(crate) async fn proxy_http_path(
@@ -87,6 +102,7 @@ async fn proxy_http_inner(
             method: Some(method),
             path_and_query,
             headers,
+            access_scope: None,
         })
         .await
     {
@@ -471,6 +487,22 @@ mod tests {
             "/files/a%3Fb"
         );
         assert!(raw_http_agent_path("different-agent", &uri).is_err());
+    }
+
+    #[test]
+    fn relay_agent_root_redirect_preserves_query_and_canonical_slash() {
+        let root: axum::http::Uri = "/relay/agents/studio?client=android-webview"
+            .parse()
+            .expect("root URI");
+        assert_eq!(
+            canonical_root_redirect(&root).as_deref(),
+            Some("/relay/agents/studio/?client=android-webview")
+        );
+
+        let canonical: axum::http::Uri = "/relay/agents/studio/?client=android-webview"
+            .parse()
+            .expect("canonical URI");
+        assert_eq!(canonical_root_redirect(&canonical), None);
     }
     use crate::tunnel::{RelayResponseOpen, RelayTunnelRegistry};
 

@@ -41,7 +41,8 @@
   ],
   "transport_invariants": [
     "local ADP bearer injection is admitted only for RelayDataProtocol::Adp and never for generic WebSocket exchanges",
-    "Relay Agent channel URL construction preserves deployment prefixes and mounts the relay API root exactly once"
+    "Relay Agent channel URL construction preserves deployment prefixes and mounts the relay API root exactly once",
+    "WebSocket and ADP data opens require RelayDataAccessScope::Remote while HTTP opens reject scope; the Agent bridge converts the accepted typed scope to the local remote-access header"
   ],
   "shared_functions": [
     {
@@ -240,7 +241,7 @@
       "step": "13",
       "symbol_path": "agent_tunnel_config_from_env / RelayAgentClient::run",
       "file_path": "apps/freehand-relay-server/src/main.rs / crates/freehand-relay/src/agent_client.rs",
-      "responsibility": "load explicit Agent bridge configuration and enter the typed outbound tunnel lifecycle",
+      "responsibility": "load explicit Agent bridge configuration and enter the typed outbound tunnel lifecycle; its data-frame bridge requires remote scope for WebSocket and ADP opens, rejects scope on HTTP opens, and converts accepted scope to the local remote-access header",
       "input_semantic": "Agent deployment environment",
       "output_semantic": "live control, data, and error Agent tunnels",
       "caller": "agent_tunnel_config_from_env",

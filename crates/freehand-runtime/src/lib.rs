@@ -169,23 +169,24 @@ use freehand_ui_protocol::{
     UiCompletionSchemaRetryWaiting, UiConfigPeerProjection, UiConfigStatusProjection,
     UiDiagnosticLogFileProjection, UiDiagnosticsProjection, UiErrorCenterEventListProjection,
     UiErrorCenterEventProjection, UiExecutionFactCommand, UiExecutionFactKind,
-    UiInputAttachmentKind, UiMasterPollClassificationProjection, UiMasterPollProjection,
-    UiModelGroupConfigProjection, UiModelGroupConfigUpdate, UiModelRequestKind,
-    UiModelRequestWaiting, UiModelRouteProjection, UiModelRouteUpdate, UiModelTransportActivity,
-    UiModelTransportKind, UiModelWeightedRouteProjection, UiModelWeightedRouteUpdate,
-    UiProtocolState, UiProviderConfigSummaryProjection, UiProviderConfigUpdate, UiQueryResult,
-    UiRuntimeQueryPort, UiSchedulerTickCommand, UiSessionMetadataProjection,
-    UiSessionSearchChildProjection, UiSessionSearchProjection, UiSessionSearchResultProjection,
-    UiSubmitMetadata, UiTaskAgentCreateCommand, UiTaskAssignCommand, UiTaskBoardProjection,
-    UiTaskClaimCommand, UiTaskCreateCommand, UiTaskDispatchCommand,
-    UiTaskEventInboxEntryProjection, UiTaskEventInboxProjection, UiTaskHistoryProjection,
-    UiTaskLedgerEventProjection, UiTaskListProjection, UiTaskReviewCommand,
-    UiTaskReviewRejectionCommand, UiTaskSnapshotProjection, UiTimerEventProjection,
-    UiTimerListProjection, UiTimerProjection, UiTimerRepeatCommand, UiTimerScheduleCommand,
-    UiToolRegistryProjection, UiToolRegistryToolProjection, UiTurnProjection,
-    UiTurnTimingProjection, UiWorkerControlCommand, UiWorkerControlEventProjection,
-    UiWorkerControlProjection, checkpoint_projection_from_runtime_summary,
-    turn_projection_for_client, turn_projection_from_events,
+    UiInputAttachmentKind, UiLocalAgentProjection, UiMasterPollClassificationProjection,
+    UiMasterPollProjection, UiModelGroupConfigProjection, UiModelGroupConfigUpdate,
+    UiModelRequestKind, UiModelRequestWaiting, UiModelRouteProjection, UiModelRouteUpdate,
+    UiModelTransportActivity, UiModelTransportKind, UiModelWeightedRouteProjection,
+    UiModelWeightedRouteUpdate, UiProtocolState, UiProviderConfigSummaryProjection,
+    UiProviderConfigUpdate, UiQueryAccessScope, UiQueryResult, UiRuntimeQueryPort,
+    UiSchedulerTickCommand, UiSessionMetadataProjection, UiSessionSearchChildProjection,
+    UiSessionSearchProjection, UiSessionSearchResultProjection, UiSubmitMetadata,
+    UiTaskAgentCreateCommand, UiTaskAssignCommand, UiTaskBoardProjection, UiTaskClaimCommand,
+    UiTaskCreateCommand, UiTaskDispatchCommand, UiTaskEventInboxEntryProjection,
+    UiTaskEventInboxProjection, UiTaskHistoryProjection, UiTaskLedgerEventProjection,
+    UiTaskListProjection, UiTaskReviewCommand, UiTaskReviewRejectionCommand,
+    UiTaskSnapshotProjection, UiTimerEventProjection, UiTimerListProjection, UiTimerProjection,
+    UiTimerRepeatCommand, UiTimerScheduleCommand, UiToolRegistryProjection,
+    UiToolRegistryToolProjection, UiTurnProjection, UiTurnTimingProjection, UiWorkerControlCommand,
+    UiWorkerControlEventProjection, UiWorkerControlProjection,
+    checkpoint_projection_from_runtime_summary, turn_projection_for_client,
+    turn_projection_from_events,
 };
 use serde_json::{Map, Value, json};
 use thiserror::Error;
@@ -2790,6 +2791,7 @@ pub struct RuntimeLiveDispatcherConfig {
 pub struct RuntimeAgentBootstrap {
     pub selected_agent: SelectedAgentConfig,
     pub runtime_home: PathBuf,
+    pub local_web_url: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -2902,6 +2904,10 @@ pub fn load_default_runtime_agent(
     Ok(RuntimeAgentBootstrap {
         selected_agent: selected,
         runtime_home,
+        local_web_url: config
+            .agents()
+            .get(agent_name)
+            .and_then(|agent| agent.local_web_url.clone()),
     })
 }
 
@@ -3150,8 +3156,10 @@ struct RuntimeCommandDispatcherState {
     active_turns: Vec<ActiveRuntimeTurn>,
     node_runtime: LocalNodeRuntime,
     next_turn_ordinal: u64,
-    pending_config_status: Option<UiConfigStatusProjection>,
+    pending_config_agent_name: Option<String>,
 }
+
+type PersistedSessionFingerprint = (Option<TurnId>, Option<TurnId>);
 
 #[derive(Clone)]
 struct ActiveRuntimeTurn {
@@ -3181,6 +3189,7 @@ struct PreparedLiveSubmit {
 pub struct RuntimeCommandDispatcher {
     ui_state: Arc<Mutex<UiProtocolState>>,
     state: Mutex<RuntimeCommandDispatcherState>,
+    persisted_session_fingerprints: Mutex<BTreeMap<SessionId, PersistedSessionFingerprint>>,
 }
 
 impl RuntimeCommandDispatcher {
@@ -3418,6 +3427,7 @@ impl RuntimeCommandDispatcher {
         }
         let dispatcher = Self {
             ui_state,
+            persisted_session_fingerprints: Mutex::new(BTreeMap::new()),
             state: Mutex::new(RuntimeCommandDispatcherState {
                 config,
                 execution_role,
@@ -3429,7 +3439,7 @@ impl RuntimeCommandDispatcher {
                 active_turns: Vec::new(),
                 node_runtime,
                 next_turn_ordinal,
-                pending_config_status: None,
+                pending_config_agent_name: None,
             }),
         };
         dispatcher
@@ -3469,8 +3479,46 @@ impl RuntimeCommandDispatcher {
         &self,
         command: &UiCommand,
     ) -> Result<Option<UiQueryResult>, UiCommandDispatchPortError> {
+        self.query_runtime_for_scope(command, UiQueryAccessScope::LocalLoopback)
+    }
+
+    fn query_runtime_for_scope(
+        &self,
+        command: &UiCommand,
+        scope: UiQueryAccessScope,
+    ) -> Result<Option<UiQueryResult>, UiCommandDispatchPortError> {
         let state = self.state.lock().expect("lock runtime dispatcher state");
         match command {
+            UiCommand::QuerySessionList | UiCommand::QueryArchivedSessionList => {
+                let Some(runtime_home) = state
+                    .config
+                    .live
+                    .as_ref()
+                    .map(|live| live.runtime_home.clone())
+                else {
+                    return Ok(None);
+                };
+                let reason_agent_id = state.config.reason_agent_id.clone();
+                let reason_node_id = reason_node_id_for_config(&state.config);
+                drop(state);
+                let mut fingerprints = self
+                    .persisted_session_fingerprints
+                    .lock()
+                    .expect("lock persisted session fingerprints");
+                refresh_persisted_sessions_for_ui_query(
+                    &runtime_home,
+                    &reason_agent_id,
+                    &reason_node_id,
+                    &self.ui_state,
+                    &mut fingerprints,
+                )?;
+                self.ui_state
+                    .lock()
+                    .expect("lock ui state")
+                    .query(command)
+                    .map(Some)
+                    .map_err(|error| UiCommandDispatchPortError::DispatchFailed(error.to_string()))
+            }
             UiCommand::QuerySessionSearch { query, limit } => {
                 let Some(live) = state.config.live.as_ref() else {
                     return Ok(None);
@@ -3524,14 +3572,19 @@ impl RuntimeCommandDispatcher {
                     .map_err(|error| UiCommandDispatchPortError::DispatchFailed(error.to_string()))
             }
             UiCommand::QueryConfigStatus => {
-                if let Some(status) = state.pending_config_status.clone() {
-                    return Ok(Some(UiQueryResult::ConfigStatus(status)));
-                }
                 let Some(live) = state.config.live.as_ref() else {
                     return Ok(None);
                 };
+                let agent_name = state
+                    .pending_config_agent_name
+                    .as_deref()
+                    .unwrap_or(&live.selected_agent.name);
                 Ok(Some(UiQueryResult::ConfigStatus(
-                    project_live_config_status_for_ui(live)?,
+                    project_config_status_from_path_for_ui(
+                        &live.runtime_home.join("config.toml"),
+                        agent_name,
+                        scope,
+                    )?,
                 )))
             }
             UiCommand::QueryTaskList { status, agent_id } => {
@@ -4685,28 +4738,27 @@ fn session_cwds_from_turns(turns: &[TurnRecord]) -> BTreeMap<SessionId, PathBuf>
     cwds
 }
 
-fn project_live_config_status_for_ui(
-    live: &RuntimeLiveDispatcherConfig,
-) -> Result<UiConfigStatusProjection, UiCommandDispatchPortError> {
-    let config_path = live.runtime_home.join("config.toml");
-    project_config_status_from_path_for_ui(&config_path, &live.selected_agent.name)
-}
-
 fn project_config_status_from_path_for_ui(
     config_path: &Path,
     agent_name: &str,
+    scope: UiQueryAccessScope,
 ) -> Result<UiConfigStatusProjection, UiCommandDispatchPortError> {
     let loaded = load_config_from_path(config_path)
         .map_err(|err| UiCommandDispatchPortError::DispatchFailed(err.to_string()))?;
     let selected = loaded
         .select_agent(agent_name)
         .map_err(|err| UiCommandDispatchPortError::DispatchFailed(err.to_string()))?;
-    Ok(project_config_status_for_ui(&selected, Some(&loaded)))
+    Ok(project_config_status_for_ui(
+        &selected,
+        Some(&loaded),
+        scope,
+    ))
 }
 
 fn project_config_status_for_ui(
     selected: &SelectedAgentConfig,
     loaded_config: Option<&LoadedConfig>,
+    scope: UiQueryAccessScope,
 ) -> UiConfigStatusProjection {
     let worker_peers = selected.worker_peers().collect::<Vec<_>>();
     let shared_provider_id = worker_peers.first().and_then(|first| {
@@ -4789,8 +4841,54 @@ fn project_config_status_for_ui(
                 provider_id: peer.provider_id.clone(),
                 fallback_provider_id: peer.fallback_provider_id.clone(),
                 model_group_id: peer.model_group_id.clone(),
+                local_web_url: (scope == UiQueryAccessScope::LocalLoopback)
+                    .then(|| {
+                        loaded_config.and_then(|loaded| {
+                            loaded
+                                .agents()
+                                .get(&peer.name)
+                                .and_then(|agent| agent.local_web_url.clone())
+                        })
+                    })
+                    .flatten(),
             })
             .collect(),
+        local_agent_directory: loaded_config
+            .map(|loaded| {
+                loaded
+                    .agents()
+                    .values()
+                    .filter_map(|agent| {
+                        if agent.local_web_url.is_none() && agent.relay_url.is_none() {
+                            return None;
+                        }
+                        Some(UiLocalAgentProjection {
+                            agent_name: agent.name.clone(),
+                            agent_mode: agent.mode.as_str().to_owned(),
+                            node_id: agent.node_id.clone(),
+                            web_url: (scope == UiQueryAccessScope::LocalLoopback)
+                                .then(|| agent.local_web_url.clone())
+                                .flatten(),
+                            is_local: scope == UiQueryAccessScope::LocalLoopback
+                                && agent.local_web_url.is_some(),
+                            relay_web_url: agent.relay_url.as_ref().map(|relay_url| {
+                                let encoded_agent_name = percent_encoding::utf8_percent_encode(
+                                    &agent.name,
+                                    percent_encoding::NON_ALPHANUMERIC,
+                                );
+                                let relay_base = relay_url.trim_end_matches('/');
+                                let agent_mount = if relay_base.ends_with("/relay") {
+                                    "/agents"
+                                } else {
+                                    "/relay/agents"
+                                };
+                                format!("{}{}/{}/", relay_base, agent_mount, encoded_agent_name)
+                            }),
+                        })
+                    })
+                    .collect()
+            })
+            .unwrap_or_default(),
         provider_registry,
         model_group_registry,
         agent_resource_count: worker_peers.len(),
@@ -5958,10 +6056,7 @@ impl RuntimeCommandDispatcher {
             },
         )
         .map_err(|err| UiCommandDispatchPortError::DispatchFailed(err.to_string()))?;
-        state.pending_config_status = Some(project_config_status_from_path_for_ui(
-            &config_path,
-            &update.agent_name,
-        )?);
+        state.pending_config_agent_name = Some(update.agent_name.clone());
         Ok(UiCommandDispatchReceipt {
             ingress: envelope.ingress,
             target_feature_id: envelope.target_feature_id,
@@ -5995,10 +6090,7 @@ impl RuntimeCommandDispatcher {
             },
         )
         .map_err(|err| UiCommandDispatchPortError::DispatchFailed(err.to_string()))?;
-        state.pending_config_status = Some(project_config_status_from_path_for_ui(
-            &config_path,
-            &update.agent_name,
-        )?);
+        state.pending_config_agent_name = Some(update.agent_name.clone());
         Ok(UiCommandDispatchReceipt {
             ingress: envelope.ingress,
             target_feature_id: envelope.target_feature_id,
@@ -6039,10 +6131,7 @@ impl RuntimeCommandDispatcher {
             },
         )
         .map_err(|err| UiCommandDispatchPortError::DispatchFailed(err.to_string()))?;
-        state.pending_config_status = Some(project_config_status_from_path_for_ui(
-            &config_path,
-            &agent_name,
-        )?);
+        state.pending_config_agent_name = Some(agent_name.clone());
         Ok(UiCommandDispatchReceipt {
             ingress: envelope.ingress,
             target_feature_id: envelope.target_feature_id,
@@ -6070,10 +6159,7 @@ impl RuntimeCommandDispatcher {
             },
         )
         .map_err(|err| UiCommandDispatchPortError::DispatchFailed(err.to_string()))?;
-        state.pending_config_status = Some(project_config_status_from_path_for_ui(
-            &config_path,
-            &selection.agent_name,
-        )?);
+        state.pending_config_agent_name = Some(selection.agent_name.clone());
         Ok(UiCommandDispatchReceipt {
             ingress: envelope.ingress,
             target_feature_id: envelope.target_feature_id,
@@ -6132,10 +6218,7 @@ impl RuntimeCommandDispatcher {
             },
         )
         .map_err(|err| UiCommandDispatchPortError::DispatchFailed(err.to_string()))?;
-        state.pending_config_status = Some(project_config_status_from_path_for_ui(
-            &config_path,
-            &selection.agent_name,
-        )?);
+        state.pending_config_agent_name = Some(selection.agent_name.clone());
         Ok(UiCommandDispatchReceipt {
             ingress: envelope.ingress,
             target_feature_id: envelope.target_feature_id,
@@ -6164,10 +6247,7 @@ impl RuntimeCommandDispatcher {
             },
         )
         .map_err(|err| UiCommandDispatchPortError::DispatchFailed(err.to_string()))?;
-        state.pending_config_status = Some(project_config_status_from_path_for_ui(
-            &config_path,
-            &update.agent_name,
-        )?);
+        state.pending_config_agent_name = Some(update.agent_name.clone());
         Ok(UiCommandDispatchReceipt {
             ingress: envelope.ingress,
             target_feature_id: envelope.target_feature_id,
@@ -6184,6 +6264,14 @@ impl UiRuntimeQueryPort for RuntimeCommandDispatcher {
         command: &UiCommand,
     ) -> Result<Option<UiQueryResult>, UiCommandDispatchPortError> {
         RuntimeCommandDispatcher::query_runtime(self, command)
+    }
+
+    fn query_runtime_with_scope(
+        &self,
+        command: &UiCommand,
+        scope: UiQueryAccessScope,
+    ) -> Result<Option<UiQueryResult>, UiCommandDispatchPortError> {
+        self.query_runtime_for_scope(command, scope)
     }
 }
 
@@ -6243,6 +6331,68 @@ fn restore_session_turns_for_ui_query(
         }
     }
     Ok(None)
+}
+
+fn refresh_persisted_sessions_for_ui_query(
+    runtime_home: &Path,
+    reason_agent_id: &AgentId,
+    master_node_id: &str,
+    ui_state: &Arc<Mutex<UiProtocolState>>,
+    fingerprints: &mut BTreeMap<SessionId, PersistedSessionFingerprint>,
+) -> Result<(), UiCommandDispatchPortError> {
+    let persistence = ReasonPersistence::new(runtime_home.to_path_buf(), reason_agent_id.clone());
+    let metadata = persistence.load_session_metadata().map_err(|error| {
+        UiCommandDispatchPortError::DispatchFailed(format!(
+            "failed to refresh persisted session metadata: {error}"
+        ))
+    })?;
+    let mut ui = ui_state.lock().expect("lock ui state");
+    ui.set_session_metadata_entries(metadata.into_iter().map(session_metadata_to_ui));
+    drop(ui);
+    let sessions = persistence.list_persisted_sessions().map_err(|error| {
+        UiCommandDispatchPortError::DispatchFailed(format!(
+            "failed to refresh persisted session index: {error}"
+        ))
+    })?;
+    let mut persisted_projections = Vec::new();
+    let mut refreshed_sessions = Vec::new();
+    for session in sessions {
+        let fingerprint = (
+            session.latest_turn_id.clone(),
+            session.active_turn_id.clone(),
+        );
+        if fingerprints.get(&session.session_id) == Some(&fingerprint) {
+            continue;
+        }
+        let turns = match persistence.restore_turn_snapshots_for_ui(&session.session_id) {
+            Ok(turns) => turns,
+            Err(error) => {
+                return Err(UiCommandDispatchPortError::DispatchFailed(format!(
+                    "failed to refresh persisted session turns: {error}"
+                )));
+            }
+        };
+        refreshed_sessions.push(session.session_id.clone());
+        fingerprints.insert(session.session_id.clone(), fingerprint);
+        for turn in turns {
+            persisted_projections.push(project_runtime_turn_history(
+                reason_agent_id,
+                master_node_id,
+                std::slice::from_ref(&turn),
+                None,
+            ));
+        }
+    }
+    let mut ui = ui_state.lock().expect("lock ui state");
+    for session_id in refreshed_sessions {
+        let session_projections = persisted_projections
+            .iter()
+            .filter(|projection| projection.session_id == session_id)
+            .cloned()
+            .collect::<Vec<_>>();
+        ui.replace_persisted_turn_projections_without_publish(&session_id, session_projections);
+    }
+    Ok(())
 }
 
 fn queryable_reason_agent_ids(config: &RuntimeCommandDispatcherConfig) -> Vec<AgentId> {

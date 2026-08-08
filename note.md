@@ -9724,3 +9724,155 @@ exact_replay: scripts/verify-remote-relay-local-online.sh
 - Final `codex -p asxs review --uncommitted` concluded: no discrete correctness, security, performance, or maintainability issues found. Its sandbox could not bind a local relay integration socket, but the already completed unrestricted 29+4 suite and deployed same-identity replay provide the required runtime evidence.
 
 - 2026-08-04 relay generation closeout: control admission now returns a server-issued control generation. Agent data/error channel handshakes echo that generation in a dedicated header, and Relay checks it atomically before attachment. Added positive current-generation admission and negative replaced-generation rejection for both dependent channels. Worker `Assigned` projects as `Waiting/1` after restart. Remaining steps are generated docs, full validation, redeploy, isolated review, then commit only after explicit PASS.
+- 2026-08-06 local multi-Agent closeout: stock Chrome 150 navigation to Worker 3 at `http://127.0.0.1:4045/` failed with literal `net::ERR_UNSAFE_PORT` while curl `/health`, root HTML, assets, and authenticated ADP v3 over websocat remained healthy. The unique cause is Chromium's blocked-port policy, not daemon or ADP failure. Worker 3 runtime config truth moved from `4045` to safe port `4046`; browser launch flags are forbidden as acceptance evidence because ordinary Chrome/Android WebView users would remain blocked. Marker: `worker-three-chromium-safe-port-4046-20260806`.
+
+## 2026-08-07 - Local Agent session namespace and Worker host label diagnosis
+
+```yaml
+symptom:
+  observed: Worker 1 SessionList returned the same three verifier session ids as Master, while the Worker 1 session drawer labeled its direct-session group `Master`.
+  expected: each daemon queries only its selected Agent persistence namespace, and each independent WebUI labels that namespace with the selected Agent identity.
+  entry: authenticated ADP QuerySessionList plus stock Chrome 390x844 Dashboard Agent navigation from 4042 to 4043/4044/4046.
+  raw_evidence: master.json and worker.json have distinct inodes and agent_id rows; Master and Worker metadata files have distinct timestamps; a Worker-only rename changed only worker/session-metadata.json, then a Master-only rename changed only master/session-metadata.json. Chrome showed Worker 2 and Worker 3 with zero rows, while Worker 1 showed its own three historical same-name fixtures. On 4043 `.session-agent-name` still rendered literal `Master`.
+sop_model_flow:
+  status: known
+  flow_id: app.webui-smoke.local-agent-session-host
+  nodes: selected Agent config -> RuntimeCommandDispatcherConfig.reason_agent_id -> ReasonPersistence namespace -> SessionList projection -> WebUI session group label
+  resources: config_status control projection, session persistence truth, WebUI render projection
+  owner_graph: reason.persistence owns namespace paths; runtime.ui-command-dispatch selects reason_agent_id; app.webui-smoke owns the rendered label.
+hypotheses:
+  - id: H1
+    cause: Worker 1 query reads Master persistence namespace.
+    result: falsified
+    evidence: distinct persistence paths/inodes/agent_id values and bidirectional endpoint-scoped rename isolation.
+  - id: H2
+    cause: old verifier runs independently created the same fixed session ids in both namespaces.
+    result: confirmed for the apparent SessionList overlap
+    evidence: Worker metadata timestamps predate the current Master verifier run, Worker 2/3 remain empty, and independent rename interventions do not cross namespaces.
+  - id: H3
+    cause: the session group label predates independent Worker WebUI hosts and is hard-coded to `Master`.
+    result: confirmed
+    evidence: apps/freehand-server/assets/webui/legacy-monolith.js renderSessionAgentGroup assigns `name.textContent = "Master"`; stock Chrome reproduces the first wrong projection on 4043.
+confirmed_hypothesis: H2 explains same ids without namespace pollution; H3 is the remaining UI identity defect.
+first_divergence_node: renderSessionAgentGroup creates the session-agent-name projection with a literal Master label instead of selected ConfigStatus agent identity.
+root_cause_module: app.webui-smoke WebUI render projection
+unique_owner: apps/freehand-server/assets/webui/legacy-monolith.js renderSessionAgentGroup
+```
+
+Fix Design Report:
+
+```yaml
+design_id: local-agent-session-group-identity-20260807-v1
+base_commit: 4551d949b8a8becce7e94e2d391177c6a2c902bb
+confirmed_cause: renderSessionAgentGroup hard-codes Master, so every independent Worker WebUI mislabels its own direct-session namespace.
+unique_modification_point: derive the group label from the owner-backed ConfigStatus selected agent name through the existing phase2AgentLabel projector.
+data_structures: unchanged
+control_flow: unchanged except the rendered label reads existing typed config truth
+error_semantics: unchanged
+resource_relations: unchanged; config_status remains a control projection and is not written into session payload truth
+module_boundaries: unchanged
+allowed_paths:
+  - apps/freehand-server/assets/webui/legacy-monolith.js
+  - apps/freehand-server/src/lib.rs
+  - scripts/verify-webui-mobile-ui-tree-online.mjs
+  - docs/testing/app.webui-smoke.md
+  - docs/function-maps/app.webui-smoke.md
+  - docs/mainline-calls/app.webui-smoke.json
+  - docs/wiki/app.webui-smoke.md
+  - note.md
+  - MEMORY.md
+forbidden_paths:
+  - crates/freehand-reason/**
+  - crates/freehand-runtime/**
+  - crates/freehand-ui-protocol/**
+non_goals:
+  - changing session ids or deleting old fixtures
+  - changing persistence namespace selection
+  - adding cross-Agent protocol
+required_verification:
+  - positive Master label on 4042 and Worker 1/2/3 labels on 4043/4044/4046
+  - negative no literal Master label on Worker direct-session group
+  - WebUI foundation contracts and freehand-server tests
+  - stock Chrome 390x844 four-Agent click chain with isolated SessionList rows
+exact_replay: Dashboard Agent directory click from 4042 to 4043 and inspect `.session-agent-name` after QuerySessionList settles
+experiment_artifacts_not_for_merge:
+  - browser DOM-only label intervention under local-agent-click-chain artifacts
+```
+
+### 2026-08-07 v2 closeout evidence
+
+- Approved design `local-agent-session-group-identity-20260807-v2` was implemented at the single owner edge in `apps/freehand-server/assets/webui/legacy-monolith.js`: after `ConfigStatus` writes `state.configStatus`, the existing `renderSessions()` projector runs again. No runtime, protocol, payload, persistence, or session-id behavior changed.
+- Root cause was an asynchronous render ordering defect: `SessionList` could render before `ConfigStatus`, leaving the explicit unknown label `当前 Agent`; later ConfigStatus rendering updated settings/Phase 2 but not the direct-session group. The positive fix re-renders from owner identity; the reverse assertion proves Workers are neither `Master` nor `当前 Agent` after ConfigStatus settles.
+- Same-version verification passed: JS syntax, diff check, fmt, targeted `freehand-server` asset test, WebUI foundation contract, mainlines, gates, workspace build, workspace clippy with `-D warnings`, and `cargo test --workspace` (all executed tests passed; one task test remained intentionally ignored).
+- Installed `target/debug/freehand-daemon` atomically to `~/.local/bin/freehand-daemonS-bin`; target and installed SHA-512 are `027c0bca4872458340664cc614e0ffa029d7b60d5b172d138da1af332e824dcafa178175ce1f5fb25f73d8baa56528941190433bb6c520056ac78d76d860c3a1`. Only the four service-scoped launchd labels were kickstarted; all returned `state=running` with active PIDs.
+- Real online proof passed on `4042/4043/4044/4046`: health, root HTML, served legacy asset, authenticated ADP smoke (subscribe/query/command failure), config identity/provider/model query, and isolated SessionList query. Identity was `master/master-node` on 4042, `worker/worker-node` on 4043, `worker-2/worker-2-node` on 4044, and `worker-3/worker-3-node` on 4046; all selected `cc/gpt-5.6-sol`.
+- Stock Chrome artifact `artifacts/webui-online/mobile-ui-tree-phase1-20260807T143011-8206` returned every check true, including `localAgentClickChainIsolated=true` and `localAgentSessionGroupIdentity=true`. It reached exact origins 4043/4044/4046/4042, showed `Worker 1`/`Worker 2`/`Worker 3`/`Master`, rejected foreign marker sessions, kept no selected session, and had no horizontal overflow.
+- Remaining scope is explicit: no cross-Agent conversation protocol, no Relay server version synchronization/deployment claim, and no Android real-device evidence.
+
+### 2026-08-07 v1 online invalidation and v2 design
+
+- Installed v1 removed the false literal `Master` label, but stock Chrome four-Agent replay `artifacts/webui-online/mobile-ui-tree-phase1-20260807T120054-98434/local-agent-click-chain.json` showed Worker 1/2/3 as `当前 Agent` while Master correctly showed `Master`.
+- `localAgentClickChainIsolated=true`: every endpoint reached its exact origin, contained its own fixed namespace marker, rejected all three foreign markers, kept no selected session and no horizontal overflow.
+- First divergence moved one step earlier in the render lifecycle: `SessionList` renders `renderSessionAgentGroup` before `ConfigStatus` exists; later `ConfigStatus` stores the owner-backed Agent identity and re-renders Phase 2 surfaces, but does not re-render the direct-session group. The label therefore remains the explicit unknown state forever instead of converging to Worker identity.
+- v1 approval is invalidated because the minimal complete fix now requires one additional render edge.
+
+```yaml
+design_id: local-agent-session-group-identity-20260807-v2
+base_commit: 4551d949b8a8becce7e94e2d391177c6a2c902bb
+confirmed_cause: SessionList may render before ConfigStatus; the ConfigStatus query-result branch updates state.configStatus but omits renderSessions, so sessionAgentGroupLabel is never recomputed from the newly available owner identity.
+first_divergence_node: applyAdpQueryResult ConfigStatus branch after state.configStatus assignment
+unique_modification_point: call the existing renderSessions owner immediately after ConfigStatus truth is accepted, alongside the existing settings and Phase 2 projections.
+data_structures: unchanged
+control_flow: add one ConfigStatus-to-session-list render edge; no request, payload, persistence, or routing change
+error_semantics: unchanged
+resource_relations: unchanged; ConfigStatus remains control projection and only invalidates a WebUI render projection
+module_boundaries: unchanged
+allowed_paths:
+  - apps/freehand-server/assets/webui/legacy-monolith.js
+  - apps/freehand-server/src/lib.rs
+  - scripts/verify-webui-mobile-ui-tree-online.mjs
+  - docs/testing/app.webui-smoke.md
+  - docs/function-maps/app.webui-smoke.md
+  - docs/mainline-calls/app.webui-smoke.json
+  - docs/wiki/app.webui-smoke.md
+  - note.md
+  - MEMORY.md
+forbidden_paths:
+  - crates/freehand-reason/**
+  - crates/freehand-runtime/**
+  - crates/freehand-ui-protocol/**
+non_goals:
+  - changing ADP query order
+  - changing session persistence or ids
+  - deleting old fixtures
+  - adding cross-Agent protocol
+required_verification:
+  - positive Master/Worker 1/Worker 2/Worker 3 session-group labels after arbitrary SessionList-before-ConfigStatus order
+  - negative Worker labels never remain Master or 当前 Agent after ConfigStatus settles
+  - localAgentClickChainIsolated and localAgentSessionGroupIdentity both true in stock Chrome 390x844
+  - full affected validation, reinstall, exact restart, four-endpoint ADP and review rerun
+exact_replay: artifacts/webui-online/mobile-ui-tree-phase1-20260807T120054-98434 plus node scripts/verify-webui-mobile-ui-tree-online.mjs
+experiment_artifacts_not_for_merge: []
+```
+
+### 2026-08-07 review findings fix design
+
+```yaml
+design_id: local-multi-agent-review-findings-20260807-v1
+review_source: tcm review of staged synthetic commit 92ba77b6a41f85395a31a655072b381d8e818847
+findings:
+  - P1 count-only Worker growth clones a host-specific local_web_url and creates endpoint collisions
+  - P2 ConfigStatus serializes loopback URLs without transport access scope
+unique_owners:
+  endpoint_growth: config.core update_agent_resource_config_in_path
+  query_scope_contract: ui.protocol UiRuntimeQueryPort typed side-channel
+  transport_scope: app.webui-smoke ADP connection plus relay.transport trusted remote marker
+  scoped_projection: runtime.ui-command-dispatch ConfigStatus projector
+control_payload_boundary: access scope remains a typed query-port argument and trusted transport header; it is not serialized into UiAdpRequest, UiQueryResult, command metadata, or session payload
+positive_tests:
+  - count growth without local_web_url remains valid
+  - local ConfigStatus retains explicit loopback web_url
+negative_tests:
+  - count growth with local_web_url fails before config overwrite
+  - remote ConfigStatus contains no local web_url or peer local_web_url
+```

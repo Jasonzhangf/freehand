@@ -14,6 +14,8 @@
   - Master mode keeps HTTP/WebUI/ADP host lifetime independent from the
     background Master lifecycle runner; runner stop/error is explicit stderr
     evidence and must not crash the host process
+  - Worker mode requires one configured, discoverable loopback `local_web_url`; missing endpoint truth fails startup instead of binding an unprojected ephemeral port
+  - non-loopback WebUI clients use the typed Relay Agent URL; the WebUI keeps page, asset, and ADP paths relative so the Relay Agent prefix remains intact
   - a configured Relay Agent client is part of the Master host lifetime;
     either the WebUI host or Relay client ending closes `run_master_mode` with
     the original error instead of entering a detached infinite reconnect loop
@@ -84,6 +86,12 @@
   - daemon checkpoint rewind HTTP smoke
   - daemon missing-checkpoint rewind HTTP failure smoke
   - daemon slave-mode production Worker runner bootstrap smoke
+  - daemon Worker bind positive/negative tests prove typed `local_web_url`, explicit
+    bind override, and legacy configs without `local_web_url` receive an isolated
+    loopback ephemeral bind rather than entering a restart loop
+  - explicit Worker bind is accepted only when it matches configured advertised
+    `local_web_url`; mismatches fail before binding so dashboard discovery cannot
+    route to a stale endpoint
   - daemon Relay Worker host smoke proves selected Slave config binds loopback
     WebUI/ADP and stops when the runner, host, or Relay client terminates
   - daemon Relay Worker host negative smoke proves missing/empty ADP auth and

@@ -27,6 +27,7 @@
       ],
       "allowed_dependencies": [
         "rust.std",
+        "freehand-contracts",
         "third_party.argon2",
         "third_party.axum",
         "third_party.futures-util",

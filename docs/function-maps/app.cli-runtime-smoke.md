@@ -5,6 +5,7 @@
 - owner crate: `apps/freehand-cli`
 - owner module: `apps/freehand-cli/src/main.rs`
 - owner entry symbols:
+- `authenticated_adp_cli_command` (integration-test transport setup only)
   - `run`
   - `run_reason_e2e_smoke`
   - `run_adp_smoke`

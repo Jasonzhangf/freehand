@@ -8,8 +8,8 @@
       "owner_crate": "crates/freehand-config",
       "identity": "agent profile plus config source path",
       "truth_store": "~/.freehand/config.toml",
-      "operations": ["load", "validate", "compile_agent_topology", "compile_agent_relay_connection", "compile_remote_daemon_registry", "project_safe_config", "mutate_provider_config", "mutate_model_group_config", "mutate_agent_resource_topology", "bootstrap_node_pairing", "compile_instruction_capability"],
-      "projections": ["runtime bootstrap config", "ordered configured peer topology", "runtime-only resolved Agent Relay connection", "safe CLI/ADP config query"]
+      "operations": ["load", "validate", "compile_agent_topology", "compile_agent_local_web_directory", "compile_agent_relay_connection", "compile_remote_daemon_registry", "project_safe_config", "mutate_provider_config", "mutate_model_group_config", "mutate_agent_resource_topology", "bootstrap_node_pairing", "compile_instruction_capability"],
+      "projections": ["runtime bootstrap config", "ordered configured peer topology", "local Agent WebUI endpoint directory", "runtime-only resolved Agent Relay connection", "safe CLI/ADP config query"]
     },
     {
       "resource_type": "remote_daemon_registry",
@@ -552,10 +552,10 @@
       "owner_feature_id": "app.webui-smoke",
       "source_resource": "ui_projection",
       "target_resource": "ui_projection",
-      "effect": "bind generated ADP query, command, and subscribe request constructors to one request-id correlated WebSocket response chain that settles query_result, command_receipt, subscription_accepted, subscription_event, and failure frames explicitly",
+      "effect": "bind generated ADP query, command, and subscribe request constructors to the WebUI ADP client without handwritten frame-class strings",
       "mainline_call_doc": "docs/mainline-calls/app.webui-smoke.json",
       "ui_contract": {
-        "projection_or_query": "ADP_PROTOCOL_MANIFEST / settleAdpResponseFrame",
+        "projection_or_query": "ADP_PROTOCOL_MANIFEST",
         "generated_command": "adpQueryOf / adpCommandOf / adpSubscribeOf",
         "surface_path": "apps/freehand-server/assets/webui/app-shell/adp-client.js"
       },
@@ -1264,6 +1264,17 @@
       "binding_status": "bound"
     },
     {
+      "edge_id": "app.webui-smoke#10-foundation-protocol-client",
+      "operation_id": "ui_projection.bind_protocol_call",
+      "source_resource": "ui_projection",
+      "target_resource": "ui_projection",
+      "mainline_call_doc": "docs/mainline-calls/app.webui-smoke.json",
+      "call_table_step": "10-foundation-protocol-client",
+      "file_path": "apps/freehand-server/assets/webui/legacy-monolith.js / apps/freehand-server/assets/webui/app-shell/adp-client.js",
+      "symbol_path": "handleAdpFrame / settleAdpResponseFrame",
+      "binding_status": "bound"
+    },
+    {
       "edge_id": "app.webui-smoke#10-foundation-root",
       "operation_id": "ui_projection.compose_shell",
       "source_resource": "ui_projection",
@@ -1283,28 +1294,6 @@
       "call_table_step": "10-foundation-surface",
       "file_path": "apps/freehand-server/assets/webui/app-shell/surface-registry.js",
       "symbol_path": "surfaceContracts",
-      "binding_status": "bound"
-    },
-    {
-      "edge_id": "app.webui-smoke#10-foundation-protocol-client",
-      "operation_id": "ui_projection.bind_protocol_call",
-      "source_resource": "ui_projection",
-      "target_resource": "ui_projection",
-      "mainline_call_doc": "docs/mainline-calls/app.webui-smoke.json",
-      "call_table_step": "10-foundation-protocol-client",
-      "file_path": "apps/freehand-server/assets/webui/legacy-monolith.js / apps/freehand-server/assets/webui/app-shell/adp-client.js",
-      "symbol_path": "handleAdpFrame / settleAdpResponseFrame",
-      "binding_status": "bound"
-    },
-    {
-      "edge_id": "app.webui-smoke#10-foundation-protocol-generated",
-      "operation_id": "ui_projection.bind_protocol_call",
-      "source_resource": "ui_projection",
-      "target_resource": "ui_projection",
-      "mainline_call_doc": "docs/mainline-calls/app.webui-smoke.json",
-      "call_table_step": "10-foundation-protocol-generated",
-      "file_path": "apps/freehand-server/assets/webui/generated/adp-protocol.js",
-      "symbol_path": "ADP_PROTOCOL_MANIFEST / adpQueryOf / adpCommandOf / adpSubscribeOf",
       "binding_status": "bound"
     },
     {

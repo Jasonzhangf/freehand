@@ -1,4 +1,4 @@
-import { initializeThemeToggle } from "/assets/theme.js?v=__WEBUI_ASSET_VERSION__";
+import { initializeThemeToggle } from "../theme.js?v=__WEBUI_ASSET_VERSION__";
 import { classifyLayoutShape, classifyLayoutShapeForClient, viewportDimensionsForLayout } from "./app-shell/layout-shape.js?v=__WEBUI_ASSET_VERSION__";
 import { webuiEdges, requireEdge, WebUiSurface } from "./app-shell/edge-registry.js?v=__WEBUI_ASSET_VERSION__";
 import { createRouteController } from "./app-shell/route-controller.js?v=__WEBUI_ASSET_VERSION__";

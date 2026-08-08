@@ -9,6 +9,8 @@
   - `TurnId`
   - `TraceId`
   - `FeatureId`
+  - `FREEHAND_REMOTE_ACCESS_SCOPE_HEADER`
+  - `FREEHAND_REMOTE_ACCESS_SCOPE_VALUE`
   - `ContextSegmentKind`
   - `ContextSegment`
   - `ReasonReq01UserRawInput`
@@ -24,6 +26,15 @@
   - `validate_reason_req02`
   - `validate_reason_req03`
 
+## Resource Map Binding
+
+- resource map: `docs/resource-maps/core.json`
+- owned resources: shared cross-module contract types and transport-control constants
+- touched resources: relay_data_tunnel, ui_projection
+- forbidden shortcuts:
+  - remote access-scope constants must not be serialized into business request/response payload nodes
+  - Relay must not import UI protocol or runtime semantics
+
 ## Request Mainline
 
 - request-chain semantic nodes are defined and exported as cross-module contracts
@@ -31,6 +42,7 @@
   first-class task contract, task-space snapshot, and attention-resolution kinds
 - provider payload semantic contract now carries ordered `input_segments` rather than one rendered prompt string
 - writable-tool preview contracts remain separate from provider request content while staying replay-safe across runtime/tool boundaries
+- shared Relay-to-WebUI access-scope header names remain transport control constants and never enter request/response business payload structs
 
 ## Response Mainline
 
@@ -78,6 +90,7 @@
 | 11 | `validate_reason_req01` | `crates/freehand-contracts/src/lib.rs` | validate non-empty user input | raw request contract | validated request contract | request builders | shared validator | bound |
 | 12 | `validate_reason_req02` | `crates/freehand-contracts/src/lib.rs` | validate typed context-composed request | composed request contract | validated request contract | reason/planner | shared validator | bound |
 | 13 | `validate_reason_req03` | `crates/freehand-contracts/src/lib.rs` | validate provider payload contract | provider payload contract | validated provider payload | provider semantic boundary | shared validator | bound |
+| 14 | `FREEHAND_REMOTE_ACCESS_SCOPE_HEADER / FREEHAND_REMOTE_ACCESS_SCOPE_VALUE` | `crates/freehand-contracts/src/lib.rs` | define one shared Relay-to-WebUI remote access-scope header contract without adding the marker to business payload DTOs | typed transport boundary | stable header name/value | Relay Agent bridge and WebUI server | contract module | bound |
 
 ## Sync Status Against Code
 
@@ -85,4 +98,5 @@
   contract/snapshot/attention-resolution kinds, request nodes, tool contracts,
   preview contracts, semantic response nodes, and error contracts are bound in code
 - request-side validation helpers remain single-owner contract guards and are reused across orchestrator boundaries
+- remote access-scope constants are shared transport-control contracts and are absent from request/response payload node fields
 - generated wiki must be regenerated from `docs/mainline-calls/contracts.core.json` when this function-map truth changes

@@ -10,8 +10,8 @@ use tokio::sync::mpsc;
 
 use crate::model::{
     AgentHeartbeat, RELAY_TUNNEL_PROTOCOL_VERSION, RelayControlInFrame, RelayControlOutFrame,
-    RelayDataFrameKind, RelayDataInFrame, RelayDataOutFrame, RelayDataProtocol, RelayErrorInFrame,
-    RelayErrorOutFrame,
+    RelayDataAccessScope, RelayDataFrameKind, RelayDataInFrame, RelayDataOutFrame,
+    RelayDataProtocol, RelayErrorInFrame, RelayErrorOutFrame,
 };
 use crate::service::{
     RelayState, authenticated_account, error_response, raw_agent_route_path, record_disconnect,
@@ -238,6 +238,7 @@ async fn proxy_websocket(
             method: None,
             path_and_query: local_path,
             headers: Vec::new(),
+            access_scope: Some(RelayDataAccessScope::Remote),
         })
         .await
     {

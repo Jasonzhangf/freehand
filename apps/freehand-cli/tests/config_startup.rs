@@ -38,6 +38,12 @@ fn unique_home_dir() -> std::path::PathBuf {
     std::env::temp_dir().join(format!("freehand-cli-home-{nanos}-{counter}"))
 }
 
+fn authenticated_adp_cli_command() -> Command {
+    let mut command = Command::new(env!("CARGO_BIN_EXE_freehand-cli"));
+    command.env("FREEHAND_ADP_AUTH_TOKEN", "test-adp-bearer");
+    command
+}
+
 fn spawn_mock_server(
     status: u16,
     content_type: &'static str,
@@ -3516,7 +3522,7 @@ relay_host_id = "studio-host"
 fn cli_runs_adp_smoke_against_mock_websocket() {
     let (url, handle) = spawn_adp_mock_server();
 
-    let output = Command::new(env!("CARGO_BIN_EXE_freehand-cli"))
+    let output = authenticated_adp_cli_command()
         .arg("adp-smoke")
         .arg("--url")
         .arg(&url)
@@ -3542,7 +3548,7 @@ fn cli_runs_adp_smoke_against_mock_websocket() {
 fn cli_runs_adp_success_turn_sample_against_mock_websocket() {
     let (url, handle) = spawn_adp_sample_mock_server(MockAdpSampleKind::Success);
 
-    let output = Command::new(env!("CARGO_BIN_EXE_freehand-cli"))
+    let output = authenticated_adp_cli_command()
         .arg("adp-turn-sample")
         .arg("--url")
         .arg(&url)
@@ -3570,7 +3576,7 @@ fn cli_runs_adp_success_turn_sample_against_mock_websocket() {
 fn cli_runs_adp_failure_turn_sample_against_mock_websocket() {
     let (url, handle) = spawn_adp_sample_mock_server(MockAdpSampleKind::Failure);
 
-    let output = Command::new(env!("CARGO_BIN_EXE_freehand-cli"))
+    let output = authenticated_adp_cli_command()
         .arg("adp-turn-sample")
         .arg("--url")
         .arg(&url)
@@ -3602,7 +3608,7 @@ fn cli_runs_adp_failure_turn_sample_against_mock_websocket() {
 fn cli_runs_adp_schema_mismatch_turn_sample_against_mock_websocket() {
     let (url, handle) = spawn_adp_sample_mock_server(MockAdpSampleKind::SchemaMismatch);
 
-    let output = Command::new(env!("CARGO_BIN_EXE_freehand-cli"))
+    let output = authenticated_adp_cli_command()
         .arg("adp-turn-sample")
         .arg("--url")
         .arg(&url)
@@ -3630,7 +3636,7 @@ fn cli_runs_adp_schema_mismatch_turn_sample_against_mock_websocket() {
 fn cli_runs_adp_provider_retry_turn_sample_against_mock_websocket() {
     let (url, handle) = spawn_adp_sample_mock_server(MockAdpSampleKind::ProviderRetry);
 
-    let output = Command::new(env!("CARGO_BIN_EXE_freehand-cli"))
+    let output = authenticated_adp_cli_command()
         .arg("adp-turn-sample")
         .arg("--url")
         .arg(&url)
@@ -3656,7 +3662,7 @@ fn cli_runs_adp_provider_retry_turn_sample_against_mock_websocket() {
 fn cli_runs_session_continue_sample_against_mock_websocket() {
     let (url, handle) = spawn_adp_session_continue_mock_server();
 
-    let output = Command::new(env!("CARGO_BIN_EXE_freehand-cli"))
+    let output = authenticated_adp_cli_command()
         .arg("session-continue-sample")
         .arg("--url")
         .arg(&url)
@@ -3681,7 +3687,7 @@ fn cli_runs_session_continue_sample_against_mock_websocket() {
 fn cli_runs_task_lifecycle_sample_against_mock_websocket() {
     let (url, handle) = spawn_adp_task_lifecycle_mock_server();
 
-    let output = Command::new(env!("CARGO_BIN_EXE_freehand-cli"))
+    let output = authenticated_adp_cli_command()
         .arg("task-lifecycle-sample")
         .arg("--url")
         .arg(&url)
@@ -3706,7 +3712,7 @@ fn cli_runs_task_lifecycle_sample_against_mock_websocket() {
 fn cli_runs_phase1_foundation_sample_against_mock_websocket() {
     let (url, handle) = spawn_adp_phase1_foundation_mock_server();
 
-    let output = Command::new(env!("CARGO_BIN_EXE_freehand-cli"))
+    let output = authenticated_adp_cli_command()
         .arg("phase1-foundation-sample")
         .arg("--url")
         .arg(&url)
@@ -3736,7 +3742,7 @@ fn cli_runs_phase1_foundation_sample_against_mock_websocket() {
 fn cli_runs_master_worker_foundation_sample_against_mock_websocket() {
     let (url, handle) = spawn_adp_master_worker_foundation_mock_server();
 
-    let output = Command::new(env!("CARGO_BIN_EXE_freehand-cli"))
+    let output = authenticated_adp_cli_command()
         .arg("master-worker-foundation-sample")
         .arg("--url")
         .arg(&url)
@@ -3767,7 +3773,7 @@ fn cli_runs_master_worker_foundation_sample_against_mock_websocket() {
 fn cli_runs_master_worker_foundation_verify_against_mock_websocket() {
     let (url, handle) = spawn_adp_master_worker_foundation_verify_mock_server();
 
-    let output = Command::new(env!("CARGO_BIN_EXE_freehand-cli"))
+    let output = authenticated_adp_cli_command()
         .arg("master-worker-foundation-sample")
         .arg("--url")
         .arg(&url)
@@ -3801,7 +3807,7 @@ fn cli_runs_master_worker_foundation_verify_against_mock_websocket() {
 fn cli_runs_master_worker_autonomy_sample_against_mock_websocket() {
     let (url, handle) = spawn_adp_master_worker_autonomy_mock_server();
 
-    let output = Command::new(env!("CARGO_BIN_EXE_freehand-cli"))
+    let output = authenticated_adp_cli_command()
         .arg("master-worker-autonomy-sample")
         .arg("--url")
         .arg(&url)
@@ -3839,7 +3845,7 @@ fn cli_runs_master_worker_autonomy_sample_against_mock_websocket() {
 fn cli_runs_master_worker_autonomy_verify_against_mock_websocket() {
     let (url, handle) = spawn_adp_master_worker_autonomy_verify_mock_server();
 
-    let output = Command::new(env!("CARGO_BIN_EXE_freehand-cli"))
+    let output = authenticated_adp_cli_command()
         .arg("master-worker-autonomy-sample")
         .arg("--url")
         .arg(&url)
@@ -3878,7 +3884,7 @@ fn cli_runs_master_worker_autonomy_verify_against_mock_websocket() {
 fn cli_runs_master_poll_foundation_sample_against_mock_websocket() {
     let (url, handle) = spawn_adp_master_poll_foundation_mock_server();
 
-    let output = Command::new(env!("CARGO_BIN_EXE_freehand-cli"))
+    let output = authenticated_adp_cli_command()
         .arg("master-poll-foundation-sample")
         .arg("--url")
         .arg(&url)
@@ -3908,7 +3914,7 @@ fn cli_runs_master_poll_foundation_sample_against_mock_websocket() {
 fn cli_runs_master_poll_foundation_verify_against_mock_websocket() {
     let (url, handle) = spawn_adp_master_poll_foundation_verify_mock_server();
 
-    let output = Command::new(env!("CARGO_BIN_EXE_freehand-cli"))
+    let output = authenticated_adp_cli_command()
         .arg("master-poll-foundation-sample")
         .arg("--url")
         .arg(&url)
@@ -3945,7 +3951,7 @@ fn cli_runs_master_poll_foundation_verify_against_mock_websocket() {
 fn cli_runs_worker_control_foundation_sample_against_mock_websocket() {
     let (url, handle) = spawn_adp_worker_control_foundation_mock_server();
 
-    let output = Command::new(env!("CARGO_BIN_EXE_freehand-cli"))
+    let output = authenticated_adp_cli_command()
         .arg("worker-control-foundation-sample")
         .arg("--url")
         .arg(&url)
@@ -3983,7 +3989,7 @@ fn cli_runs_worker_control_foundation_sample_against_mock_websocket() {
 fn cli_runs_worker_control_foundation_verify_against_mock_websocket() {
     let (url, handle) = spawn_adp_worker_control_foundation_verify_mock_server();
 
-    let output = Command::new(env!("CARGO_BIN_EXE_freehand-cli"))
+    let output = authenticated_adp_cli_command()
         .arg("worker-control-foundation-sample")
         .arg("--url")
         .arg(&url)
@@ -4023,7 +4029,7 @@ fn cli_runs_worker_control_foundation_verify_against_mock_websocket() {
 fn cli_runs_adp_session_query_against_mock_websocket() {
     let (url, handle) = spawn_adp_session_mock_server();
 
-    let output = Command::new(env!("CARGO_BIN_EXE_freehand-cli"))
+    let output = authenticated_adp_cli_command()
         .arg("adp-session-query")
         .arg("--url")
         .arg(&url)
@@ -4052,7 +4058,7 @@ fn cli_runs_adp_session_query_against_mock_websocket() {
 fn cli_runs_adp_session_manage_rollback_against_mock_websocket() {
     let (url, handle) = spawn_adp_session_mock_server();
 
-    let output = Command::new(env!("CARGO_BIN_EXE_freehand-cli"))
+    let output = authenticated_adp_cli_command()
         .arg("adp-session-manage")
         .arg("--url")
         .arg(&url)

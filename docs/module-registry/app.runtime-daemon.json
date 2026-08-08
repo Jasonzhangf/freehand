@@ -29,7 +29,8 @@
         "third_party.serde-json",
         "third_party.serial-test",
         "third_party.tokio",
-        "third_party.tokio-tungstenite"
+        "third_party.tokio-tungstenite",
+        "third_party.url"
       ],
       "forbidden_dependencies": [
         "freehand-config",

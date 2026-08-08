@@ -12,6 +12,9 @@ import {
   surfaceContracts,
   validateSurfaceContractRegistry,
 } from '../apps/freehand-server/assets/webui/app-shell/surface-registry.js';
+import {
+  settleAdpResponseFrame,
+} from '../apps/freehand-server/assets/webui/app-shell/adp-client.js';
 
 const root = new URL('../', import.meta.url);
 const bootstrap = await readFile(
@@ -117,6 +120,111 @@ assert.match(legacyWebui, /!Array\.isArray\(sessions\)/);
 assert.match(onlineVerifier, /async function productionAssetVersion\(\)/);
 assert.doesNotMatch(onlineVerifier, /const assetVersion = ['"][^'"]+['"]/);
 assert.match(onlineVerifier, /runningHomeClearsSharedActiveState/);
+
+function settlementState(requestId, callbacks) {
+  return {
+    adpRequests: new Map([[requestId, {
+      timeoutId: `timeout-${requestId}`,
+      resolve: (value) => callbacks.push({ type: 'resolve', value }),
+      reject: (error) => callbacks.push({ type: 'reject', value: error.message }),
+    }]]),
+    adpSubscriptions: new Set(),
+  };
+}
+
+const clearedTimeouts = [];
+const settlementWindow = {
+  clearTimeout: (timeoutId) => clearedTimeouts.push(timeoutId),
+};
+const queryCallbacks = [];
+const queryState = settlementState('query-1', queryCallbacks);
+assert.deepEqual(
+  settleAdpResponseFrame({
+    state: queryState,
+    windowRef: settlementWindow,
+    frame: { kind: 'query_result', request_id: 'query-1', result: { sessions: [] } },
+  }),
+  { kind: 'query_result', settled: true },
+);
+assert.deepEqual(queryCallbacks, [{ type: 'resolve', value: { sessions: [] } }]);
+assert.equal(queryState.adpRequests.size, 0);
+
+const commandCallbacks = [];
+const commandState = settlementState('command-1', commandCallbacks);
+const commandReceipt = { dispatch_status: 'accepted' };
+assert.deepEqual(
+  settleAdpResponseFrame({
+    state: commandState,
+    windowRef: settlementWindow,
+    frame: { kind: 'command_receipt', request_id: 'command-1', receipt: commandReceipt },
+  }),
+  { kind: 'command_receipt', settled: true, receipt: commandReceipt },
+);
+assert.deepEqual(commandCallbacks, [{ type: 'resolve', value: commandReceipt }]);
+
+const subscribeCallbacks = [];
+const subscribeState = settlementState('subscribe-1', subscribeCallbacks);
+const selector = { stream_kind: 'latest_turn' };
+assert.deepEqual(
+  settleAdpResponseFrame({
+    state: subscribeState,
+    windowRef: settlementWindow,
+    frame: { kind: 'subscription_accepted', request_id: 'subscribe-1', selector },
+  }),
+  { kind: 'subscription_accepted', settled: true, selector },
+);
+assert.deepEqual(subscribeCallbacks, [{ type: 'resolve', value: selector }]);
+assert(subscribeState.adpSubscriptions.has('subscribe-1'));
+
+const eventState = { adpRequests: new Map(), adpSubscriptions: new Set() };
+const event = { stream_kind: 'latest_turn', payload: { status: 'running' } };
+assert.deepEqual(
+  settleAdpResponseFrame({
+    state: eventState,
+    windowRef: settlementWindow,
+    frame: { kind: 'subscription_event', request_id: 'subscribe-1', event },
+  }),
+  { kind: 'subscription_event', settled: false, event },
+);
+
+const failureCallbacks = [];
+const failureState = settlementState('query-2', failureCallbacks);
+const failure = { code: 'query_failed', message: 'query rejected' };
+assert.deepEqual(
+  settleAdpResponseFrame({
+    state: failureState,
+    windowRef: settlementWindow,
+    frame: { kind: 'failure', request_id: 'query-2', failure },
+  }),
+  { kind: 'failure', settled: true, failure },
+);
+assert.deepEqual(failureCallbacks, [{ type: 'reject', value: 'query rejected' }]);
+const malformedFailureCallbacks = [];
+const malformedFailureState = settlementState('query-malformed', malformedFailureCallbacks);
+assert.throws(
+  () => settleAdpResponseFrame({
+    state: malformedFailureState,
+    windowRef: settlementWindow,
+    frame: { kind: 'failure', request_id: 'query-malformed' },
+  }),
+  /violates the generated protocol contract/,
+);
+assert.equal(malformedFailureState.adpRequests.size, 1);
+assert.deepEqual(malformedFailureCallbacks, []);
+assert.deepEqual(
+  settleAdpResponseFrame({
+    state: eventState,
+    windowRef: settlementWindow,
+    frame: { kind: 'unsupported', request_id: 'unknown-1' },
+  }),
+  { kind: 'unsupported', settled: false, unsupported: true },
+);
+assert.deepEqual(clearedTimeouts, [
+  'timeout-query-1',
+  'timeout-command-1',
+  'timeout-subscribe-1',
+  'timeout-query-2',
+]);
 
 const stateModels = Object.values(SharedUiStateKind).map((kind) =>
   createSharedStateModel(kind, {

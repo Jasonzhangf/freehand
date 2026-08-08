@@ -11,6 +11,7 @@ freehand-runtime = { path = "../../crates/freehand-runtime" }
 freehand-server = { path = "../freehand-server" }
 freehand-ui-protocol = { path = "../../crates/freehand-ui-protocol" }
 tokio = { version = "1", features = ["macros", "rt-multi-thread", "net", "sync", "time"] }
+url = "2"
 
 [dev-dependencies]
 axum = "0.8"

@@ -20,16 +20,17 @@ use axum::response::sse::{Event, Sse};
 use axum::routing::{get, post};
 use axum::{Json, Router};
 use freehand_contracts::{
-    AgentId, FeatureId, ReasonResp01SemanticEvent, ReasonResp03TerminalEvent, SemanticEventKind,
-    SessionId, TerminalStatus, TraceId, TurnId,
+    AgentId, FREEHAND_REMOTE_ACCESS_SCOPE_HEADER, FREEHAND_REMOTE_ACCESS_SCOPE_VALUE, FeatureId,
+    ReasonResp01SemanticEvent, ReasonResp03TerminalEvent, SemanticEventKind, SessionId,
+    TerminalStatus, TraceId, TurnId,
 };
 use freehand_ui_protocol::{
     DebugScenePosition, DebugSemanticPosition, DebugStateSnapshot, SubscriptionSelector,
     TurnProjectionInput, UiAdpFailure, UiAdpRequest, UiAdpResponse, UiCheckpointSnapshot,
     UiClientKind, UiCommand, UiCommandDispatchFailure, UiCommandDispatchPort,
-    UiCommandDispatchReceipt, UiProjection, UiProtocolState, UiPublicTurnProjection, UiQueryResult,
-    UiRuntimeQueryPort, UiSubscriptionEvent, UiTurnProjection, accept_query_ingress,
-    adp_internal_command_token_from_capability, adp_server_capabilities,
+    UiCommandDispatchReceipt, UiProjection, UiProtocolState, UiPublicTurnProjection,
+    UiQueryAccessScope, UiQueryResult, UiRuntimeQueryPort, UiSubscriptionEvent, UiTurnProjection,
+    accept_query_ingress, adp_internal_command_token_from_capability, adp_server_capabilities,
     build_command_dispatch_envelope, checkpoint_projection_from_runtime_summary,
     dispatch_port_failure, is_internal_adp_command, is_public_adp_command, protocol_rejection,
     public_turn_projection, subscription_matches, subscription_selector,
@@ -518,11 +519,35 @@ async fn handle_adp_socket(
     if !adp_request_authorized(&headers, &state.adp_auth_token) {
         return StatusCode::UNAUTHORIZED.into_response();
     }
-    ws.on_upgrade(move |socket| handle_adp_connection(socket, state))
+    let scope = query_access_scope(&headers);
+    ws.on_upgrade(move |socket| handle_adp_connection(socket, state, scope))
         .into_response()
 }
 
-async fn handle_adp_connection(socket: WebSocket, state: WebUiState) {
+fn query_access_scope(headers: &HeaderMap) -> UiQueryAccessScope {
+    if headers
+        .get(FREEHAND_REMOTE_ACCESS_SCOPE_HEADER)
+        .and_then(|value| value.to_str().ok())
+        == Some(FREEHAND_REMOTE_ACCESS_SCOPE_VALUE)
+    {
+        return UiQueryAccessScope::Remote;
+    }
+    let host = headers
+        .get(header::HOST)
+        .and_then(|value| value.to_str().ok())
+        .unwrap_or_default();
+    let host = host
+        .strip_prefix('[')
+        .and_then(|value| value.split(']').next())
+        .or_else(|| host.rsplit_once(':').map(|(value, _)| value))
+        .unwrap_or(host);
+    match host {
+        "localhost" | "127.0.0.1" | "::1" => UiQueryAccessScope::LocalLoopback,
+        _ => UiQueryAccessScope::Remote,
+    }
+}
+
+async fn handle_adp_connection(socket: WebSocket, state: WebUiState, scope: UiQueryAccessScope) {
     let (mut sender, mut receiver) = socket.split();
     let (outbound_tx, mut outbound_rx) = mpsc::unbounded_channel::<UiAdpResponse>();
     let writer = tokio::spawn(async move {
@@ -561,6 +586,7 @@ async fn handle_adp_connection(socket: WebSocket, state: WebUiState) {
                             &mut subscriptions,
                             &mut adp_handshake_accepted,
                             &mut adp_internal_commands_accepted,
+                            scope,
                             text.to_string(),
                         )
                         .await
@@ -621,6 +647,7 @@ async fn handle_adp_text_message(
     subscriptions: &mut Vec<(String, SubscriptionSelector)>,
     adp_handshake_accepted: &mut bool,
     adp_internal_commands_accepted: &mut bool,
+    scope: UiQueryAccessScope,
     text: String,
 ) -> Result<(), String> {
     let request: UiAdpRequest =
@@ -677,7 +704,7 @@ async fn handle_adp_text_message(
                 send_adp_handshake_required(outbound_tx, request_id);
                 return Ok(());
             }
-            let _ = handle_adp_query(state, outbound_tx, request_id, query).await;
+            let _ = handle_adp_query(state, outbound_tx, request_id, query, scope).await;
             Ok(())
         }
         UiAdpRequest::Subscribe {
@@ -800,6 +827,7 @@ async fn handle_adp_query(
     outbound_tx: &mpsc::UnboundedSender<UiAdpResponse>,
     request_id: String,
     query: UiCommand,
+    scope: UiQueryAccessScope,
 ) -> Result<(), String> {
     if let Err(err) = accept_query_ingress(&query) {
         let rejection = protocol_rejection(err);
@@ -815,10 +843,11 @@ async fn handle_adp_query(
     }
     let runtime_query_port = Arc::clone(&state.runtime_query_port);
     let query_for_runtime = query.clone();
-    let runtime_result =
-        tokio::task::spawn_blocking(move || runtime_query_port.query_runtime(&query_for_runtime))
-            .await
-            .map_err(|err| format!("运行时 query task failed: {err}"))?;
+    let runtime_result = tokio::task::spawn_blocking(move || {
+        runtime_query_port.query_runtime_with_scope(&query_for_runtime, scope)
+    })
+    .await
+    .map_err(|err| format!("运行时 query task failed: {err}"))?;
     match runtime_result {
         Ok(Some(result)) => {
             let _ = outbound_tx.send(UiAdpResponse::QueryResult { request_id, result });
@@ -1190,6 +1219,42 @@ mod tests {
     use tokio_tungstenite::connect_async;
     use tokio_tungstenite::tungstenite::Message as WsMessage;
     use tokio_tungstenite::tungstenite::client::IntoClientRequest;
+
+    #[test]
+    fn query_access_scope_classifies_loopback_and_remote_hosts() {
+        let mut headers = HeaderMap::new();
+        headers.insert(header::HOST, HeaderValue::from_static("127.0.0.1:4042"));
+        assert_eq!(
+            query_access_scope(&headers),
+            UiQueryAccessScope::LocalLoopback
+        );
+
+        headers.insert(header::HOST, HeaderValue::from_static("localhost"));
+        assert_eq!(
+            query_access_scope(&headers),
+            UiQueryAccessScope::LocalLoopback
+        );
+
+        headers.insert(header::HOST, HeaderValue::from_static("[::1]:4042"));
+        assert_eq!(
+            query_access_scope(&headers),
+            UiQueryAccessScope::LocalLoopback
+        );
+
+        headers.insert(header::HOST, HeaderValue::from_static("agent.example.test"));
+        assert_eq!(query_access_scope(&headers), UiQueryAccessScope::Remote);
+    }
+
+    #[test]
+    fn query_access_scope_remote_marker_is_explicit_and_authoritative() {
+        let mut headers = HeaderMap::new();
+        headers.insert(header::HOST, HeaderValue::from_static("127.0.0.1:4042"));
+        headers.insert(
+            FREEHAND_REMOTE_ACCESS_SCOPE_HEADER,
+            HeaderValue::from_static(FREEHAND_REMOTE_ACCESS_SCOPE_VALUE),
+        );
+        assert_eq!(query_access_scope(&headers), UiQueryAccessScope::Remote);
+    }
 
     #[tokio::test]
     async fn asset_response_serves_shared_logo_png() {
@@ -1807,13 +1872,13 @@ mod tests {
         assert!(html.contains("data-webui-shell=\"true\""));
         assert!(!html.contains("data-layout-client=\"android-webview\""));
         assert!(!html.contains("data-layout-shape=\"tablet_portrait\""));
-        assert!(html.contains("/assets/theme.css"));
-        assert!(html.contains("/assets/webui.css"));
-        assert!(html.contains("/assets/logo.png"));
-        assert!(html.contains("/assets/webui.js"));
+        assert!(html.contains("href=\"assets/theme.css"));
+        assert!(html.contains("href=\"assets/webui.css"));
+        assert!(html.contains("src=\"assets/logo.png"));
+        assert!(html.contains("src=\"assets/webui.js"));
         assert!(html.contains(crate::assets::WEBUI_ASSET_VERSION));
         assert!(!html.contains("__WEBUI_ASSET_VERSION__"));
-        assert!(html.contains("data-adp-endpoint=\"/adp\""));
+        assert!(html.contains("data-adp-endpoint=\"adp\""));
         assert!(html.contains("data-selected-session=\"\""));
         assert!(html.contains("data-selected-turn=\"\""));
         assert!(html.contains("id=\"session-list\""));
@@ -2040,9 +2105,9 @@ mod tests {
         assert!(root_body.contains("data-webui-shell=\"true\""));
         assert!(!root_body.contains("data-layout-client=\"android-webview\""));
         assert!(!root_body.contains("data-layout-shape=\"tablet_portrait\""));
-        assert!(root_body.contains("/assets/theme.css"));
-        assert!(root_body.contains("/assets/logo.png"));
-        assert!(root_body.contains("data-adp-endpoint=\"/adp\""));
+        assert!(root_body.contains("href=\"assets/theme.css"));
+        assert!(root_body.contains("src=\"assets/logo.png"));
+        assert!(root_body.contains("data-adp-endpoint=\"adp\""));
         assert!(root_body.contains("id=\"session-list\""));
         assert!(root_body.contains("id=\"new-conversation-button\""));
         assert!(root_body.contains("id=\"new-task-button\""));
@@ -2114,8 +2179,8 @@ mod tests {
         assert!(root_body.contains("工作器上限"));
         assert!(!root_body.contains("id=\"mobile-agent-resource-save\""));
         assert!(!root_body.contains("Agent resources"));
-        assert!(root_body.contains("工作器任务"));
-        assert!(root_body.contains("点击任务打开对应工作器会话"));
+        assert!(root_body.contains("Agent 与 Worker"));
+        assert!(root_body.contains("选择 Agent 或当前会话的 Worker 任务"));
         assert!(!root_body.contains("id=\"mobile-agent-master-card\""));
         assert!(!root_body.contains("id=\"mobile-agent-agent-list\""));
         assert!(!root_body.contains("id=\"mobile-agent-history-list\""));
@@ -2134,7 +2199,7 @@ mod tests {
         assert!(!root_body.contains("rootfs"));
         assert!(!root_body.contains("shared-folder"));
         assert!(!root_body.contains("mount-directory"));
-        assert!(root_body.contains("data-checkpoint-query=\"/ui/query/checkpoints\""));
+        assert!(root_body.contains("data-checkpoint-query=\"ui/query/checkpoints\""));
         assert!(root_body.contains("id=\"debug-details-toggle\""));
         assert!(!root_body.contains(">Success</button>"));
         assert!(!root_body.contains(">Failure</button>"));
@@ -2282,6 +2347,12 @@ mod tests {
         assert!(
             webui_css_body.contains("body[data-mobile-agent-sheet=\"open\"] .mobile-agent-sheet")
         );
+        assert!(webui_css_body.contains(
+            "body[data-layout-shape=\"tablet_portrait\"][data-webui-route=\"home_dashboard\"] .mobile-agent-summary-strip {\n  display: block;\n}"
+        ));
+        assert!(!webui_css_body.contains(
+            "body[data-layout-shape=\"tall_phone\"][data-webui-route=\"home_dashboard\"] .mobile-agent-summary-strip,\nbody[data-layout-shape=\"tablet_portrait\"][data-webui-route=\"home_dashboard\"] .mobile-agent-summary-strip,\nbody[data-layout-shape=\"phone_portrait\"][data-webui-route=\"home_dashboard\"] .session-relation-header"
+        ));
         assert!(
             webui_css_body.contains("body[data-mobile-agent-sheet=\"open\"] .mobile-drawer-scrim")
         );
@@ -2331,7 +2402,7 @@ mod tests {
         let js_body = js.text().await.expect("js body");
         assert!(js_body.contains("initializeMobileWebui"));
         assert!(js_body.contains(&format!(
-            "/assets/webui/bootstrap.js?v={}",
+            "./webui/bootstrap.js?v={}",
             crate::assets::WEBUI_ASSET_VERSION
         )));
         assert!(
@@ -2373,6 +2444,13 @@ mod tests {
         assert!(legacy_body.contains("openNewSessionSurface"));
         assert!(legacy_body.contains("switchConversationSessionInSurface"));
         assert!(legacy_body.contains("createAdpClient"));
+        assert!(legacy_body.contains("function agentNavigationUrl"));
+        assert!(legacy_body.contains("function phase2AgentLabel"));
+        assert!(legacy_body.contains("function sessionAgentGroupLabel"));
+        assert!(legacy_body.contains("name.textContent = sessionAgentGroupLabel();"));
+        assert!(!legacy_body.contains("name.textContent = \"Master\";"));
+        assert!(legacy_body.contains("当前配置中没有可访问的 Agent"));
+        assert!(legacy_body.contains("进入独立会话"));
         assert!(legacy_body.contains("adpQueryOf"));
         assert!(legacy_body.contains("adpCommandOf"));
         assert!(legacy_body.contains("generated/adp-protocol.js"));
@@ -2402,6 +2480,7 @@ mod tests {
         assert_eq!(edge_registry.status(), StatusCode::OK);
         let edge_registry_body = edge_registry.text().await.expect("edge-registry body");
         assert!(edge_registry_body.contains("root.open_home"));
+        assert!(edge_registry_body.contains("home.open_agent_directory"));
         assert!(edge_registry_body.contains("session.open_parent_session"));
         assert!(edge_registry_body.contains("session.rename_session"));
 
@@ -2640,6 +2719,10 @@ mod tests {
         assert!(!legacy_body.contains("session-rename-selected-button"));
         assert!(legacy_body.contains("dispatchWebUiEdge"));
         assert!(legacy_body.contains("session.open_parent_session"));
+        assert!(legacy_body.contains("home.open_agent_directory"));
+        assert!(
+            legacy_body.contains("state.route === \"home_dashboard\" && !state.selectedSessionId")
+        );
         assert!(legacy_body.contains("root.open_home"));
         assert!(legacy_body.contains("renderHomeDashboardSurface"));
         assert!(!legacy_body.contains("运行、重试、等待用户选择的会话"));

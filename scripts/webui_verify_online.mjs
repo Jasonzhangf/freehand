@@ -7,6 +7,8 @@ const chromePath = '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome
 const debugPort = Number.parseInt(process.env.FREEHAND_WEBUI_DEBUG_PORT || '9223', 10);
 const baseUrl = normalizedBaseUrl(process.env.FREEHAND_WEBUI_BASE_URL || 'http://127.0.0.1:4042/');
 const adpUrl = process.env.FREEHAND_WEBUI_ADP_URL || adpUrlFromBaseUrl(baseUrl);
+const adpAuthToken = process.env.FREEHAND_ADP_AUTH_TOKEN || '';
+const adpProtocolVersion = 3;
 const cliPath = process.env.FREEHAND_WEBUI_CLI || `${process.env.HOME}/.local/bin/freehand-cliS`;
 const profileName = process.env.FREEHAND_WEBUI_PROFILE || portLabelFromBaseUrl(baseUrl);
 const successPrompt =
@@ -1039,17 +1041,39 @@ function unwrapQueryResult(result, variant) {
 
 function queryService(query, label) {
   const requestId = `webui-verify-${label}-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  const handshakeId = `${requestId}-handshake`;
+  let handshakeAccepted = false;
   return new Promise((resolve, reject) => {
-    const socket = new WebSocket(adpUrl);
+    const socket = new WebSocket(
+      adpUrl,
+      adpAuthToken ? { headers: { Authorization: `Bearer ${adpAuthToken}` } } : undefined,
+    );
     const timeout = setTimeout(() => {
       socket.close();
       reject(new Error(`service query timed out: ${label}`));
     }, 15_000);
     socket.addEventListener('open', () => {
-      socket.send(JSON.stringify({ kind: 'query', request_id: requestId, query }));
+      socket.send(JSON.stringify({
+        protocol_version: adpProtocolVersion,
+        kind: 'handshake',
+        request_id: handshakeId,
+        client_name: 'freehand-webui-online-verifier',
+        capabilities: ['query', 'command', 'subscribe'],
+      }));
     });
     socket.addEventListener('message', (event) => {
       const frame = JSON.parse(event.data);
+      if (!handshakeAccepted) {
+        if (frame.kind !== 'handshake_accepted' || frame.request_id !== handshakeId) {
+          clearTimeout(timeout);
+          socket.close();
+          reject(new Error(`service handshake failed: ${JSON.stringify(frame)}`));
+          return;
+        }
+        handshakeAccepted = true;
+        socket.send(JSON.stringify({ protocol_version: adpProtocolVersion, kind: 'query', request_id: requestId, query }));
+        return;
+      }
       if (frame.request_id !== requestId) {
         return;
       }

@@ -650,6 +650,58 @@ fn live_bootstrap_restores_all_persisted_sessions_into_ui_state() {
 }
 
 #[test]
+fn runtime_session_list_refreshes_current_agent_persistence_without_cross_agent_leakage() {
+    let runtime_home = temp_runtime_home();
+    let selected = live_selected_agent(
+        "http://127.0.0.1:1".to_owned(),
+        freehand_config::ProviderType::Anthropic,
+    );
+    let runtime = RuntimeCommandDispatcher::from_selected_agent_with_live(
+        &selected,
+        runtime_home.clone(),
+        false,
+    )
+    .expect("runtime bootstrap");
+    let local_session = SessionId::new("background-local-session");
+    ReasonPersistence::new(runtime_home.clone(), AgentId::new(selected.name.clone()))
+        .create_session_metadata(
+            local_session.clone(),
+            Some("Background local session".to_owned()),
+            None,
+        )
+        .expect("persist local background session");
+    ReasonPersistence::new(runtime_home.clone(), AgentId::new("agent-live-worker"))
+        .create_session_metadata(
+            SessionId::new("foreign-worker-session"),
+            Some("Foreign worker session".to_owned()),
+            None,
+        )
+        .expect("persist foreign background session");
+
+    let result = runtime
+        .query_runtime(&UiCommand::QuerySessionList)
+        .expect("runtime query")
+        .expect("runtime-owned session list");
+    match result {
+        UiQueryResult::SessionList(list) => {
+            assert!(
+                list.sessions
+                    .iter()
+                    .any(|row| row.session_id == local_session)
+            );
+            assert!(
+                list.sessions
+                    .iter()
+                    .all(|row| row.session_id.as_str() != "foreign-worker-session")
+            );
+        }
+        other => panic!("unexpected session list result: {other:?}"),
+    }
+
+    fs::remove_dir_all(runtime_home).expect("cleanup");
+}
+
+#[test]
 fn live_bridge_restores_same_session_history_into_follow_up_provider_request() {
     let runtime_home = temp_runtime_home();
     let session_id = SessionId::new("runtime-session-history");
@@ -2380,6 +2432,9 @@ node_id = "agent-live-node"
 paired_agents = ["agent-live-worker"]
 pair_token = "FREEHAND_RUNTIME_CONFIG_QUERY_MASTER_TOKEN"
 provider = "provider-live"
+relay_url = "https://relay.example"
+relay_token_env = "FREEHAND_RUNTIME_CONFIG_QUERY_RELAY_TOKEN"
+local_web_url = "http://127.0.0.1:4142"
 
 [agents.agent-live-worker]
 name = "agent-live-worker"
@@ -2388,6 +2443,9 @@ node_id = "agent-live-worker-node"
 paired_agents = ["agent-live"]
 pair_token = "FREEHAND_RUNTIME_CONFIG_QUERY_WORKER_TOKEN"
 provider = "provider-live"
+relay_url = "https://relay.example/relay/"
+relay_token_env = "FREEHAND_RUNTIME_CONFIG_QUERY_RELAY_TOKEN"
+local_web_url = "http://127.0.0.1:4143"
 "#,
     )
     .expect("write config");
@@ -2396,6 +2454,7 @@ provider = "provider-live"
         std::env::set_var("FREEHAND_RUNTIME_CONFIG_QUERY_PROVIDER", "test-api-key");
         std::env::set_var("FREEHAND_RUNTIME_CONFIG_QUERY_MASTER_TOKEN", "pair-token");
         std::env::set_var("FREEHAND_RUNTIME_CONFIG_QUERY_WORKER_TOKEN", "pair-token");
+        std::env::set_var("FREEHAND_RUNTIME_CONFIG_QUERY_RELAY_TOKEN", "relay-token");
     }
     let selected = freehand_config::load_config_from_path(&config_path)
         .expect("load config")
@@ -2420,6 +2479,26 @@ provider = "provider-live"
             assert_eq!(status.node_id, "agent-live-node");
             assert_eq!(status.paired_agents.len(), 1);
             assert_eq!(status.paired_agents[0].agent_name, "agent-live-worker");
+            assert_eq!(
+                status.paired_agents[0].local_web_url.as_deref(),
+                Some("http://127.0.0.1:4143")
+            );
+            assert_eq!(status.local_agent_directory.len(), 2);
+            assert_eq!(status.local_agent_directory[0].agent_name, "agent-live");
+            assert!(status.local_agent_directory[0].is_local);
+            assert_eq!(
+                status.local_agent_directory[0].relay_web_url.as_deref(),
+                Some("https://relay.example/relay/agents/agent%2Dlive/")
+            );
+            assert_eq!(
+                status.local_agent_directory[1].agent_name,
+                "agent-live-worker"
+            );
+            assert!(status.local_agent_directory[1].is_local);
+            assert_eq!(
+                status.local_agent_directory[1].relay_web_url.as_deref(),
+                Some("https://relay.example/relay/agents/agent%2Dlive%2Dworker/")
+            );
             assert_eq!(status.provider_id, "provider-live");
             assert_eq!(status.provider_type, "anthropic");
             assert_eq!(status.provider_protocol, "messages");
@@ -2456,11 +2535,43 @@ provider = "provider-live"
         other => panic!("unexpected query result: {other:?}"),
     }
 
+    let remote = runtime
+        .query_runtime_with_scope(&UiCommand::QueryConfigStatus, UiQueryAccessScope::Remote)
+        .expect("remote config query")
+        .expect("runtime-owned remote result");
+    match remote {
+        UiQueryResult::ConfigStatus(status) => {
+            assert!(
+                status
+                    .paired_agents
+                    .iter()
+                    .all(|peer| peer.local_web_url.is_none())
+            );
+            assert!(
+                status
+                    .local_agent_directory
+                    .iter()
+                    .all(|agent| agent.web_url.is_none() && !agent.is_local)
+            );
+            assert!(
+                status
+                    .local_agent_directory
+                    .iter()
+                    .all(|agent| agent.relay_web_url.is_some())
+            );
+            let encoded = serde_json::to_string(&status).expect("remote status json");
+            assert!(!encoded.contains("127.0.0.1"));
+            assert!(!encoded.contains("relay-token"));
+        }
+        other => panic!("unexpected remote query result: {other:?}"),
+    }
+
     // SAFETY: undo the test environment mutation before exit.
     unsafe {
         std::env::remove_var("FREEHAND_RUNTIME_CONFIG_QUERY_PROVIDER");
         std::env::remove_var("FREEHAND_RUNTIME_CONFIG_QUERY_MASTER_TOKEN");
         std::env::remove_var("FREEHAND_RUNTIME_CONFIG_QUERY_WORKER_TOKEN");
+        std::env::remove_var("FREEHAND_RUNTIME_CONFIG_QUERY_RELAY_TOKEN");
     }
     fs::remove_dir_all(runtime_home).expect("cleanup runtime home");
 }

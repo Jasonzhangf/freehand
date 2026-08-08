@@ -56,6 +56,8 @@
   - `UiProtocolState::subscribe`
   - `UiProtocolState::query`
   - `UiRuntimeQueryPort::query_runtime`
+  - `UiRuntimeQueryPort::query_runtime_with_scope`
+  - `UiQueryAccessScope`
   - `UiProviderConfigUpdate`
   - `UiModelGroupConfigUpdate`
   - `UiAgentModelGroupSelectionUpdate`
@@ -326,6 +328,12 @@
   - allowed callers: WebUI/daemon ADP query transport
   - related tests: daemon ADP task query smoke, daemon ADP error-center query smoke, Phase 1 foundation CLI smoke
   - why shared: keeps app transports protocol-bound while allowing runtime-owned read models without importing runtime into `freehand-server`
+- `UiQueryAccessScope` / `UiRuntimeQueryPort::query_runtime_with_scope`
+  - owner: `crates/freehand-ui-protocol/src/lib.rs`
+  - purpose: carry local-loopback versus remote projection scope as a typed side-channel so remote ConfigStatus cannot expose loopback endpoints or secrets through response payloads
+  - allowed callers: WebUI ADP transport, Relay bridge, runtime query owner
+  - related tests: `cargo test -p freehand-server query_access_scope -- --nocapture`, `cargo test -p freehand-runtime runtime_query_projects_config_status_without_secrets -- --nocapture --test-threads=1`
+  - why shared: keeps access visibility policy out of business query payloads and out of app-specific URL filtering
 - `project_tool_call_display` / `project_tool_result_display`
   - owner: `crates/freehand-blocks/src/tool_display.rs`
   - purpose: parse tool call/result contracts into UI-safe semantic display projection
@@ -366,8 +374,10 @@
 | 18b | `write_output` / `main` | `crates/freehand-ui-protocol/src/bin/export-adp-protocol.rs` | write the generated ADP JSON manifest or WebUI constructor module to the requested artifact path | `--json` or `--js` output path | generated `adp-protocol.schema.json` or `adp-protocol.js` artifact | developer / `xtask` gate | freehand-ui-protocol manifest exporters | bound |
 | 19 | `validate_command` / `command_dispatch_target` | `crates/freehand-ui-protocol/src/lib.rs` | validate session-management mutation intents and route them to the session persistence owner | session CRUD or rollback command | owner-routed dispatch envelope or protocol rejection | WebUI/Android/CLI transports | runtime/reason persistence owner path | bound |
 | 19a | `UiProtocolState::replace_session_turn_projections` / `preserve_live_activity_on_nonterminal_refresh` / `merge_tool_activity` | `crates/freehand-ui-protocol/src/lib.rs` | replace one session's effective transcript projection after persistence-owned rollback or selected-session refresh while preserving live provider-transport/tool activity only for the latest nonterminal replacement turn and keeping terminal snapshots authoritative | session id plus effective turn projections plus current protocol state | queryable session transcript without rolled-back turns, without stale live activity on historical rounds, and without losing current provider transport retry/tool-call observability | runtime.ui-command-dispatch | protocol state | bound |
+| 19b | `UiProtocolState::merge_persisted_turn_projections_without_publish` | `crates/freehand-ui-protocol/src/lib.rs` | merge persistence-owned background session snapshots for list queries without publishing replay events, changing latest-active identity, or replacing a newer live nonterminal projection | persisted turn projections plus current protocol state | silently refreshed queryable session rows with live activity preserved | runtime.ui-command-dispatch | protocol state | bound |
 | 19b | `session_list_projection` / `turn_is_nonterminal` | `crates/freehand-ui-protocol/src/lib.rs` | project persisted session summaries while allowing active turn identity only for the latest nonterminal live/progress turn | persisted session metadata plus turn projections plus latest protocol active turn id | session summary list where terminal latest turns remain visible but do not appear active | protocol query handler | protocol state | bound |
 | 20 | `UiRuntimeQueryPort::query_runtime` | `crates/freehand-ui-protocol/src/lib.rs` | define runtime-backed read-only query extension point without making app transports import runtime owners | UI query command | optional runtime-owned query result or explicit dispatch failure | WebUI/daemon ADP query transport | runtime query owner | bound |
+| 20d | `UiRuntimeQueryPort::query_runtime_with_scope` / `UiQueryAccessScope` | `crates/freehand-ui-protocol/src/lib.rs` | carry typed local/remote visibility scope beside ConfigStatus query execution without placing control semantics in query payloads | UI query command + typed access scope | scoped runtime-owned UI projection or explicit dispatch failure | WebUI/Relay ADP transport | runtime query owner | bound |
 | 20a | `UiCommand::QueryConfigStatus` / `UiQueryResult::ConfigStatus` / `UiConfigStatusProjection` / `UiProviderConfigSummaryProjection` | `crates/freehand-ui-protocol/src/lib.rs` | define UI-safe active config query/result DTO with complete provider registry and no secrets | config status query | active agent/provider/fallback/model/auth-source/resource-count projection plus safe configured provider registry | ADP query transport | runtime query port | bound |
 | 20b | `UiProviderConfigUpdate` / `UiCommand::UpdateProviderConfig` / `UiCommand::UpsertProviderConfig` | `crates/freehand-ui-protocol/src/lib.rs` | define provider definition mutation DTOs without credential values and route them to the config owner | provider/model/base-url/env-var update | validated mutation intent routed to `config.core` | WebUI/CLI ADP command transport | runtime.ui-command-dispatch | bound |
 | 20b1 | `UiAgentProviderSelectionUpdate` / `UiCommand::UpdateAgentProviderSelection` | `crates/freehand-ui-protocol/src/lib.rs` | define active provider selection mutation DTO without credential values and route it to the config owner | agent name plus primary/fallback provider ids | validated mutation intent routed to `config.core` | WebUI/CLI ADP command transport | runtime.ui-command-dispatch | bound |
@@ -386,6 +396,7 @@
 | 30 | `UiCommand::QueryToolRegistry` / `UiQueryResult::ToolRegistry` / `UiToolRegistryProjection` / `UiToolRegistryToolProjection` | `crates/freehand-ui-protocol/src/lib.rs` | define read-only Tools dashboard query/result DTOs without owning tool registry truth or executing tools | tool registry query | runtime-backed UI-safe built-in tool registry projection or protocol-state route rejection | ADP query transport | runtime.ui-command-dispatch | bound |
 | 31 | `UiCommand::QuerySessionSearch` / `UiQueryResult::SessionSearch` / `UiSessionSearchProjection` / `UiSessionSearchResultProjection` / `UiSessionSearchChildProjection` | `crates/freehand-ui-protocol/src/lib.rs` | define read-only persisted-session Search dashboard query/result DTOs without owning session index truth or promoting Worker sessions to top-level results | search query text plus optional limit | runtime-backed UI-safe persisted session search projection or protocol-state route rejection | ADP query transport | runtime.ui-command-dispatch | bound |
 | 32 | `UiCommand::QueryDiagnostics` / `UiQueryResult::Diagnostics` / `UiDiagnosticsProjection` / `UiDiagnosticLogFileProjection` | `crates/freehand-ui-protocol/src/lib.rs` | define read-only diagnostics query/result DTOs without owning debug/log truth or exposing raw provider payloads, secrets, or absolute user paths | diagnostics query | runtime-backed UI-safe diagnostics projection or protocol-state route rejection | ADP query transport | runtime.ui-command-dispatch | bound |
+| 33 | `UiConfigStatusProjection` / `UiLocalAgentProjection` | `crates/freehand-ui-protocol/src/lib.rs` | carry the config-owned local Agent endpoint directory without owning endpoint selection or session truth | runtime-owned config status projection | credential-free Agent name, role, node, and WebUI URL rows | ADP query transport | runtime.ui-command-dispatch | bound |
 
 ## Sync Status Against Code
 

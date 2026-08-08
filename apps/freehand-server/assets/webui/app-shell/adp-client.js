@@ -7,6 +7,56 @@ function versionedAdpFrame(frame) {
   return { protocol_version: ADP_PROTOCOL_VERSION, ...frame };
 }
 
+export function settleAdpResponseFrame({ state, windowRef, frame }) {
+  const request = state.adpRequests.get(frame.request_id);
+  const settleRequest = (settle) => {
+    if (!request) {
+      return false;
+    }
+    state.adpRequests.delete(frame.request_id);
+    windowRef.clearTimeout(request.timeoutId);
+    settle(request);
+    return true;
+  };
+
+  switch (frame.kind) {
+    case 'query_result':
+      return { kind: frame.kind, settled: settleRequest((pending) => pending.resolve(frame.result)) };
+    case 'command_receipt':
+      return { kind: frame.kind, settled: settleRequest((pending) => pending.resolve(frame.receipt)), receipt: frame.receipt };
+    case 'subscription_accepted':
+      if (request) {
+        state.adpSubscriptions.add(frame.request_id);
+      }
+      return {
+        kind: frame.kind,
+        settled: settleRequest((pending) => pending.resolve(frame.selector)),
+        selector: frame.selector,
+      };
+    case 'subscription_event':
+      return { kind: frame.kind, settled: false, event: frame.event };
+    case 'failure': {
+      const failure = frame.failure;
+      if (
+        !failure
+        || typeof failure.code !== 'string'
+        || failure.code.length === 0
+        || typeof failure.message !== 'string'
+        || failure.message.length === 0
+      ) {
+        throw new Error('ADP failure frame violates the generated protocol contract');
+      }
+      return {
+        kind: frame.kind,
+        settled: settleRequest((pending) => pending.reject(new Error(failure.message))),
+        failure,
+      };
+    }
+    default:
+      return { kind: frame.kind, settled: false, unsupported: true };
+  }
+}
+
 export function createAdpClient({
   state,
   windowRef,

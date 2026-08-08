@@ -2,6 +2,8 @@
 
 - feature_id: `contracts.core`
 - owner: `crates/freehand-contracts`
+- resource map: `docs/resource-maps/core.json`
+- resource operation coverage: shared contract node serialization and remote access-scope control constants
 - lifecycle path under test:
   - shared semantic types serialize
   - replay and persistence boundaries remain stable
@@ -18,10 +20,12 @@
     `TaskSpaceSnapshot`, and `AttentionResolution`
   - context-composed request validation
   - provider payload segment validation
+  - remote access-scope header constants remain stable and outside request/response payload structs
 - module black-box plan:
   - replay fixture decode and encode compatibility through public contract boundary
 - project black-box impact:
   - contracts remain compatible across owner crates that depend on them
+  - Relay Agent and WebUI server compile against one remote access-scope header contract
   - machine-readable mainline truth remains the only source for generated wiki artifacts
 - fixtures / replay inputs / runtime evidence paths:
   - replay fixtures under contract fixtures

@@ -11,6 +11,7 @@
     "typed context segments replace ad hoc context item pairs, including first-class task contract, task-space snapshot, and attention-resolution kinds",
     "provider payload semantic contract carries ordered `input_segments` rather than one rendered prompt string",
     "writable-tool preview contracts remain separate from provider request content while staying replay-safe across runtime/tool boundaries",
+    "shared Relay-to-WebUI access-scope header names remain transport control constants and never enter request/response business payload structs",
     "request validators stay inside the contract owner and gate request boundaries before orchestrators or adapters proceed"
   ],
   "response_mainline": [
@@ -209,11 +210,23 @@
       "caller": "provider semantic boundary",
       "callee": "shared validator",
       "binding_status": "bound"
+    },
+    {
+      "step": "14",
+      "symbol_path": "FREEHAND_REMOTE_ACCESS_SCOPE_HEADER / FREEHAND_REMOTE_ACCESS_SCOPE_VALUE",
+      "file_path": "crates/freehand-contracts/src/lib.rs",
+      "responsibility": "define one shared Relay-to-WebUI remote access-scope header contract without adding the marker to business payload DTOs",
+      "input_semantic": "typed transport boundary",
+      "output_semantic": "stable header name and value",
+      "caller": "Relay Agent bridge and WebUI server",
+      "callee": "contract module",
+      "binding_status": "bound"
     }
   ],
   "sync_status": [
     "shared IDs, typed context segment contracts including task contract/snapshot/attention-resolution kinds, request nodes, tool contracts, preview contracts, semantic response nodes, and error contracts are bound in code",
     "request-side validation helpers remain single-owner contract guards and are reused across orchestrator boundaries",
+    "remote access-scope constants are shared transport-control contracts and are absent from request/response payload node fields",
     "shared contract types remain serializable, replayable, and persistable by default",
     "generated wiki must be regenerated from `docs/mainline-calls/contracts.core.json` when this function-map truth changes"
   ]

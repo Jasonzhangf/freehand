@@ -8,6 +8,8 @@ const chromePath = process.env.FREEHAND_WEBUI_CHROME ||
 const debugPort = Number.parseInt(process.env.FREEHAND_WEBUI_DEBUG_PORT || '9247', 10);
 const baseUrl = normalizedBaseUrl(process.env.FREEHAND_WEBUI_BASE_URL || 'http://127.0.0.1:4042/');
 const adpUrl = process.env.FREEHAND_WEBUI_ADP_URL || adpUrlFromBaseUrl(baseUrl);
+const adpAuthToken = process.env.FREEHAND_ADP_AUTH_TOKEN || '';
+const adpProtocolVersion = 3;
 const runId = `mobile-ui-tree-phase1-${new Date().toISOString().replace(/[-:.]/g, '').slice(0, 15)}-${process.pid}`;
 const artifactDir = path.join(process.cwd(), 'artifacts', 'webui-online', runId);
 let assetVersion = '';
@@ -19,6 +21,13 @@ const workerRailSessionId = 'webui-header-worker-rail-fixed';
 const workerRailTaskIds = [
   'task-webui-header-worker-rail-a',
   'task-webui-header-worker-rail-b',
+];
+const agentDirectoryIds = ['master', 'worker', 'worker-2', 'worker-3'];
+const localAgentTargets = [
+  { agentId: 'worker', origin: 'http://127.0.0.1:4043', label: 'Worker 1', markerSessionId: 'webui-local-agent-namespace-worker' },
+  { agentId: 'worker-2', origin: 'http://127.0.0.1:4044', label: 'Worker 2', markerSessionId: 'webui-local-agent-namespace-worker-2' },
+  { agentId: 'worker-3', origin: 'http://127.0.0.1:4046', label: 'Worker 3', markerSessionId: 'webui-local-agent-namespace-worker-3' },
+  { agentId: 'master', origin: 'http://127.0.0.1:4042', label: 'Master', markerSessionId: 'webui-local-agent-namespace-master' },
 ];
 const forbiddenUiTerms = [
   /rootfs/i,
@@ -56,6 +65,7 @@ try {
   assetVersion = await productionAssetVersion();
   await ensureMultiSelectSessions();
   await ensureHeaderWorkerRailTruth();
+  await ensureWorkerOneNamespaceSessions();
   chrome = spawn(
     chromePath,
     [
@@ -102,18 +112,22 @@ try {
   for (const viewport of viewports) {
     snapshots.push(await captureViewport(cdp, viewport));
   }
+  const homeAgentDirectory = await captureHomeAgentDirectory(cdp);
+  const localAgentClickChain = await captureLocalAgentClickChain(cdp);
   const homeMultiSelect = await captureHomeMultiSelect(cdp);
   const sessionDetail = await captureSessionDetailRoute(cdp);
   const settings = await captureSettingsTree(cdp);
   const homeSharedStateIntegration = await captureHomeSharedStateIntegration(cdp);
   const summary = buildSummary({
     snapshots,
+    homeAgentDirectory,
     homeMultiSelect,
     sessionDetail,
     settings,
     moduleAssets,
     sharedStateProjection,
     homeSharedStateIntegration,
+    localAgentClickChain,
   });
   await fs.writeFile(path.join(artifactDir, 'summary.json'), JSON.stringify(summary, null, 2));
 
@@ -140,7 +154,7 @@ async function productionAssetVersion() {
     throw new Error(`production WebUI not reachable: ${response.status} ${response.statusText}`);
   }
   const html = await response.text();
-  const match = html.match(/\/assets\/webui\.js\?v=([^"'&<>\s]+)/);
+  const match = html.match(/(?:^|["'(\/])assets\/webui\.js\?v=([^"'&<>\s]+)/);
   if (!match || !match[1]) {
     throw new Error('served WebUI does not expose the owner-stamped asset version');
   }
@@ -168,6 +182,61 @@ async function captureViewport(cdp, viewport) {
   await fs.writeFile(path.join(artifactDir, fileName), Buffer.from(screenshot.data, 'base64'));
   const result = { viewport, screenshot: fileName, state };
   await fs.writeFile(path.join(artifactDir, `${viewport.label}.json`), JSON.stringify(result, null, 2));
+  return result;
+}
+
+async function captureHomeAgentDirectory(cdp) {
+  await cdp.send('Emulation.setDeviceMetricsOverride', {
+    width: 390,
+    height: 844,
+    deviceScaleFactor: 2,
+    mobile: true,
+  });
+  await evalInPage(cdp, () => {
+    window.dispatchEvent(new Event('resize'));
+    window.__freehandLayout?.applyLayoutShape?.();
+  });
+  await waitForFunction(cdp, (agentIds) => {
+    const summary = document.getElementById('mobile-agent-summary-strip');
+    return document.body.dataset.webuiRoute === 'home_dashboard' &&
+      summary && getComputedStyle(summary).display !== 'none' &&
+      agentIds.every((agentId) => !!document.querySelector(`#mobile-agent-task-list [data-agent-id="${agentId}"]`));
+  }, 20_000, 'Home Agent directory entry', agentDirectoryIds);
+  await evalInPage(cdp, () => document.getElementById('open-mobile-agent-sheet-button')?.click());
+  await waitForFunction(cdp, () => {
+    const sheet = document.getElementById('mobile-agent-sheet');
+    const rect = sheet?.getBoundingClientRect();
+    return document.body.dataset.mobileAgentSheet === 'open' &&
+      sheet && getComputedStyle(sheet).visibility === 'visible' &&
+      Number.parseFloat(getComputedStyle(sheet).opacity || '0') >= 0.99 &&
+      rect && rect.top < window.innerHeight && rect.bottom <= window.innerHeight + 1;
+  }, 5_000, 'Home Agent directory sheet');
+  const state = await evalInPage(cdp, (agentIds) => ({
+    route: document.body.dataset.webuiRoute || '',
+    selectedSession: document.querySelector('[data-webui-shell="true"]')?.dataset.selectedSession || '',
+    agentIds: Array.from(document.querySelectorAll('#mobile-agent-task-list [data-agent-id]'))
+      .map((node) => node.dataset.agentId || ''),
+    rows: agentIds.map((agentId) => {
+      const row = document.querySelector(`#mobile-agent-task-list [data-agent-id="${agentId}"]`);
+      return {
+        agentId,
+        exists: !!row,
+        text: row?.innerText || '',
+      };
+    }),
+    noHorizontalOverflow:
+      Math.max(document.body.scrollWidth, document.documentElement.scrollWidth) <= window.innerWidth + 2,
+  }), agentDirectoryIds);
+  const screenshot = await cdp.send('Page.captureScreenshot', {
+    format: 'png',
+    captureBeyondViewport: true,
+  });
+  const screenshotName = 'home-agent-directory.png';
+  await fs.writeFile(path.join(artifactDir, screenshotName), Buffer.from(screenshot.data, 'base64'));
+  await evalInPage(cdp, () => document.getElementById('close-mobile-agent-sheet-button')?.click());
+  await waitForFunction(cdp, () => !document.body.dataset.mobileAgentSheet, 5_000, 'Home Agent directory closed');
+  const result = { screenshot: screenshotName, state };
+  await fs.writeFile(path.join(artifactDir, 'home-agent-directory.json'), JSON.stringify(result, null, 2));
   return result;
 }
 
@@ -534,14 +603,92 @@ async function captureSettingsSnapshot(cdp, fileBase) {
   return result;
 }
 
+async function captureLocalAgentClickChain(cdp) {
+  const markerSessionIds = localAgentTargets.map((target) => target.markerSessionId);
+  const captures = [];
+  await cdp.send('Emulation.setDeviceMetricsOverride', {
+    width: 390,
+    height: 844,
+    deviceScaleFactor: 2,
+    mobile: true,
+  });
+  await evalInPage(cdp, () => {
+    window.dispatchEvent(new Event('resize'));
+    window.__freehandLayout?.applyLayoutShape?.();
+  });
+  for (const target of localAgentTargets) {
+    await waitForFunction(cdp, (agentId) => {
+      return document.body.dataset.webuiRoute === 'home_dashboard' &&
+        document.body.dataset.webuiJsReady === 'true' &&
+        !!document.querySelector(`#mobile-agent-task-list [data-agent-id="${agentId}"]`);
+    }, 45_000, `Agent ${target.agentId} Home ready`, target.agentId);
+    await evalInPage(cdp, () => document.getElementById('open-mobile-agent-sheet-button')?.click());
+    await waitForFunction(cdp, () => {
+      return document.body.dataset.mobileAgentSheet === 'open';
+    }, 5_000, `Agent ${target.agentId} directory open`);
+    const click = await evalInPage(cdp, (agentId) => {
+      const row = document.querySelector(`#mobile-agent-task-list [data-agent-id="${agentId}"]`);
+      if (!row) return false;
+      row.click();
+      return true;
+    }, target.agentId);
+    if (!click) {
+      throw new Error(`missing Agent directory row ${target.agentId}`);
+    }
+    await waitForFunction(cdp, ({ origin, markerSessionId }) => {
+      return window.location.origin === origin &&
+        document.body.dataset.webuiRoute === 'home_dashboard' &&
+        document.body.dataset.webuiJsReady === 'true' &&
+        !!document.querySelector(`#mobile-home-session-list [data-session-id="${markerSessionId}"]`);
+    }, 45_000, `Agent ${target.agentId} namespace`, {
+      origin: target.origin,
+      markerSessionId: target.markerSessionId,
+    });
+    await delay(500);
+    const state = await evalInPage(cdp, ({ markerSessionIds, target }) => {
+      const sessionIds = Array.from(document.querySelectorAll('#mobile-home-session-list [data-session-id]'))
+        .map((row) => row.dataset.sessionId || '');
+      return {
+        agentId: target.agentId,
+        expectedOrigin: target.origin,
+        actualOrigin: window.location.origin,
+        route: document.body.dataset.webuiRoute || '',
+        selectedSession: document.querySelector('[data-webui-shell="true"]')?.dataset.selectedSession || '',
+        sessionGroupLabel: document.querySelector('.session-agent-name')?.textContent?.trim() || '',
+        markerSessionId: target.markerSessionId,
+        sessionIds,
+        foreignMarkerSessionIds: markerSessionIds.filter((sessionId) =>
+          sessionId !== target.markerSessionId && sessionIds.includes(sessionId)
+        ),
+        noHorizontalOverflow:
+          Math.max(document.body.scrollWidth, document.documentElement.scrollWidth) <= window.innerWidth + 2,
+      };
+    }, { markerSessionIds, target });
+    const screenshot = await cdp.send('Page.captureScreenshot', {
+      format: 'png',
+      captureBeyondViewport: true,
+    });
+    const screenshotName = `local-agent-${target.agentId}.png`;
+    await fs.writeFile(path.join(artifactDir, screenshotName), Buffer.from(screenshot.data, 'base64'));
+    captures.push({ ...state, screenshot: screenshotName });
+  }
+  await fs.writeFile(
+    path.join(artifactDir, 'local-agent-click-chain.json'),
+    JSON.stringify(captures, null, 2),
+  );
+  return captures;
+}
+
 function buildSummary({
   snapshots,
+  homeAgentDirectory,
   homeMultiSelect,
   sessionDetail,
   settings,
   moduleAssets,
   sharedStateProjection,
   homeSharedStateIntegration,
+  localAgentClickChain,
 }) {
   const portraitSnapshots = snapshots.filter((snapshot) =>
     ['phone_portrait', 'tall_phone', 'tablet_portrait'].includes(snapshot.state.layoutShape)
@@ -565,17 +712,37 @@ function buildSummary({
     artifactDir,
     assetVersion,
     snapshots,
+    homeAgentDirectory,
     homeMultiSelect,
     sessionDetail,
     settings,
     moduleAssets,
     sharedStateProjection,
+    localAgentClickChain,
     checks: {
       productionAssetVersion: snapshots.every((snapshot) => snapshot.state.assetVersionSeen),
       viewportMatrixCovered: snapshots.length === viewports.length,
       noHorizontalOverflow: snapshots.every((snapshot) => snapshot.state.noHorizontalOverflow),
       portraitQuickEntriesIconOnly: portraitEntriesVisibleAndSeparated,
       mobileHomeDashboardVisible: portraitSnapshots.every((snapshot) => snapshot.state.mobileHomeDashboardVisible),
+      mobileHomeAgentEntryVisible: portraitSnapshots.every((snapshot) => snapshot.state.mobileAgentSummaryVisible),
+      mobileHomeAgentDirectoryOpens:
+        homeAgentDirectory.state.route === 'home_dashboard' &&
+        homeAgentDirectory.state.selectedSession === '' &&
+        homeAgentDirectory.state.noHorizontalOverflow &&
+        homeAgentDirectory.state.agentIds.join(',') === agentDirectoryIds.join(',') &&
+        homeAgentDirectory.state.rows.every((row) => row.exists && row.text.includes('进入独立会话')),
+      localAgentClickChainIsolated: localAgentClickChain.every((capture) =>
+        capture.actualOrigin === capture.expectedOrigin &&
+        capture.route === 'home_dashboard' &&
+        capture.selectedSession === '' &&
+        capture.sessionIds.includes(capture.markerSessionId) &&
+        capture.foreignMarkerSessionIds.length === 0 &&
+        capture.noHorizontalOverflow
+      ),
+      localAgentSessionGroupIdentity: localAgentClickChain.every((capture) =>
+        capture.sessionGroupLabel === localAgentTargets.find((target) => target.agentId === capture.agentId)?.label
+      ),
       sharedStateContractLoaded: snapshots.every((snapshot) => snapshot.state.sharedStateContractLoaded),
       sharedEmptyAndLoadingRendered:
         sharedStateProjection.states.length === 2 &&
@@ -1240,6 +1407,25 @@ async function ensureHeaderWorkerRailTruth() {
   }
 }
 
+async function ensureWorkerOneNamespaceSessions() {
+  for (const target of localAgentTargets) {
+    const targetAdpUrl = adpUrlFromBaseUrl(`${target.origin}/`);
+    const title = `${target.label} namespace proof`;
+    try {
+      await adpCommandAt(targetAdpUrl, {
+        CreateSession: { session_id: target.markerSessionId, title },
+      }, 20_000);
+    } catch (error) {
+      await adpCommandAt(targetAdpUrl, {
+        RenameSession: { session_id: target.markerSessionId, title },
+      }, 20_000);
+    }
+    await adpCommandAt(targetAdpUrl, {
+      RestoreSession: { session_id: target.markerSessionId },
+    }, 20_000);
+  }
+}
+
 async function ensureSession(sessionId, title) {
   try {
     await adpCommand({ CreateSession: { session_id: sessionId, title } }, 20_000);
@@ -1253,6 +1439,10 @@ async function adpCommand(command, timeoutMs = 30_000) {
   return await adpRequest('command', 'command', command, timeoutMs);
 }
 
+async function adpCommandAt(targetAdpUrl, command, timeoutMs = 30_000) {
+  return await adpRequest('command', 'command', command, timeoutMs, targetAdpUrl);
+}
+
 async function adpQueryVariant(query, variant, timeoutMs = 30_000) {
   const result = await adpRequest('query', 'query', query, timeoutMs);
   if (!result || typeof result !== 'object' || !Object.prototype.hasOwnProperty.call(result, variant)) {
@@ -1261,17 +1451,39 @@ async function adpQueryVariant(query, variant, timeoutMs = 30_000) {
   return result[variant];
 }
 
-function adpRequest(kind, payloadKey, payload, timeoutMs) {
-  const socket = new WebSocket(adpUrl);
+function adpRequest(kind, payloadKey, payload, timeoutMs, targetAdpUrl = adpUrl) {
+  const socket = new WebSocket(
+    targetAdpUrl,
+    adpAuthToken ? { headers: { Authorization: `Bearer ${adpAuthToken}` } } : undefined,
+  );
   const requestId = `${kind}-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  const handshakeId = `${requestId}-handshake`;
+  let handshakeAccepted = false;
   return new Promise((resolve, reject) => {
     const timer = setTimeout(() => {
       socket.close();
       reject(new Error(`ADP ${kind} timeout`));
     }, timeoutMs);
-    socket.addEventListener('open', () => socket.send(JSON.stringify({ kind, request_id: requestId, [payloadKey]: payload })));
+    socket.addEventListener('open', () => socket.send(JSON.stringify({
+      protocol_version: adpProtocolVersion,
+      kind: 'handshake',
+      request_id: handshakeId,
+      client_name: 'freehand-mobile-verifier',
+      capabilities: ['query', 'command', 'subscribe'],
+    })));
     socket.addEventListener('message', (event) => {
       const message = JSON.parse(event.data);
+      if (!handshakeAccepted) {
+        if (message.kind !== 'handshake_accepted' || message.request_id !== handshakeId) {
+          clearTimeout(timer);
+          socket.close();
+          reject(new Error(`ADP handshake failed: ${JSON.stringify(message)}`));
+          return;
+        }
+        handshakeAccepted = true;
+        socket.send(JSON.stringify({ protocol_version: adpProtocolVersion, kind, request_id: requestId, [payloadKey]: payload }));
+        return;
+      }
       if (message.request_id !== requestId) return;
       clearTimeout(timer);
       socket.close();

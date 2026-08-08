@@ -68,6 +68,7 @@
 | transport | same-account live HTTP/ADP round trip | unknown, cross-account, expired, malformed protocol, and unreachable upstream routes fail explicitly before success projection |
 | generic WebSocket | same-account caller exchanges opaque text/binary frames through `/connect` | Relay never parses frames into session/task/provider truth and rejects invalid route/auth before upgrade |
 | local WebSocket credential scope | ADP protocol injects the configured local ADP bearer only into `/adp` | generic `/connect/{path}` never receives the ADP bearer even when the Agent has one configured |
+| remote UI projection scope | typed WebSocket tunnel `remote` scope becomes the local remote-access header and never enters ADP/business payload bytes | missing scope on WebSocket opens and any scope on HTTP opens fail before exchange insertion; remote ConfigStatus omits loopback URLs |
 | verifier startup | upstream health admission precedes Relay process startup | an upstream or Relay process exit before readiness fails immediately instead of waiting out the full health timeout |
 | persistence | explicit initialization and atomic valid store reloads | absent, incomplete, corrupt, duplicate-init, and failed-write stores do not create in-memory success truth |
 
@@ -108,6 +109,7 @@
 | negative | malformed, mismatched, or structurally incomplete Agent route prefixes fail explicitly | route extraction cannot silently redirect a request to the Agent root |
 | positive | a routable exchange is inserted only after the same identity has live data and error attachments, and returns both typed senders with pending response truth | every admitted exchange has its data path and error return path before `RequestOpen` |
 | negative | data-only or error-only tunnel state rejects exchange admission without inserting pending truth | the data/error attachment race cannot strand an exchange after `ResponseOpen` |
+| negative | WebSocket `RequestOpen` without `RelayDataAccessScope::Remote` and HTTP `RequestOpen` with a scope are rejected before exchange insertion | a caller cannot bypass the remote projection visibility boundary or attach WebSocket control semantics to an HTTP payload path |
 | negative | raw pending insertion is private to the registry implementation and runtime callers plus architecture gates can enter only through `open_routable_exchange` | a later caller cannot bypass atomic data/error admission while maps and tests remain green |
 
 ## Known Gaps And Non-Goals

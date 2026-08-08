@@ -14,6 +14,7 @@
   - `run_master_mode`
   - `monitor_master_lifecycle_runner`
   - `run_worker_mode`
+  - `parse_worker_bind_arg`
   - `run_blocking_worker_service`
   - `build_runtime_dispatcher_from_default_config`
   - `parse_bind_arg`
@@ -42,10 +43,9 @@
 - each configured Worker process has an agent-specific launchd label, env file,
   stdout log, and stderr log; a shared `workerS` service is not the Worker pool
 - daemon bootstrap selects one agent from default config and creates one runtime dispatcher
-- daemon bootstrap routes Master mode to the runtime-backed UI host; Slave mode
-  without Relay runs only `runtime.master-worker-loop`, while Relay-configured
-  Slave mode also binds a loopback UI/ADP host for that Worker's own session
-  namespace
+- daemon bootstrap routes Master mode to the runtime-backed UI host; every Slave
+  binds its configured `local_web_url` as a WebUI/ADP host while its Worker loop
+  runs in the same process, preserving one process and session namespace per Agent
 - Master mode starts the WebUI/ADP host as the daemon lifetime and supervises
   the background Master lifecycle runner separately, so a lifecycle runner
   owner-truth stop is observable without taking down HTTP/ADP status surfaces

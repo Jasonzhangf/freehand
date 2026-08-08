@@ -16,6 +16,7 @@
   - optionally select one distinct enabled fallback provider per agent
   - resolve provider auth source without leaking secret projection
   - accept Agent Relay connection only when `relay_url` and `relay_token_env` are both present, reject query/fragment Relay URLs before runtime, resolve the token at selection time, and reject missing or empty token env without projecting its value
+  - accept only HTTP `local_web_url` values with an IP-literal host and no query/fragment, and project them without provider or pair credentials
   - preserve safe auth source kind on selected provider config for downstream UI-safe status projection
   - project the complete configured provider registry without resolved secrets so users can select any enabled provider by id
   - project the complete configured model group registry without resolved secrets so users can select primary/sub/search/title/fallback/load-balance routes by group id
@@ -26,7 +27,7 @@
   - validate and persist owner-backed active model-group selection changes without rewriting provider definitions or model group definitions
   - retain the legacy combined provider/model update path for existing CLI callers while new UI flows use separate upsert and selection operations
   - validate and persist owner-backed Master Worker resource-count updates through the canonical config path
-  - keep active Worker resources in `1..=5`, preserve declared peer order, clone the first Worker as the shared-provider template when growing, and remove trailing reciprocal Worker tables when shrinking
+  - keep active Worker resources in `1..=5`, preserve declared peer order, clone the first Worker as the shared-provider template only when it has no host-specific `local_web_url`, reject growth that would duplicate an endpoint, and remove trailing reciprocal Worker tables when shrinking
   - compile remote daemon accounts, daemon endpoint candidates, route selection diagnostics, and QR/deep-link bootstrap bundles from config owner truth
   - validate restart-only config activation
 
@@ -55,6 +56,7 @@
   - assert invalid provider update input fails before overwrite so the original config bytes remain unchanged
   - assert a resource-count update grows one Master from one to five reciprocal Workers, gives every active Worker the Master provider/fallback bindings, and returns a restart-required selected-agent projection
   - assert shrinking removes only trailing Workers owned by that Master and preserves surviving peer order
+  - assert growing from a Worker template with `local_web_url` fails before overwrite, because the count-only mutation has no endpoint input and config must not derive or duplicate ports
   - assert zero, six, unknown-agent, and non-Master resource-count updates fail before overwrite so original config bytes remain unchanged
   - assert valid remote daemon registry loads one account with multiple daemons and Tailscale/relay endpoint candidates
   - assert route selection prefers Tailscale/IPv6/IPv4 direct candidates over relay when health is unknown or successful
@@ -65,6 +67,8 @@
   - positive peer-topology coverage locks one Master plus three ordered Workers and selected-agent projection of every peer name, mode, node id, allowed IP, and pair-token env
   - negative peer-topology coverage locks empty peer sets, empty peer names, duplicate peers, self-pairing, missing peers, same-mode peers, non-reciprocal peers, and a Slave bound to multiple Masters
   - legacy singular `paired_agent` is rejected as an unknown field; no compatibility parser or runtime fallback exists
+  - positive local WebUI endpoint coverage accepts explicit IPv4 and IPv6 loopback URLs
+  - negative local WebUI endpoint coverage rejects wildcard, private-LAN, public, domain, query, and fragment hosts so the unauthenticated local UI surface cannot be exposed remotely
 - module black-box plan:
   - load config file and select named Master with full primary/fallback provider runtime selection plus stable ordered three-Worker topology projection through the public config boundary
   - select each named Worker and prove its compiled peer set contains exactly its configured Master

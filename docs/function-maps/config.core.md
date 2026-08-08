@@ -56,6 +56,7 @@
 - selected agent references one primary `[providers.<id>]` entry and may reference one distinct fallback provider through `fallback_provider`
 - validation resolves startup mode, ordered unique reciprocal multi-peer bindings, primary/fallback provider bindings, explicit protocol declarations, auth-source invariants, and unknown-field rejection
 - optional per-Agent Relay configuration is admitted only as one atomic URL plus token-env pair and resolves the token only in the selected runtime projection
+- optional per-Agent `local_web_url` is validated as an HTTP endpoint with an IP-literal host and projected as a credential-free local Agent directory; daemon and WebUI do not derive endpoint ports from Agent names
 - optional `[remote_daemon_accounts.<id>]` and `[remote_daemons.<id>]` tables compile into one account-scoped remote daemon registry with explicit endpoint candidates
 - remote daemon route selection is config-owned: direct Tailscale/IPv6/IPv4 candidates score below relay candidates, health failures make a candidate non-selectable, and relay is selected only through explicit candidate truth
 - QR/deep-link bootstrap requests enter through versioned remote daemon bootstrap bundles with expiry, nonce, selected route endpoint, and one-time credential metadata
@@ -64,7 +65,7 @@
 - model group definition requests enter only through `ModelGroupConfigUpdate` and `upsert_model_group_config_in_path`; the config owner validates route providers/models, enabled-provider constraints, load-balance weights, and atomically persists `[model_groups.<id>]` without changing active provider registry entries
 - model group selection requests enter only through `AgentModelGroupSelectionConfigUpdate` and `switch_agent_model_group_in_path`; the config owner validates existing enabled model-group ids before atomically rewriting only the selected agent `model_group`
 - legacy provider/model update requests enter only through `ProviderConfigUpdate` and `update_provider_config_in_path`; the config owner validates provider id, provider type, protocol, base URL, model, and env-var auth before persistence and preserves existing fallback binding
-- Agent resource-count update requests enter only through `AgentResourceConfigUpdate` and `update_agent_resource_config_in_path`; the config owner validates Master-only intent and `1..=5` Worker resources before persistence
+- Agent resource-count update requests enter only through `AgentResourceConfigUpdate` and `update_agent_resource_config_in_path`; the config owner validates Master-only intent and `1..=5` Worker resources before persistence, and count-only growth fails when the template has a host-specific `local_web_url` because endpoint allocation requires explicit truth
 
 ## Response Mainline
 

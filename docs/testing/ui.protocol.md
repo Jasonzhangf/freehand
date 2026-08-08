@@ -7,6 +7,7 @@
   - `task.project_to_ui`
   - `input_attachment.validate_submit_metadata`
   - `debug_trace.read_snapshot`
+  - `config.compile_agent_local_web_directory`
 
 ## Resource Operation Test Coverage
 
@@ -15,6 +16,9 @@
 | `task.project_to_ui` | bound | `cargo test -p freehand-ui-protocol -- --nocapture` covers DTO validation, task/session projection filtering, command receipt, and worker-child session projection tests | `cargo test -p freehand-cli master_worker_autonomy -- --nocapture` covers ADP query/subscribe/command protocol smokes for task board, agent board, event inbox, task history, and session list | `make verify-webui-online` covers WebUI/CLI S-profile projection proofs that task truth renders through protocol projections without UI owning task state |
 | `input_attachment.validate_submit_metadata` | bound | `cargo test -p freehand-ui-protocol image -- --nocapture` covers image-only submit admission and missing-payload rejection | `cargo test -p freehand-server --lib android -- --nocapture` covers WebUI asset wiring for attachment metadata submit helpers and Android bridge payload fields | `node scripts/verify-webui-image-attachment-online.mjs` proves online WebUI submit sends `SubmitUserInput.metadata.attachments` with image base64 while persisted turn projection keeps metadata only |
 | `debug_trace.read_snapshot` | bound | `cargo test -p freehand-ui-protocol diagnostics_query -- --nocapture` covers Diagnostics DTO JSON, route separation, and protocol-state rejection | `cargo test -p freehand-runtime runtime_query_projects_diagnostics_without_raw_secrets_or_absolute_home -- --nocapture --test-threads=1` covers runtime-owned projection, redaction, and no absolute home path | `node scripts/verify-webui-diagnostics-online.mjs` proves browser Settings rows match `QueryDiagnostics` owner projection and do not create sessions |
+| `config.compile_agent_local_web_directory` | bound | `cargo test -p freehand-ui-protocol config_status -- --nocapture` covers typed config-status roundtrip | `cargo test -p freehand-runtime runtime_query_projects_config_status_without_secrets -- --nocapture` proves all configured local endpoints and Relay URLs are projected without credentials | `cargo test -p freehand-server --lib` proves page/asset paths are relative and can remain under a Relay Agent prefix |
+
+The config-status projection also carries a Relay-backed Agent URL for non-loopback clients; it never serializes the Relay access token.
 
 - lifecycle path under test:
   - commands enter protocol boundary
@@ -27,6 +31,7 @@
   - latest-active cancellation is accepted as mutation intent and routes to `reason.turn`
   - query returns snapshot truth
   - ADP query frames return the same snapshot truth without requiring WebUI DOM
+  - scoped ADP queries carry `UiQueryAccessScope` beside the business query payload; local scope retains loopback Agent endpoints while remote scope omits them at the runtime projector
   - task list/history ADP query frames use protocol-owned commands and UI-safe DTOs while runtime owner code supplies persisted task truth
   - Phase 1 TaskBoard/AgentBoard/AgentLifecycle ADP query frames use protocol-owned commands and UI-safe DTOs while runtime owner code supplies owner truth; task DTOs carry parent/observing session scope, canonical Worker session id, and task-owner `created_at`
   - public task mutation ADP command frames use protocol-owned command DTOs while runtime/task owners perform create/create_agent/assign/review/reject/approve/close mutation and persistence; direct worker claim and scheduler/execution-fact commands are internal-only and rejected on public ADP command ingress
@@ -238,6 +243,7 @@
   - incremental turn projection update methods from shared contracts landed
   - typed model request waiting projection is landed and regression-locked for normal thinking, schema retry, and tool-result continuation; provider retry/failover are regression-locked as transport substate on the same model request activity
   - selected-session transcript refresh preserves active provider transport retry/model waiting and active tool activity cards through `replace_session_turn_projections`, and terminal refresh clearing stale live state is regression-locked
+  - persisted session-list refresh through `merge_persisted_turn_projections_without_publish` emits no subscription replay, preserves the current live projection, and keeps the active turn identity stable
   - session list nonterminal-only active identity is regression-locked by `session_list_active_turn_id_tracks_only_nonterminal_turns`
   - minimal per-turn debug-state query/subscribe baseline landed
   - debug receiver-drain bridge from `debug.core` into protocol state landed

@@ -4722,7 +4722,7 @@ body[data-layout-shape="tablet_portrait"] {
 body[data-layout-shape="phone_portrait"] .workspace,
 body[data-layout-shape="tall_phone"] .workspace,
 body[data-layout-shape="tablet_portrait"] .workspace {
-  grid-template-rows: auto auto minmax(0, 1fr);
+  grid-template-rows: auto auto auto minmax(0, 1fr);
   background: var(--mobile-agent-bg);
 }
 
@@ -5344,13 +5344,16 @@ body[data-layout-shape="tablet_portrait"][data-webui-route="session_detail"] .mo
 body[data-layout-shape="phone_portrait"][data-webui-route="home_dashboard"] .conversation-region,
 body[data-layout-shape="tall_phone"][data-webui-route="home_dashboard"] .conversation-region,
 body[data-layout-shape="tablet_portrait"][data-webui-route="home_dashboard"] .conversation-region,
-body[data-layout-shape="phone_portrait"][data-webui-route="home_dashboard"] .mobile-agent-summary-strip,
-body[data-layout-shape="tall_phone"][data-webui-route="home_dashboard"] .mobile-agent-summary-strip,
-body[data-layout-shape="tablet_portrait"][data-webui-route="home_dashboard"] .mobile-agent-summary-strip,
 body[data-layout-shape="phone_portrait"][data-webui-route="home_dashboard"] .session-relation-header,
 body[data-layout-shape="tall_phone"][data-webui-route="home_dashboard"] .session-relation-header,
 body[data-layout-shape="tablet_portrait"][data-webui-route="home_dashboard"] .session-relation-header {
   display: none !important;
+}
+
+body[data-layout-shape="phone_portrait"][data-webui-route="home_dashboard"] .mobile-agent-summary-strip,
+body[data-layout-shape="tall_phone"][data-webui-route="home_dashboard"] .mobile-agent-summary-strip,
+body[data-layout-shape="tablet_portrait"][data-webui-route="home_dashboard"] .mobile-agent-summary-strip {
+  display: block;
 }
 
 .mobile-home-card {

@@ -3,6 +3,7 @@ use std::net::SocketAddr;
 use std::sync::Arc;
 use std::time::Duration;
 
+use freehand_contracts::{FREEHAND_REMOTE_ACCESS_SCOPE_HEADER, FREEHAND_REMOTE_ACCESS_SCOPE_VALUE};
 use futures_util::{SinkExt, StreamExt, stream};
 use reqwest::{Body, Client, Method, Url};
 use tokio::sync::mpsc;
@@ -15,8 +16,8 @@ use tokio_tungstenite::tungstenite::protocol::{CloseFrame, frame::coding::CloseC
 
 use crate::model::{
     AgentHeartbeat, RELAY_TUNNEL_PROTOCOL_VERSION, RelayControlInFrame, RelayControlOutFrame,
-    RelayDataFrameKind, RelayDataInFrame, RelayDataOutFrame, RelayDataProtocol, RelayErrorInFrame,
-    RelayErrorOutFrame,
+    RelayDataAccessScope, RelayDataFrameKind, RelayDataInFrame, RelayDataOutFrame,
+    RelayDataProtocol, RelayErrorInFrame, RelayErrorOutFrame,
 };
 
 #[derive(Debug, Clone)]
@@ -56,6 +57,7 @@ struct HttpExchange {
 struct WebSocketExchange {
     protocol: RelayDataProtocol,
     path_and_query: String,
+    access_scope: Option<RelayDataAccessScope>,
     inbound: mpsc::Receiver<RelayDataOutFrame>,
 }
 
@@ -399,7 +401,11 @@ async fn handle_data_frame(
             method,
             path_and_query,
             headers,
+            access_scope,
         } => {
+            if access_scope.is_some() {
+                return Err("HTTP tunnel open cannot carry WebSocket access scope".to_owned());
+            }
             let method =
                 method.ok_or_else(|| "HTTP tunnel request is missing method".to_owned())?;
             let (body_sender, body_receiver) = mpsc::channel(32);
@@ -435,6 +441,7 @@ async fn handle_data_frame(
             method,
             path_and_query,
             headers,
+            access_scope,
         } if matches!(
             protocol,
             RelayDataProtocol::Adp | RelayDataProtocol::WebSocket
@@ -442,6 +449,9 @@ async fn handle_data_frame(
         {
             if method.is_some() || !headers.is_empty() {
                 return Err("WebSocket tunnel open contains HTTP request semantics".to_owned());
+            }
+            if access_scope != Some(RelayDataAccessScope::Remote) {
+                return Err("WebSocket tunnel open requires remote access scope".to_owned());
             }
             if !valid_local_websocket_path(&path_and_query)
                 || (protocol == RelayDataProtocol::Adp && path_and_query != "/adp")
@@ -458,6 +468,7 @@ async fn handle_data_frame(
                     WebSocketExchange {
                         protocol,
                         path_and_query,
+                        access_scope,
                         inbound: receiver,
                     },
                     responses,
@@ -628,9 +639,7 @@ async fn run_websocket_exchange(
         &exchange_id,
         local_addr,
         local_adp_token,
-        exchange.protocol,
-        &exchange.path_and_query,
-        &mut exchange.inbound,
+        &mut exchange,
         &responses,
     )
     .await;
@@ -651,12 +660,16 @@ async fn execute_websocket_exchange(
     exchange_id: &str,
     local_addr: SocketAddr,
     local_adp_token: Option<String>,
-    protocol: RelayDataProtocol,
-    path_and_query: &str,
-    inbound: &mut mpsc::Receiver<RelayDataOutFrame>,
+    exchange: &mut WebSocketExchange,
     responses: &mpsc::Sender<RelayDataInFrame>,
 ) -> Result<(), String> {
-    let request = local_websocket_request(local_addr, protocol, local_adp_token, path_and_query)?;
+    let request = local_websocket_request(
+        local_addr,
+        exchange.protocol,
+        local_adp_token,
+        &exchange.path_and_query,
+        exchange.access_scope,
+    )?;
     let (socket, _) = connect_async(request)
         .await
         .map_err(|error| error.to_string())?;
@@ -671,7 +684,7 @@ async fn execute_websocket_exchange(
     let (mut sink, mut stream) = socket.split();
     loop {
         tokio::select! {
-            request = inbound.recv() => match request {
+            request = exchange.inbound.recv() => match request {
                 Some(RelayDataOutFrame::RequestChunk { frame_kind: Some(kind), bytes, .. }) => {
                     let message = decode_message(kind, bytes)?;
                     sink.send(message).await.map_err(|error| error.to_string())?;
@@ -710,6 +723,7 @@ fn local_websocket_request(
     protocol: RelayDataProtocol,
     local_adp_token: Option<String>,
     path_and_query: &str,
+    access_scope: Option<RelayDataAccessScope>,
 ) -> Result<tokio_tungstenite::tungstenite::http::Request<()>, String> {
     let mut request = format!("ws://{local_addr}{path_and_query}")
         .into_client_request()
@@ -722,6 +736,14 @@ fn local_websocket_request(
             format!("Bearer {token}").parse().map_err(|error| {
                 format!("local WebSocket authorization header is invalid: {error}")
             })?,
+        );
+    }
+    if access_scope == Some(RelayDataAccessScope::Remote) {
+        request.headers_mut().insert(
+            FREEHAND_REMOTE_ACCESS_SCOPE_HEADER,
+            FREEHAND_REMOTE_ACCESS_SCOPE_VALUE
+                .parse()
+                .map_err(|error| format!("remote access scope header is invalid: {error}"))?,
         );
     }
     Ok(request)
@@ -869,6 +891,7 @@ mod url_tests {
             RelayDataProtocol::Adp,
             Some("local-secret".to_owned()),
             "/adp",
+            Some(RelayDataAccessScope::Remote),
         )
         .expect("ADP request");
         assert_eq!(
@@ -883,9 +906,17 @@ mod url_tests {
             RelayDataProtocol::WebSocket,
             Some("local-secret".to_owned()),
             "/echo",
+            Some(RelayDataAccessScope::Remote),
         )
         .expect("generic request");
         assert!(generic.headers().get(AUTHORIZATION).is_none());
+        assert_eq!(
+            generic
+                .headers()
+                .get(FREEHAND_REMOTE_ACCESS_SCOPE_HEADER)
+                .and_then(|value| value.to_str().ok()),
+            Some(FREEHAND_REMOTE_ACCESS_SCOPE_VALUE)
+        );
     }
 
     #[test]
@@ -920,6 +951,7 @@ mod url_tests {
             method: None,
             path_and_query: "/echo".to_owned(),
             headers: Vec::new(),
+            access_scope: Some(RelayDataAccessScope::Remote),
         };
 
         handle_data_frame(
@@ -966,6 +998,73 @@ mod url_tests {
             }
             AgentExchange::Http { .. } => panic!("expected WebSocket exchange"),
         }
+        exchange_tasks.abort_all();
+    }
+
+    #[tokio::test]
+    async fn websocket_open_without_remote_scope_is_rejected_before_exchange_inserted() {
+        let mut exchanges = BTreeMap::new();
+        let mut completed_exchanges = BTreeSet::new();
+        let mut exchange_tasks = JoinSet::new();
+        let (responses, _response_rx) = mpsc::channel(4);
+        let (errors, _error_rx) = mpsc::channel(4);
+        let error = handle_data_frame(
+            RelayDataOutFrame::RequestOpen {
+                exchange_id: "missing-scope".to_owned(),
+                protocol: RelayDataProtocol::WebSocket,
+                method: None,
+                path_and_query: "/echo".to_owned(),
+                headers: Vec::new(),
+                access_scope: None,
+            },
+            &mut exchanges,
+            &mut completed_exchanges,
+            Client::new(),
+            "127.0.0.1:9".parse().expect("local address"),
+            None,
+            responses,
+            errors,
+            &mut exchange_tasks,
+        )
+        .await
+        .expect_err("missing remote scope must fail");
+        assert_eq!(error, "WebSocket tunnel open requires remote access scope");
+        assert!(exchanges.is_empty());
+        exchange_tasks.abort_all();
+    }
+
+    #[tokio::test]
+    async fn http_open_with_remote_scope_is_rejected_before_exchange_inserted() {
+        let mut exchanges = BTreeMap::new();
+        let mut completed_exchanges = BTreeSet::new();
+        let mut exchange_tasks = JoinSet::new();
+        let (responses, _response_rx) = mpsc::channel(4);
+        let (errors, _error_rx) = mpsc::channel(4);
+        let error = handle_data_frame(
+            RelayDataOutFrame::RequestOpen {
+                exchange_id: "http-scope".to_owned(),
+                protocol: RelayDataProtocol::Http,
+                method: Some("GET".to_owned()),
+                path_and_query: "/health".to_owned(),
+                headers: Vec::new(),
+                access_scope: Some(RelayDataAccessScope::Remote),
+            },
+            &mut exchanges,
+            &mut completed_exchanges,
+            Client::new(),
+            "127.0.0.1:9".parse().expect("local address"),
+            None,
+            responses,
+            errors,
+            &mut exchange_tasks,
+        )
+        .await
+        .expect_err("HTTP open must reject WebSocket scope");
+        assert_eq!(
+            error,
+            "HTTP tunnel open cannot carry WebSocket access scope"
+        );
+        assert!(exchanges.is_empty());
         exchange_tasks.abort_all();
     }
 

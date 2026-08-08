@@ -9,7 +9,7 @@ import { renderDiagnosticLogRow as renderDiagnosticLogRowSurface, renderSurface 
 import { chooseNewTaskDirectory as chooseNewTaskDirectoryFromSurface, openNewSessionSurface, closeNewSessionSurface, selectedNewSessionKind as selectedNewSessionKindFromSurface, submitNewSessionSurface, syncNewSessionDialogMode as syncNewSessionDialogModeFromSurface } from "./surfaces/new-session/index.js?v=__WEBUI_ASSET_VERSION__";
 import { setSelectedSessionId as setSelectedSessionIdInSurface, clearConversationForSessionSwitch as clearConversationForSessionSwitchInSurface, switchConversationSession as switchConversationSessionInSurface } from "./surfaces/session-detail/index.js?v=__WEBUI_ASSET_VERSION__";
 import { HISTORICAL_FAILURE_RECOVERED, historicalFailureRecoveredLifecycle, historicalFailureRecoveredRows, historicalRecoveryProjectionChanged, recoveredHistoricalWorkerFailureTurnIds } from "./surfaces/session-detail/recovery.js?v=__WEBUI_ASSET_VERSION__";
-import { createAdpClient } from "./app-shell/adp-client.js?v=__WEBUI_ASSET_VERSION__";
+import { createAdpClient, settleAdpResponseFrame } from "./app-shell/adp-client.js?v=__WEBUI_ASSET_VERSION__";
 import { adpCommandOf, adpQueryOf, adpSubscribeOf } from "./generated/adp-protocol.js?v=__WEBUI_ASSET_VERSION__";
 
 export const classifyLayoutShape = window.__freehandLayout.classifyLayoutShape;
@@ -464,10 +464,14 @@ function closeMobileDrawer() {
 
 function setMobileAgentSheetOpen(open) {
   const shape = document.body.dataset.layoutShape || applyLayoutShape();
-  if (open && state.selectedSessionId) {
+  const homeDirectoryRoute = state.route === "home_dashboard" && !state.selectedSessionId;
+  const sessionWorkerRoute = selectedSessionDetailRouteActive();
+  if (open && homeDirectoryRoute) {
+    dispatchWebUiEdge("home.open_agent_directory");
+  } else if (open && sessionWorkerRoute) {
     dispatchWebUiEdge("session.open_agent_sheet", { session_id: state.selectedSessionId });
   }
-  state.mobileAgentSheetOpen = !!open && isMobileDrawerLayout(shape) && selectedSessionDetailRouteActive();
+  state.mobileAgentSheetOpen = !!open && isMobileDrawerLayout(shape) && (homeDirectoryRoute || sessionWorkerRoute);
   if (state.mobileAgentSheetOpen) {
     state.mobileDrawer = null;
   }
@@ -780,9 +784,10 @@ function installMobileSessionSwipeGesture() {
 }
 
 function adpUrl() {
-  const endpoint = shellConfig().adpEndpoint || "/adp";
-  const protocol = window.location.protocol === "https:" ? "wss:" : "ws:";
-  return `${protocol}//${window.location.host}${endpoint}`;
+  const endpoint = shellConfig().adpEndpoint || "adp";
+  const url = new URL(endpoint, window.location.href);
+  url.protocol = url.protocol === "https:" ? "wss:" : "ws:";
+  return url.toString();
 }
 
 function nextRequestId(prefix) {
@@ -957,50 +962,29 @@ function setBackgroundCommandStatus(message) {
 }
 
 function handleAdpFrame(frame) {
-  const request = state.adpRequests.get(frame.request_id);
-  switch (frame.kind) {
+  const settlement = settleAdpResponseFrame({ state, windowRef: window, frame });
+  switch (settlement.kind) {
     case "query_result":
       state.adpFailure = null;
-      if (request) {
-        state.adpRequests.delete(frame.request_id);
-        window.clearTimeout(request.timeoutId);
-        request.resolve(frame.result);
-      }
       return;
     case "command_receipt":
       state.adpFailure = null;
-      if (request) {
-        state.adpRequests.delete(frame.request_id);
-        window.clearTimeout(request.timeoutId);
-        request.resolve(frame.receipt);
-      }
-      setBackgroundCommandStatus(commandReceiptStatus(frame.receipt));
+      setBackgroundCommandStatus(commandReceiptStatus(settlement.receipt));
       return;
     case "subscription_accepted":
       state.adpFailure = null;
-      if (request) {
-        state.adpRequests.delete(frame.request_id);
-        window.clearTimeout(request.timeoutId);
-        request.resolve(frame.selector);
-      }
-      state.adpSubscriptions.add(frame.request_id);
-      setBackgroundCommandStatus(`更新流已连接：${frame.selector.stream_kind}`);
+      setBackgroundCommandStatus(`更新流已连接：${settlement.selector.stream_kind}`);
       return;
     case "subscription_event":
       state.adpFailure = null;
-      applyAdpSubscriptionEvent(frame.event);
+      applyAdpSubscriptionEvent(settlement.event);
       return;
     case "failure":
-      state.adpFailure = frame.failure.message || frame.failure.code;
-      if (request) {
-        state.adpRequests.delete(frame.request_id);
-        window.clearTimeout(request.timeoutId);
-        request.reject(new Error(frame.failure.message || frame.failure.code));
-      }
-      setCommandStatus(`请求失败：${frame.failure.code}`);
+      state.adpFailure = settlement.failure.message;
+      setCommandStatus(`请求失败：${settlement.failure.code}`);
       return;
     default:
-      setCommandStatus(`不支持的服务消息：${frame.kind}`);
+      setCommandStatus(`不支持的服务消息：${settlement.kind}`);
   }
 }
 
@@ -4342,6 +4326,7 @@ function applyAdpQueryResult(result) {
     state.agentResourceDraftCount = Number(configStatus.agent_resource_count) || null;
     renderSettingsShell();
     renderPhase2Dashboard();
+    renderSessions();
     return;
   }
   if (applyPhase2QueryResult(result)) {
@@ -5406,7 +5391,7 @@ function renderSessionAgentGroup(sessions) {
   chevron.textContent = "›";
   const name = document.createElement("span");
   name.className = "session-agent-name";
-  name.textContent = "Master";
+  name.textContent = sessionAgentGroupLabel();
   main.append(chevron, name);
 
   const count = document.createElement("span");
@@ -5427,6 +5412,11 @@ function renderSessionAgentGroup(sessions) {
   });
   group.append(toggle, sessionNodes);
   return group;
+}
+
+function sessionAgentGroupLabel() {
+  const agentName = `${state.configStatus?.agent_name || ""}`.trim();
+  return agentName ? phase2AgentLabel(agentName) : "当前 Agent";
 }
 
 function renderSessionBulkToolbar() {
@@ -5843,7 +5833,17 @@ function applyPhase2QueryResult(result) {
 function buildMobileAgentDashboardModel() {
   const taskBoard = state.taskBoard;
   const tasks = currentSessionTasks();
-  const agents = currentSessionAgents();
+  const agents = state.selectedSessionId
+    ? currentSessionAgents()
+    : (state.configStatus?.local_agent_directory || []).map((entry) => ({
+        agent_id: entry.agent_name,
+        role: entry.agent_mode,
+        alive: false,
+        state: "configured",
+        local_web_url: entry.web_url || null,
+        relay_web_url: entry.relay_web_url || null,
+        is_local: !!entry.is_local,
+      }));
   const counts = currentSessionTaskCounts(tasks);
   const liveObservation = globalLiveSessionObservation();
   const selectedTurns = logicalSessionTurns(state.sessionTurns || []).filter((turn) =>
@@ -5895,10 +5895,13 @@ function renderMobileAgentSummaryStrip(model = buildMobileAgentDashboardModel())
     ? ` · limit ${workerLimit}`
     : "";
   const liveObservation = model.liveObservation || null;
+  const directoryMode = !state.selectedSessionId;
   setText(
     "mobile-agent-summary-title",
     liveObservation
       ? `${liveObservation.label} · ${liveObservation.turnId || "活动 turn"}`
+      : directoryMode
+      ? `${model.agents.length} 个 Agent · ${runningAgents.length} 个活动`
       : `${runningAgents.length} 运行中 · ${lifecycleSummary}${resourceSummary}`,
   );
   const activeTask =
@@ -5910,6 +5913,8 @@ function renderMobileAgentSummaryStrip(model = buildMobileAgentDashboardModel())
     "mobile-agent-summary-copy",
     liveObservation
       ? compactSentence(`${liveObservation.scope}: ${liveObservation.title} · ${liveObservation.sessionId}`, 96)
+      : directoryMode
+      ? "点开选择一个 Agent 进入独立会话"
       : activeTask
       ? compactSentence(`${statusLabel(activeTask.status)}: ${taskTitle(activeTask)}`, 72)
       : "当前会话没有 工作器任务",
@@ -5931,6 +5936,8 @@ function renderMobileAgentSheet(model = buildMobileAgentDashboardModel()) {
     "mobile-agent-task-status",
     liveObservation
       ? `${liveObservation.label} · ${liveObservation.turnId || "活动 turn"} · ${liveObservation.sessionId}`
+      : !state.selectedSessionId
+      ? `${model.agents.length} 个已配置 Agent`
       : model.taskBoardStatus,
   );
   renderMobileAgentTaskList(model);
@@ -6022,6 +6029,28 @@ function renderMobileAgentTaskList(model) {
     return;
   }
   mobileAgentTaskList.replaceChildren();
+  if (!state.selectedSessionId) {
+    if (model.agents.length === 0) {
+      mobileAgentTaskList.appendChild(mobileAgentEmptyCard("当前配置中没有可访问的 Agent。"));
+      return;
+    }
+    model.agents.forEach((agent) => {
+      const agentWebUrl = agentNavigationUrl(agent);
+      const card = mobileAgentCard({
+        title: phase2AgentLabel(agent.agent_id),
+        meta: [statusLabel(agent.state), `${agent.role || "Agent"}`.toUpperCase()].join(" · "),
+        copy: agentWebUrl ? "进入独立会话" : "当前设备没有可访问地址",
+        tone: agentIsActive(agent) ? "phase2-agent-active" : "phase2-muted",
+        interactive: !!agentWebUrl,
+      });
+      card.dataset.agentId = `${agent.agent_id || ""}`;
+      if (agentWebUrl) {
+        card.addEventListener("click", () => window.location.assign(agentWebUrl));
+      }
+      mobileAgentTaskList.appendChild(card);
+    });
+    return;
+  }
   if (model.tasks.length === 0) {
     mobileAgentTaskList.appendChild(mobileAgentEmptyCard("当前投影中没有 工作器任务。"));
     return;
@@ -6165,12 +6194,22 @@ function renderAgentBoardProjection() {
     agentBoardList.textContent = "-";
     return;
   }
-  const agents = currentSessionAgents();
+  const agents = state.selectedSessionId
+    ? currentSessionAgents()
+    : (state.configStatus?.local_agent_directory || []).map((entry) => ({
+        agent_id: entry.agent_name,
+        role: entry.agent_mode,
+        alive: false,
+        state: "configured",
+        local_web_url: entry.web_url || null,
+        relay_web_url: entry.relay_web_url || null,
+        is_local: !!entry.is_local,
+      }));
   const activeCount = agents.filter((agent) => agent.alive).length;
   agentBoardStatus.textContent = `${agents.length} 个当前 Agent · ${activeCount} 个活动`;
   agentBoardList.replaceChildren();
   if (agents.length === 0) {
-    agentBoardList.textContent = state.selectedSessionId ? "选中会话没有 Worker" : "暂无 Worker";
+    agentBoardList.textContent = state.selectedSessionId ? "选中会话没有 Worker" : "暂无本地 Agent";
     return;
   }
   agents.slice(0, 8).forEach((agent, index) => agentBoardList.appendChild(agentBoardItem(agent, index)));
@@ -6178,19 +6217,24 @@ function renderAgentBoardProjection() {
 
 function agentBoardItem(agent, index) {
   const boundTask = taskForAgent(agent);
-  const item = document.createElement(boundTask ? "button" : "section");
+  const agentWebUrl = agentNavigationUrl(agent);
+  const item = document.createElement(boundTask || agentWebUrl ? "button" : "section");
   item.className = `phase2-card phase2-agent-card ${agent.alive ? "phase2-agent-active" : "phase2-muted"}`;
-  if (boundTask) {
+  if (boundTask || agentWebUrl) {
     item.type = "button";
-    item.dataset.taskId = boundTask.task_id || "";
-    item.dataset.sessionId = workerSessionIdForTask(boundTask);
+    item.dataset.taskId = (boundTask && boundTask.task_id) || "";
+    item.dataset.sessionId = boundTask ? workerSessionIdForTask(boundTask) : "";
     item.addEventListener("click", () => {
-      openWorkerTaskSession(boundTask);
+      if (boundTask) {
+        openWorkerTaskSession(boundTask);
+        return;
+      }
+      window.location.assign(agentWebUrl);
     });
   }
   const title = document.createElement("div");
   title.className = "phase2-card-title";
-  title.textContent = phase2AgentLabel(agent.agent_id, index);
+  title.textContent = phase2AgentLabel(agent.agent_id);
   const meta = document.createElement("div");
   meta.className = "phase2-card-meta";
   meta.textContent = [statusLabel(agent.state), agent.role || "Agent", agent.current_model ? `模型 ${agent.current_model}` : null]
@@ -6415,6 +6459,14 @@ function agentIsActive(agent) {
     return true;
   }
   return !!agent.alive && !["idle", "available", ""].includes(`${agent.state || ""}`.toLowerCase());
+}
+
+function agentNavigationUrl(agent) {
+  const browserIsLoopback = ["127.0.0.1", "::1", "[::1]", "localhost"].includes(window.location.hostname);
+  if (browserIsLoopback && agent.is_local && agent.local_web_url) {
+    return agent.local_web_url;
+  }
+  return agent.relay_web_url;
 }
 
 function taskForAgent(agent, taskCandidates = null) {
@@ -6959,13 +7011,17 @@ function phase2AgentLabel(agentId, explicitIndex = null) {
   if (normalized === "master") {
     return "Master";
   }
+  const stableOrdinal = workerOrdinalFromAgentId(normalized);
+  if (stableOrdinal) {
+    return `Worker ${stableOrdinal}`;
+  }
   const agents = ((state.agentBoard && state.agentBoard.agents) || []).filter(
     (agent) => normalizeAgentId(agent.agent_id) !== "master",
   );
   const index = explicitIndex === null
     ? agents.findIndex((agent) => normalizeAgentId(agent.agent_id) === normalized)
     : explicitIndex;
-  const ordinal = index >= 0 ? index + 1 : workerOrdinalFromAgentId(normalized);
+  const ordinal = index >= 0 ? index + 1 : null;
   return `Worker ${ordinal || ""}`.trim();
 }
 

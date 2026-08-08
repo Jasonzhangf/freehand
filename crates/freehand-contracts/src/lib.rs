@@ -29,6 +29,9 @@ id_type!(FeatureId);
 id_type!(ToolCallId);
 id_type!(ContextSegmentId);
 
+pub const FREEHAND_REMOTE_ACCESS_SCOPE_HEADER: &str = "x-freehand-relay-access-scope";
+pub const FREEHAND_REMOTE_ACCESS_SCOPE_VALUE: &str = "remote";
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ContextSegmentKind {
     SystemAnchor,
