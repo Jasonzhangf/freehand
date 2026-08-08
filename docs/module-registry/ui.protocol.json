@@ -1,0 +1,50 @@
+{
+  "schema_version": 1,
+  "registry_id": "ui.protocol.modules",
+  "feature_id": "ui.protocol",
+  "status": "active",
+  "coverage_roots": [
+    "crates/freehand-ui-protocol"
+  ],
+  "modules": [
+    {
+      "module_id": "ui.protocol.library",
+      "owner_feature_id": "ui.protocol",
+      "status": "active",
+      "owned_paths": [
+        "crates/freehand-ui-protocol/Cargo.toml",
+        "crates/freehand-ui-protocol/src/adp_descriptor.rs",
+        "crates/freehand-ui-protocol/src/adp_wire.rs",
+        "crates/freehand-ui-protocol/src/bin/export-adp-protocol.rs",
+        "crates/freehand-ui-protocol/src/dto.rs",
+        "crates/freehand-ui-protocol/src/lib.rs",
+        "crates/freehand-ui-protocol/src/ports.rs",
+        "crates/freehand-ui-protocol/src/state.rs",
+        "crates/freehand-ui-protocol/src/validate.rs",
+        "crates/freehand-ui-protocol/src/projection.rs",
+        "crates/freehand-ui-protocol/src/tests.rs"
+      ],
+      "allowed_dependencies": [
+        "rust.std",
+        "freehand-blocks",
+        "freehand-contracts",
+        "freehand-control",
+        "freehand-debug",
+        "third_party.serde",
+        "third_party.serde-json",
+        "third_party.thiserror",
+        "third_party.tokio"
+      ],
+      "forbidden_dependencies": [
+        "freehand-config",
+        "freehand-node",
+        "freehand-provider-anthropic",
+        "freehand-provider-openai",
+        "freehand-reason",
+        "freehand-runtime",
+        "freehand-task"
+      ]
+    }
+  ],
+  "declared_edges": []
+}
