@@ -2,8 +2,8 @@ use crate::*;
 use freehand_contracts::{
     AgentId, ErrorClass, ErrorContract, ErrorErr01RuntimeClassified, FeatureId,
     ReasonReq04ToolCall, ReasonReq05ToolResultReentry, ReasonResp01SemanticEvent,
-    ReasonResp02UsageEvent, ReasonResp03TerminalEvent, RecoveryPolicy, SemanticEventKind, TraceId,
-    SessionId, TerminalStatus, TurnId,
+    ReasonResp02UsageEvent, ReasonResp03TerminalEvent, RecoveryPolicy, SemanticEventKind,
+    SessionId, TerminalStatus, TraceId, TurnId,
 };
 use freehand_debug::{DebugEvent, DebugHub, DebugStateSnapshot};
 
