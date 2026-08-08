@@ -2,6 +2,8 @@
 
 - feature_id: `ui.protocol`
 - owner: `crates/freehand-ui-protocol`
+- module registry: `docs/module-registry/ui.protocol.json`
+- verification map: `docs/verification-maps/ui.protocol.json`
 - resource map: `docs/resource-maps/core.json`
 - resource operation coverage:
   - `task.project_to_ui`

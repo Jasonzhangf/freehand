@@ -605,7 +605,7 @@
     {
       "step": "18",
       "symbol_path": "UiAdpRequest / UiAdpResponse / adp_protocol_version / adp_server_capabilities",
-      "file_path": "crates/freehand-ui-protocol/src/lib.rs",
+      "file_path": "crates/freehand-ui-protocol/src/adp_wire.rs",
       "responsibility": "define protocol-owned versioned WebSocket ADP frames and handshake capability metadata for command/query/subscribe automation",
       "input_semantic": "ADP JSON frame with top-level protocol_version and first-frame handshake",
       "output_semantic": "typed handshake, command/query/subscription response, event, or failure",
@@ -616,7 +616,7 @@
     {
       "step": "19",
       "symbol_path": "UiAdpResponse",
-      "file_path": "crates/freehand-ui-protocol/src/lib.rs",
+      "file_path": "crates/freehand-ui-protocol/src/adp_wire.rs",
       "responsibility": "define protocol-owned WebSocket ADP response frames for command/query/subscribe/event/failure automation",
       "input_semantic": "protocol command/query/subscription result",
       "output_semantic": "ADP JSON response frame",
@@ -638,7 +638,7 @@
     {
       "step": "20a",
       "symbol_path": "UiCommand::QueryConfigStatus / UiQueryResult::ConfigStatus / UiConfigStatusProjection / UiConfigPeerProjection / UiProviderConfigSummaryProjection",
-      "file_path": "crates/freehand-ui-protocol/src/lib.rs",
+      "file_path": "crates/freehand-ui-protocol/src/dto.rs",
       "responsibility": "define the secret-free selected config query/result DTO with complete provider registry, current primary/fallback provider selection, ordered peer list, and Agent resource capacity",
       "input_semantic": "config status query",
       "output_semantic": "active agent/provider/fallback/model/auth-source plus safe configured provider registry, ordered paired agent name/mode/node/provider projections, and Agent resource capacity",
@@ -682,7 +682,7 @@
     {
       "step": "23",
       "symbol_path": "UiCommand::QueryErrorCenterEvents / UiCommand::SubscribeErrorCenterEvents / UiErrorCenterEventProjection",
-      "file_path": "crates/freehand-ui-protocol/src/lib.rs",
+      "file_path": "crates/freehand-ui-protocol/src/dto.rs",
       "responsibility": "define read-only error-center ADP query/subscribe shapes and UI-safe event DTOs",
       "input_semantic": "session/trace/turn/domain filters",
       "output_semantic": "ErrorCenterEvents query result or subscription projection",
@@ -693,7 +693,7 @@
     {
       "step": "24",
       "symbol_path": "UiProviderConfigUpdate / UiCommand::UpdateProviderConfig / UiCommand::UpsertProviderConfig",
-      "file_path": "crates/freehand-ui-protocol/src/lib.rs",
+      "file_path": "crates/freehand-ui-protocol/src/dto.rs",
       "responsibility": "define provider definition mutation DTOs without credential values and route them to the config owner",
       "input_semantic": "provider/model/base-url/env-var update",
       "output_semantic": "validated mutation intent routed to config.core",
@@ -704,7 +704,7 @@
     {
       "step": "24b",
       "symbol_path": "UiAgentProviderSelectionUpdate / UiCommand::UpdateAgentProviderSelection",
-      "file_path": "crates/freehand-ui-protocol/src/lib.rs",
+      "file_path": "crates/freehand-ui-protocol/src/dto.rs",
       "responsibility": "define active provider selection mutation DTO without credential values and route it to the config owner",
       "input_semantic": "agent name plus primary/fallback provider ids",
       "output_semantic": "validated mutation intent routed to config.core",
@@ -726,7 +726,7 @@
     {
       "step": "24b3",
       "symbol_path": "UiModelGroupConfigUpdate / UiAgentModelGroupSelectionUpdate / UiCommand::UpsertModelGroupConfig / UiCommand::UpdateAgentModelGroupSelection / UiModelGroupConfigProjection",
-      "file_path": "crates/freehand-ui-protocol/src/lib.rs",
+      "file_path": "crates/freehand-ui-protocol/src/dto.rs",
       "responsibility": "define model group registry/selection DTOs without credential values and route them to the config owner",
       "input_semantic": "group id, route provider/model fields, load-balance weights, and optional active group id",
       "output_semantic": "validated mutation intent routed to config.core plus UI-safe config projection DTOs",
@@ -737,7 +737,7 @@
     {
       "step": "24c",
       "symbol_path": "UiAgentResourceConfigUpdate / UiCommand::UpdateAgentResourceConfig",
-      "file_path": "crates/freehand-ui-protocol/src/lib.rs",
+      "file_path": "crates/freehand-ui-protocol/src/dto.rs",
       "responsibility": "define Agent resource-count update command DTO without provider credentials and route it to the config owner",
       "input_semantic": "agent name plus `1..=5` resource count",
       "output_semantic": "validated mutation intent routed to config.core",
@@ -784,7 +784,7 @@
     {
       "step": "28",
       "symbol_path": "UiTaskAgentCreateCommand / UiTaskAssignCommand / UiTaskClaimCommand / UiTaskReviewRejectionCommand / UiTaskDispatchCommand",
-      "file_path": "crates/freehand-ui-protocol/src/lib.rs",
+      "file_path": "crates/freehand-ui-protocol/src/dto.rs",
       "responsibility": "define Phase 2A worker agent, assignment, review rejection, and dispatch-mode DTOs routed to task.orchestration; keep ClaimNextTask internal-only for worker/runtime claim paths",
       "input_semantic": "worker/task mutation intent; public ADP excludes direct worker claim",
       "output_semantic": "validated mutation intent routed to task.orchestration or protocol/public-ingress rejection",
@@ -817,7 +817,7 @@
     {
       "step": "28",
       "symbol_path": "UiWorkerControlCommand / UiCommand::WorkerControl / UiCommand::QueryWorkerControl / UiQueryResult::WorkerControl",
-      "file_path": "crates/freehand-ui-protocol/src/lib.rs",
+      "file_path": "crates/freehand-ui-protocol/src/dto.rs",
       "responsibility": "define Phase 2C worker-control command/query DTOs, validate op-specific fields, and route mutation intent to worker.control",
       "input_semantic": "worker-control command or event query",
       "output_semantic": "validated mutation intent or runtime-backed control event projection",
@@ -839,7 +839,7 @@
     {
       "step": "32",
       "symbol_path": "UiCommand::QueryToolRegistry / UiQueryResult::ToolRegistry / UiToolRegistryProjection / UiToolRegistryToolProjection",
-      "file_path": "crates/freehand-ui-protocol/src/lib.rs",
+      "file_path": "crates/freehand-ui-protocol/src/dto.rs",
       "responsibility": "define read-only Tools dashboard query/result DTOs without owning tool registry truth or executing tools",
       "input_semantic": "tool registry query",
       "output_semantic": "runtime-backed UI-safe built-in tool registry projection or protocol-state route rejection",
@@ -850,7 +850,7 @@
     {
       "step": "33",
       "symbol_path": "UiCommand::QuerySessionSearch / UiQueryResult::SessionSearch / UiSessionSearchProjection / UiSessionSearchResultProjection / UiSessionSearchChildProjection",
-      "file_path": "crates/freehand-ui-protocol/src/lib.rs",
+      "file_path": "crates/freehand-ui-protocol/src/dto.rs",
       "responsibility": "define read-only persisted-session Search dashboard query/result DTOs without owning session index truth or promoting Worker sessions to top-level results",
       "input_semantic": "search query text plus optional limit",
       "output_semantic": "runtime-backed UI-safe persisted session search projection or protocol-state route rejection",
@@ -861,7 +861,7 @@
     {
       "step": "34",
       "symbol_path": "UiCommand::QueryDiagnostics / UiQueryResult::Diagnostics / UiDiagnosticsProjection / UiDiagnosticLogFileProjection",
-      "file_path": "crates/freehand-ui-protocol/src/lib.rs",
+      "file_path": "crates/freehand-ui-protocol/src/dto.rs",
       "responsibility": "define read-only diagnostics query/result DTOs without owning debug/log truth or exposing raw provider payloads, secrets, or absolute user paths",
       "input_semantic": "diagnostics query",
       "output_semantic": "runtime-backed UI-safe diagnostics projection or protocol-state route rejection",
