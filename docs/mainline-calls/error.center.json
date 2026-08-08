@@ -166,7 +166,7 @@
     {
       "step": "10",
       "symbol_path": "UiCommand::QueryErrorCenterEvents / UiQueryResult::ErrorCenterEvents",
-      "file_path": "crates/freehand-ui-protocol/src/lib.rs",
+      "file_path": "crates/freehand-ui-protocol/src/dto.rs",
       "responsibility": "define protocol-owned ADP query/result shape for error-center events",
       "input_semantic": "query filters",
       "output_semantic": "UI-safe error-center projection",

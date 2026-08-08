@@ -256,7 +256,7 @@
     {
       "step": "06",
       "symbol_path": "turn_projection_for_client",
-      "file_path": "crates/freehand-ui-protocol/src/lib.rs",
+      "file_path": "crates/freehand-ui-protocol/src/adp_descriptor.rs",
       "responsibility": "gate slave-card visibility by client kind",
       "input_semantic": "turn projection plus client kind",
       "output_semantic": "client-specific projection",

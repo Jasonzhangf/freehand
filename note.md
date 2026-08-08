@@ -1,5 +1,13 @@
 # note.md
 
+# 2026-08-09 ui.protocol large-lib split audit
+
+- Owner: `ui.protocol`; resource owners remain `ui_projection` and `input_attachment` from `docs/resource-maps/core.json`.
+- Existing dirty work already created `dto.rs`, `adp_wire.rs`, and `adp_descriptor.rs`, then removed 2649 lines from `lib.rs`.
+- Positive compile signal: `cargo check -p freehand-ui-protocol` passed.
+- First architecture divergence: `cargo run -p xtask -- gates check` failed because `ui.protocol` mainline step 18 still bound `adp_protocol_version` to `src/lib.rs` after the symbol moved to `src/adp_wire.rs`.
+- Scope decision: finish this owner slice before starting another crate; update machine bindings and add executable module/verification registration. No DTO, payload, routing, or error semantic changes.
+
 # 2026-07-25 Android daemon config legacy compatibility
 
 - owner resources: `android_apk_update`, `DaemonConnectionConfigStore`, compatibility projection for older APKs.

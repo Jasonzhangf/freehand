@@ -1,8 +1,12 @@
 use crate::dto::*;
-use crate::{is_public_adp_command_descriptor, SubscriptionSelector, UiCommandFrameClass, UI_COMMAND_DESCRIPTORS};
+use crate::{
+    SubscriptionSelector, UI_COMMAND_DESCRIPTORS, UiCommandFrameClass,
+    is_public_adp_command_descriptor,
+};
 use freehand_contracts::{
     AgentId, ErrorErr01RuntimeClassified, ReasonReq04ToolCall, ReasonReq05ToolResultReentry,
-    ReasonResp01SemanticEvent, ReasonResp02UsageEvent, ReasonResp03TerminalEvent, SessionId, TurnId,
+    ReasonResp01SemanticEvent, ReasonResp02UsageEvent, ReasonResp03TerminalEvent, SessionId,
+    TurnId,
 };
 use freehand_debug::DebugStateSnapshot;
 use serde::{Deserialize, Deserializer, Serialize, Serializer};

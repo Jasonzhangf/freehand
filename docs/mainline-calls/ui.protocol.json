@@ -360,7 +360,7 @@
     {
       "step": "01",
       "symbol_path": "validate_command",
-      "file_path": "crates/freehand-ui-protocol/src/lib.rs",
+      "file_path": "crates/freehand-ui-protocol/src/validate.rs",
       "responsibility": "accept and validate UI command payload",
       "input_semantic": "UI command",
       "output_semantic": "validated command",
@@ -371,7 +371,7 @@
     {
       "step": "01a",
       "symbol_path": "validate_command",
-      "file_path": "crates/freehand-ui-protocol/src/lib.rs",
+      "file_path": "crates/freehand-ui-protocol/src/validate.rs",
       "responsibility": "validate SubmitUserInput metadata image attachments before runtime dispatch",
       "input_semantic": "SubmitUserInput.metadata.attachments",
       "output_semantic": "validated image attachment metadata and transient base64 payload or explicit protocol rejection",
@@ -385,7 +385,7 @@
     {
       "step": "02",
       "symbol_path": "accept_command_ingress",
-      "file_path": "crates/freehand-ui-protocol/src/lib.rs",
+      "file_path": "crates/freehand-ui-protocol/src/validate.rs",
       "responsibility": "accept only mutation-intent ingress commands and return explicit ack",
       "input_semantic": "UI command",
       "output_semantic": "ingress ack",
@@ -396,7 +396,7 @@
     {
       "step": "03",
       "symbol_path": "protocol_rejection",
-      "file_path": "crates/freehand-ui-protocol/src/lib.rs",
+      "file_path": "crates/freehand-ui-protocol/src/validate.rs",
       "responsibility": "convert protocol error into transport-safe rejection payload",
       "input_semantic": "protocol error",
       "output_semantic": "rejection payload",
@@ -407,7 +407,7 @@
     {
       "step": "04",
       "symbol_path": "build_command_dispatch_envelope",
-      "file_path": "crates/freehand-ui-protocol/src/lib.rs",
+      "file_path": "crates/freehand-ui-protocol/src/validate.rs",
       "responsibility": "wrap accepted ingress command with declared owner routing",
       "input_semantic": "UI command",
       "output_semantic": "dispatch envelope",
@@ -418,7 +418,7 @@
     {
       "step": "04a",
       "symbol_path": "validate_command / command_dispatch_target",
-      "file_path": "crates/freehand-ui-protocol/src/lib.rs",
+      "file_path": "crates/freehand-ui-protocol/src/validate.rs",
       "responsibility": "validate session-management mutation intents and route them to the session persistence owner",
       "input_semantic": "session CRUD or rollback command",
       "output_semantic": "owner-routed dispatch envelope or protocol rejection",
@@ -428,8 +428,8 @@
     },
     {
       "step": "04b",
-      "symbol_path": "UiProtocolState::replace_session_turn_projections / preserve_live_activity_on_nonterminal_refresh / merge_tool_activity",
-      "file_path": "crates/freehand-ui-protocol/src/lib.rs",
+      "symbol_path": "UiProtocolState::replace_session_turn_projections / preserve_live_activity_on_nonterminal_refresh",
+      "file_path": "crates/freehand-ui-protocol/src/state.rs",
       "responsibility": "replace one session's effective transcript projection after persistence-owned rollback or selected-session refresh while preserving live provider-transport/tool activity only for the latest nonterminal replacement turn and keeping terminal snapshots authoritative",
       "input_semantic": "session id plus effective turn projections",
       "output_semantic": "queryable session transcript excluding rolled-back turns, retaining current latest provider transport retry/tool-call observability until terminal truth, and clearing stale live activity on historical rounds",
@@ -440,7 +440,7 @@
     {
       "step": "04c",
       "symbol_path": "session_list_projection / turn_is_nonterminal",
-      "file_path": "crates/freehand-ui-protocol/src/lib.rs",
+      "file_path": "crates/freehand-ui-protocol/src/projection.rs",
       "responsibility": "project persisted session summaries while allowing active turn identity only for the latest nonterminal live/progress turn",
       "input_semantic": "persisted session metadata plus turn projections plus latest protocol active turn id",
       "output_semantic": "session summary list where terminal latest turns remain visible but do not appear active",
@@ -451,7 +451,7 @@
     {
       "step": "05",
       "symbol_path": "UiProtocolState::query",
-      "file_path": "crates/freehand-ui-protocol/src/lib.rs",
+      "file_path": "crates/freehand-ui-protocol/src/state.rs",
       "responsibility": "execute read-only query path",
       "input_semantic": "query command",
       "output_semantic": "snapshot projection",
@@ -462,7 +462,7 @@
     {
       "step": "06",
       "symbol_path": "UiProtocolState::subscribe",
-      "file_path": "crates/freehand-ui-protocol/src/lib.rs",
+      "file_path": "crates/freehand-ui-protocol/src/state.rs",
       "responsibility": "expose the protocol-owned continuous subscription channel for app transports",
       "input_semantic": "none",
       "output_semantic": "UiSubscriptionEvent receiver",
@@ -473,7 +473,7 @@
     {
       "step": "07",
       "symbol_path": "subscription_selector",
-      "file_path": "crates/freehand-ui-protocol/src/lib.rs",
+      "file_path": "crates/freehand-ui-protocol/src/validate.rs",
       "responsibility": "build read-only subscribe selector",
       "input_semantic": "subscribe command",
       "output_semantic": "subscription selector",
@@ -484,7 +484,7 @@
     {
       "step": "08",
       "symbol_path": "subscription_matches",
-      "file_path": "crates/freehand-ui-protocol/src/lib.rs",
+      "file_path": "crates/freehand-ui-protocol/src/validate.rs",
       "responsibility": "route incremental projection to matching subscription",
       "input_semantic": "subscription selector plus projection",
       "output_semantic": "delivery decision",
@@ -495,7 +495,7 @@
     {
       "step": "09",
       "symbol_path": "turn_projection_from_events",
-      "file_path": "crates/freehand-ui-protocol/src/lib.rs",
+      "file_path": "crates/freehand-ui-protocol/src/adp_descriptor.rs",
       "responsibility": "project whole-turn state into UI snapshot, including tool lifecycle activities",
       "input_semantic": "semantic/tool/tool-result/usage/terminal/error/user inputs",
       "output_semantic": "UI turn projection",
@@ -506,7 +506,7 @@
     {
       "step": "10",
       "symbol_path": "terminal_text_projection",
-      "file_path": "crates/freehand-ui-protocol/src/lib.rs",
+      "file_path": "crates/freehand-ui-protocol/src/projection.rs",
       "responsibility": "project terminal text",
       "input_semantic": "terminal semantic payload",
       "output_semantic": "UI terminal text",
@@ -517,7 +517,7 @@
     {
       "step": "10a",
       "symbol_path": "public_conversation_items / public_turn_projection",
-      "file_path": "crates/freehand-ui-protocol/src/lib.rs",
+      "file_path": "crates/freehand-ui-protocol/src/projection.rs",
       "responsibility": "derive public user-visible conversation stream, preserve user prompt, and strip raw completion schema",
       "input_semantic": "full turn projection",
       "output_semantic": "public turn projection",
@@ -528,7 +528,7 @@
     {
       "step": "11",
       "symbol_path": "UiProtocolState::apply_semantic_event / apply_tool_call / apply_tool_result / apply_usage_event / apply_terminal_event / apply_error_event",
-      "file_path": "crates/freehand-ui-protocol/src/lib.rs",
+      "file_path": "crates/freehand-ui-protocol/src/state.rs",
       "responsibility": "incrementally update one turn projection from shared contract events and publish subscription updates",
       "input_semantic": "shared reason/error contracts",
       "output_semantic": "updated queryable/subscribable turn projection",
@@ -539,7 +539,7 @@
     {
       "step": "12",
       "symbol_path": "turn_projection_for_client",
-      "file_path": "crates/freehand-ui-protocol/src/lib.rs",
+      "file_path": "crates/freehand-ui-protocol/src/adp_descriptor.rs",
       "responsibility": "gate client-specific slave substream visibility",
       "input_semantic": "turn projection plus client kind",
       "output_semantic": "client-specific turn projection",
@@ -550,7 +550,7 @@
     {
       "step": "13",
       "symbol_path": "UiProtocolState::set_debug_state",
-      "file_path": "crates/freehand-ui-protocol/src/lib.rs",
+      "file_path": "crates/freehand-ui-protocol/src/state.rs",
       "responsibility": "store per-turn read-only debug projection for UI consumption and publish subscription updates",
       "input_semantic": "freehand-debug snapshot",
       "output_semantic": "queryable/subscribable debug state",
@@ -561,7 +561,7 @@
     {
       "step": "14",
       "symbol_path": "UiProtocolState::apply_debug_event",
-      "file_path": "crates/freehand-ui-protocol/src/lib.rs",
+      "file_path": "crates/freehand-ui-protocol/src/state.rs",
       "responsibility": "ingest one observation-only debug event into UI protocol state when a snapshot is present",
       "input_semantic": "freehand-debug event",
       "output_semantic": "updated per-turn debug state or ignored event",
@@ -572,7 +572,7 @@
     {
       "step": "15",
       "symbol_path": "UiProtocolState::drain_debug_receiver",
-      "file_path": "crates/freehand-ui-protocol/src/lib.rs",
+      "file_path": "crates/freehand-ui-protocol/src/state.rs",
       "responsibility": "drain a debug.core receiver without making UI a truth writer",
       "input_semantic": "debug receiver",
       "output_semantic": "applied snapshot count",
@@ -583,7 +583,7 @@
     {
       "step": "16",
       "symbol_path": "debug_projection_from_event",
-      "file_path": "crates/freehand-ui-protocol/src/lib.rs",
+      "file_path": "crates/freehand-ui-protocol/src/projection.rs",
       "responsibility": "map one debug event to read-only UI debug projection when snapshot exists",
       "input_semantic": "freehand-debug event",
       "output_semantic": "UiProjection::Debug",
@@ -593,8 +593,8 @@
     },
     {
       "step": "17",
-      "symbol_path": "UiProtocolState::set_checkpoint_snapshot / checkpoint_projection_from_runtime_summary",
-      "file_path": "crates/freehand-ui-protocol/src/lib.rs",
+      "symbol_path": "checkpoint_projection_from_runtime_summary",
+      "file_path": "crates/freehand-ui-protocol/src/projection.rs",
       "responsibility": "store and query read-only checkpoint summaries supplied by runtime owner",
       "input_semantic": "runtime checkpoint summary DTO",
       "output_semantic": "checkpoint query result",
@@ -627,7 +627,7 @@
     {
       "step": "20",
       "symbol_path": "UiRuntimeQueryPort::query_runtime / UiRuntimeQueryPort::query_runtime_with_scope / UiQueryAccessScope",
-      "file_path": "crates/freehand-ui-protocol/src/lib.rs",
+      "file_path": "crates/freehand-ui-protocol/src/ports.rs",
       "responsibility": "define runtime-backed read-only query port shape and typed local/remote visibility scope without adding control fields to the UI query payload",
       "input_semantic": "UI query command plus typed access scope",
       "output_semantic": "optional scoped UI query result or dispatch failure",
@@ -648,8 +648,8 @@
     },
     {
       "step": "10b",
-      "symbol_path": "UiProtocolState::apply_terminal_event / turn_projection_from_events",
-      "file_path": "crates/freehand-ui-protocol/src/lib.rs",
+      "symbol_path": "turn_projection_from_events",
+      "file_path": "crates/freehand-ui-protocol/src/adp_descriptor.rs",
       "responsibility": "preserve terminal status alongside terminal text in UI turn projections",
       "input_semantic": "terminal semantic event",
       "output_semantic": "terminal text plus terminal status projection",
@@ -660,7 +660,7 @@
     {
       "step": "21",
       "symbol_path": "UiProtocolState::publish_task_list_projection",
-      "file_path": "crates/freehand-ui-protocol/src/lib.rs",
+      "file_path": "crates/freehand-ui-protocol/src/state.rs",
       "responsibility": "publish runtime-supplied task list projection to subscribers",
       "input_semantic": "UI task list projection",
       "output_semantic": "UI subscription event",
@@ -671,7 +671,7 @@
     {
       "step": "22",
       "symbol_path": "subscription_selector / subscription_matches",
-      "file_path": "crates/freehand-ui-protocol/src/lib.rs",
+      "file_path": "crates/freehand-ui-protocol/src/validate.rs",
       "responsibility": "route task list subscription selectors to task list projection events",
       "input_semantic": "SubscribeTaskList command plus UI projection",
       "output_semantic": "subscription delivery decision",
@@ -715,7 +715,7 @@
     {
       "step": "24b2",
       "symbol_path": "UiCommand::TestProviderWebSearch",
-      "file_path": "crates/freehand-ui-protocol/src/lib.rs",
+      "file_path": "crates/freehand-ui-protocol/src/dto.rs",
       "responsibility": "define provider-hosted web_search live-test command DTO and route it to the runtime/provider bridge owner",
       "input_semantic": "provider id plus optional query",
       "output_semantic": "validated mutation intent routed to provider.reason-live-bridge",
@@ -748,7 +748,7 @@
     {
       "step": "25",
       "symbol_path": "UiCommand::CreateTask / UiCommand::SubmitTaskReview / UiCommand::ApproveTaskReview / UiCommand::CloseTask",
-      "file_path": "crates/freehand-ui-protocol/src/lib.rs",
+      "file_path": "crates/freehand-ui-protocol/src/dto.rs",
       "responsibility": "define task mutation command DTOs and validate required fields before runtime dispatch",
       "input_semantic": "task create/review/approve/close mutation intent",
       "output_semantic": "validated mutation intent routed to task.orchestration or protocol rejection",
@@ -759,7 +759,7 @@
     {
       "step": "26",
       "symbol_path": "UiCommand::QueryTaskBoard / UiCommand::QueryAgentBoard / UiCommand::QueryAgentLifecycle",
-      "file_path": "crates/freehand-ui-protocol/src/lib.rs",
+      "file_path": "crates/freehand-ui-protocol/src/dto.rs",
       "responsibility": "define Phase 1 board and lifecycle query DTOs without owning task/lifecycle truth",
       "input_semantic": "board or lifecycle query filters",
       "output_semantic": "runtime-backed UI-safe board/lifecycle projections",
@@ -773,7 +773,7 @@
     {
       "step": "27",
       "symbol_path": "UiCommand::ApplyExecutionFact / UiCommand::RunSchedulerTick",
-      "file_path": "crates/freehand-ui-protocol/src/lib.rs",
+      "file_path": "crates/freehand-ui-protocol/src/dto.rs",
       "responsibility": "define internal Phase 1 execution fact and scheduler tick mutation DTOs routed to task.orchestration while excluding them from the public ADP command surface",
       "input_semantic": "execution fact or scheduler tick command",
       "output_semantic": "validated internal mutation intent routed to task.orchestration or public-ingress rejection",
@@ -795,7 +795,7 @@
     {
       "step": "29",
       "symbol_path": "UiCommand::QueryEventInbox / UiQueryResult::EventInbox",
-      "file_path": "crates/freehand-ui-protocol/src/lib.rs",
+      "file_path": "crates/freehand-ui-protocol/src/dto.rs",
       "responsibility": "define Phase 2B EventInbox query DTOs without owning task event truth or cursor truth",
       "input_semantic": "event inbox query cursor",
       "output_semantic": "runtime-backed UI-safe event inbox projection",
@@ -806,7 +806,7 @@
     {
       "step": "30",
       "symbol_path": "UiCommand::RunMasterPoll / UiQueryResult::MasterPoll",
-      "file_path": "crates/freehand-ui-protocol/src/lib.rs",
+      "file_path": "crates/freehand-ui-protocol/src/dto.rs",
       "responsibility": "define internal Phase 2B RunMasterPoll mutation DTO plus public read-only MasterPoll result DTO; public ADP uses QueryMasterPoll and rejects RunMasterPoll command ingress",
       "input_semantic": "master poll command cursor",
       "output_semantic": "validated internal mutation intent or public read-only owner-supplied poll projection",
@@ -827,8 +827,8 @@
     },
     {
       "step": "31",
-      "symbol_path": "UiTimerScheduleCommand / UiTimerRepeatCommand / UiCommand::QueryTimerList / UiCommand::ScheduleTimer / UiCommand::CancelTimer / UiQueryResult::TimerList / validate_timer_schedule_command",
-      "file_path": "crates/freehand-ui-protocol/src/lib.rs",
+      "symbol_path": "validate_timer_schedule_command / validate_timer_repeat_command",
+      "file_path": "crates/freehand-ui-protocol/src/validate.rs",
       "responsibility": "define independent timer dashboard query/command DTOs, validate mode-specific timer schedule fields, and route mutation intent to runtime.master-worker-loop through runtime dispatch",
       "input_semantic": "timer list query, timer schedule command, or timer cancel command",
       "output_semantic": "validated timer query/result DTO or mutation intent routed to timer owner",
@@ -872,7 +872,7 @@
     {
       "step": "18a",
       "symbol_path": "UI_COMMAND_DESCRIPTORS / command_descriptor / adp_protocol_manifest / adp_protocol_webui_module",
-      "file_path": "crates/freehand-ui-protocol/src/lib.rs",
+      "file_path": "crates/freehand-ui-protocol/src/adp_wire.rs",
       "responsibility": "derive the ADP manifest and WebUI constructor module from the exhaustive protocol command descriptor table",
       "input_semantic": "UiCommand variants plus protocol version and handshake capability constants",
       "output_semantic": "deterministic command manifest entries, frame classes, public owner feature ids, and JavaScript constructor helpers without internal crate paths",

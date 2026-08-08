@@ -73,7 +73,7 @@
     {
       "step": "01",
       "symbol_path": "UiWorkerControlCommand",
-      "file_path": "crates/freehand-ui-protocol/src/lib.rs",
+      "file_path": "crates/freehand-ui-protocol/src/dto.rs",
       "responsibility": "define protocol DTO for worker-control op, target ids, and typed payload",
       "input_semantic": "UI/CLI worker-control command",
       "output_semantic": "validated DTO",
@@ -84,7 +84,7 @@
     {
       "step": "02",
       "symbol_path": "UiCommand::WorkerControl",
-      "file_path": "crates/freehand-ui-protocol/src/lib.rs",
+      "file_path": "crates/freehand-ui-protocol/src/dto.rs",
       "responsibility": "route worker-control mutation-intent commands to worker.control",
       "input_semantic": "protocol command",
       "output_semantic": "dispatch envelope target",

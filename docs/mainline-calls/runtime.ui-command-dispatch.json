@@ -528,8 +528,8 @@
     },
     {
       "step": "10s",
-      "symbol_path": "RuntimeCommandDispatcher::query_runtime / restore_session_turns_for_ui_query / apply_error_center_live_activity_to_session_projections / UiProtocolState::replace_session_turn_projections",
-      "file_path": "crates/freehand-runtime/src/lib.rs",
+      "symbol_path": "UiProtocolState::replace_session_turn_projections",
+      "file_path": "crates/freehand-ui-protocol/src/state.rs",
       "responsibility": "restore exact-round QuerySessionTurns snapshots from the master plus configured Worker reason-persistence namespaces, derive latest-turn nonterminal retry/waiting state from ErrorCenter metadata when live hooks are absent, and replace the derived transcript at query time without projecting framework-owned parent/Worker prompts as user-authored text or reactivating historical retry rows; inactive partial authoritative transcripts with empty reason ledgers surface the reason-owned integrity warning on the surviving turns",
       "input_semantic": "session id",
       "output_semantic": "fresh queryable transcript with runtime-turn-N / runtime-turn-N-rM rounds preserved, per-round tool activity visible, partial-transcript warning visible when reason ledger is empty, background provider retry/failover observable only as model-request transport substate on the latest nonterminal owning turn, schema waiting observable as model-request phase, terminal and historical earlier turns not reactivated, active live provider/tool activity preserved only on latest-turn nonterminal refresh, internal parent-goal evaluation user text hidden, and Worker task transcript rows sourced to the configured Worker with internal task prompts hidden from user_text",
@@ -628,7 +628,7 @@
     {
       "step": "15",
       "symbol_path": "UiProtocolState::replace_session_turn_projections",
-      "file_path": "crates/freehand-ui-protocol/src/lib.rs",
+      "file_path": "crates/freehand-ui-protocol/src/state.rs",
       "responsibility": "replace one session transcript with persistence-owned effective projections after rollback or selected-session refresh while preserving live provider/tool activity only for the latest nonterminal replacement turn",
       "input_semantic": "session id plus effective turn projections",
       "output_semantic": "queryable transcript excluding rolled-back logical turns and preserving active live activity until terminal truth arrives",

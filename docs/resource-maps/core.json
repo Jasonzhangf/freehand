@@ -8,8 +8,27 @@
       "owner_crate": "crates/freehand-config",
       "identity": "agent profile plus config source path",
       "truth_store": "~/.freehand/config.toml",
-      "operations": ["load", "validate", "compile_agent_topology", "compile_agent_local_web_directory", "compile_agent_relay_connection", "compile_remote_daemon_registry", "project_safe_config", "mutate_provider_config", "mutate_model_group_config", "mutate_agent_resource_topology", "bootstrap_node_pairing", "compile_instruction_capability"],
-      "projections": ["runtime bootstrap config", "ordered configured peer topology", "local Agent WebUI endpoint directory", "runtime-only resolved Agent Relay connection", "safe CLI/ADP config query"]
+      "operations": [
+        "load",
+        "validate",
+        "compile_agent_topology",
+        "compile_agent_local_web_directory",
+        "compile_agent_relay_connection",
+        "compile_remote_daemon_registry",
+        "project_safe_config",
+        "mutate_provider_config",
+        "mutate_model_group_config",
+        "mutate_agent_resource_topology",
+        "bootstrap_node_pairing",
+        "compile_instruction_capability"
+      ],
+      "projections": [
+        "runtime bootstrap config",
+        "ordered configured peer topology",
+        "local Agent WebUI endpoint directory",
+        "runtime-only resolved Agent Relay connection",
+        "safe CLI/ADP config query"
+      ]
     },
     {
       "resource_type": "remote_daemon_registry",
@@ -17,8 +36,22 @@
       "owner_crate": "crates/freehand-config",
       "identity": "account id plus daemon id plus endpoint id",
       "truth_store": "~/.freehand/config.toml remote_daemon_accounts and remote_daemons tables plus QR bootstrap bundle payloads",
-      "operations": ["validate", "select_daemon", "build_route_plan", "select_route", "build_bootstrap_bundle", "parse_bootstrap_bundle", "project_safe_config", "project_directory"],
-      "projections": ["safe remote daemon registry projection", "versioned QR/deep-link bootstrap bundle", "selected remote daemon endpoint candidates", "route selection diagnostics"]
+      "operations": [
+        "validate",
+        "select_daemon",
+        "build_route_plan",
+        "select_route",
+        "build_bootstrap_bundle",
+        "parse_bootstrap_bundle",
+        "project_safe_config",
+        "project_directory"
+      ],
+      "projections": [
+        "safe remote daemon registry projection",
+        "versioned QR/deep-link bootstrap bundle",
+        "selected remote daemon endpoint candidates",
+        "route selection diagnostics"
+      ]
     },
     {
       "resource_type": "remote_daemon_directory",
@@ -26,8 +59,16 @@
       "owner_crate": "crates/freehand-node",
       "identity": "account id plus daemon id plus current endpoint resolution",
       "truth_store": "node-owned in-memory directory snapshot and route-resolution state compiled from config registry truth",
-      "operations": ["publish_registry", "resolve_route", "query_snapshot"],
-      "projections": ["account-scoped daemon directory snapshot", "per-daemon selected route", "route health diagnostics"]
+      "operations": [
+        "publish_registry",
+        "resolve_route",
+        "query_snapshot"
+      ],
+      "projections": [
+        "account-scoped daemon directory snapshot",
+        "per-daemon selected route",
+        "route health diagnostics"
+      ]
     },
     {
       "resource_type": "relay_account",
@@ -35,8 +76,15 @@
       "owner_crate": "crates/freehand-relay",
       "identity": "account id plus normalized username plus hashed access token",
       "truth_store": "Relay persisted store accounts and token hashes; raw passwords and raw tokens are never persisted",
-      "operations": ["register", "authenticate"],
-      "projections": ["authenticated account id", "opaque access token returned once at registration or login", "explicit authentication errors"]
+      "operations": [
+        "register",
+        "authenticate"
+      ],
+      "projections": [
+        "authenticated account id",
+        "opaque access token returned once at registration or login",
+        "explicit authentication errors"
+      ]
     },
     {
       "resource_type": "agent_presence",
@@ -44,8 +92,21 @@
       "owner_crate": "crates/freehand-relay",
       "identity": "account id plus agent id",
       "truth_store": "Relay persisted Agent identity projection plus live control-channel lease timestamp",
-      "operations": ["admit_control", "heartbeat", "disconnect", "query_directory", "subscribe_directory", "resolve_tunnel"],
-      "projections": ["account-scoped Agent directory", "account-scoped Agent directory subscription", "online/offline lease projection", "Master/Worker role and current work-status projection", "authenticated tunnel identity"]
+      "operations": [
+        "admit_control",
+        "heartbeat",
+        "disconnect",
+        "query_directory",
+        "subscribe_directory",
+        "resolve_tunnel"
+      ],
+      "projections": [
+        "account-scoped Agent directory",
+        "account-scoped Agent directory subscription",
+        "online/offline lease projection",
+        "Master/Worker role and current work-status projection",
+        "authenticated tunnel identity"
+      ]
     },
     {
       "resource_type": "relay_control_tunnel",
@@ -53,8 +114,18 @@
       "owner_crate": "crates/freehand-relay",
       "identity": "authenticated account id plus agent id plus control connection generation",
       "truth_store": "live control connection registry and persisted presence projection",
-      "operations": ["connect", "heartbeat", "disconnect", "admit_data", "admit_error"],
-      "projections": ["authenticated tunnel admission with server-issued control generation", "presence lease updates", "explicit disconnect"]
+      "operations": [
+        "connect",
+        "heartbeat",
+        "disconnect",
+        "admit_data",
+        "admit_error"
+      ],
+      "projections": [
+        "authenticated tunnel admission with server-issued control generation",
+        "presence lease updates",
+        "explicit disconnect"
+      ]
     },
     {
       "resource_type": "runtime_agent_activity",
@@ -62,9 +133,19 @@
       "owner_crate": "crates/freehand-runtime",
       "identity": "configured agent id plus typed activity snapshot",
       "truth_store": "none; derived control-side projection read from turn and AgentLifecycle truth",
-      "operations": ["project_direct", "project_worker", "merge_for_presence"],
-      "projections": ["Relay control heartbeat status and active-session count"],
-      "forbidden": ["ADP request/response payload", "UiProtocolState business transcript", "metadata/debug payload"]
+      "operations": [
+        "project_direct",
+        "project_worker",
+        "merge_for_presence"
+      ],
+      "projections": [
+        "Relay control heartbeat status and active-session count"
+      ],
+      "forbidden": [
+        "ADP request/response payload",
+        "UiProtocolState business transcript",
+        "metadata/debug payload"
+      ]
     },
     {
       "resource_type": "runtime_daemon_host",
@@ -72,9 +153,19 @@
       "owner_crate": "apps/freehand-daemon",
       "identity": "configured agent id plus daemon service instance",
       "truth_store": "process and service lifetime only; no session, task, presence, or payload truth",
-      "operations": ["host_runtime_transport"],
-      "projections": ["HTTP/WebUI/ADP listener lifetime", "role-selected runtime host", "explicit host termination error"],
-      "forbidden": ["business payload ownership", "Relay account/presence ownership", "reason/task lifecycle ownership"]
+      "operations": [
+        "host_runtime_transport"
+      ],
+      "projections": [
+        "HTTP/WebUI/ADP listener lifetime",
+        "role-selected runtime host",
+        "explicit host termination error"
+      ],
+      "forbidden": [
+        "business payload ownership",
+        "Relay account/presence ownership",
+        "reason/task lifecycle ownership"
+      ]
     },
     {
       "resource_type": "relay_data_tunnel",
@@ -82,8 +173,22 @@
       "owner_crate": "crates/freehand-relay",
       "identity": "authenticated account id plus agent id plus exchange id",
       "truth_store": "ephemeral typed request/response exchange registry; no business truth",
-      "operations": ["open_routable_exchange", "stream_request", "accept_generation", "stream_response", "close_exchange", "fail_exchange", "proxy_http", "proxy_adp", "proxy_websocket"],
-      "projections": ["opaque HTTP bytes", "opaque ADP frames", "opaque generic WebSocket frames"]
+      "operations": [
+        "open_routable_exchange",
+        "stream_request",
+        "accept_generation",
+        "stream_response",
+        "close_exchange",
+        "fail_exchange",
+        "proxy_http",
+        "proxy_adp",
+        "proxy_websocket"
+      ],
+      "projections": [
+        "opaque HTTP bytes",
+        "opaque ADP frames",
+        "opaque generic WebSocket frames"
+      ]
     },
     {
       "resource_type": "relay_error_tunnel",
@@ -91,8 +196,14 @@
       "owner_crate": "crates/freehand-relay",
       "identity": "authenticated account id plus agent id plus optional exchange id",
       "truth_store": "ephemeral typed tunnel error chain",
-      "operations": ["report", "correlate", "close_terminal"],
-      "projections": ["explicit auth, route, lease, disconnect, protocol, and bridge failures"]
+      "operations": [
+        "report",
+        "correlate",
+        "close_terminal"
+      ],
+      "projections": [
+        "explicit auth, route, lease, disconnect, protocol, and bridge failures"
+      ]
     },
     {
       "resource_type": "android_apk_update",
@@ -100,8 +211,17 @@
       "owner_crate": "apps/freehand-android",
       "identity": "installed Android package versionCode plus daemon update manifest URL",
       "truth_store": "daemon-hosted /android/update.json plus Android app cache apk-updates/ for downloaded installer artifacts",
-      "operations": ["check_manifest", "download_apk", "request_install"],
-      "projections": ["FreehandApkUpdate logcat rows", "WebUI Settings Android APK update status card", "Android system package installer intent", "downloaded APK cache file"]
+      "operations": [
+        "check_manifest",
+        "download_apk",
+        "request_install"
+      ],
+      "projections": [
+        "FreehandApkUpdate logcat rows",
+        "WebUI Settings Android APK update status card",
+        "Android system package installer intent",
+        "downloaded APK cache file"
+      ]
     },
     {
       "resource_type": "android_file_access",
@@ -109,8 +229,17 @@
       "owner_crate": "apps/freehand-android",
       "identity": "installed Android package install/update marker plus package permission state",
       "truth_store": "Android package permission manager plus app-owned shared preferences recording the last package install marker that launched the centralized first-start permission prompt",
-      "operations": ["request_startup_permissions", "open_all_files_settings", "project_status"],
-      "projections": ["FreehandFileAccess logcat rows", "Android runtime permission dialog", "Android all-files-access settings intent", "startup permission status"]
+      "operations": [
+        "request_startup_permissions",
+        "open_all_files_settings",
+        "project_status"
+      ],
+      "projections": [
+        "FreehandFileAccess logcat rows",
+        "Android runtime permission dialog",
+        "Android all-files-access settings intent",
+        "startup permission status"
+      ]
     },
     {
       "resource_type": "android_notification",
@@ -118,8 +247,17 @@
       "owner_crate": "apps/freehand-android",
       "identity": "installed Android package install/update marker plus session_id plus turn_id plus terminal status",
       "truth_store": "Android package notification permission state plus app-owned shared preferences for per-turn notification de-duplication",
-      "operations": ["request_startup_permission", "post_turn_finished", "project_status"],
-      "projections": ["FreehandNotification logcat rows", "Android runtime notification permission dialog", "Android notification drawer entry", "tap intent returning to MainActivity"]
+      "operations": [
+        "request_startup_permission",
+        "post_turn_finished",
+        "project_status"
+      ],
+      "projections": [
+        "FreehandNotification logcat rows",
+        "Android runtime notification permission dialog",
+        "Android notification drawer entry",
+        "tap intent returning to MainActivity"
+      ]
     },
     {
       "resource_type": "session",
@@ -127,8 +265,18 @@
       "owner_crate": "crates/freehand-reason",
       "identity": "session_id",
       "truth_store": "~/.freehand/state/turns and ~/.freehand/ledgers/reason",
-      "operations": ["create", "append_turn", "append_turn_to_turn", "restore", "list_persisted"],
-      "projections": ["ui_session_list", "ui_session_turns", "current-session task attachment view derived through task parent truth"]
+      "operations": [
+        "create",
+        "append_turn",
+        "append_turn_to_turn",
+        "restore",
+        "list_persisted"
+      ],
+      "projections": [
+        "ui_session_list",
+        "ui_session_turns",
+        "current-session task attachment view derived through task parent truth"
+      ]
     },
     {
       "resource_type": "turn",
@@ -136,8 +284,18 @@
       "owner_crate": "crates/freehand-reason",
       "identity": "session_id plus turn_id",
       "truth_store": "~/.freehand/state/turns and reason ledger rows",
-      "operations": ["start", "apply_provider_output", "apply_tool_result", "terminalize", "plan_request_context", "project_runtime_agent_activity"],
-      "projections": ["public conversation", "runtime turn status"]
+      "operations": [
+        "start",
+        "apply_provider_output",
+        "apply_tool_result",
+        "terminalize",
+        "plan_request_context",
+        "project_runtime_agent_activity"
+      ],
+      "projections": [
+        "public conversation",
+        "runtime turn status"
+      ]
     },
     {
       "resource_type": "input_attachment",
@@ -145,8 +303,16 @@
       "owner_crate": "crates/freehand-ui-protocol",
       "identity": "session_id plus turn_id plus attachment_id for one SubmitUserInput metadata payload",
       "truth_store": "SubmitUserInput.metadata for transient raw payload plus TurnRecord.attachments metadata-only persisted projection; raw image bytes are not session-history truth",
-      "operations": ["validate_submit_metadata", "prepare_provider_input", "project_to_ui"],
-      "projections": ["SubmitUserInput metadata DTO", "metadata-only UiTurnProjection.attachments", "provider-neutral current-submit input attachment"]
+      "operations": [
+        "validate_submit_metadata",
+        "prepare_provider_input",
+        "project_to_ui"
+      ],
+      "projections": [
+        "SubmitUserInput metadata DTO",
+        "metadata-only UiTurnProjection.attachments",
+        "provider-neutral current-submit input attachment"
+      ]
     },
     {
       "resource_type": "request_context",
@@ -154,8 +320,15 @@
       "owner_crate": "crates/freehand-blocks",
       "identity": "session_id plus turn_id plus context plan version",
       "truth_store": "typed in-memory context segments plus reason/debug evidence",
-      "operations": ["plan_segments", "admit_model_visible_context", "reject_over_budget_context", "build_provider_request"],
-      "projections": ["provider-neutral request context"]
+      "operations": [
+        "plan_segments",
+        "admit_model_visible_context",
+        "reject_over_budget_context",
+        "build_provider_request"
+      ],
+      "projections": [
+        "provider-neutral request context"
+      ]
     },
     {
       "resource_type": "provider_request",
@@ -163,8 +336,20 @@
       "owner_crate": "crates/freehand-runtime",
       "identity": "trace_id plus turn_id plus provider attempt",
       "truth_store": "provider debug ledger when enabled and live bridge attempt state",
-      "operations": ["build", "send", "retry_recoverable", "select_hosted_search", "render_hosted_search_wire", "render_anthropic_hosted_search_wire", "render_openai_image_input_wire", "render_anthropic_image_input_wire"],
-      "projections": ["provider attempt evidence", "error-center metadata"]
+      "operations": [
+        "build",
+        "send",
+        "retry_recoverable",
+        "select_hosted_search",
+        "render_hosted_search_wire",
+        "render_anthropic_hosted_search_wire",
+        "render_openai_image_input_wire",
+        "render_anthropic_image_input_wire"
+      ],
+      "projections": [
+        "provider attempt evidence",
+        "error-center metadata"
+      ]
     },
     {
       "resource_type": "provider_response",
@@ -172,8 +357,19 @@
       "owner_crate": "crates/freehand-provider-core",
       "identity": "trace_id plus turn_id plus provider event index",
       "truth_store": "provider semantic event stream and debug raw ledgers",
-      "operations": ["normalize", "classify_finish", "map_tool_call", "map_error", "apply_to_turn", "observe_hosted_search_call", "observe_anthropic_hosted_search_call"],
-      "projections": ["reason provider output events", "error-center observed failure"]
+      "operations": [
+        "normalize",
+        "classify_finish",
+        "map_tool_call",
+        "map_error",
+        "apply_to_turn",
+        "observe_hosted_search_call",
+        "observe_anthropic_hosted_search_call"
+      ],
+      "projections": [
+        "reason provider output events",
+        "error-center observed failure"
+      ]
     },
     {
       "resource_type": "provider_hosted_search",
@@ -181,8 +377,14 @@
       "owner_crate": "crates/freehand-provider-core",
       "identity": "provider id plus protocol plus model plus hosted search mode",
       "truth_store": "provider semantic request hosted-tool declaration plus provider response web_search_call observations; not Freehand local tool execution truth",
-      "operations": ["declare"],
-      "projections": ["provider request hosted tool declaration", "reasoning event observation for provider-hosted web_search_call", "online verifier provider request capture"]
+      "operations": [
+        "declare"
+      ],
+      "projections": [
+        "provider request hosted tool declaration",
+        "reasoning event observation for provider-hosted web_search_call",
+        "online verifier provider request capture"
+      ]
     },
     {
       "resource_type": "tool_call",
@@ -190,8 +392,19 @@
       "owner_crate": "crates/freehand-tools",
       "identity": "turn_id plus provider tool_call_id",
       "truth_store": "reason turn event plus tool owner execution state",
-      "operations": ["declare_schema", "classify_scope", "execute", "execute_workspace_path", "execute_external_http", "project_registry_to_ui"],
-      "projections": ["tool result text", "tool display semantics", "UI-safe tool registry projection"]
+      "operations": [
+        "declare_schema",
+        "classify_scope",
+        "execute",
+        "execute_workspace_path",
+        "execute_external_http",
+        "project_registry_to_ui"
+      ],
+      "projections": [
+        "tool result text",
+        "tool display semantics",
+        "UI-safe tool registry projection"
+      ]
     },
     {
       "resource_type": "workspace_path",
@@ -199,8 +412,20 @@
       "owner_crate": "crates/freehand-tools",
       "identity": "locked workspace root plus canonicalized path",
       "truth_store": "filesystem under owner-supplied workspace root",
-      "operations": ["read_file", "glob", "grep", "ls", "write_file", "edit_file", "multi_edit", "checkpoint_before_write"],
-      "projections": ["tool result text", "checkpoint preview"]
+      "operations": [
+        "read_file",
+        "glob",
+        "grep",
+        "ls",
+        "write_file",
+        "edit_file",
+        "multi_edit",
+        "checkpoint_before_write"
+      ],
+      "projections": [
+        "tool result text",
+        "checkpoint preview"
+      ]
     },
     {
       "resource_type": "external_http_resource",
@@ -208,8 +433,13 @@
       "owner_crate": "crates/freehand-tools",
       "identity": "absolute http or https URL plus bounded fetch options",
       "truth_store": "remote HTTP response observed during one web_fetch tool execution; not persisted business truth",
-      "operations": ["fetch_text"],
-      "projections": ["tool result text", "explicit HTTP fetch error"]
+      "operations": [
+        "fetch_text"
+      ],
+      "projections": [
+        "tool result text",
+        "explicit HTTP fetch error"
+      ]
     },
     {
       "resource_type": "task",
@@ -217,8 +447,27 @@
       "owner_crate": "crates/freehand-task",
       "identity": "task_id",
       "truth_store": "~/.freehand/state/tasks and ~/.freehand/ledgers/tasks",
-      "operations": ["create", "attach_session", "assign", "cancel", "record_execution", "submit_review", "approve_review", "reject_review", "close", "recover_interrupted", "project_to_ui"],
-      "projections": ["TaskBoard", "TaskSpaceSnapshot", "ui_task_snapshot", "current session attachment", "current assignment/lease/execution attachment", "canonical Worker transcript session identity"]
+      "operations": [
+        "create",
+        "attach_session",
+        "assign",
+        "cancel",
+        "record_execution",
+        "submit_review",
+        "approve_review",
+        "reject_review",
+        "close",
+        "recover_interrupted",
+        "project_to_ui"
+      ],
+      "projections": [
+        "TaskBoard",
+        "TaskSpaceSnapshot",
+        "ui_task_snapshot",
+        "current session attachment",
+        "current assignment/lease/execution attachment",
+        "canonical Worker transcript session identity"
+      ]
     },
     {
       "resource_type": "agent",
@@ -226,8 +475,18 @@
       "owner_crate": "crates/freehand-task",
       "identity": "agent_id independent of session; task assignment, lease, and execution are temporary bindings",
       "truth_store": "AgentBoard projection from lifecycle events",
-      "operations": ["register", "heartbeat", "claim_task", "release_task", "project_runtime_agent_activity"],
-      "projections": ["AgentBoard reusable resource pool", "TaskSpaceSnapshot", "current task/execution occupancy"]
+      "operations": [
+        "register",
+        "heartbeat",
+        "claim_task",
+        "release_task",
+        "project_runtime_agent_activity"
+      ],
+      "projections": [
+        "AgentBoard reusable resource pool",
+        "TaskSpaceSnapshot",
+        "current task/execution occupancy"
+      ]
     },
     {
       "resource_type": "timer",
@@ -235,8 +494,20 @@
       "owner_crate": "crates/freehand-runtime",
       "identity": "timer_id",
       "truth_store": "~/.freehand/state/timers and ~/.freehand/ledgers/timers",
-      "operations": ["schedule", "cancel", "list", "fire_due", "fire_master_wakeup", "reschedule_recurring"],
-      "projections": ["timer tool result", "timer dashboard UI projection", "source-session injected prompt turn", "source-less internal master wakeup turn"]
+      "operations": [
+        "schedule",
+        "cancel",
+        "list",
+        "fire_due",
+        "fire_master_wakeup",
+        "reschedule_recurring"
+      ],
+      "projections": [
+        "timer tool result",
+        "timer dashboard UI projection",
+        "source-session injected prompt turn",
+        "source-less internal master wakeup turn"
+      ]
     },
     {
       "resource_type": "master_work",
@@ -244,8 +515,19 @@
       "owner_crate": "crates/freehand-runtime",
       "identity": "master_agent_id plus work_id",
       "truth_store": "~/.freehand/state/master-loop/<master-agent>.active-work.json guarded by the sibling active-work lock",
-      "operations": ["register", "update_safe_point", "request_suspend", "resolve_attention", "admit_resolution_context", "clear"],
-      "projections": ["active Master work identity", "safe-point suspension state", "typed attention resolution and exact return identity"]
+      "operations": [
+        "register",
+        "update_safe_point",
+        "request_suspend",
+        "resolve_attention",
+        "admit_resolution_context",
+        "clear"
+      ],
+      "projections": [
+        "active Master work identity",
+        "safe-point suspension state",
+        "typed attention resolution and exact return identity"
+      ]
     },
     {
       "resource_type": "error",
@@ -253,8 +535,17 @@
       "owner_crate": "crates/freehand-control",
       "identity": "trace_id plus domain plus attempt",
       "truth_store": "~/.freehand/ledgers/metadata error.center rows",
-      "operations": ["classify", "record", "record_metadata", "decide_recovery", "query_projection"],
-      "projections": ["ADP error query", "runtime recovery decision"]
+      "operations": [
+        "classify",
+        "record",
+        "record_metadata",
+        "decide_recovery",
+        "query_projection"
+      ],
+      "projections": [
+        "ADP error query",
+        "runtime recovery decision"
+      ]
     },
     {
       "resource_type": "metadata",
@@ -262,8 +553,14 @@
       "owner_crate": "crates/freehand-metadata",
       "identity": "metadata entry id plus writer owner plus write node",
       "truth_store": "~/.freehand/ledgers/metadata",
-      "operations": ["validate_entry", "append", "query"],
-      "projections": ["owner-scoped metadata query"]
+      "operations": [
+        "validate_entry",
+        "append",
+        "query"
+      ],
+      "projections": [
+        "owner-scoped metadata query"
+      ]
     },
     {
       "resource_type": "debug_trace",
@@ -271,8 +568,14 @@
       "owner_crate": "crates/freehand-debug",
       "identity": "trace_id plus scene coordinate",
       "truth_store": "~/.freehand/logs and debug snapshots",
-      "operations": ["emit_snapshot", "fanout", "read_snapshot"],
-      "projections": ["debug artifacts"]
+      "operations": [
+        "emit_snapshot",
+        "fanout",
+        "read_snapshot"
+      ],
+      "projections": [
+        "debug artifacts"
+      ]
     },
     {
       "resource_type": "ui_projection",
@@ -280,8 +583,20 @@
       "owner_crate": "crates/freehand-ui-protocol",
       "identity": "query type plus resource id",
       "truth_store": "derived protocol projection, not independent truth",
-      "operations": ["query", "subscribe", "project_public_state", "dispatch_command", "compose_shell", "render_surface_contract", "bind_protocol_call", "render_shared_state", "post_android_turn_finished_notification"],
-      "projections": ["CLI/WebUI/Android protocol frames"]
+      "operations": [
+        "query",
+        "subscribe",
+        "project_public_state",
+        "dispatch_command",
+        "compose_shell",
+        "render_surface_contract",
+        "bind_protocol_call",
+        "render_shared_state",
+        "post_android_turn_finished_notification"
+      ],
+      "projections": [
+        "CLI/WebUI/Android protocol frames"
+      ]
     },
     {
       "resource_type": "ui_surface",
@@ -289,8 +604,14 @@
       "owner_crate": "apps/freehand-server",
       "identity": "surface contract id plus current protocol projection",
       "truth_store": "ephemeral render projection only, never business or session truth",
-      "operations": ["compose", "render", "present_shared_state"],
-      "projections": ["WebUI shell and surface DOM"]
+      "operations": [
+        "compose",
+        "render",
+        "present_shared_state"
+      ],
+      "projections": [
+        "WebUI shell and surface DOM"
+      ]
     },
     {
       "resource_type": "runtime_command",
@@ -298,8 +619,16 @@
       "owner_crate": "crates/freehand-runtime",
       "identity": "command id plus target feature id",
       "truth_store": "runtime command dispatcher state and owner module effects",
-      "operations": ["dispatch", "route_to_owner", "return_receipt", "rewind_checkpoint"],
-      "projections": ["UI command receipt", "owner operation effect"]
+      "operations": [
+        "dispatch",
+        "route_to_owner",
+        "return_receipt",
+        "rewind_checkpoint"
+      ],
+      "projections": [
+        "UI command receipt",
+        "owner operation effect"
+      ]
     },
     {
       "resource_type": "checkpoint",
@@ -307,8 +636,17 @@
       "owner_crate": "crates/freehand-runtime",
       "identity": "agent id plus session id plus checkpoint id",
       "truth_store": "~/.freehand/state/checkpoints and ~/.freehand/ledgers/checkpoints",
-      "operations": ["preview", "snapshot", "apply_tool_after_checkpoint", "rewind", "list"],
-      "projections": ["checkpoint summary", "rewind command receipt"]
+      "operations": [
+        "preview",
+        "snapshot",
+        "apply_tool_after_checkpoint",
+        "rewind",
+        "list"
+      ],
+      "projections": [
+        "checkpoint summary",
+        "rewind command receipt"
+      ]
     },
     {
       "resource_type": "node_pairing",
@@ -316,8 +654,20 @@
       "owner_crate": "crates/freehand-node",
       "identity": "source node id plus target node id plus pair token boundary",
       "truth_store": "node runtime pairing state plus metadata/debug evidence",
-      "operations": ["validate_pairing", "accept_pairing", "lose_pairing", "delegate_task", "publish_slave_turn", "query_status", "project_to_ui"],
-      "projections": ["node status", "delegated task progress", "slave turn stream"]
+      "operations": [
+        "validate_pairing",
+        "accept_pairing",
+        "lose_pairing",
+        "delegate_task",
+        "publish_slave_turn",
+        "query_status",
+        "project_to_ui"
+      ],
+      "projections": [
+        "node status",
+        "delegated task progress",
+        "slave turn stream"
+      ]
     },
     {
       "resource_type": "instruction_capability",
@@ -325,8 +675,17 @@
       "owner_crate": "crates/freehand-instructions",
       "identity": "capability source path plus scope plus precedence",
       "truth_store": "compiled deterministic instruction capability manifest under runtime state",
-      "operations": ["discover", "validate", "compile_manifest", "write_manifest", "admit_request_context"],
-      "projections": ["instruction capability manifest", "manifest error records"]
+      "operations": [
+        "discover",
+        "validate",
+        "compile_manifest",
+        "write_manifest",
+        "admit_request_context"
+      ],
+      "projections": [
+        "instruction capability manifest",
+        "manifest error records"
+      ]
     }
   ],
   "operation_bindings": [
@@ -1226,7 +1585,7 @@
       "target_resource": "ui_projection",
       "mainline_call_doc": "docs/mainline-calls/ui.protocol.json",
       "call_table_step": "26",
-      "file_path": "crates/freehand-ui-protocol/src/lib.rs",
+      "file_path": "crates/freehand-ui-protocol/src/dto.rs",
       "symbol_path": "UiCommand::QueryTaskBoard / UiCommand::QueryAgentBoard / UiCommand::QueryAgentLifecycle",
       "binding_status": "bound"
     },
@@ -1237,7 +1596,7 @@
       "target_resource": "input_attachment",
       "mainline_call_doc": "docs/mainline-calls/ui.protocol.json",
       "call_table_step": "01a",
-      "file_path": "crates/freehand-ui-protocol/src/lib.rs",
+      "file_path": "crates/freehand-ui-protocol/src/validate.rs",
       "symbol_path": "validate_command",
       "binding_status": "bound"
     },
@@ -2058,7 +2417,10 @@
       "source_resource": "tool_call",
       "target_resource": "provider_hosted_search",
       "allowed_direct": false,
-      "via_resources": ["provider_request", "provider_hosted_search"],
+      "via_resources": [
+        "provider_request",
+        "provider_hosted_search"
+      ],
       "reason": "Provider-hosted search is declared and observed through provider request/response truth; it must not be implemented as a local Freehand function-tool execution."
     },
     {
@@ -2098,7 +2460,10 @@
       "source_resource": "session",
       "target_resource": "agent",
       "allowed_direct": false,
-      "via_resources": ["task", "agent"],
+      "via_resources": [
+        "task",
+        "agent"
+      ],
       "reason": "Session-to-agent attachment is a derived current-progress projection through task parent and assignment truth; sessions never own agents directly."
     },
     {
@@ -2362,7 +2727,10 @@
       "source_resource": "ui_projection",
       "target_resource": "task",
       "allowed_direct": false,
-      "via_resources": ["runtime_command", "task"],
+      "via_resources": [
+        "runtime_command",
+        "task"
+      ],
       "reason": "UI may dispatch commands and read projections, but must not mutate or parse task truth directly."
     },
     {
@@ -2370,7 +2738,9 @@
       "source_resource": "ui_projection",
       "target_resource": "session",
       "allowed_direct": false,
-      "via_resources": ["session"],
+      "via_resources": [
+        "session"
+      ],
       "reason": "Global session lists must show persisted session metadata, not temporary turn-only worker sessions."
     },
     {
@@ -2378,7 +2748,10 @@
       "source_resource": "timer",
       "target_resource": "task",
       "allowed_direct": false,
-      "via_resources": ["turn", "task"],
+      "via_resources": [
+        "turn",
+        "task"
+      ],
       "reason": "Waiting and wakeup are independent timer resources; task lifecycle state must not encode timer schedules."
     },
     {
@@ -2386,7 +2759,9 @@
       "source_resource": "turn",
       "target_resource": "provider_request",
       "allowed_direct": false,
-      "via_resources": ["request_context"],
+      "via_resources": [
+        "request_context"
+      ],
       "reason": "Turns must build provider requests through typed context planning, not by ad hoc prompt/provider payload rewrites."
     },
     {
@@ -2394,7 +2769,10 @@
       "source_resource": "runtime_command",
       "target_resource": "workspace_path",
       "allowed_direct": false,
-      "via_resources": ["checkpoint", "workspace_path"],
+      "via_resources": [
+        "checkpoint",
+        "workspace_path"
+      ],
       "reason": "Workspace restore commands must pass through checkpoint truth before mutating workspace paths."
     },
     {
@@ -2402,7 +2780,9 @@
       "source_resource": "metadata",
       "target_resource": "request_context",
       "allowed_direct": false,
-      "via_resources": ["request_context"],
+      "via_resources": [
+        "request_context"
+      ],
       "reason": "Metadata may observe provenance and control watermarks, but must not recover or mutate request-context payload truth directly."
     },
     {
@@ -2410,7 +2790,10 @@
       "source_resource": "instruction_capability",
       "target_resource": "provider_request",
       "allowed_direct": false,
-      "via_resources": ["request_context", "provider_request"],
+      "via_resources": [
+        "request_context",
+        "provider_request"
+      ],
       "reason": "Instruction capabilities may become model-visible only through typed context-planner admission, not provider payload patching."
     },
     {
@@ -2426,7 +2809,10 @@
       "source_resource": "ui_projection",
       "target_resource": "node_pairing",
       "allowed_direct": false,
-      "via_resources": ["runtime_command", "node_pairing"],
+      "via_resources": [
+        "runtime_command",
+        "node_pairing"
+      ],
       "reason": "UI may render node pairing projections and dispatch commands, but must not own or mutate node pairing transport truth directly."
     }
   ],
@@ -2434,7 +2820,10 @@
     {
       "source_resource": "session",
       "target_resource": "agent",
-      "required_via": ["task", "agent"],
+      "required_via": [
+        "task",
+        "agent"
+      ],
       "source_gate_status": "checked",
       "source_gate_reason": "source_shortcut_gates blocks freehand-reason from depending on or importing freehand-task agent truth",
       "reason": "Session truth must not own or directly attach Agent resources; current attachment is derived through task parent and assignment truth."
@@ -2442,7 +2831,10 @@
     {
       "source_resource": "ui_projection",
       "target_resource": "task",
-      "required_via": ["runtime_command", "task"],
+      "required_via": [
+        "runtime_command",
+        "task"
+      ],
       "source_gate_status": "checked",
       "source_gate_reason": "source_shortcut_gates blocks freehand-ui-protocol from depending on or importing freehand-task",
       "reason": "UI code must not directly mutate task truth."
@@ -2450,7 +2842,9 @@
     {
       "source_resource": "ui_projection",
       "target_resource": "session",
-      "required_via": ["session"],
+      "required_via": [
+        "session"
+      ],
       "source_gate_status": "checked",
       "source_gate_reason": "source_shortcut_gates blocks freehand-ui-protocol from depending on or importing freehand-reason",
       "reason": "UI code must not synthesize global persisted sessions from temporary subagent turns."
@@ -2458,7 +2852,10 @@
     {
       "source_resource": "timer",
       "target_resource": "task",
-      "required_via": ["turn", "task"],
+      "required_via": [
+        "turn",
+        "task"
+      ],
       "source_gate_status": "precise_checked",
       "source_gate_reason": "precise_source_edge_gates checks ProductionMasterRunner::handle_due_timer so due timers enter a timer wakeup turn and do not call Task Center mutation paths directly",
       "reason": "Timer schedules are independent resources, not task lifecycle states."
@@ -2466,7 +2863,9 @@
     {
       "source_resource": "metadata",
       "target_resource": "request_context",
-      "required_via": ["request_context"],
+      "required_via": [
+        "request_context"
+      ],
       "source_gate_status": "checked",
       "source_gate_reason": "source_shortcut_gates blocks freehand-metadata from depending on or importing freehand-blocks",
       "reason": "Metadata/control state must not be smuggled into request content."
@@ -2474,7 +2873,10 @@
     {
       "source_resource": "runtime_command",
       "target_resource": "workspace_path",
-      "required_via": ["checkpoint", "workspace_path"],
+      "required_via": [
+        "checkpoint",
+        "workspace_path"
+      ],
       "source_gate_status": "precise_checked",
       "source_gate_reason": "precise_source_edge_gates checks dispatch_rewind_checkpoint so runtime command admission enters the checkpoint owner and does not mutate workspace paths directly",
       "reason": "Runtime commands must not mutate workspace paths directly without checkpoint owner admission."
@@ -2482,7 +2884,10 @@
     {
       "source_resource": "instruction_capability",
       "target_resource": "provider_request",
-      "required_via": ["request_context", "provider_request"],
+      "required_via": [
+        "request_context",
+        "provider_request"
+      ],
       "source_gate_status": "checked",
       "source_gate_reason": "source_shortcut_gates blocks freehand-instructions from depending on or importing runtime/provider request owner crates",
       "reason": "Instruction manifests must not patch provider requests directly."
@@ -2490,7 +2895,10 @@
     {
       "source_resource": "tool_call",
       "target_resource": "provider_hosted_search",
-      "required_via": ["provider_request", "provider_hosted_search"],
+      "required_via": [
+        "provider_request",
+        "provider_hosted_search"
+      ],
       "source_gate_status": "precise_checked",
       "source_gate_reason": "precise_source_edge_gates checks reasonix_aligned_builtin_specs so tool.registry never exposes hosted web_search as a local Freehand function tool",
       "reason": "Provider-hosted search is not a local Freehand function tool and must not be executed through tool.registry."
@@ -2498,7 +2906,10 @@
     {
       "source_resource": "ui_projection",
       "target_resource": "node_pairing",
-      "required_via": ["runtime_command", "node_pairing"],
+      "required_via": [
+        "runtime_command",
+        "node_pairing"
+      ],
       "source_gate_status": "checked",
       "source_gate_reason": "source_shortcut_gates blocks freehand-ui-protocol from depending on or importing freehand-node",
       "reason": "UI code must not mutate or synthesize node pairing truth directly."
@@ -2508,29 +2919,45 @@
     {
       "source_resource": "session",
       "target_resource": "agent",
-      "forbidden_packages": ["freehand-task"],
-      "forbidden_import_tokens": ["freehand_task"],
+      "forbidden_packages": [
+        "freehand-task"
+      ],
+      "forbidden_import_tokens": [
+        "freehand_task"
+      ],
       "reason": "Reason persistence session owner must not depend on or import task-owned Agent resource truth."
     },
     {
       "source_resource": "ui_projection",
       "target_resource": "task",
-      "forbidden_packages": ["freehand-task"],
-      "forbidden_import_tokens": ["freehand_task"],
+      "forbidden_packages": [
+        "freehand-task"
+      ],
+      "forbidden_import_tokens": [
+        "freehand_task"
+      ],
       "reason": "UI protocol must not depend on or import task truth owner directly."
     },
     {
       "source_resource": "ui_projection",
       "target_resource": "session",
-      "forbidden_packages": ["freehand-reason"],
-      "forbidden_import_tokens": ["freehand_reason"],
+      "forbidden_packages": [
+        "freehand-reason"
+      ],
+      "forbidden_import_tokens": [
+        "freehand_reason"
+      ],
       "reason": "UI protocol must not depend on or import reason persistence session truth directly."
     },
     {
       "source_resource": "metadata",
       "target_resource": "request_context",
-      "forbidden_packages": ["freehand-blocks"],
-      "forbidden_import_tokens": ["freehand_blocks"],
+      "forbidden_packages": [
+        "freehand-blocks"
+      ],
+      "forbidden_import_tokens": [
+        "freehand_blocks"
+      ],
       "reason": "Metadata owner must not depend on or import request-context planner truth directly."
     },
     {
@@ -2553,8 +2980,12 @@
     {
       "source_resource": "ui_projection",
       "target_resource": "node_pairing",
-      "forbidden_packages": ["freehand-node"],
-      "forbidden_import_tokens": ["freehand_node"],
+      "forbidden_packages": [
+        "freehand-node"
+      ],
+      "forbidden_import_tokens": [
+        "freehand_node"
+      ],
       "reason": "UI protocol must not depend on or import node pairing truth directly."
     }
   ],
@@ -2586,7 +3017,10 @@
       "target_resource": "workspace_path",
       "file_path": "crates/freehand-runtime/src/lib.rs",
       "symbol_path": "dispatch_rewind_checkpoint",
-      "required_tokens": ["rewind_checkpoint", "refresh_checkpoint_projection_from_config"],
+      "required_tokens": [
+        "rewind_checkpoint",
+        "refresh_checkpoint_projection_from_config"
+      ],
       "forbidden_tokens": [
         "fs::",
         "write_text_atomic",
