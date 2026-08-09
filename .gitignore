@@ -13,3 +13,5 @@
 /apps/freehand-android/.gradle
 /apps/freehand-android/app/build
 /external/OpenMinis
+/gradle.zip
+/gradle-wrapper.zip
