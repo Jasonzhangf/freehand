@@ -5,6 +5,8 @@ edition.workspace = true
 license.workspace = true
 
 [dependencies]
+freehand-acp = { path = "../../crates/freehand-acp" }
+agent-client-protocol = "2.0"
 freehand-contracts = { path = "../../crates/freehand-contracts" }
 freehand-relay = { path = "../../crates/freehand-relay" }
 freehand-runtime = { path = "../../crates/freehand-runtime" }

@@ -306,6 +306,25 @@ Use this skill for any non-trivial work in this repo.
 - Runtime, UI, and provider code must not scan AGENTS.md or skills authoring directories directly; they must consume the deterministic manifest compiled from `~/.freehand/AGENTS.md`, `~/.freehand/skills`, local `AGENTS.md`, and local `.agents/skills`.
 - Provider-visible instruction admission must use `freehand-instructions::render_instruction_capability_context` plus `ContextSegmentKind::InstructionCapability`; provider adapters must not patch instruction content into wire payloads directly.
 
+## ACP v1 Agent Surface Boundary
+
+When touching `crates/freehand-acp` or the daemon `acp` subcommand, every change
+set must update, in lockstep with the code, the following eight artifacts:
+
+- `docs/goals/acp-v1-agent-surface-plan.md` (implementation plan)
+- `docs/design/acp-v1-agent-server-design.md` (design source of truth)
+- `docs/module-registry/app.acp-server.json` (module ownership)
+- `docs/function-maps/app.acp-server.md` (function map)
+- `docs/mainline-calls/app.acp-server.json` (mainline call source)
+- `docs/testing/app.acp-server.md` (test design)
+- `docs/verification-maps/app.acp-server.json` (verification map)
+- `docs/wiki/app.acp-server.md` (generated wiki)
+
+`xtask gates check` runs `scripts/verify-acp-stdio.sh` against the installed
+daemon to assert the wire carries only NDJSON JSON-RPC frames and that
+session/cancel followed by session/prompt returns `cancelled` and a fresh
+prompt after that returns `end_turn` (cancel-token reset invariant).
+
 ## Debug Workflow
 
 - Start from `feature_id`, owner, `debug_artifacts`, and runtime paths in the function map.

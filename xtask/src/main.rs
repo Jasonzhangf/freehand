@@ -222,6 +222,15 @@ fn run_gates_check() -> Result<(), String> {
             "docs/references/provider-protocols/openai-responses.md",
             "docs/references/provider-protocols/openai-chat-completions.md",
             "docs/references/provider-protocols/anthropic-messages.md",
+            "docs/goals/acp-v1-agent-surface-plan.md",
+            "docs/design/acp-v1-agent-server-design.md",
+            "docs/module-registry/app.acp-server.json",
+            "docs/function-maps/app.acp-server.md",
+            "docs/mainline-calls/app.acp-server.json",
+            "docs/testing/app.acp-server.md",
+            "docs/verification-maps/app.acp-server.json",
+            "docs/wiki/app.acp-server.md",
+            "scripts/verify-acp-stdio.sh",
             "scripts/source-search.sh",
             "scripts/verify-webui-foundation-contracts.mjs",
             ".agents/skills/freehand-dev/SKILL.md",
@@ -253,6 +262,7 @@ fn run_gates_check() -> Result<(), String> {
     verify_dependency_graph(&root)?;
     verify_task_status_single_writer(&root)?;
     verify_adp_protocol_artifacts(&root)?;
+    verify_acp_server_boundary(&root)?;
     openminis_ui_migration::verify_openminis_ui_migration_manifest(&root)?;
     Ok(())
 }
@@ -476,6 +486,15 @@ fn verify_skill_rules(root: &Path) -> Result<(), String> {
         "cargo run -p xtask -- gates check",
         "CI/CD command alignment",
         "make ci",
+        "docs/goals/acp-v1-agent-surface-plan.md",
+        "docs/design/acp-v1-agent-server-design.md",
+        "docs/module-registry/app.acp-server.json",
+        "docs/function-maps/app.acp-server.md",
+        "docs/mainline-calls/app.acp-server.json",
+        "docs/testing/app.acp-server.md",
+        "docs/verification-maps/app.acp-server.json",
+        "docs/wiki/app.acp-server.md",
+        "scripts/verify-acp-stdio.sh",
         "scripts/source-search.sh",
         "Do not search generated or runtime output when locating implementation truth",
     ];
@@ -2628,6 +2647,15 @@ fn verify_source_search_policy(root: &Path) -> Result<(), String> {
         "Debug/search truth is source-first",
         "Do not search generated or runtime output when locating implementation truth",
         "Generated artifacts may be opened only as verification evidence",
+        "docs/goals/acp-v1-agent-surface-plan.md",
+        "docs/design/acp-v1-agent-server-design.md",
+        "docs/module-registry/app.acp-server.json",
+        "docs/function-maps/app.acp-server.md",
+        "docs/mainline-calls/app.acp-server.json",
+        "docs/testing/app.acp-server.md",
+        "docs/verification-maps/app.acp-server.json",
+        "docs/wiki/app.acp-server.md",
+        "scripts/verify-acp-stdio.sh",
         "scripts/source-search.sh",
     ] {
         require_contains(&skill, snippet, ".agents/skills/freehand-dev/SKILL.md")?;
@@ -2638,6 +2666,15 @@ fn verify_source_search_policy(root: &Path) -> Result<(), String> {
             .map_err(|err| format!("read docs/architecture/dev-debug-workflow.md: {err}"))?;
     for snippet in [
         "Source-Only Search Rule",
+        "docs/goals/acp-v1-agent-surface-plan.md",
+        "docs/design/acp-v1-agent-server-design.md",
+        "docs/module-registry/app.acp-server.json",
+        "docs/function-maps/app.acp-server.md",
+        "docs/mainline-calls/app.acp-server.json",
+        "docs/testing/app.acp-server.md",
+        "docs/verification-maps/app.acp-server.json",
+        "docs/wiki/app.acp-server.md",
+        "scripts/verify-acp-stdio.sh",
         "scripts/source-search.sh",
         "not as implementation search roots",
     ] {
@@ -4774,6 +4811,59 @@ fn verify_task_status_single_writer(root: &Path) -> Result<(), String> {
     Ok(())
 }
 
+fn verify_acp_server_boundary(root: &Path) -> Result<(), String> {
+    let module_path = root.join("docs/module-registry/app.acp-server.json");
+    let module_source = fs::read_to_string(&module_path).map_err(|error| error.to_string())?;
+    let module: serde_json::Value = serde_json::from_str(&module_source)
+        .map_err(|error| format!("app.acp-server module registry is invalid: {error}"))?;
+    let module_status = module
+        .get("status")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| "app.acp-server module registry missing status".to_owned())?;
+    if module_status != "active" {
+        return Err(format!(
+            "app.acp-server module registry must be active, got {module_status}"
+        ));
+    }
+
+    let verification_path = root.join("docs/verification-maps/app.acp-server.json");
+    let verification_source =
+        fs::read_to_string(&verification_path).map_err(|error| error.to_string())?;
+    let verification: serde_json::Value = serde_json::from_str(&verification_source)
+        .map_err(|error| format!("app.acp-server verification map is invalid: {error}"))?;
+    let verification_status = verification
+        .get("status")
+        .and_then(|v| v.as_str())
+        .ok_or_else(|| "app.acp-server verification map missing status".to_owned())?;
+    if verification_status != "active" {
+        return Err(format!(
+            "app.acp-server verification map must be active, got {verification_status}"
+        ));
+    }
+
+    let script_path = root.join("scripts/verify-acp-stdio.sh");
+    if !script_path.exists() {
+        return Err(format!(
+            "ACP end-to-end verifier missing: {}",
+            script_path.display()
+        ));
+    }
+
+    let output = std::process::Command::new("bash")
+        .arg(&script_path)
+        .current_dir(root)
+        .output()
+        .map_err(|error| format!("failed to spawn ACP verifier: {error}"))?;
+    if !output.status.success() {
+        let stderr = String::from_utf8_lossy(&output.stderr);
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        return Err(format!(
+            "ACP end-to-end verifier failed (exit {:?}):\nstdout:\n{stdout}\nstderr:\n{stderr}",
+            output.status.code()
+        ));
+    }
+    Ok(())
+}
 #[cfg(test)]
 mod tests {
     use super::*;

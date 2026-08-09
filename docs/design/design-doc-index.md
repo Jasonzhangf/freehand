@@ -46,6 +46,7 @@ Use this directory family for durable design truth.
 - `docs/design/runtime-command-dispatch-design.md`
 - `docs/design/runtime-checkpoint-rewind-design.md`
 - `docs/design/runtime-daemon-design.md`
+- `docs/design/acp-v1-agent-server-design.md`
 - `docs/prototypes/README.md`
 
 ## Rule

@@ -16,6 +16,7 @@ members = [
   "crates/freehand-task",
   "crates/freehand-ui-protocol",
   "crates/freehand-tools",
+  "crates/freehand-acp",
   "crates/freehand-runtime",
   "crates/freehand-gates",
   "crates/freehand-testkit",

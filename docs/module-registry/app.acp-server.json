@@ -1,0 +1,44 @@
+{
+  "schema_version": 1,
+  "registry_id": "app.acp-server.modules",
+  "feature_id": "app.acp-server",
+  "status": "active",
+  "coverage_roots": [
+    "crates/freehand-acp"
+  ],
+  "modules": [
+    {
+      "module_id": "app.acp-server.library",
+      "owner_feature_id": "app.acp-server",
+      "status": "active",
+      "owned_paths": [
+        "crates/freehand-acp/Cargo.toml",
+        "crates/freehand-acp/src/lib.rs",
+        "crates/freehand-acp/src/tests.rs"
+      ],
+      "allowed_dependencies": [
+        "rust.std",
+        "freehand-contracts",
+        "freehand-runtime",
+        "third_party.agent-client-protocol",
+        "third_party.tokio"
+      ],
+      "forbidden_dependencies": [
+        "freehand-node",
+        "freehand-provider-anthropic",
+        "freehand-provider-openai",
+        "freehand-reason",
+        "freehand-task"
+      ]
+    }
+  ],
+  "declared_edges": [
+    {
+      "edge_id": "app.acp-server#01",
+      "operation": "acp_transport.prompt_turn",
+      "binding_status": "bound",
+      "from_module_id": "app.acp-server.library",
+      "to_module_id": "runtime.master-worker-loop.worker"
+    }
+  ]
+}

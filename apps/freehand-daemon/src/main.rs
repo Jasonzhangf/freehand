@@ -61,6 +61,18 @@ async fn run() -> Result<String, String> {
             let bind_addr = parse_bind_arg(trailing_args.into_iter())?;
             run_master_mode(agent_name, bootstrap, bind_addr).await
         }
+        "acp" => {
+            // ACP v1 agent surface over stdio. stdout is the NDJSON JSON-RPC
+            // channel; diagnostics go to stderr. Serve blocks until the host
+            // closes stdin. Return an empty success so the daemon process does
+            // not write anything to stdout beyond JSON-RPC frames.
+            use agent_client_protocol::{ConnectTo, Stdio};
+            freehand_acp::FreehandAgent::default()
+                .connect_to(Stdio::new())
+                .await
+                .map_err(|err| format!("acp server error: {err}"))?;
+            Ok(String::new())
+        }
         "remote-relay" => {
             if args.next().is_some() {
                 return Err(

@@ -1,0 +1,36 @@
+{
+  "schema_version": 1,
+  "verification_map_id": "app.acp-server.verification",
+  "feature_id": "app.acp-server",
+  "status": "active",
+  "module_registry": "docs/module-registry/app.acp-server.json",
+  "function_map": "docs/function-maps/app.acp-server.md",
+  "mainline_call_map": "docs/mainline-calls/app.acp-server.json",
+  "test_design": "docs/testing/app.acp-server.md",
+  "gates": [
+    {
+      "gate_id": "app.acp-server.unit",
+      "kind": "test",
+      "command": "cargo test -p freehand-acp -- --nocapture",
+      "binding_status": "active"
+    },
+    {
+      "gate_id": "app.acp-server.clippy",
+      "kind": "lint",
+      "command": "cargo clippy -p freehand-acp --all-targets -- -D warnings",
+      "binding_status": "active"
+    },
+    {
+      "gate_id": "app.acp-server.architecture",
+      "kind": "architecture",
+      "command": "cargo run -p xtask -- gates check",
+      "binding_status": "active"
+    },
+    {
+      "gate_id": "app.acp-server.end-to-end",
+      "kind": "smoke",
+      "command": "bash scripts/verify-acp-stdio.sh",
+      "binding_status": "active"
+    }
+  ]
+}

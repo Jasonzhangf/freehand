@@ -12,6 +12,7 @@
 - `freehand-debug`: debug/trace envelope, debug snapshot, replay-facing observation contracts
 - `freehand-metadata`: internal control/provenance metadata center with writer owner and write-node validation
 - `freehand-ui-protocol`: UI-facing contract surface
+- `freehand-acp`: ACP v1 transport bridge to the runtime live-reason turn mainline (SDK owns wire and framing)
 - `freehand-runtime`: runtime wiring owner that composes reason/node owners without turning apps into business owners
   - may also own config-selected runtime bootstrap helpers so host apps stay thin
 - `freehand-gates`: architecture enforcement

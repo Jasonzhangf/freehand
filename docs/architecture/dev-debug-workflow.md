@@ -73,3 +73,22 @@
 - update `.agents/skills/freehand-dev/SKILL.md` if workflow changed
 - update `MEMORY.md` with verified durable truth
 - update `note.md` with exploration trail
+
+## ACP v1 agent surface artifacts
+
+When touching `crates/freehand-acp` or the daemon `acp` subcommand, every
+change set must update, in lockstep with the code:
+
+- `docs/goals/acp-v1-agent-surface-plan.md`
+- `docs/design/acp-v1-agent-server-design.md`
+- `docs/module-registry/app.acp-server.json`
+- `docs/function-maps/app.acp-server.md`
+- `docs/mainline-calls/app.acp-server.json`
+- `docs/testing/app.acp-server.md`
+- `docs/verification-maps/app.acp-server.json`
+- `docs/wiki/app.acp-server.md`
+
+`xtask gates check` runs `scripts/verify-acp-stdio.sh` against the installed
+daemon to assert the wire carries only NDJSON JSON-RPC frames and that
+session/cancel followed by session/prompt returns `cancelled` and a fresh
+prompt after that returns `end_turn` (cancel-token reset invariant).

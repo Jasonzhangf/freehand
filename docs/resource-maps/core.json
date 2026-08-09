@@ -168,6 +168,29 @@
       ]
     },
     {
+      "resource_type": "acp_transport",
+      "owner_feature_id": "app.acp-server",
+      "owner_crate": "crates/freehand-acp",
+      "identity": "one ACP connection plus transport-local session handle",
+      "truth_store": "ephemeral connection registry; no business truth",
+      "operations": [
+        "initialize",
+        "new_session",
+        "cancel_turn",
+        "prompt_turn"
+      ],
+      "projections": [
+        "ACP JSON-RPC responses",
+        "ACP session/update notifications",
+        "explicit ACP transport errors"
+      ],
+      "forbidden": [
+        "session or turn persistence",
+        "provider request/response payload",
+        "task, metadata, debug, or ADP truth"
+      ]
+    },
+    {
       "resource_type": "relay_data_tunnel",
       "owner_feature_id": "relay.transport",
       "owner_crate": "crates/freehand-relay",
@@ -1388,6 +1411,15 @@
       "effect": "admit compiled instruction capabilities into provider-visible request context only as typed context-planner segments",
       "mainline_call_doc": "docs/mainline-calls/instruction.capability-loader.json",
       "binding_status": "bound"
+    },
+    {
+      "operation_id": "acp_transport.prompt_turn",
+      "owner_feature_id": "app.acp-server",
+      "source_resource": "acp_transport",
+      "target_resource": "master_work",
+      "effect": "drive one ACP session/prompt turn through the runtime live-reason turn mainline with a per-session cancel token",
+      "mainline_call_doc": "docs/mainline-calls/app.acp-server.json",
+      "binding_status": "bound"
     }
   ],
   "source_edge_registry": [
@@ -2281,6 +2313,28 @@
       "file_path": "crates/freehand-runtime/src/live_context.rs",
       "symbol_path": "instruction_capability_segment",
       "binding_status": "bound"
+    },
+    {
+      "edge_id": "app.acp-server#01",
+      "operation_id": "acp_transport.prompt_turn",
+      "source_resource": "acp_transport",
+      "target_resource": "master_work",
+      "mainline_call_doc": "docs/mainline-calls/app.acp-server.json",
+      "call_table_step": "03",
+      "file_path": "crates/freehand-acp/src/lib.rs",
+      "symbol_path": "FreehandAgent::connect_to",
+      "binding_status": "bound"
+    },
+    {
+      "edge_id": "app.acp-server#02",
+      "operation_id": "acp_transport.prompt_turn",
+      "source_resource": "acp_transport",
+      "target_resource": "master_work",
+      "mainline_call_doc": "docs/mainline-calls/app.acp-server.json",
+      "call_table_step": "02",
+      "file_path": "crates/freehand-acp/src/lib.rs",
+      "symbol_path": "run_turn_blocking",
+      "binding_status": "bound"
     }
   ],
   "relation_rules": [
@@ -2814,6 +2868,14 @@
         "node_pairing"
       ],
       "reason": "UI may render node pairing projections and dispatch commands, but must not own or mutate node pairing transport truth directly."
+    },
+    {
+      "rule_id": "acp-transport-drives-master-work-direct",
+      "source_resource": "acp_transport",
+      "target_resource": "master_work",
+      "allowed_direct": true,
+      "via_resources": [],
+      "reason": "ACP session/prompt drives one live-reason turn through the runtime master-work mainline; ACP owns the transport, not the turn truth."
     }
   ],
   "forbidden_direct_relations": [

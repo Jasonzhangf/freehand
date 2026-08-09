@@ -9884,3 +9884,13 @@ negative_tests:
   - count growth with local_web_url fails before config overwrite
   - remote ConfigStatus contains no local web_url or peer local_web_url
 ```
+# 2026-08-09 ACP v1 SDK adapter delivery
+
+- Direction: Freehand is exposed as a standard ACP v1 agent endpoint over NDJSON JSON-RPC 2.0 over stdio.
+- Reference: the official `agent-client-protocol` Rust SDK 2.0 owns wire, framing, transport, and parameter validation. Freehand adapts the runtime live-reason turn mainline through a thin `FreehandAgent::connect_to` over `Stdio`. The earlier hand-rolled protocol/server/handler design was abandoned and removed because the SDK is the source of truth for any published ACP spec.
+- Owner: `app.acp-server` feature, `crates/freehand-acp` crate; daemon owns only the `acp` subcommand entry. Allowed dependencies: `freehand-contracts`, `freehand-runtime`, `agent-client-protocol`, `tokio` (blocking pool). Forbidden: `freehand-reason`, `freehand-task`, `freehand-provider-*`, `freehand-node`, `freehand-ui-protocol`.
+- Method surface (this slice): `initialize`, `session/new`, `session/prompt`, `session/cancel`. Methods not implemented here are deliberately omitted from `agentCapabilities` so the wire and the advertised capability set stay in lockstep. Unsupported methods get a typed `method not found` from the SDK.
+- Cancel semantics: `session/cancel` flips a per-session `LiveReasonCancelToken`. The runtime polls the token mid-flight and aborts the turn with `RuntimeLiveBridgeError::Cancelled`; the adapter maps that to `StopReason::Cancelled` in the `session/prompt` response. Other runtime errors map to `StopReason::Refusal`. The token is reset after every turn returns (either completing normally or aborting) so a stale cancel does not leak into the next prompt.
+- Session working directory: `session/new` records `req.cwd` in the transport-local registry; `session/prompt` forwards it to `LiveReasonTurnRequest.cwd`. No more hardcoded `/tmp`.
+- Streaming: this slice does not emit `session/update` notifications; the adapter only returns a `PromptResponse` with a `StopReason`. Adding streaming turns is a separate scope.
+- Non-goals: `authenticate`, `session/load`, `session/resume`, `session/list`, `session/close`, `session/delete`, ACP socket transport, MCP bridging, permission/terminal/fs proxy, vendor extensions, ADP changes.

@@ -1,0 +1,81 @@
+{
+  "feature_id": "app.acp-server",
+  "owner_crate": "crates/freehand-acp",
+  "owner_module": "crates/freehand-acp/src/lib.rs",
+  "function_map_doc": "docs/function-maps/app.acp-server.md",
+  "test_design_doc": "docs/testing/app.acp-server.md",
+  "mainline_call_doc": "docs/mainline-calls/app.acp-server.json",
+  "generated_wiki_doc": "docs/wiki/app.acp-server.md",
+  "resource_operations": [
+    "acp_transport.prompt_turn"
+  ],
+  "request_mainline": [
+    "daemon `acp` subcommand binds a FreehandAgent over Stdio and serves NDJSON JSON-RPC frames until EOF",
+    "initialize negotiates protocol version 1 and advertises agent capabilities; no session is opened",
+    "session/new registers a transport-local ACP session and a per-session cancel token",
+    "session/prompt drives one turn through the runtime live-reason turn mainline using the per-session cancel token"
+  ],
+  "response_mainline": [
+    "initialize returns protocolVersion 1, agentCapabilities, agentInfo, and authMethods as a JSON-RPC result",
+    "session/new returns a JSON-RPC result carrying the generated sessionId",
+    "session/prompt returns a StopReason (end_turn/cancelled/refusal) after the turn completes",
+    "ACP wire is owned by the official agent-client-protocol Rust SDK; FreehandAgent only adapts methods to runtime"
+  ],
+  "error_mainline": [
+    "Framing, JSON-RPC, and parameter validation are enforced by the agent-client-protocol SDK before reaching handlers",
+    "session/prompt for an unknown session returns a typed invalid-params error",
+    "runtime turn failures surface as StopReason::Refusal; the SDK transports protocol errors as JSON-RPC error frames"
+  ],
+  "shared_functions": [],
+  "call_table": [
+    {
+      "step": "01",
+      "symbol_path": "run",
+      "file_path": "apps/freehand-daemon/src/main.rs",
+      "responsibility": "route the ACP stdio subcommand and serve NDJSON JSON-RPC frames until stdin EOF",
+      "input_semantic": "daemon acp command",
+      "output_semantic": "served ACP connection",
+      "caller": "daemon main",
+      "callee": "FreehandAgent::connect_to + Stdio",
+      "binding_status": "bound"
+    },
+    {
+      "step": "02",
+      "symbol_path": "run_turn_blocking",
+      "file_path": "crates/freehand-acp/src/lib.rs",
+      "responsibility": "load the selected agent config and run one live-reason turn with the session cancel token on the tokio blocking pool",
+      "input_semantic": "ACP sessionId plus prompt text",
+      "output_semantic": "LiveReasonTurnOutcome observed under cancel",
+      "caller": "FreehandAgent::connect_to prompt handler",
+      "callee": "run_live_reason_turn",
+      "source_resource": "acp_transport",
+      "target_resource": "master_work",
+      "resource_operation": "acp_transport.prompt_turn",
+      "binding_status": "bound"
+    },
+    {
+      "step": "03",
+      "symbol_path": "FreehandAgent::connect_to",
+      "file_path": "crates/freehand-acp/src/lib.rs",
+      "responsibility": "register initialize/session/new/session/prompt handlers and session/cancel notification, then drive the ACP stdio transport via agent-client-protocol SDK",
+      "input_semantic": "ACP client transport (Stdio)",
+      "output_semantic": "ACP v1 method surface",
+      "caller": "daemon acp entry",
+      "callee": "Agent::builder + Stdio",
+      "source_resource": "acp_transport",
+      "target_resource": "master_work",
+      "resource_operation": "acp_transport.prompt_turn",
+      "binding_status": "bound"
+    }
+  ],
+  "sync_status": [
+    "FreehandAgent is implemented on top of the official agent-client-protocol Rust SDK 2.0; the hand-rolled protocol/server/handler modules are removed",
+    "daemon `acp` subcommand binds a FreehandAgent over Stdio and is proven end-to-end via initialize + session/new + session/prompt returning stopReason end_turn",
+    "session/cancel flips the per-session cancel token; the runtime live-reason turn polls the token mid-flight and aborts with RuntimeLiveBridgeError::Cancelled, which the adapter maps to stopReason cancelled. The token is reset after each turn returns (either completing normally or aborting) so a stale cancel does not leak into the next prompt.",
+    "capability advertisement (initialize) declares only the methods and prompt content kinds that the adapter actually handles",
+    "session/new records the session working directory; session/prompt forwards it to LiveReasonTurnRequest.cwd",
+    "stdout carries NDJSON JSON-RPC frames only; daemon acp returns Ok(empty) so nothing else is written",
+    "ADP WebUI surface is untouched and remains the internal UI protocol",
+    "generated wiki must be regenerated from docs/mainline-calls/app.acp-server.json when this truth changes"
+  ]
+}

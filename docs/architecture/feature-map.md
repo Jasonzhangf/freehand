@@ -70,6 +70,7 @@ Use this table before grep or implementation. Every bug or feature request must 
 | WebUI/protocol-only app boundary smoke | `app.webui-smoke` | `apps/freehand-server` | `docs/function-maps/app.webui-smoke.md` | `docs/testing/app.webui-smoke.md` |
 | account authentication, Agent presence, remote HTTP/ADP proxy, and Relay deployment | `relay.transport` | `crates/freehand-relay`, `apps/freehand-relay-server` | `docs/function-maps/relay.transport.md` | `docs/testing/relay.transport.md` |
 | runtime-backed HTTP/SSE UI daemon host | `app.runtime-daemon` | `apps/freehand-daemon` | `docs/function-maps/app.runtime-daemon.md` | `docs/testing/app.runtime-daemon.md` |
+| ACP v1 agent transport and session bridge | `app.acp-server` | `crates/freehand-acp` | `docs/function-maps/app.acp-server.md` | `docs/testing/app.acp-server.md` |
 | Android/protocol-only app boundary client | `app.android-client` | `apps/freehand-android` | `docs/function-maps/app.android-client.md` | `docs/testing/app.android-client.md` |
 
 If a problem does not fit this table, update this routing index before making code changes. Do not create a second owner by patching an adjacent module.
@@ -97,6 +98,7 @@ This table is the feature-map backlink for `docs/resource-maps/core.json`. The r
 | `app.webui-smoke` | `ui_surface` | `docs/resource-maps/core.json` |
 | `runtime.ui-command-dispatch` | `runtime_command`, `runtime_agent_activity` | `docs/resource-maps/core.json` |
 | `app.runtime-daemon` | `runtime_daemon_host` | `docs/resource-maps/core.json` |
+| `app.acp-server` | `acp_transport` | `docs/resource-maps/core.json` |
 | `runtime.checkpoint-rewind` | `checkpoint` | `docs/resource-maps/core.json` |
 | `node.master-slave` | `node_pairing`, `remote_daemon_directory` | `docs/resource-maps/core.json` |
 | `relay.transport` | `relay_account`, `agent_presence`, `relay_control_tunnel`, `relay_data_tunnel`, `relay_error_tunnel` | `docs/resource-maps/core.json` |
@@ -768,6 +770,46 @@ Non-violation pending items live in `docs/architecture/architecture-gaps.md`. Ea
     transport, while an explicitly Relay-configured Slave hosts only its own
     loopback UI/ADP namespace beside the production Worker runner
   - migrated mainline call source and generated wiki stay in sync with the function map
+
+### `app.acp-server`
+
+- owner: `crates/freehand-acp`; `apps/freehand-daemon` owns only ACP process bootstrap wiring
+- allowed_paths: `crates/freehand-acp/**`, `apps/freehand-daemon/**` for ACP entry wiring, `docs/design/acp-v1-agent-server-design.md`, `docs/module-registry/app.acp-server.json`, `docs/verification-maps/app.acp-server.json`, `docs/function-maps/app.acp-server.md`, `docs/testing/app.acp-server.md`, `docs/mainline-calls/app.acp-server.json`, `docs/wiki/app.acp-server.md`, `docs/resource-maps/core.json`, `docs/architecture/feature-map.md`, `docs/architecture/workspace-layout.md`, `docs/design/design-doc-index.md`, `MEMORY.md`, `note.md`
+- forbidden_paths: `crates/freehand-reason/**`, `crates/freehand-task/**`, `crates/freehand-provider-*/**`, `crates/freehand-node/**`, `crates/freehand-metadata/**`, ADP wire implementation in `crates/freehand-ui-protocol/**`
+- required_checks:
+  - `cargo test -p freehand-acp -- --nocapture`
+  - `cargo run -p xtask -- mainlines check`
+  - `cargo run -p xtask -- gates check`
+  - `cargo run -p freehand-daemon -- acp` piped initialize + session/new + session/prompt returning stopReason end_turn
+- required_white_box_tests:
+  - extract_text joins ContentBlock text blocks
+  - monotonic_id is strictly increasing within a process
+  - cancel token flip changes subsequent observation atomically
+  - SDK enforces NDJSON JSON-RPC framing, handshake gate, and ACP parameter/content validation before the adapter runs
+- required_module_black_box_tests:
+  - daemon `acp` subcommand over real stdio returns only NDJSON JSON-RPC frames on stdout and keeps stderr clean
+- required_project_black_box_tests:
+  - installed `freehand-daemon acp` handshake + session/new + session/prompt returning stopReason end_turn
+- test_design_doc: `docs/testing/app.acp-server.md`
+- function_map_doc: `docs/function-maps/app.acp-server.md`
+- mainline_call_doc: `docs/mainline-calls/app.acp-server.json`
+- generated_wiki_doc: `docs/wiki/app.acp-server.md`
+- resource_map_doc: `docs/resource-maps/core.json`
+- debug_artifacts:
+  - ACP stderr diagnostics
+- runtime_paths:
+  - `~/.freehand/state/turns`
+  - `~/.freehand/replays/acp`
+- update_triggers:
+  - ACP wire method or content shape changes
+  - ACP session lifecycle mapping changes
+  - ACP-to-UI protocol command/query mapping changes
+  - daemon ACP entrypoint changes
+- lifecycle_checks:
+  - initialize precedes all ACP methods
+  - ACP never owns session/turn truth or copies control metadata into business payload
+  - prompt update stream terminates on typed terminal projection
+  - no ACP success response is synthesized from an owner failure
 ### `app.android-client`
 
 - owner: `apps/freehand-android`
