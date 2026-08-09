@@ -1,0 +1,30 @@
+{
+  "schema_version": 1,
+  "verification_map_id": "ui.protocol.verification",
+  "feature_id": "ui.protocol",
+  "status": "active",
+  "module_registry": "docs/module-registry/ui.protocol.json",
+  "function_map": "docs/function-maps/ui.protocol.md",
+  "mainline_call_map": "docs/mainline-calls/ui.protocol.json",
+  "test_design": "docs/testing/ui.protocol.md",
+  "gates": [
+    {
+      "gate_id": "ui.protocol.unit",
+      "kind": "test",
+      "command": "cargo test -p freehand-ui-protocol -- --nocapture",
+      "binding_status": "active"
+    },
+    {
+      "gate_id": "ui.protocol.clippy",
+      "kind": "lint",
+      "command": "cargo clippy -p freehand-ui-protocol --all-targets -- -D warnings",
+      "binding_status": "active"
+    },
+    {
+      "gate_id": "ui.protocol.architecture",
+      "kind": "architecture",
+      "command": "cargo run -p xtask -- gates check",
+      "binding_status": "active"
+    }
+  ]
+}
