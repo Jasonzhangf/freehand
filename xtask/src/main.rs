@@ -7015,12 +7015,12 @@ pub struct MetadataCenter {{\n    records: Vec<MetadataEnvelope>,\n}}\n"
         .expect("write source-search fixture");
         fs::write(
             root.join(".agents/skills/freehand-dev/SKILL.md"),
-            "Debug/search truth is source-first.\nDo not search generated or runtime output when locating implementation truth.\nGenerated artifacts may be opened only as verification evidence.\nUse scripts/source-search.sh.\n",
+            "Debug/search truth is source-first.\nDo not search generated or runtime output when locating implementation truth.\nGenerated artifacts may be opened only as verification evidence.\nUse scripts/source-search.sh.\n\n## ACP v1 Agent Surface Boundary\n- `docs/goals/acp-v1-agent-surface-plan.md` (implementation plan)\n- `docs/design/acp-v1-agent-server-design.md` (design source of truth)\n- `docs/module-registry/app.acp-server.json` (module ownership)\n- `docs/function-maps/app.acp-server.md` (function map)\n- `docs/mainline-calls/app.acp-server.json` (mainline call source)\n- `docs/testing/app.acp-server.md` (test design)\n- `docs/verification-maps/app.acp-server.json` (verification map)\n- `docs/wiki/app.acp-server.md` (generated wiki)\n`xtask gates check` runs `scripts/verify-acp-stdio.sh` against the installed\n",
         )
         .expect("write skill fixture");
         fs::write(
             root.join("docs/architecture/dev-debug-workflow.md"),
-            "## Source-Only Search Rule\nUse scripts/source-search.sh. Generated outputs are evidence, not as implementation search roots.\n",
+            "## Source-Only Search Rule\nUse scripts/source-search.sh. Generated outputs are evidence, not as implementation search roots.\n\n## ACP v1 Agent Surface Boundary\n`docs/goals/acp-v1-agent-surface-plan.md` (implementation plan)\n`docs/design/acp-v1-agent-server-design.md` (design)\n`docs/module-registry/app.acp-server.json` (module ownership)\n`docs/function-maps/app.acp-server.md` (function map)\n`docs/mainline-calls/app.acp-server.json` (mainline call source)\n`docs/testing/app.acp-server.md` (test design)\n`docs/verification-maps/app.acp-server.json` (verification map)\n`docs/wiki/app.acp-server.md` (generated wiki)\n`scripts/verify-acp-stdio.sh` (e2e)\n",
         )
         .expect("write debug workflow fixture");
         fs::write(
