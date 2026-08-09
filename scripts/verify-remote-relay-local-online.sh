@@ -120,7 +120,7 @@ curl -fsS -c "$COOKIE_JAR" \
   "$RELAY_URL/relay/agents/studio/?client=android-webview" \
   >"$TMP_DIR/relay-root.html"
 grep -F 'data-webui-shell="true"' "$TMP_DIR/relay-root.html" >/dev/null
-grep -F 'data-adp-endpoint="/adp"' "$TMP_DIR/relay-root.html" >/dev/null
+grep -F 'data-adp-endpoint="adp"' "$TMP_DIR/relay-root.html" >/dev/null
 
 curl -fsS -b "$COOKIE_JAR" \
   -H "authorization: Bearer $TOKEN" \

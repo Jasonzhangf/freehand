@@ -13,12 +13,16 @@
     "daemon `acp` subcommand binds a FreehandAgent over Stdio and serves NDJSON JSON-RPC frames until EOF",
     "initialize negotiates protocol version 1 and advertises agent capabilities; no session is opened",
     "session/new registers a transport-local ACP session and a per-session cancel token",
-    "session/prompt drives one turn through the runtime live-reason turn mainline using the per-session cancel token"
+    "session/prompt drives one turn through the runtime live-reason turn mainline using the per-session cancel token",
+    "session/list, session/set_mode, session/load, session/resume, and session/close adapt the transport-local ACP session registry onto the runtime reason-persistence truth",
+    "session/load and session/resume replay persisted turn history as full ACP session/update notifications"
   ],
   "response_mainline": [
     "initialize returns protocolVersion 1, agentCapabilities, agentInfo, and authMethods as a JSON-RPC result",
     "session/new returns a JSON-RPC result carrying the generated sessionId",
     "session/prompt returns a StopReason (end_turn/cancelled/refusal) after the turn completes",
+    "session/prompt streams runtime reasoning, message, tool, tool-result, and usage events as ACP session/update notifications via the AcpBroadcaster projection",
+    "session/load and session/resume return the standard response after replaying persisted history; session/close marks the session closed and cancels any in-flight turn",
     "ACP wire is owned by the official agent-client-protocol Rust SDK; FreehandAgent only adapts methods to runtime"
   ],
   "error_mainline": [
@@ -66,6 +70,62 @@
       "target_resource": "master_work",
       "resource_operation": "acp_transport.prompt_turn",
       "binding_status": "bound"
+    },
+    {
+      "step": "04",
+      "symbol_path": "run_prompt_with_reset",
+      "file_path": "crates/freehand-acp/src/lib.rs",
+      "responsibility": "run the prompt through the configured turn runner on the tokio blocking pool and reset the session cancel token after each turn so a stale cancel cannot brick the next prompt",
+      "input_semantic": "ACP session plus prompt text plus turn runner",
+      "output_semantic": "StopReason (end_turn/cancelled/refusal)",
+      "caller": "FreehandAgent::connect_to prompt handler",
+      "callee": "run_turn_blocking",
+      "source_resource": "acp_transport",
+      "target_resource": "master_work",
+      "resource_operation": "acp_transport.prompt_turn",
+      "binding_status": "bound"
+    },
+    {
+      "step": "05",
+      "symbol_path": "AcpBroadcaster::on_broadcast / project_broadcast",
+      "file_path": "crates/freehand-acp/src/lib.rs",
+      "responsibility": "project runtime broadcast events (semantic, tool, tool-result, usage) into ACP session/update notifications and stream them to the client",
+      "input_semantic": "ReasonBroadcastEvent stream",
+      "output_semantic": "ACP session/update notifications",
+      "caller": "run_turn_blocking",
+      "callee": "project_semantic / project_tool_call / project_tool_result / project_usage",
+      "source_resource": "acp_transport",
+      "target_resource": "master_work",
+      "resource_operation": "acp_transport.prompt_turn",
+      "binding_status": "bound"
+    },
+    {
+      "step": "06",
+      "symbol_path": "replay_session_history / emit_replay_turn",
+      "file_path": "crates/freehand-acp/src/lib.rs",
+      "responsibility": "replay persisted turn history for session/load and session/resume as full ACP session/update notifications from the runtime reason persistence",
+      "input_semantic": "ACP sessionId",
+      "output_semantic": "replayed session/update notifications",
+      "caller": "FreehandAgent::connect_to load/resume handler",
+      "callee": "ReasonPersistence::restore_turn_snapshots_for_ui",
+      "source_resource": "acp_transport",
+      "target_resource": "master_work",
+      "resource_operation": "acp_transport.prompt_turn",
+      "binding_status": "bound"
+    },
+    {
+      "step": "07",
+      "symbol_path": "list_sessions",
+      "file_path": "crates/freehand-acp/src/lib.rs",
+      "responsibility": "project the transport-local ACP session registry into ACP SessionInfo entries for session/list",
+      "input_semantic": "ACP session registry",
+      "output_semantic": "Vec<SessionInfo>",
+      "caller": "FreehandAgent::connect_to session/list handler",
+      "callee": "SessionInfo::new",
+      "source_resource": "acp_transport",
+      "target_resource": "master_work",
+      "resource_operation": "acp_transport.prompt_turn",
+      "binding_status": "bound"
     }
   ],
   "sync_status": [
@@ -74,6 +134,9 @@
     "session/cancel flips the per-session cancel token; the runtime live-reason turn polls the token mid-flight and aborts with RuntimeLiveBridgeError::Cancelled, which the adapter maps to stopReason cancelled. The token is reset after each turn returns (either completing normally or aborting) so a stale cancel does not leak into the next prompt.",
     "capability advertisement (initialize) declares only the methods and prompt content kinds that the adapter actually handles",
     "session/new records the session working directory; session/prompt forwards it to LiveReasonTurnRequest.cwd",
+    "session/prompt streams runtime reasoning/message/tool/usage events as ACP session/update notifications via AcpBroadcaster; replay (session/load and session/resume) emits full chunks from the runtime reason persistence truth and never emits usage_update during replay",
+    "session/list projects the transport-local registry; session/set_mode and session/close are accepted with typed responses, and session/close marks the session closed and cancels any in-flight turn",
+    "the ACP adapter depends on serde_json only for building tool-call raw_input and typed error data; the runtime owns reason persistence and live-reason turn truth",
     "stdout carries NDJSON JSON-RPC frames only; daemon acp returns Ok(empty) so nothing else is written",
     "ADP WebUI surface is untouched and remains the internal UI protocol",
     "generated wiki must be regenerated from docs/mainline-calls/app.acp-server.json when this truth changes"

@@ -634,6 +634,7 @@ dependencies = [
  "agent-client-protocol",
  "freehand-contracts",
  "freehand-runtime",
+ "serde_json",
  "tokio",
 ]
 

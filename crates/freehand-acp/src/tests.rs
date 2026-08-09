@@ -56,24 +56,25 @@ async fn cancel_does_not_brick_following_prompts() {
         session_id: agent_client_protocol::schema::v1::SessionId::new("acp-test"),
         cwd: PathBuf::from("/tmp"),
         cancel: Arc::new(AtomicBool::new(false)),
+        closed: Arc::new(AtomicBool::new(false)),
     });
 
     // First cancel the session, then prompt: the runner observes the
     // cancel flag and returns Cancelled.
     session.cancel.store(true, Ordering::SeqCst);
-    let first = run_prompt_with_reset(&session, "first", fake_turn_runner).await;
+    let first = run_prompt_with_reset(&session, "first", fake_turn_runner, ()).await;
     assert_eq!(first, StopReason::Cancelled);
 
     // Second prompt without a fresh cancel: the runner must NOT see the
     // stale flag because the production code resets it after the first
     // turn returns.
-    let second = run_prompt_with_reset(&session, "second", fake_turn_runner).await;
+    let second = run_prompt_with_reset(&session, "second", fake_turn_runner, ()).await;
     assert_eq!(second, StopReason::EndTurn);
 }
 
 /// Fake turn runner that mirrors the runtime contract: if the session
 /// cancel flag is set, return `Cancelled`; otherwise return `Ok(())`.
-fn fake_turn_runner(session: &AcpSession, _prompt: &str) -> Result<(), TurnError> {
+fn fake_turn_runner(session: &Arc<AcpSession>, _prompt: &str, _cx: &()) -> Result<(), TurnError> {
     if session.cancel.load(Ordering::SeqCst) {
         Err(TurnError::Cancelled)
     } else {

@@ -138,7 +138,7 @@ use freehand_provider_core::{
     build_semantic_request,
 };
 use freehand_provider_executors::production_provider_executor_factory;
-use freehand_reason::{
+pub use freehand_reason::{
     PersistedSessionIndexEntry, PersistedSessionMetadataEntry, ProviderRawLedgerWrite,
     ProviderRawScenePosition, ReasonBroadcastEvent, ReasonPersistence, ReasonPersistenceError,
     ReasonResp04CompletionSchemaRejected, ReasonResp05ModelContinuationWaiting, ReasonTurnEngine,

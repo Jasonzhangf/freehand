@@ -21,7 +21,8 @@
         "freehand-contracts",
         "freehand-runtime",
         "third_party.agent-client-protocol",
-        "third_party.tokio"
+        "third_party.tokio",
+        "third_party.serde_json"
       ],
       "forbidden_dependencies": [
         "freehand-node",

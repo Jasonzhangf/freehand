@@ -177,7 +177,12 @@
         "initialize",
         "new_session",
         "cancel_turn",
-        "prompt_turn"
+        "prompt_turn",
+        "list_sessions",
+        "set_session_mode",
+        "load_session",
+        "resume_session",
+        "close_session"
       ],
       "projections": [
         "ACP JSON-RPC responses",
@@ -2334,6 +2339,50 @@
       "call_table_step": "02",
       "file_path": "crates/freehand-acp/src/lib.rs",
       "symbol_path": "run_turn_blocking",
+      "binding_status": "bound"
+    },
+    {
+      "edge_id": "app.acp-server#04",
+      "operation_id": "acp_transport.prompt_turn",
+      "source_resource": "acp_transport",
+      "target_resource": "master_work",
+      "mainline_call_doc": "docs/mainline-calls/app.acp-server.json",
+      "call_table_step": "04",
+      "file_path": "crates/freehand-acp/src/lib.rs",
+      "symbol_path": "run_prompt_with_reset",
+      "binding_status": "bound"
+    },
+    {
+      "edge_id": "app.acp-server#05",
+      "operation_id": "acp_transport.prompt_turn",
+      "source_resource": "acp_transport",
+      "target_resource": "master_work",
+      "mainline_call_doc": "docs/mainline-calls/app.acp-server.json",
+      "call_table_step": "05",
+      "file_path": "crates/freehand-acp/src/lib.rs",
+      "symbol_path": "AcpBroadcaster::on_broadcast / project_broadcast",
+      "binding_status": "bound"
+    },
+    {
+      "edge_id": "app.acp-server#06",
+      "operation_id": "acp_transport.prompt_turn",
+      "source_resource": "acp_transport",
+      "target_resource": "master_work",
+      "mainline_call_doc": "docs/mainline-calls/app.acp-server.json",
+      "call_table_step": "06",
+      "file_path": "crates/freehand-acp/src/lib.rs",
+      "symbol_path": "replay_session_history / emit_replay_turn",
+      "binding_status": "bound"
+    },
+    {
+      "edge_id": "app.acp-server#07",
+      "operation_id": "acp_transport.prompt_turn",
+      "source_resource": "acp_transport",
+      "target_resource": "master_work",
+      "mainline_call_doc": "docs/mainline-calls/app.acp-server.json",
+      "call_table_step": "07",
+      "file_path": "crates/freehand-acp/src/lib.rs",
+      "symbol_path": "list_sessions",
       "binding_status": "bound"
     }
   ],

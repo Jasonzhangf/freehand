@@ -27,18 +27,23 @@
 ## Request Mainline
 
 `FreehandAgent::connect_to` registers the ACP v1 method handlers
-(initialize, session/new, session/prompt, session/cancel) onto the official
-agent-client-protocol SDK and drives the stdio transport. `session/prompt`
-loads the selected agent config and drives one turn through the runtime
-live-reason turn mainline (`master_work`) with a per-session cancel token.
-Session lifecycle (new/cancel) is kept in the transport-local ACP session
-registry; the runtime owns no ACP session persistence.
+(initialize, session/new, session/prompt, session/list, session/set_mode,
+session/load, session/resume, session/close, session/cancel) onto the
+official agent-client-protocol SDK and drives the stdio transport.
+`session/prompt` drives one turn through the runtime live-reason turn mainline
+(`master_work`) with a per-session cancel token, streaming runtime broadcast
+events back as ACP `session/update` notifications. `session/load` and
+`session/resume` replay persisted turn history from the runtime reason
+persistence truth. Session lifecycle is kept in the transport-local ACP
+session registry; the runtime owns no ACP session persistence.
 
 ## Response Mainline
 
 ACP JSON-RPC results carry initialize capability advertisement, the generated
 sessionId, and the turn stop reason (`end_turn`/`cancelled`/`refusal`).
-Runtime turn execution is owned by `master_work`; ACP only adapts the wire.
+`session/prompt` also emits streaming `session/update` notifications for
+runtime reasoning, message, tool, tool-result, and usage events. Runtime turn
+execution is owned by `master_work`; ACP only adapts the wire.
 
 ## Error Mainline
 
@@ -54,3 +59,7 @@ typed invalid-params errors. Runtime turn failures surface as
 | 01 | `run` | `apps/freehand-daemon/src/main.rs` | route the ACP stdio subcommand; on completion return empty Ok so stdout carries only JSON-RPC frames | daemon main | `FreehandAgent::connect_to + Stdio` | binding bound |
 | 02 | `run_turn_blocking` | `crates/freehand-acp/src/lib.rs` | drive one turn through the runtime live-reason mainline with the session cancel token on the tokio blocking pool | prompt handler | `run_live_reason_turn` | binding bound |
 | 03 | `FreehandAgent::connect_to` | `crates/freehand-acp/src/lib.rs` | register initialize/session/new/session/prompt handlers and session/cancel notification, then drive the ACP stdio transport via agent-client-protocol SDK | daemon acp entry | `Agent::builder + Stdio` | binding bound |
+| 04 | `run_prompt_with_reset` | `crates/freehand-acp/src/lib.rs` | run the prompt through the turn runner on the blocking pool and reset the session cancel token after each turn | prompt handler | `run_turn_blocking` | binding bound |
+| 05 | `AcpBroadcaster::on_broadcast` | `crates/freehand-acp/src/lib.rs` | project runtime broadcast events into ACP `session/update` notifications and stream them | `run_turn_blocking` | `project_semantic` / `project_tool_call` / `project_tool_result` / `project_usage` | binding bound |
+| 06 | `replay_session_history` | `crates/freehand-acp/src/lib.rs` | replay persisted turn history for `session/load`/`session/resume` from runtime reason persistence | load/resume handler | `ReasonPersistence::restore_turn_snapshots_for_ui` | binding bound |
+| 07 | `list_sessions` | `crates/freehand-acp/src/lib.rs` | project the transport-local session registry into ACP `SessionInfo` entries | session/list handler | `SessionInfo::new` | binding bound |

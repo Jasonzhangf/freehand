@@ -14,7 +14,11 @@ PAYLOAD='{"jsonrpc":"2.0","id":1,"method":"initialize","params":{"protocolVersio
 {"jsonrpc":"2.0","id":2,"method":"session/new","params":{"cwd":"/tmp","mcpServers":[]}}
 {"jsonrpc":"2.0","method":"session/cancel","params":{"sessionId":"acp-1"}}
 {"jsonrpc":"2.0","id":3,"method":"session/prompt","params":{"sessionId":"acp-1","prompt":[{"type":"text","text":"x"}]}}
-{"jsonrpc":"2.0","id":4,"method":"session/prompt","params":{"sessionId":"acp-1","prompt":[{"type":"text","text":"reply with exactly: OK"}]}}'
+{"jsonrpc":"2.0","id":4,"method":"session/prompt","params":{"sessionId":"acp-1","prompt":[{"type":"text","text":"reply with exactly: OK"}]}}
+{"jsonrpc":"2.0","id":5,"method":"authenticate","params":{"methodId":"opencode-login"}}
+{"jsonrpc":"2.0","id":6,"method":"session/list","params":{}}
+{"jsonrpc":"2.0","id":7,"method":"session/set_mode","params":{"sessionId":"acp-1","modeId":"build"}}
+{"jsonrpc":"2.0","id":8,"method":"session/close","params":{"sessionId":"acp-1"}}'
 
 STDOUT_FILE="$(mktemp)"
 STDERR_FILE="$(mktemp)"
@@ -38,6 +42,10 @@ assert_present '"protocolVersion":1'
 assert_present '"sessionId":"acp-1"'
 assert_present '"stopReason":"cancelled"'
 assert_present '"stopReason":"end_turn"'
+assert_present '"id":5'
+assert_present '"id":6'
+assert_present '"id":7'
+assert_present '"id":8'
 
 # stderr must be empty so the wire stays on stdout only.
 if [[ -s "$STDERR_FILE" ]]; then
