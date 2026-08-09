@@ -692,6 +692,9 @@ prompt after that returns `end_turn` (cancel-token reset invariant).
 
 Use this checklist for both new features and bug fixes:
 
+- opencode-go/deepseek-v4-flash review: run with `--auto --format json --model opencode-go/deepseek-v4-flash` and a long-lived session (background `&` may be killed by the sandbox when the shell exits; run it as the sole foreground `exec_command` and poll). After the run, the jsonl MUST contain a real `VERDICT: PASS/FAIL` conclusion; a run that ends without a verdict text (e.g. last step `reason: unknown`) is NOT a valid review and must be rerun. Verify with `grep '"type":"text"' review.jsonl | ... | tail`.
+- For e2e gates that drive a real live-provider turn, budget the timeout from measured latency, not a guess. A 60s `timeout` on a 150-300s provider turn makes the gate non-hermetic and fails under load; raise to the measured budget (300s) and re-verify, then re-review because the run-config change invalidates the prior verdict.
+- Commit hygiene: stage only the feature files by explicit path. Never let `.agent-collab/`, `output/`, `err*.log`, `__pycache__`, `.DS_Store`, or scratch notes into the commit; `git diff --cached --check` before commit.
 - Codex review gate uses `codex --profile cc review` by default. If that route returns HTTP 402 / insufficient quota before a final verdict, rerun the identical review prompt with `codex --profile tcm review`. This is an external reviewer transport switch only; do not weaken tests, skip review, or treat it as product-runtime fallback.
 - information sufficient
 - logic closed-loop
