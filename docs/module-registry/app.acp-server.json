@@ -40,6 +40,13 @@
       "binding_status": "bound",
       "from_module_id": "app.acp-server.library",
       "to_module_id": "runtime.master-worker-loop.worker"
+    },
+    {
+      "edge_id": "app.acp-server#05",
+      "operation": "master_work.project_acp_broadcast",
+      "binding_status": "bound",
+      "from_module_id": "runtime.master-worker-loop.worker",
+      "to_module_id": "app.acp-server.library"
     }
   ]
 }

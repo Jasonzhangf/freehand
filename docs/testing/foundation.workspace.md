@@ -6,8 +6,9 @@
   - workspace scaffold exists
   - required architecture docs exist
   - required hooks and CI files exist
-  - `make ci` is the canonical full local gate and includes mainline freshness before architecture gates
-  - pre-push, CI, and release paths consume the same full gate instead of drifting into partial gate stacks
+- `make ci` is the canonical full local gate and includes mainline freshness before architecture gates
+- `make dev` and `make pre-push-fast` are manual inner-loop tiers that never replace `make ci`; `make nightly` adds webui online verifiers, and `make release` reruns `make ci` before staging artifacts
+- pre-push, CI, and release paths consume the same full gate instead of drifting into partial gate stacks
   - release script runs full regression, Rust release build, Android JVM regression, Android release build, extracts APK version truth, and stages APK plus `update.json` artifacts
   - Android release artifact packaging disables Android release lint checks in Gradle config; release regression truth is `make ci` plus Android JVM tests, not the failing Android Lint Vital task
   - global install script installs release host binaries into the configured prefix and Android update artifacts into runtime-home distribution truth

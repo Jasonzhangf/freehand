@@ -60,13 +60,19 @@
   - allowed callers: `ui.protocol`, tests
   - related tests: result update projection tests
   - why shared: keeps result success/failure display semantics protocol-owned and UI-independent
+- `classify_tool_display_kind`
+  - owner: `crates/freehand-blocks/src/tool_display.rs`
+  - purpose: map tool name and shell command shape to a display class
+  - allowed callers: `app.acp-server` (via `freehand-runtime` typed port), display projector, tests
+  - related tests: tool kind classification tests
+  - why shared: ACP projects tool-call display kind through the same typed owner classifier instead of re-classifying tool names
 
 ## Function Call Table
 
 | step | symbol path | file path | responsibility | input semantic | output semantic | caller | callee | binding status |
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | 01 | `project_tool_call_display` | `crates/freehand-blocks/src/tool_display.rs` | create structured display projection from a tool call | tool name plus arguments | display projection | ui.protocol | tool display owner | bound |
-| 02 | `classify_tool_display_kind` | `crates/freehand-blocks/src/tool_display.rs` | map tool name and shell command shape to a display class | tool name plus arguments | display kind | display projector | classifier | bound |
+| 02 | `classify_tool_display_kind` | `crates/freehand-blocks/src/tool_display.rs` | map tool name and shell command shape to a display class | tool name plus arguments | display kind | display projector, app.acp-server (via freehand-runtime typed port) | classifier | bound |
 | 03 | `parse_read_file_tool_display` | `crates/freehand-blocks/src/tool_display.rs` | parse read/list target fields | tool arguments | read/list display fields | display projector | read parser | bound |
 | 04 | `parse_file_mutation_tool_display` | `crates/freehand-blocks/src/tool_display.rs` | parse write/edit target and diff-oriented fields | tool arguments | mutation display fields | display projector | mutation parser | bound |
 | 05 | `parse_search_tool_display` | `crates/freehand-blocks/src/tool_display.rs` | parse search pattern/path fields | tool arguments | search display fields | display projector | search parser | bound |

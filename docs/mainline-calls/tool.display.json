@@ -54,6 +54,20 @@
         "result update projection tests"
       ],
       "why_shared": "keeps result success/failure display semantics protocol-owned and UI-independent"
+    },
+    {
+      "symbol": "classify_tool_display_kind",
+      "owner": "crates/freehand-blocks/src/tool_display.rs",
+      "purpose": "map tool name and shell command shape to a display class",
+      "allowed_callers": [
+        "app.acp-server",
+        "display projector",
+        "tests"
+      ],
+      "related_tests": [
+        "tool kind classification tests"
+      ],
+      "why_shared": "ACP projects tool-call display kind through the same typed owner classifier instead of re-classifying tool names"
     }
   ],
   "call_table": [
@@ -75,7 +89,7 @@
       "responsibility": "map tool name and shell command shape to a display class",
       "input_semantic": "tool name plus arguments",
       "output_semantic": "display kind",
-      "caller": "display projector",
+      "caller": "display projector, app.acp-server (via freehand-runtime typed port)",
       "callee": "classifier",
       "binding_status": "bound"
     },

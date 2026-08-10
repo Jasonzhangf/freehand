@@ -6,9 +6,10 @@
 //! that adapts the runtime live-reason turn mainline
 //! (`run_live_reason_turn_with_hooks`) onto the ACP method surface, including
 //! streaming `session/update` projections of reasoning, message, tool, and
-//! usage events, plus session lifecycle methods (`session/list`, `session/load`,
-//! `session/resume`, `session/close`) backed by the runtime reason persistence
-//! truth. The internal ADP WebUI surface is left untouched.
+//! tool-result events. Usage events are not projected because the runtime
+//! lacks a provider context-window projection. Session lifecycle is limited
+//! to transport-local session/new, prompt, and cancel; list/load/resume/close
+//! are out of scope. The internal ADP WebUI surface is left untouched.
 
 use std::collections::HashMap;
 use std::path::PathBuf;
@@ -16,39 +17,32 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
 use agent_client_protocol::schema::v1::{
-    AgentCapabilities, AuthenticateRequest, AuthenticateResponse, CancelNotification,
-    CloseSessionRequest, CloseSessionResponse, ContentBlock, ContentChunk, Implementation,
-    InitializeRequest, InitializeResponse, ListSessionsRequest, ListSessionsResponse,
-    LoadSessionRequest, LoadSessionResponse, MessageId, NewSessionRequest, NewSessionResponse,
-    PromptCapabilities, PromptRequest, PromptResponse, ResumeSessionRequest, ResumeSessionResponse,
-    SessionCapabilities, SessionCloseCapabilities, SessionId, SessionInfo, SessionListCapabilities,
-    SessionNotification, SessionResumeCapabilities, SessionUpdate, SetSessionConfigOptionRequest,
-    SetSessionConfigOptionResponse, SetSessionModeRequest, SetSessionModeResponse, StopReason,
-    TextContent, ToolCall, ToolCallId, ToolCallStatus, ToolCallUpdate, ToolCallUpdateFields,
-    ToolKind, UsageUpdate,
+    AgentCapabilities, CancelNotification, ContentBlock, ContentChunk, Implementation,
+    InitializeRequest, InitializeResponse, MessageId, NewSessionRequest, NewSessionResponse,
+    PromptCapabilities, PromptRequest, PromptResponse, SessionId, SessionNotification,
+    SessionUpdate, StopReason, TextContent, ToolCall, ToolCallId, ToolCallStatus, ToolCallUpdate,
+    ToolCallUpdateFields, ToolKind,
 };
 use agent_client_protocol::{Agent, Client, ConnectTo, ConnectionTo, Result};
 use freehand_contracts::{
-    AgentId, ReasonReq04ToolCall, ReasonReq05ToolResultReentry, ReasonResp01SemanticEvent,
-    ReasonResp02UsageEvent, SemanticEventKind, SessionId as RuntimeSessionId, ToolCallContract,
-    ToolResultStatus, TraceId, TurnId,
+    ReasonReq04ToolCall, ReasonReq05ToolResultReentry, ReasonResp01SemanticEvent,
+    ReasonResp02UsageEvent, SemanticEventKind, SessionId as RuntimeSessionId, ToolArgument,
+    ToolCallContract, ToolResultStatus, TraceId, TurnId,
 };
 use freehand_runtime::{
-    LiveReasonExecutionProfile, LiveReasonTurnRequest, ReasonBroadcastEvent, ReasonPersistence,
-    RuntimeLiveBridgeError, TurnRecord, load_default_runtime_agent,
-    run_live_reason_turn_with_hooks,
+    LiveReasonExecutionProfile, LiveReasonTurnRequest, ReasonBroadcastEvent,
+    RuntimeLiveBridgeError, load_default_runtime_agent, run_live_reason_turn_with_hooks,
 };
 
-/// One ACP session binding: working directory, cancel token shared with the
-/// runtime live-reason turn mainline, and ACP-side lifecycle marker. Session
-/// and turn truth lives in the runtime reason persistence; this registry only
-/// holds transport-local handles.
+/// One ACP session binding: working directory and the cancel token shared
+/// with the runtime live-reason turn mainline. Session and turn truth lives
+/// in the runtime reason persistence; this registry only holds
+/// transport-local handles.
 #[derive(Debug)]
 struct AcpSession {
     session_id: SessionId,
     cwd: PathBuf,
     cancel: Arc<AtomicBool>,
-    closed: Arc<AtomicBool>,
 }
 
 type SessionRegistry = Arc<Mutex<HashMap<SessionId, Arc<AcpSession>>>>;
@@ -77,18 +71,12 @@ impl ConnectTo<Client> for FreehandAgent {
             .on_receive_request(
                 async move |req: InitializeRequest, responder, _cx| {
                     let capabilities = AgentCapabilities::new()
-                        .load_session(true)
+                        .load_session(false)
                         .prompt_capabilities(
                             PromptCapabilities::new()
                                 .image(false)
                                 .audio(false)
                                 .embedded_context(false),
-                        )
-                        .session_capabilities(
-                            SessionCapabilities::new()
-                                .list(SessionListCapabilities::new())
-                                .resume(SessionResumeCapabilities::new())
-                                .close(SessionCloseCapabilities::new()),
                         );
                     let resp = InitializeResponse::new(req.protocol_version)
                         .agent_info(
@@ -103,17 +91,6 @@ impl ConnectTo<Client> for FreehandAgent {
                 agent_client_protocol::on_receive_request!(),
             )
             .on_receive_request(
-                async move |req: AuthenticateRequest, responder, _cx| {
-                    // Freehand exposes no ACP auth methods; the SDK's auth
-                    // capability list is empty, so any authenticate call is a
-                    // no-op success that keeps pocketcode-style clients happy.
-                    let _ = req;
-                    responder.respond(AuthenticateResponse::new())?;
-                    Ok(())
-                },
-                agent_client_protocol::on_receive_request!(),
-            )
-            .on_receive_request(
                 {
                     let sessions = Arc::clone(&sessions);
                     async move |req: NewSessionRequest, responder, _cx| {
@@ -122,7 +99,6 @@ impl ConnectTo<Client> for FreehandAgent {
                             session_id: session_id.clone(),
                             cwd: req.cwd,
                             cancel: Arc::new(AtomicBool::new(false)),
-                            closed: Arc::new(AtomicBool::new(false)),
                         });
                         sessions
                             .lock()
@@ -163,140 +139,12 @@ impl ConnectTo<Client> for FreehandAgent {
                                     )),
                                 )
                             })?;
-                        if session.closed.load(Ordering::SeqCst) {
-                            return Err(agent_client_protocol::Error::invalid_params().data(
-                                serde_json::Value::String(format!(
-                                    "session closed: {}",
-                                    req.session_id.0
-                                )),
-                            ));
-                        }
                         let prompt_text = extract_text(&req.prompt);
 
                         let stop_reason =
                             run_prompt_with_reset(&session, &prompt_text, run_turn_blocking, cx)
                                 .await;
                         responder.respond(PromptResponse::new(stop_reason))?;
-                        Ok(())
-                    }
-                },
-                agent_client_protocol::on_receive_request!(),
-            )
-            .on_receive_request(
-                {
-                    let sessions = Arc::clone(&sessions);
-                    async move |req: ListSessionsRequest, responder, cx| {
-                        let _ = (&req, &cx);
-                        let infos = list_sessions(&sessions);
-                        responder.respond(ListSessionsResponse::new(infos))?;
-                        Ok(())
-                    }
-                },
-                agent_client_protocol::on_receive_request!(),
-            )
-            .on_receive_request(
-                {
-                    let sessions = Arc::clone(&sessions);
-                    async move |req: LoadSessionRequest, responder, cx| {
-                        let session = sessions
-                            .lock()
-                            .unwrap()
-                            .get(&req.session_id)
-                            .cloned()
-                            .ok_or_else(|| {
-                                agent_client_protocol::Error::invalid_params().data(
-                                    serde_json::Value::String(format!(
-                                        "unknown session: {}",
-                                        req.session_id.0
-                                    )),
-                                )
-                            })?;
-                        replay_session_history(&session, &cx)?;
-                        responder.respond(LoadSessionResponse::new())?;
-                        Ok(())
-                    }
-                },
-                agent_client_protocol::on_receive_request!(),
-            )
-            .on_receive_request(
-                {
-                    let sessions = Arc::clone(&sessions);
-                    async move |req: ResumeSessionRequest, responder, cx| {
-                        let session = sessions
-                            .lock()
-                            .unwrap()
-                            .get(&req.session_id)
-                            .cloned()
-                            .ok_or_else(|| {
-                                agent_client_protocol::Error::invalid_params().data(
-                                    serde_json::Value::String(format!(
-                                        "unknown session: {}",
-                                        req.session_id.0
-                                    )),
-                                )
-                            })?;
-                        replay_session_history(&session, &cx)?;
-                        responder.respond(ResumeSessionResponse::new())?;
-                        Ok(())
-                    }
-                },
-                agent_client_protocol::on_receive_request!(),
-            )
-            .on_receive_request(
-                {
-                    let sessions = Arc::clone(&sessions);
-                    async move |req: SetSessionModeRequest, responder, _cx| {
-                        let session = sessions
-                            .lock()
-                            .unwrap()
-                            .get(&req.session_id)
-                            .cloned()
-                            .ok_or_else(|| {
-                                agent_client_protocol::Error::invalid_params().data(
-                                    serde_json::Value::String(format!(
-                                        "unknown session: {}",
-                                        req.session_id.0
-                                    )),
-                                )
-                            })?;
-                        let _ = &req.mode_id;
-                        let _ = &session;
-                        responder.respond(SetSessionModeResponse::new())?;
-                        Ok(())
-                    }
-                },
-                agent_client_protocol::on_receive_request!(),
-            )
-            .on_receive_request(
-                {
-                    let sessions = Arc::clone(&sessions);
-                    async move |req: SetSessionConfigOptionRequest, responder, _cx| {
-                        let session = sessions
-                            .lock()
-                            .unwrap()
-                            .get(&req.session_id)
-                            .cloned()
-                            .ok_or_else(|| {
-                                agent_client_protocol::Error::invalid_params().data(
-                                    serde_json::Value::String(format!(
-                                        "unknown session: {}",
-                                        req.session_id.0
-                                    )),
-                                )
-                            })?;
-                        let _ = session;
-                        responder.respond(SetSessionConfigOptionResponse::new(Vec::new()))?;
-                        Ok(())
-                    }
-                },
-                agent_client_protocol::on_receive_request!(),
-            )
-            .on_receive_request(
-                {
-                    let sessions = Arc::clone(&sessions);
-                    async move |req: CloseSessionRequest, responder, _cx| {
-                        try_close_session(&sessions, &req.session_id)?;
-                        responder.respond(CloseSessionResponse::new())?;
                         Ok(())
                     }
                 },
@@ -460,7 +308,8 @@ fn project_broadcast(
         ReasonBroadcastEvent::Usage(usage) => project_usage(session_id, usage),
         // Completion-schema-rejected, model-continuation-waiting, and terminal
         // events are runtime control signals with no ACP session/update
-        // projection; Error is surfaced by AcpBroadcaster before reaching here.
+        // projection; Error is recorded by AcpBroadcaster (error_seen) for
+        // diagnostics and is not projected into a business notification.
         ReasonBroadcastEvent::CompletionSchemaRejected(_)
         | ReasonBroadcastEvent::ModelContinuationWaiting(_)
         | ReasonBroadcastEvent::Terminal(_)
@@ -476,8 +325,15 @@ pub(crate) fn project_semantic(
         return Vec::new();
     }
     let content = ContentBlock::Text(TextContent::new(semantic.content.clone()));
+    // PocketCode groups chunks by messageId; keep thought and answer in
+    // distinct message groups so the client never merges reasoning into the
+    // final answer. The kind prefix is stable per semantic class.
+    let kind_tag = match semantic.kind {
+        SemanticEventKind::Reasoning => "thought",
+        _ => "answer",
+    };
     let chunk = ContentChunk::new(content).message_id(MessageId::new(format!(
-        "acp-msg-{}",
+        "acp-{kind_tag}-{}",
         semantic.turn_id.as_str()
     )));
     let update = match semantic.kind {
@@ -492,7 +348,7 @@ pub(crate) fn project_tool_call(
     tool: &ReasonReq04ToolCall,
 ) -> Vec<SessionNotification> {
     let contract: &ToolCallContract = &tool.tool_call;
-    let kind = tool_kind_for(&contract.tool_name);
+    let kind = tool_kind_for(&contract.tool_name, &contract.arguments);
     let raw_input = serde_json::json!({
         "name": contract.tool_name,
         "arguments": contract
@@ -529,7 +385,9 @@ pub(crate) fn project_tool_result(
     };
     let update = ToolCallUpdate::new(
         ToolCallId::new(result.tool_result.tool_call_id.as_str().to_owned()),
-        ToolCallUpdateFields::new().status(status),
+        ToolCallUpdateFields::new().status(status).content(vec![
+            ContentBlock::Text(TextContent::new(result.tool_result.output.clone())).into(),
+        ]),
     );
     vec![SessionNotification::new(
         session_id.clone(),
@@ -538,116 +396,34 @@ pub(crate) fn project_tool_result(
 }
 
 pub(crate) fn project_usage(
-    session_id: &SessionId,
-    usage: &ReasonResp02UsageEvent,
+    _session_id: &SessionId,
+    _usage: &ReasonResp02UsageEvent,
 ) -> Vec<SessionNotification> {
-    let used = usage.usage.resolved_total_tokens() as usize;
-    // ponytail: the runtime does not yet expose a provider context-window size,
-    // and the ACP SDK requires `size` to be set. We report size == used so we
-    // never fabricate a larger window than we can prove; when the runtime gains
-    // a provider window-size projection, stream that as `size` instead.
-    let size = usage.usage.resolved_total_tokens() as usize;
-    let update = UsageUpdate::new(used as u64, size as u64);
-    vec![SessionNotification::new(
-        session_id.clone(),
-        SessionUpdate::UsageUpdate(update),
-    )]
+    // The runtime does not yet expose a provider context-window size, and the
+    // ACP SDK requires `size` to be set. Rather than fabricate a window size
+    // we cannot prove (which would show a misleading 100%-full progress bar),
+    // do not emit a usage_update until the reason.persistence owner exposes a
+    // typed context-window projection.
+    Vec::new()
 }
 
-pub(crate) fn tool_kind_for(name: &str) -> ToolKind {
-    match name {
-        "read" | "glob" | "grep" | "list" => ToolKind::Read,
-        "edit" | "write" | "apply_patch" => ToolKind::Edit,
-        "delete" | "rm" => ToolKind::Delete,
-        "move" | "rename" => ToolKind::Move,
-        "search" => ToolKind::Search,
-        "execute" | "run" | "bash" => ToolKind::Execute,
-        "think" => ToolKind::Think,
-        "fetch" | "http" => ToolKind::Fetch,
-        "switch_mode" | "mode" => ToolKind::SwitchMode,
-        _ => ToolKind::Other,
+pub(crate) fn tool_kind_for(name: &str, arguments: &[ToolArgument]) -> ToolKind {
+    // Tool display classification is owned by `tool.display`
+    // (crates/freehand-blocks::tool_display). ACP maps that owner's typed
+    // display kind onto the ACP ToolKind enum; it does not re-classify tool
+    // names itself, so the mapping stays consistent with the one classifier.
+    match freehand_runtime::classify_tool_display_kind(name, arguments) {
+        freehand_runtime::ToolDisplayKind::ReadFile | freehand_runtime::ToolDisplayKind::List => {
+            ToolKind::Read
+        }
+        freehand_runtime::ToolDisplayKind::FileMutation => ToolKind::Edit,
+        freehand_runtime::ToolDisplayKind::Search => ToolKind::Search,
+        freehand_runtime::ToolDisplayKind::Shell => ToolKind::Execute,
+        freehand_runtime::ToolDisplayKind::Plan
+        | freehand_runtime::ToolDisplayKind::Task
+        | freehand_runtime::ToolDisplayKind::Timer
+        | freehand_runtime::ToolDisplayKind::Generic => ToolKind::Other,
     }
-}
-
-/// Collect the transport-local sessions into ACP `SessionInfo` entries. The
-/// runtime persistence is the truth for titles and updated-at; entries not
-/// persisted yet carry only their ACP-side identity.
-fn list_sessions(registry: &SessionRegistry) -> Vec<SessionInfo> {
-    let guard = registry.lock().unwrap();
-    guard
-        .iter()
-        .map(|(id, session)| {
-            SessionInfo::new(id.clone(), session.cwd.clone()).title(session.session_id.to_string())
-        })
-        .collect()
-}
-
-/// Replay the persisted history of a session to the client as ACP
-/// `session/update` notifications: the latest user prompt as a
-/// `user_message_chunk`, then the turn's semantic/tool/tool-result events as
-/// full chunks. Replay emits no usage_update. Uses the runtime reason
-/// persistence as the single source of truth.
-fn replay_session_history(
-    session: &AcpSession,
-    cx: &ConnectionTo<Client>,
-) -> Result<(), agent_client_protocol::Error> {
-    let bootstrap = load_default_runtime_agent("master")
-        .map_err(|_| agent_client_protocol::Error::internal_error())?;
-    let persistence = ReasonPersistence::new(
-        bootstrap.runtime_home.clone(),
-        AgentId::new(bootstrap.selected_agent.name.clone()),
-    );
-    let runtime_session_id = RuntimeSessionId::new(session.session_id.to_string());
-    let turns = persistence
-        .restore_turn_snapshots_for_ui(&runtime_session_id)
-        .map_err(|_| agent_client_protocol::Error::internal_error())?;
-    for turn in &turns {
-        emit_replay_turn(&session.session_id, turn, cx)?;
-    }
-    Ok(())
-}
-
-fn emit_replay_turn(
-    session_id: &SessionId,
-    turn: &TurnRecord,
-    cx: &ConnectionTo<Client>,
-) -> Result<(), agent_client_protocol::Error> {
-    for notification in replay_turn_notifications(session_id, turn) {
-        cx.send_notification(notification)?;
-    }
-    Ok(())
-}
-
-/// Project one persisted turn into the ACP `session/update` notifications that
-/// replay emits: a user_message_chunk for the prompt, then semantic/tool/
-/// tool-result full chunks. Replay deliberately emits no usage_update (ACP
-/// replay semantics).
-pub(crate) fn replay_turn_notifications(
-    session_id: &SessionId,
-    turn: &TurnRecord,
-) -> Vec<SessionNotification> {
-    let mut out = Vec::new();
-    let user_text = &turn.request.user_text;
-    if !user_text.trim().is_empty() {
-        let chunk =
-            ContentChunk::new(ContentBlock::Text(TextContent::new(user_text.clone()))).message_id(
-                MessageId::new(format!("acp-replay-user-{}", turn.request.turn_id.as_str())),
-            );
-        out.push(SessionNotification::new(
-            session_id.clone(),
-            SessionUpdate::UserMessageChunk(chunk),
-        ));
-    }
-    for semantic in &turn.semantic_events {
-        out.extend(project_semantic(session_id, semantic));
-    }
-    for tool in &turn.tool_calls {
-        out.extend(project_tool_call(session_id, tool));
-    }
-    for result in &turn.tool_results {
-        out.extend(project_tool_result(session_id, result));
-    }
-    out
 }
 
 /// Monotonic id generator used for ACP session/turn/trace ids.
@@ -659,25 +435,3 @@ fn monotonic_id() -> u64 {
 
 #[cfg(test)]
 mod tests;
-/// Attempt to close an ACP session: marks it closed and cancels any in-flight turn.
-/// Returns the session handle on success, or a typed invalid-params error if the
-/// session is not found.
-pub(crate) fn try_close_session(
-    sessions: &SessionRegistry,
-    session_id: &SessionId,
-) -> Result<Arc<AcpSession>, agent_client_protocol::Error> {
-    let session = sessions
-        .lock()
-        .unwrap()
-        .get(session_id)
-        .cloned()
-        .ok_or_else(|| {
-            agent_client_protocol::Error::invalid_params().data(serde_json::Value::String(format!(
-                "unknown session: {}",
-                session_id.0
-            )))
-        })?;
-    session.closed.store(true, Ordering::SeqCst);
-    session.cancel.store(true, Ordering::SeqCst);
-    Ok(session)
-}

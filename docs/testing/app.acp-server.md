@@ -3,13 +3,14 @@
 - feature_id: `app.acp-server`
 - owner: `crates/freehand-acp`
 - resource map: `docs/resource-maps/core.json`
-- lifecycle: initialize -> session/new -> prompt -> cancel -> close
+- lifecycle: initialize -> session/new -> prompt -> cancel
 
 ## Resource Operation Test Coverage
 
 | operation | status | white-box | module black-box | project black-box |
 | --- | --- | --- | --- | --- |
 | `acp_transport.prompt_turn` | bound | `cargo test -p freehand-acp -- --nocapture` | `cargo test -p freehand-acp extract_text monotonic_id cancel_token -- --nocapture` | `cargo run -p freehand-daemon -- acp` piped initialize + session/new + session/prompt returning stopReason end_turn; session/cancel followed by session/prompt returns stopReason cancelled |
+| `master_work.project_acp_broadcast` | bound | `cargo test -p freehand-acp project_tool_result tool_kind_for -- --nocapture` (deterministic tool-result output content and tool-kind projection) | `cargo test -p freehand-acp -- --nocapture` | `bash scripts/verify-acp-stdio.sh` (wire purity + protocol/session/stopReason on real stdio; streaming projection is white-box covered because real prompts are not deterministic tool fixtures) |
 
 ## White-box
 
@@ -54,3 +55,18 @@
   prompt runs normally (stopReason end_turn) instead of being cancelled again.
   `scripts/verify-acp-stdio.sh` covers both the cancelled and end_turn
   follow-up frames plus the empty-stderr invariant.
+
+## Known Test Gap
+
+- `AcpBroadcaster.send_failed -> StopReason::Refusal` (streaming notification
+  send failure) has no independent unit red test: the SDK `ConnectionTo`
+  requires a full transport stack to construct, so a deterministic failing
+  client is not feasible in a unit harness. The path is covered by review
+  analysis and the e2e empty-stderr/wire-purity assertions. Add a red test
+  when the SDK exposes a testable notification sink.
+- ACP tool-call `ToolKind` projection follows the `tool.display` owner
+  classifier (`classify_tool_display_kind`), so kinds that the old ACP-local
+  classifier mapped to richer kinds (Delete/Move/Fetch/Think/SwitchMode) now
+  collapse to the owner's display class (e.g. `Read`/`Other`). This is the
+  intended de-duplicated semantics, not a regression; the e2e/white-box tests
+  assert the owner-driven classification via `tool_kind_for_uses_display_owner_classification`.

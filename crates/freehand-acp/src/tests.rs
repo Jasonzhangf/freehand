@@ -7,8 +7,18 @@
 //! with a fake turn runner, so the test directly guards the reset code in
 //! `crates/freehand-acp/src/lib.rs`.
 
-use super::{AcpSession, TurnError, extract_text, monotonic_id, run_prompt_with_reset};
-use agent_client_protocol::schema::v1::{ContentBlock, StopReason, TextContent};
+use super::{
+    AcpSession, TurnError, extract_text, monotonic_id, project_tool_result, run_prompt_with_reset,
+    tool_kind_for,
+};
+use agent_client_protocol::schema::v1::{
+    ContentBlock, SessionUpdate, StopReason, TextContent, ToolCallStatus,
+};
+use freehand_contracts::{
+    AgentId, FeatureId, ReasonReq05ToolResultReentry, SessionId as RuntimeSessionId, ToolArgument,
+    ToolResultContract, ToolResultStatus, TraceId, TurnId,
+};
+use serde_json::json;
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
@@ -56,7 +66,6 @@ async fn cancel_does_not_brick_following_prompts() {
         session_id: agent_client_protocol::schema::v1::SessionId::new("acp-test"),
         cwd: PathBuf::from("/tmp"),
         cancel: Arc::new(AtomicBool::new(false)),
-        closed: Arc::new(AtomicBool::new(false)),
     });
 
     // First cancel the session, then prompt: the runner observes the
@@ -80,4 +89,74 @@ fn fake_turn_runner(session: &Arc<AcpSession>, _prompt: &str, _cx: &()) -> Resul
     } else {
         Ok(())
     }
+}
+
+#[test]
+fn project_tool_result_success_carries_output_content() {
+    let session_id = agent_client_protocol::schema::v1::SessionId::new("acp-1");
+    let result = ReasonReq05ToolResultReentry {
+        session_id: RuntimeSessionId::new("acp-1"),
+        turn_id: TurnId::new("t1"),
+        trace_id: TraceId::new("tr1"),
+        feature_id: FeatureId::new("app.acp-server"),
+        agent_id: AgentId::new("master"),
+        tool_result: ToolResultContract {
+            tool_call_id: freehand_contracts::ToolCallId::new("call-1"),
+            status: ToolResultStatus::Success,
+            output: "command output text".to_owned(),
+        },
+    };
+    let notifications = project_tool_result(&session_id, &result);
+    assert_eq!(notifications.len(), 1);
+    match &notifications[0].update {
+        SessionUpdate::ToolCallUpdate(update) => {
+            let fields = &update.fields;
+            assert_eq!(fields.status, Some(ToolCallStatus::Completed));
+            let content = fields
+                .content
+                .as_ref()
+                .expect("tool result must carry output content");
+            assert_eq!(content.len(), 1);
+        }
+        other => panic!("expected ToolCallUpdate, got {other:?}"),
+    }
+}
+
+#[test]
+fn project_tool_result_failed_carries_output_content() {
+    let session_id = agent_client_protocol::schema::v1::SessionId::new("acp-1");
+    let result = ReasonReq05ToolResultReentry {
+        session_id: RuntimeSessionId::new("acp-1"),
+        turn_id: TurnId::new("t1"),
+        trace_id: TraceId::new("tr1"),
+        feature_id: FeatureId::new("app.acp-server"),
+        agent_id: AgentId::new("master"),
+        tool_result: ToolResultContract {
+            tool_call_id: freehand_contracts::ToolCallId::new("call-1"),
+            status: ToolResultStatus::Failed,
+            output: "boom".to_owned(),
+        },
+    };
+    let notifications = project_tool_result(&session_id, &result);
+    match &notifications[0].update {
+        SessionUpdate::ToolCallUpdate(update) => {
+            assert_eq!(update.fields.status, Some(ToolCallStatus::Failed));
+            assert!(update.fields.content.is_some());
+        }
+        other => panic!("expected ToolCallUpdate, got {other:?}"),
+    }
+}
+
+#[test]
+fn tool_kind_for_uses_display_owner_classification() {
+    // read_file classifies as Read through the tool.display owner.
+    assert_eq!(tool_kind_for("read_file", &[]), super::ToolKind::Read);
+    // bash with a read-shaped command (cat) classifies as Read through the
+    // tool.display owner because the owner classifies shell intent; the ACP
+    // adapter only maps the typed kind and never re-implements classification.
+    let args = vec![ToolArgument {
+        name: "command".to_owned(),
+        value: json!("cat file.txt"),
+    }];
+    assert_eq!(tool_kind_for("bash", &args), super::ToolKind::Read);
 }

@@ -1,4 +1,17 @@
 .PHONY: provision-openminis-source build fmt clippy test mainlines gates relay-deployment-smoke relay-local-online ci verify-webui-online verify-webui-release-online release install-global install-symlink install-launchd install-launchdS install-worker-launchd install-worker-launchdS restart-launchd restart-launchdS restart-worker-launchd restart-worker-launchdS uninstall-launchd uninstall-launchdS uninstall-worker-launchd uninstall-worker-launchdS launchd-status launchd-statusS worker-launchd-status worker-launchd-statusS launchd-logs launchd-logsS worker-launchd-logs worker-launchd-logsS hooks
+.PHONY: dev pre-push-fast nightly
+
+# Build/test tiers (from fastest to slowest):
+#   make dev           - fast inner loop: workspace build + fmt + targeted core
+#                        tests + mainlines + gates. Use while iterating.
+#   make pre-push-fast - personal-branch pre-push: dev + workspace clippy +
+#                        relay-deployment-smoke. Skips full workspace test.
+#   make ci            - full release-candidate gate: build + fmt + clippy +
+#                        workspace test + mainlines + gates + relay smokes.
+#                        This is what .githooks/pre-push runs by default.
+#   make nightly       - ci + webui online verifiers. Run on the nightly cron.
+#   make release       - full release: ci + Android JVM regression + release
+#                        binaries + Android APK (invoked separately).
 
 provision-openminis-source:
 	scripts/provision-openminis-source.sh
@@ -27,7 +40,25 @@ relay-deployment-smoke:
 relay-local-online:
 	scripts/verify-remote-relay-local-online.sh
 
+dev: provision-openminis-source
+	cargo build --workspace
+	cargo fmt --check
+	cargo test -p freehand-acp -p freehand-runtime -- --nocapture
+	cargo run -p xtask -- mainlines check
+	cargo run -p xtask -- gates check
+
+pre-push-fast: provision-openminis-source
+	cargo build --workspace
+	cargo fmt --check
+	cargo clippy --workspace --all-targets -- -D warnings
+	cargo test -p freehand-acp -p freehand-runtime
+	cargo run -p xtask -- mainlines check
+	cargo run -p xtask -- gates check
+	scripts/verify-relay-deployment-smoke.sh
+
 ci: provision-openminis-source build fmt clippy test mainlines gates relay-deployment-smoke relay-local-online
+
+nightly: ci verify-webui-online verify-webui-release-online
 
 verify-webui-online:
 	scripts/verify-webui-online.sh

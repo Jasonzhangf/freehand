@@ -14,10 +14,11 @@ protocol/server/handler modules from earlier designs are removed.
 - daemon `freehand-daemon acp` binds a `FreehandAgent` over `Stdio` and
   serves NDJSON JSON-RPC frames until EOF. stdout carries only JSON-RPC
   frames; stderr stays clean.
-- `session/prompt` runs one turn through `run_live_reason_turn` with the
-  per-session cancel token attached. `RuntimeLiveBridgeError::Cancelled`
-  maps to `StopReason::Cancelled`; every other error maps to
-  `StopReason::Refusal`.
+- `session/prompt` runs one turn through `run_live_reason_turn_with_hooks`
+  with the per-session cancel token attached, streaming runtime
+  semantic/tool/tool-result events as ACP `session/update` notifications.
+  `RuntimeLiveBridgeError::Cancelled` maps to `StopReason::Cancelled`; every
+  other error maps to `StopReason::Refusal`.
 - `session/new` records the session working directory; `session/prompt`
   forwards it to `LiveReasonTurnRequest.cwd`.
 - `cargo build --workspace`, `cargo clippy --workspace --all-targets -- -D warnings`,
@@ -56,7 +57,7 @@ It must not depend on `freehand-reason`, `freehand-task`,
 | --- | --- |
 | `initialize` | respond with `InitializeResponse` advertising only the prompt capabilities the adapter handles |
 | `session/new` | allocate transport-local session id and cancel token; record session cwd |
-| `session/prompt` | drive one `run_live_reason_turn` on the tokio blocking pool with the session cwd and cancel token attached |
+| `session/prompt` | drive one `run_live_reason_turn_with_hooks` on the tokio blocking pool with the session cwd and cancel token attached, streaming broadcast events as ACP `session/update` notifications |
 | `session/cancel` | flip the per-session cancel token |
 
 ## 5. Verification Matrix

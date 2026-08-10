@@ -1,0 +1,28 @@
+name: nightly
+
+on:
+  schedule:
+    - cron: "0 20 * * *"
+
+jobs:
+  nightly-gates:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Checkout pinned OpenMinis source
+        uses: actions/checkout@v4
+        with:
+          repository: OpenMinis/OpenMinis
+          ref: 9cf3a855fecd27bb5735b84cacbd56852a3ab8dd
+          path: external/OpenMinis
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@stable
+        with:
+          toolchain: 1.94.1
+          components: rustfmt, clippy
+      - name: Install Swift toolchain
+        uses: swift-actions/setup-swift@v2
+      - name: Cache cargo
+        uses: Swatinem/rust-cache@v2
+      - name: Nightly full gate + online verifiers
+        run: make nightly

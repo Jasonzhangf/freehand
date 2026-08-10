@@ -177,12 +177,7 @@
         "initialize",
         "new_session",
         "cancel_turn",
-        "prompt_turn",
-        "list_sessions",
-        "set_session_mode",
-        "load_session",
-        "resume_session",
-        "close_session"
+        "prompt_turn"
       ],
       "projections": [
         "ACP JSON-RPC responses",
@@ -549,7 +544,8 @@
         "request_suspend",
         "resolve_attention",
         "admit_resolution_context",
-        "clear"
+        "clear",
+        "project_acp_broadcast"
       ],
       "projections": [
         "active Master work identity",
@@ -1423,6 +1419,15 @@
       "source_resource": "acp_transport",
       "target_resource": "master_work",
       "effect": "drive one ACP session/prompt turn through the runtime live-reason turn mainline with a per-session cancel token",
+      "mainline_call_doc": "docs/mainline-calls/app.acp-server.json",
+      "binding_status": "bound"
+    },
+    {
+      "operation_id": "master_work.project_acp_broadcast",
+      "owner_feature_id": "app.acp-server",
+      "source_resource": "master_work",
+      "target_resource": "acp_transport",
+      "effect": "project runtime broadcast events (semantic, tool, tool-result) into ACP session/update notifications streamed to the ACP client; the app.acp-server adapter owns this projection operation because it owns the ACP wire and only consumes master_work's typed broadcast side-channel",
       "mainline_call_doc": "docs/mainline-calls/app.acp-server.json",
       "binding_status": "bound"
     }
@@ -2354,35 +2359,13 @@
     },
     {
       "edge_id": "app.acp-server#05",
-      "operation_id": "acp_transport.prompt_turn",
-      "source_resource": "acp_transport",
-      "target_resource": "master_work",
+      "operation_id": "master_work.project_acp_broadcast",
+      "source_resource": "master_work",
+      "target_resource": "acp_transport",
       "mainline_call_doc": "docs/mainline-calls/app.acp-server.json",
       "call_table_step": "05",
       "file_path": "crates/freehand-acp/src/lib.rs",
       "symbol_path": "AcpBroadcaster::on_broadcast / project_broadcast",
-      "binding_status": "bound"
-    },
-    {
-      "edge_id": "app.acp-server#06",
-      "operation_id": "acp_transport.prompt_turn",
-      "source_resource": "acp_transport",
-      "target_resource": "master_work",
-      "mainline_call_doc": "docs/mainline-calls/app.acp-server.json",
-      "call_table_step": "06",
-      "file_path": "crates/freehand-acp/src/lib.rs",
-      "symbol_path": "replay_session_history / emit_replay_turn",
-      "binding_status": "bound"
-    },
-    {
-      "edge_id": "app.acp-server#07",
-      "operation_id": "acp_transport.prompt_turn",
-      "source_resource": "acp_transport",
-      "target_resource": "master_work",
-      "mainline_call_doc": "docs/mainline-calls/app.acp-server.json",
-      "call_table_step": "07",
-      "file_path": "crates/freehand-acp/src/lib.rs",
-      "symbol_path": "list_sessions",
       "binding_status": "bound"
     }
   ],
@@ -2925,6 +2908,14 @@
       "allowed_direct": true,
       "via_resources": [],
       "reason": "ACP session/prompt drives one live-reason turn through the runtime master-work mainline; ACP owns the transport, not the turn truth."
+    },
+    {
+      "rule_id": "master-work-projects-acp-broadcast-direct",
+      "source_resource": "master_work",
+      "target_resource": "acp_transport",
+      "allowed_direct": true,
+      "via_resources": [],
+      "reason": "Runtime master-work broadcast events are projected into ACP session/update notifications by the app.acp-server adapter; acp_transport owns the wire, not the runtime truth."
     }
   ],
   "forbidden_direct_relations": [

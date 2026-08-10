@@ -90,6 +90,7 @@ use freehand_blocks::{
     CompletionSubmission, completion_schema_rejection_feedback, parse_completion_submission_block,
     strip_completion_submission_block, validate_completion_submission,
 };
+pub use freehand_blocks::{ToolDisplayKind, ToolDisplayOutcome, classify_tool_display_kind};
 #[cfg(test)]
 use freehand_config::SelectedPeerAgentConfig;
 use freehand_config::{
@@ -138,9 +139,10 @@ use freehand_provider_core::{
     build_semantic_request,
 };
 use freehand_provider_executors::production_provider_executor_factory;
-pub use freehand_reason::{
+pub use freehand_reason::ReasonBroadcastEvent;
+use freehand_reason::{
     PersistedSessionIndexEntry, PersistedSessionMetadataEntry, ProviderRawLedgerWrite,
-    ProviderRawScenePosition, ReasonBroadcastEvent, ReasonPersistence, ReasonPersistenceError,
+    ProviderRawScenePosition, ReasonPersistence, ReasonPersistenceError,
     ReasonResp04CompletionSchemaRejected, ReasonResp05ModelContinuationWaiting, ReasonTurnEngine,
     SessionHistory, SessionRollbackMarker, TurnRecord, TurnStartInput,
 };

@@ -6,7 +6,7 @@ Expose Freehand as an Agent Client Protocol (ACP) v1 endpoint. The official
 `agent-client-protocol` Rust SDK owns the wire schema, JSON-RPC framing, and
 stdio transport. `freehand-acp` is a thin adapter that implements the SDK
 `Agent` role and routes `session/prompt` to the Freehand runtime live-reason
-turn mainline (`run_live_reason_turn`). The daemon hosts the adapter over
+turn mainline (`run_live_reason_turn_with_hooks`). The daemon hosts the adapter over
 stdio via `freehand-daemon acp`. ADP remains the internal WebUI transport.
 
 ## Boundary
@@ -21,8 +21,9 @@ agent-client-protocol SDK  (wire, framing, transport, parameter validation)
 freehand-acp  FreehandAgent::connect_to  (initialize / session/new /
         |                                  session/prompt / session/cancel)
         v
-freehand-runtime  run_live_reason_turn  (master_work mainline; turns poll
-                                        LiveReasonCancelToken mid-flight)
+freehand-runtime  run_live_reason_turn_with_hooks  (master_work mainline;
+                                        turns poll LiveReasonCancelToken
+                                        mid-flight and stream broadcast events)
 ```
 
 `freehand-acp` does not own framing, JSON-RPC errors, parameter validation,
@@ -34,8 +35,10 @@ and parameter schema before reaching the adapter. The adapter only:
   per-session cancel token;
 - persists the session working directory on `session/new` and forwards it
   to `LiveReasonTurnRequest.cwd` on `session/prompt`;
-- maps `session/prompt` to one `run_live_reason_turn` call on the tokio
-  blocking pool, with the session cancel token attached;
+- maps `session/prompt` to one `run_live_reason_turn_with_hooks` call on the
+  tokio blocking pool, with the session cancel token attached and broadcast
+  hooks that project runtime semantic/tool/tool-result events into ACP
+  `session/update` notifications streamed to the client;
 - translates the runtime turn outcome into `StopReason::{EndTurn, Cancelled,
   Refusal}`. `RuntimeLiveBridgeError::Cancelled` maps to `StopReason::Cancelled`;
   every other runtime error maps to `StopReason::Refusal`.
@@ -76,8 +79,8 @@ explicit unsupported errors or are advertised as unavailable.
 `session/cancel` is a fire-and-forget notification that flips the
 per-session cancel token atomically. The token is the
 `LiveReasonCancelToken` (an `Arc<AtomicBool>`) shared with
-`run_live_reason_turn`; the runtime polls the token mid-flight and aborts
-the turn with `RuntimeLiveBridgeError::Cancelled` when it sees the flip.
+`run_live_reason_turn_with_hooks`; the runtime polls the token mid-flight and
+aborts the turn with `RuntimeLiveBridgeError::Cancelled` when it sees the flip.
 
 The adapter maps the cancelled runtime error to `StopReason::Cancelled` in
 the `session/prompt` response. A successful in-flight turn returns

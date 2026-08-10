@@ -43,6 +43,25 @@ No feature may claim regression-safe completion unless all three mapped layers p
 - release jobs rerun `make ci` before building release binaries
 - gate failures block commit and push; no bypass-by-default workflow exists
 
+## Build And Test Tiers
+
+To keep inner-loop iteration fast without weakening the release gate, the
+stack is split into tiers. The default push/CI/release gate is always the full
+`make ci`; the faster tiers are convenience entrypoints only and never replace
+`make ci` for a push or release.
+
+| tier | target | scope | used by |
+| --- | --- | --- | --- |
+| dev | `make dev` | provision + workspace build + fmt + targeted core tests (`freehand-acp`, `freehand-runtime`) + mainlines + gates | daily inner-loop iteration on the working tree |
+| pre-push fast | `make pre-push-fast` | dev + workspace clippy + relay-deployment-smoke | manual fast check on personal branches; never used by the push hook |
+| full gate | `make ci` | build + fmt + clippy + `cargo test --workspace` + mainlines + gates + relay-deployment-smoke + relay-local-online | default `.githooks/pre-push`, CI, and release |
+| nightly | `make nightly` | `make ci` + webui online verifiers | nightly cron |
+| release | `make release` | `make ci` + Android JVM regression + release binaries + Android APK | tagged release (invoked separately; itself reruns `make ci`) |
+
+`.githooks/pre-push` always runs `make ci`; there is no hook-selectable fast
+path. `make pre-push-fast` is a manual convenience for local iteration only
+and must never be wired into the push hook or CI.
+
 ## Test Taxonomy
 
 - module white-box: internal semantic behavior of the owner crate, including validator/builder/parser/projector edge cases
