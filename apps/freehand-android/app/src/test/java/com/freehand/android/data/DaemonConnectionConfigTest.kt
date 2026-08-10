@@ -489,4 +489,27 @@ class DaemonConnectionConfigTest {
             .encodeToString(json.toByteArray(StandardCharsets.UTF_8))
         return "freehand://daemon/import?payload=$encoded"
     }
+
+    @Test
+    fun `updateActiveProfile edits active profile host and port and round trips`() {
+        val config = DaemonConnectionConfig.parse(readBundledConfig())
+        val updated = config.updateActiveProfile("100.66.1.82", 4042)
+        val host = updated.activeHostConfig()
+
+        assertEquals("tailscale-main", updated.activeProfile)
+        assertEquals("100.66.1.82", host.host)
+        assertEquals(4042, host.port)
+        assertEquals(4042, updated.profiles.first { it.id == "tailscale-main" }.port)
+    }
+
+    @Test
+    fun `updateActiveProfile rejects invalid port`() {
+        val config = DaemonConnectionConfig.parse(readBundledConfig())
+        try {
+            config.updateActiveProfile("100.66.1.82", 70000)
+            fail("expected DaemonConnectionConfigException for invalid port")
+        } catch (expected: DaemonConnectionConfigException) {
+            assertTrue(expected.message!!.contains("invalid port"))
+        }
+    }
 }

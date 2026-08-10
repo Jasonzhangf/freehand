@@ -6,6 +6,7 @@ import android.animation.ObjectAnimator
 import android.app.NotificationChannel
 import android.app.NotificationManager
 import android.app.PendingIntent
+import android.app.AlertDialog
 import android.content.ActivityNotFoundException
 import android.content.Context
 import android.content.Intent
@@ -33,6 +34,7 @@ import android.webkit.WebViewClient
 import android.widget.FrameLayout
 import android.widget.ImageView
 import android.widget.LinearLayout
+import android.widget.EditText
 import android.widget.ProgressBar
 import android.widget.TextView
 import androidx.activity.OnBackPressedCallback
@@ -46,7 +48,10 @@ import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
 import com.freehand.android.BuildConfig
 import com.freehand.android.data.ClientConfig
+import com.freehand.android.data.DaemonConnectionConfig
+import com.freehand.android.data.DaemonConnectionConfigStore
 import com.freehand.android.data.DaemonConnectionConfigException
+import com.freehand.android.data.HostConfig
 import org.json.JSONArray
 import org.json.JSONObject
 
@@ -70,10 +75,12 @@ class MainActivity : AppCompatActivity() {
     private lateinit var notificationPermissionLauncher: ActivityResultLauncher<String>
     private lateinit var apkUpdater: AndroidApkUpdater
     private var lastApkUpdateStatus: ApkUpdateStatus? = null
+    private var currentHostConfig: HostConfig? = null
+    private var endpointConfigAutoPrompted: Boolean = false
 
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-        val host = loadHostConfigFromStartupIntent()
+        val host = loadHostConfigFromStartupIntent().also { currentHostConfig = it }
         apkUpdater = AndroidApkUpdater(applicationContext, host)
 
         notificationPermissionLauncher = registerForActivityResult(
@@ -555,6 +562,9 @@ class MainActivity : AppCompatActivity() {
     private fun recordAndroidApkUpdateStatus(status: ApkUpdateStatus) {
         lastApkUpdateStatus = status
         emitAndroidApkUpdateStatus(status)
+        if (status.phase == "failed") {
+            promptEndpointConfigIfNeeded()
+        }
     }
 
     private fun emitAndroidApkUpdateStatus(status: ApkUpdateStatus) {
@@ -782,6 +792,89 @@ class MainActivity : AppCompatActivity() {
         if (!::startupStatus.isInitialized || startupOverlay.parent == null) return
         startupStatus.text = message
         startupStatus.setTextColor(Color.rgb(203, 213, 225))
+        promptEndpointConfigIfNeeded()
+    }
+
+    private fun promptEndpointConfigIfNeeded() {
+        if (endpointConfigAutoPrompted || !::startupOverlay.isInitialized || startupOverlay.parent == null) return
+        endpointConfigAutoPrompted = true
+        val current = currentHostConfig
+        showEndpointConfigDialog(
+            initialHost = current?.host ?: "",
+            initialPort = current?.port ?: 0,
+        )
+    }
+
+    private fun showEndpointConfigDialog(initialHost: String, initialPort: Int) {
+        val container = LinearLayout(this).apply {
+            orientation = LinearLayout.VERTICAL
+            setPadding(dp(24), dp(16), dp(24), dp(0))
+        }
+        val hostInput = EditText(this).apply {
+            hint = "Daemon host (e.g. 100.66.1.82)"
+            setText(initialHost)
+            inputType = android.text.InputType.TYPE_CLASS_TEXT or android.text.InputType.TYPE_TEXT_VARIATION_URI
+        }
+        val portInput = EditText(this).apply {
+            hint = "Port (e.g. 4042)"
+            setText(if (initialPort > 0) initialPort.toString() else "")
+            inputType = android.text.InputType.TYPE_CLASS_NUMBER
+        }
+        container.addView(
+            hostInput,
+            LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT,
+            ),
+        )
+        container.addView(
+            portInput,
+            LinearLayout.LayoutParams(
+                LinearLayout.LayoutParams.MATCH_PARENT,
+                LinearLayout.LayoutParams.WRAP_CONTENT,
+            ).apply { topMargin = dp(12) },
+        )
+        AlertDialog.Builder(this)
+            .setTitle("Daemon 配置")
+            .setMessage("配置 Freehand daemon 地址，保存后重新连接。")
+            .setView(container)
+            .setNegativeButton("取消", null)
+            .setPositiveButton("保存") { _, _ ->
+                val host = hostInput.text.toString().trim()
+                val port = portInput.text.toString().trim().toIntOrNull()
+                if (host.isNotEmpty() && port != null) {
+                    saveEndpointConfig(host, port)
+                } else {
+                    showStartupError("配置无效：host 或 port 不能为空")
+                }
+            }
+            .show()
+    }
+
+    private fun saveEndpointConfig(host: String, port: Int) {
+        try {
+            val store = ClientConfig.store(applicationContext)
+            val config = store.load()
+            val updated = config.updateActiveProfile(host, port)
+            store.write(updated)
+            val newHost = updated.activeHostConfig()
+            currentHostConfig = newHost
+            endpointConfigAutoPrompted = false
+            reloadWebUi(newHost)
+        } catch (error: DaemonConnectionConfigException) {
+            Log.e(LOG_TAG, "endpoint config save failed", error)
+            showStartupError("配置保存失败：${error.message}")
+        }
+    }
+
+    private fun reloadWebUi(host: HostConfig) {
+        if (::startupStatus.isInitialized && startupOverlay.parent != null) {
+            startupStatus.text = "正在连接 ${host.baseUrl}"
+            startupStatus.setTextColor(Color.rgb(163, 163, 163))
+        }
+        if (::webView.isInitialized) {
+            webView.loadUrl(host.webUiUrl)
+        }
     }
 
     private fun dp(value: Int): Int = (value * resources.displayMetrics.density).toInt()

@@ -34,6 +34,26 @@ data class DaemonConnectionConfig(
         return profile.toHostConfig()
     }
 
+    fun updateActiveProfile(host: String, port: Int): DaemonConnectionConfig {
+        if (connectionMode == "remote_registry") {
+            throw DaemonConnectionConfigException(
+                "remote registry connection cannot be edited here; use a legacy profile",
+            )
+        }
+        if (port !in 1..65535) {
+            throw DaemonConnectionConfigException("invalid port $port")
+        }
+        val updatedProfiles = profiles.map { profile ->
+            if (profile.id == activeProfile) {
+                profile.copy(host = host, port = port)
+            } else {
+                profile
+            }
+        }
+        val updated = copy(profiles = updatedProfiles)
+        return updated.normalizedAndValidated()
+    }
+
     private fun activeRemoteHostConfig(): HostConfig {
         val daemonId = activeDaemon?.takeIf { it.isNotBlank() }
             ?: throw DaemonConnectionConfigException("activeDaemon is required")
