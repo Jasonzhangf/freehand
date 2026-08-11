@@ -312,4 +312,7 @@
     `cargo test -p freehand-runtime runtime_query_session_search_returns_worker_hits_under_parent_session -- --nocapture --test-threads=1`
   - runtime Diagnostics query bridge is covered by
     `cargo test -p freehand-runtime runtime_query_projects_diagnostics_without_raw_secrets_or_absolute_home -- --nocapture --test-threads=1`
+  - context compaction dispatch is covered by
+    `runtime_compact_session_context_hold_when_no_provider_summary_payload` (positive: persisted history routes through reason.rewrite-policy and returns an explicit hold receipt preserving the request reason) and
+    `runtime_compact_session_context_rejects_missing_recovery_truth_explicitly` (negative: missing persisted recovery truth fails dispatch instead of falling back to an empty history)
   - migrated mainline-call source and generated wiki are kept in sync with this test design

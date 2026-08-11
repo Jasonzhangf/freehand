@@ -441,6 +441,8 @@
 - Tools dashboard query/result DTOs are landed and locked by `cargo test -p freehand-ui-protocol tool_registry -- --nocapture`; protocol-state local query rejection proves the runtime/tool owner supplies the registry projection
 - Search dashboard query/result DTOs are landed and locked by `cargo test -p freehand-ui-protocol session_search -- --nocapture --test-threads=1`; protocol-state local query rejection proves runtime/reason owners supply the search projection
 - Diagnostics query/result DTOs are landed and locked by `cargo test -p freehand-ui-protocol diagnostics_query -- --nocapture`; protocol-state local query rejection proves runtime/debug owners supply the diagnostics projection
+- context compaction command DTO (`CompactSessionContext`) is protocol-bound, owner-routed to `reason.rewrite-policy`, and validated for non-empty session id; runtime supplies the policy/rewrite outcome and must not fabricate a compaction result
+- per-turn usage projection (`UiUsageProjection` on `UiTurnProjection.usage_projection`) carries input/output/reasoning/cache-creation/cache-read tokens, cache-hit-rate bps, context tokens, and compacted-token counters projected from provider usage events
 - the generated wiki must be regenerated from `docs/mainline-calls/ui.protocol.json` when this function-map truth changes
 
 - `accept_query_ingress` is the ADP Query-frame gate: only `UiCommandFrameClass::Query` may enter `handle_adp_query`; mutation frames return `direct_task_mutation_forbidden` before runtime query ports run.

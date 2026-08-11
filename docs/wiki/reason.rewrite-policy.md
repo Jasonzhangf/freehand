@@ -16,6 +16,7 @@ Generated from `docs/mainline-calls/reason.rewrite-policy.json`. Do not edit by 
 - facts stay on the metadata/debug/runtime side, not in request text
 - rewrite policy classifies whether the next action is hold, soft notice, prune-only, compaction, rollback, resume rebuild, or explicit block
 - if the policy selects a rewrite-bearing action, runtime later calls the matching `SessionHistory` gate in `freehand-reason`
+- CompactSessionContext dispatch restores the persisted session history and feeds a compaction policy request (manual reason, no provider summary payload yet) through apply_compaction_policy; missing persisted recovery truth fails dispatch explicitly before policy runs
 
 ## Response Mainline
 

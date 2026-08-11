@@ -403,4 +403,5 @@
 - final live projection now keeps each runtime round as its own UI turn so earlier-round tool activity cannot be merged into the final latest turn
 - failed live bridge tool execution now refreshes runtime UI state from persisted failed turn truth before returning the dispatch error, so WebUI query/SSE can observe failure instead of waiting forever
 - early live provider/protocol failure now creates a persisted failed turn and session projection instead of falling back to non-live submit or returning transport-only dispatch failure
+- context compaction dispatch restores the persisted session history from reason.persistence, runs `ReasonRewriteRuntime::apply_compaction_policy` through `reason.rewrite-policy` truth with the request reason, and returns an explicit hold/soft-notice/stale-prune/staged receipt; missing persisted recovery truth fails dispatch explicitly instead of falling back to an empty history, and the reason payload is preserved in the receipt status
 - migrated mainline-call source now lives at `docs/mainline-calls/runtime.ui-command-dispatch.json` and generated wiki lives at `docs/wiki/runtime.ui-command-dispatch.md`

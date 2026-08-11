@@ -46,7 +46,8 @@
     "session management commands (`CreateSession`, `RenameSession`, `ArchiveSession`, `RestoreSession`, `DeleteSession`, `RollbackLatestSessionTurn`) are mutation intents only; protocol validates and routes them while `reason.persistence` owns durable metadata and rollback truth",
     "task list subscribe commands are protocol-owned ADP/subscribe shapes while task truth remains runtime/task-owner supplied",
     "error-center subscribe commands are protocol-owned ADP/subscribe shapes while error truth remains runtime/error-center supplied",
-    "Diagnostics QueryDiagnostics is a protocol-owned read-only ADP query shape; protocol defines UiDiagnosticsProjection and UiDiagnosticLogFileProjection while runtime/debug owners supply safe log metadata and redacted tail truth."
+    "Diagnostics QueryDiagnostics is a protocol-owned read-only ADP query shape; protocol defines UiDiagnosticsProjection and UiDiagnosticLogFileProjection while runtime/debug owners supply safe log metadata and redacted tail truth.",
+    "CompactSessionContext is a protocol-owned mutation command shape validated for non-empty session id and routed to reason.rewrite-policy; runtime supplies the policy/rewrite outcome and must not fabricate a compaction result"
   ],
   "response_mainline": [
     "query returns snapshots",
@@ -57,6 +58,7 @@
     "ADP protocol export returns a deterministic public manifest with protocol_version, handshake capability, request/response kinds, public command serde names, frame classes, and owner feature ids, plus a WebUI module exposing adpQueryOf, adpCommandOf, and adpSubscribeOf constructors; internal owner module paths and internal scheduler/worker command names stay out of served/generated artifacts and public CommandReceipt responses",
     "projections are read-only views over owner-written truth",
     "model request lifecycle is projected as UiModelRequestActivity inside UiTurnProjection for ordinary thinking, schema retry, and tool-result continuation; provider retry/failover are transport substate on the same activity, not separate reasoning-flow phases, and the activity clears when response/tool/usage/terminal/error projection arrives",
+    "per-turn usage is projected as UiUsageProjection inside UiTurnProjection.usage_projection with input/output/reasoning/cache tokens, cache-hit-rate bps, context tokens, and compacted-token counters; protocol exposes the projection while provider usage truth stays reason-owned",
     "terminal completion shows only final projected text",
     "public conversation projection preserves the user prompt while stripping raw completion schema blocks and excluding reasoning, usage, provider payload, debug details, and verbose tool term text from the main user-visible stream",
     "debug state is projected as a read-only per-turn snapshot/stream with summary text plus ordered detail lines",

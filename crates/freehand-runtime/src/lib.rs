@@ -4455,16 +4455,17 @@ impl RuntimeCommandDispatcher {
         );
         let (mut history, _restored_closed_turns) = match persistence.restore(&session_id) {
             Ok(restored) => (restored.history, restored.closed_turns.len()),
-            Err(ReasonPersistenceError::MissingRecoveryTruth(_)) => (
-                SessionHistory::new(session_id.clone(), Vec::new())
-                    .map_err(|err| UiCommandDispatchPortError::DispatchFailed(err.to_string()))?,
-                0,
-            ),
+            Err(ReasonPersistenceError::MissingRecoveryTruth(_)) => {
+                return Err(UiCommandDispatchPortError::DispatchFailed(format!(
+                    "session context compaction requires persisted recovery truth for `{}`",
+                    session_id.as_str()
+                )));
+            }
             Err(err) => {
                 return Err(UiCommandDispatchPortError::DispatchFailed(err.to_string()));
             }
         };
-        let _ = reason;
+        let reason_text = reason.unwrap_or_else(|| "manual compaction request".to_owned());
         let request = CompactionPolicyRequest {
             context_window_tokens: None,
             prompt_tokens: None,
@@ -4492,7 +4493,11 @@ impl RuntimeCommandDispatcher {
         Ok(UiCommandDispatchReceipt {
             ingress: envelope.ingress,
             target_feature_id: envelope.target_feature_id,
-            dispatch_status: format!("{status}:session={}", session_id.as_str()),
+            dispatch_status: format!(
+                "{status}:session={}:reason={}",
+                session_id.as_str(),
+                reason_text
+            ),
         })
     }
 

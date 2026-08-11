@@ -54,6 +54,7 @@ Generated from `docs/mainline-calls/runtime.ui-command-dispatch.json`. Do not ed
 - Phase 2 Search dashboard QuerySessionSearch routes through runtime into reason.persistence persisted session index/metadata truth and task.orchestration TaskBoard parent-session truth; runtime returns persisted Master/user sessions only as top-level results and nests Worker matches under the owning parent session.
 - Diagnostics QueryDiagnostics routes through runtime into runtime-home log truth under ~/.freehand/logs; runtime projects file metadata and bounded redacted tail lines only, without exposing absolute user paths, provider raw payloads, secrets, or non-log files.
 - runtime passes Phase 2B replay_from_start and maps omitted limit to the owner full-drain sentinel so closeout samples can ignore stale persisted cursors and consume all pending events instead of only the first page
+- CompactSessionContext enters through RuntimeCommandDispatcher::dispatch, restores the persisted session history from reason.persistence, runs ReasonRewriteRuntime::apply_compaction_policy with the request reason (or a manual-compaction default) through reason.rewrite-policy truth, and returns an explicit compaction_hold/soft_notice/stale_prune/staged receipt without fabricating a rewrite result; missing persisted recovery truth fails dispatch explicitly instead of falling back to an empty history
 
 ## Response Mainline
 

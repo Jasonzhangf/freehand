@@ -4984,7 +4984,8 @@ function renderComposerContextStrip() {
   setText("context-stat-cache-avg", `平均 ${formatPercentBps(avgBps)}`);
   setText("context-stat-thinking", `思考 ${formatTokenCount(thinking)}`);
   setText("context-stat-context", `上下文 ${formatTokenCount(context)}`);
-  setText("context-stat-compacted", `压缩 ${formatTokenCount(compacted)}`);
+  const compactedText = compacted > 0 ? `压缩 ${formatTokenCount(compacted)}` : "压缩 --";
+  setText("context-stat-compacted", compactedText);
 }
 
 function requestContextCompaction() {

@@ -531,8 +531,8 @@ pub(crate) const UI_COMMAND_DESCRIPTORS: &[UiCommandDescriptor] = &[
         serde_name: "CompactSessionContext",
         semantic_kind: "compact_session_context",
         frame_class: UiCommandFrameClass::Mutation,
-        target_owner_feature: "reason.rewrite",
-        target_owner_module: "crates/freehand-reason",
+        target_owner_feature: "reason.rewrite-policy",
+        target_owner_module: "crates/freehand-blocks",
         exposure: UiAdpCommandExposure::Public,
     },
 ];

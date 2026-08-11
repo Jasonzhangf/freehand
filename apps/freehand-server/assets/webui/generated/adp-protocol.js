@@ -375,7 +375,7 @@ export const ADP_PROTOCOL_MANIFEST = Object.freeze({
       "serde_name": "CompactSessionContext",
       "semantic_kind": "compact_session_context",
       "frame_class": "mutation",
-      "target_owner_feature": "reason.rewrite"
+      "target_owner_feature": "reason.rewrite-policy"
     }
   ]
 });

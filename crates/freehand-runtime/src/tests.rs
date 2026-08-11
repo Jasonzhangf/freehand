@@ -2112,6 +2112,101 @@ fn runtime_dispatches_session_crud_into_shared_ui_projection() {
 }
 
 #[test]
+fn runtime_compact_session_context_hold_when_no_provider_summary_payload() {
+    let runtime_home = temp_runtime_home();
+    let selected = live_selected_agent(
+        "http://127.0.0.1:1".to_owned(),
+        freehand_config::ProviderType::Anthropic,
+    );
+    let runtime = RuntimeCommandDispatcher::from_selected_agent_with_live(
+        &selected,
+        runtime_home.clone(),
+        false,
+    )
+    .expect("runtime bootstrap");
+    let session_id = SessionId::new("compact-hold-session");
+    let mut history = SessionHistory::new(session_id.clone(), Vec::new()).expect("session history");
+    let engine = ReasonTurnEngine::new();
+    let turn = engine
+        .start_turn(
+            &mut history,
+            TurnStartInput {
+                session_id: session_id.clone(),
+                turn_id: TurnId::new("runtime-turn-1"),
+                trace_id: TraceId::new("compact-hold-trace"),
+                feature_id: FeatureId::new("reason.turn"),
+                agent_id: AgentId::new(selected.name.clone()),
+                user_text: "compact me".to_owned(),
+                planned_context_segments: Vec::new(),
+                tool_schema_fingerprint: None,
+                model: "MiniMax-M2.7".to_owned(),
+            },
+        )
+        .expect("start turn");
+    let persistence =
+        ReasonPersistence::new(runtime_home.clone(), AgentId::new(selected.name.clone()));
+    persistence
+        .record_turn_started(&history, &turn, 0)
+        .expect("persist turn start");
+
+    let compact = build_command_dispatch_envelope(&UiCommand::CompactSessionContext {
+        session_id: session_id.clone(),
+        reason: Some("manual compaction request".to_owned()),
+    })
+    .expect("compact envelope");
+    let receipt = runtime.dispatch(compact).expect("compact dispatch");
+    assert_eq!(receipt.target_feature_id, "reason.rewrite-policy");
+    assert!(
+        receipt.dispatch_status.starts_with("compaction_hold:"),
+        "expected compaction_hold receipt, got `{}`",
+        receipt.dispatch_status
+    );
+    assert!(
+        receipt
+            .dispatch_status
+            .contains("reason=manual compaction request")
+    );
+
+    fs::remove_dir_all(runtime_home).expect("cleanup runtime home");
+}
+
+#[test]
+fn runtime_compact_session_context_rejects_missing_recovery_truth_explicitly() {
+    let runtime_home = temp_runtime_home();
+    let selected = live_selected_agent(
+        "http://127.0.0.1:1".to_owned(),
+        freehand_config::ProviderType::Anthropic,
+    );
+    let runtime = RuntimeCommandDispatcher::from_selected_agent_with_live(
+        &selected,
+        runtime_home.clone(),
+        false,
+    )
+    .expect("runtime bootstrap");
+    let session_id = SessionId::new("compact-missing-truth-session");
+
+    let compact = build_command_dispatch_envelope(&UiCommand::CompactSessionContext {
+        session_id: session_id.clone(),
+        reason: None,
+    })
+    .expect("compact envelope");
+    let err = runtime
+        .dispatch(compact)
+        .expect_err("missing recovery truth must fail explicitly");
+    match err {
+        UiCommandDispatchPortError::DispatchFailed(message) => {
+            assert!(
+                message.contains("requires persisted recovery truth"),
+                "unexpected failure message: {message}"
+            );
+        }
+        other => panic!("expected DispatchFailed, got {other:?}"),
+    }
+
+    fs::remove_dir_all(runtime_home).expect("cleanup runtime home");
+}
+
+#[test]
 fn runtime_timer_ui_commands_persist_and_project_owner_truth() {
     let runtime_home = temp_runtime_home();
     let runtime = RuntimeCommandDispatcher::from_selected_agent_with_live(

@@ -224,6 +224,37 @@ fn command_to_projection_smoke() {
 }
 
 #[test]
+fn usage_projection_carries_cache_hit_and_context_tokens() {
+    let projection = sample_turn_projection(false);
+    let usage = projection
+        .usage_projection
+        .as_ref()
+        .expect("usage_projection must be populated from usage events");
+    assert_eq!(usage.input_tokens, 10);
+    assert_eq!(usage.output_tokens, 5);
+    assert_eq!(usage.reasoning_tokens, Some(3));
+    assert_eq!(usage.context_tokens, 10);
+    assert_eq!(usage.cache_hit_rate_bps, 0);
+    assert_eq!(usage.compacted_tokens, 0);
+}
+
+#[test]
+fn compact_session_context_roundtrips_through_wire_and_validates() {
+    let command = UiCommand::CompactSessionContext {
+        session_id: SessionId::new("webui-compact-session"),
+        reason: Some("manual compaction request".to_owned()),
+    };
+    validate_command(&command).expect("valid command");
+    let encoded = serde_json::to_string(&command).expect("json");
+    assert!(encoded.contains("webui-compact-session"));
+    let decoded: UiCommand = serde_json::from_str(&encoded).expect("decode");
+    assert_eq!(decoded, command);
+    let descriptor = command_descriptor(&command);
+    assert_eq!(descriptor.target_owner_feature, "reason.rewrite-policy");
+    assert_eq!(command_frame_class(&command), UiCommandFrameClass::Mutation);
+}
+
+#[test]
 fn submit_user_input_accepts_optional_session_id() {
     let command = UiCommand::SubmitUserInput {
         text: "hello new session".to_owned(),
