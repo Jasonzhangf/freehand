@@ -180,6 +180,13 @@ const attachmentFileInput = document.getElementById("attachment-file-input");
 const attachmentImageInput = document.getElementById("attachment-image-input");
 const attachmentVideoInput = document.getElementById("attachment-video-input");
 const attachmentTray = document.getElementById("attachment-tray");
+const composerContextStrip = document.getElementById("composer-context-strip");
+const compactContextButton = document.getElementById("compact-context-button");
+const contextStatCacheHit = document.getElementById("context-stat-cache-hit");
+const contextStatCacheAvg = document.getElementById("context-stat-cache-avg");
+const contextStatThinking = document.getElementById("context-stat-thinking");
+const contextStatContext = document.getElementById("context-stat-context");
+const contextStatCompacted = document.getElementById("context-stat-compacted");
 
 const samplePrompts = {
   success:
@@ -4430,6 +4437,7 @@ function renderCommandStatus() {
 
 function renderMessages() {
   updateComposerClearance();
+  renderComposerContextStrip();
   const wasNearBottom = messageListIsNearBottom();
   const shouldStickToBottom =
     state.forceScrollToBottom || (!state.userScrollLocked && wasNearBottom);
@@ -4924,6 +4932,102 @@ function updateComposerClearance() {
   const clearance = Math.max(96, height + 28);
   shell.style.setProperty("--composer-clearance", `${clearance}px`);
   document.documentElement.style.setProperty("--composer-clearance", `${clearance}px`);
+}
+
+function formatTokenCount(tokens) {
+  const value = Number(tokens) || 0;
+  if (value >= 1_000_000) {
+    return `${(value / 1_000_000).toFixed(1)}M`;
+  }
+  if (value >= 1_000) {
+    return `${(value / 1_000).toFixed(1)}k`;
+  }
+  return `${value}`;
+}
+
+function formatPercentBps(bps) {
+  const value = Number(bps) || 0;
+  if (value <= 0) {
+    return "--";
+  }
+  return `${(value / 100).toFixed(1)}%`;
+}
+
+function currentSessionUsageProjections() {
+  return conversationTurnsForRender()
+    .map((turn) => turn && turn.usage_projection)
+    .filter(Boolean);
+}
+
+function renderComposerContextStrip() {
+  if (!composerContextStrip) {
+    return;
+  }
+  const projections = currentSessionUsageProjections();
+  const latest = projections[projections.length - 1] || null;
+  const hasData = !!latest;
+  composerContextStrip.hidden = !hasData;
+  if (!hasData) {
+    return;
+  }
+
+  const hit = latest.cache_hit_rate_bps || 0;
+  const readTotal = projections.reduce((sum, p) => sum + (Number(p.cache_read_tokens) || 0), 0);
+  const createTotal = projections.reduce((sum, p) => sum + (Number(p.cache_creation_tokens) || 0), 0);
+  const cachePool = readTotal + createTotal;
+  const avgBps = cachePool > 0 ? Math.round((readTotal / cachePool) * 10000) : 0;
+  const thinking = latest.reasoning_tokens || 0;
+  const context = Number(latest.context_tokens) || 0;
+  const compacted = projections.reduce((sum, p) => sum + (Number(p.compacted_tokens) || 0), 0);
+
+  setText("context-stat-cache-hit", `缓存 ${formatPercentBps(hit)}`);
+  setText("context-stat-cache-avg", `平均 ${formatPercentBps(avgBps)}`);
+  setText("context-stat-thinking", `思考 ${formatTokenCount(thinking)}`);
+  setText("context-stat-context", `上下文 ${formatTokenCount(context)}`);
+  setText("context-stat-compacted", `压缩 ${formatTokenCount(compacted)}`);
+}
+
+function requestContextCompaction() {
+  const latest = currentSessionUsageProjections()[currentSessionUsageProjections().length - 1];
+  const sessionId = state.selectedSessionId || (latest && latest.session_id) || "";
+  if (!sessionId) {
+    return;
+  }
+  dispatchWebUiEdge("session.compact_context", {
+    session_id: sessionId,
+    reason: "manual compaction request",
+  });
+  if (compactContextButton) {
+    compactContextButton.disabled = true;
+  }
+  setCommandStatus("正在请求压缩上下文...", { stickyMs: 8000 });
+  adpCommand(adpCommandOf("CompactSessionContext", {
+    session_id: sessionId,
+    reason: "manual compaction request",
+  }))
+    .then((receipt) => {
+      const status = (receipt && receipt.dispatch_status) || "";
+      if (status.startsWith("compaction_hold") || status.startsWith("compaction_stale_prune") || status.startsWith("compaction_staged")) {
+        setCommandStatus(`压缩暂不可执行（当前未接入模型摘要生成）: ${status}`, { stickyMs: 9000 });
+      } else if (status.startsWith("compaction_soft_notice")) {
+        setCommandStatus(`上下文接近压缩阈值，暂保持前缀: ${status}`, { stickyMs: 9000 });
+      } else {
+        setCommandStatus(`压缩请求已受理: ${status}`, { stickyMs: 9000 });
+      }
+      if (compactContextButton) {
+        compactContextButton.disabled = false;
+      }
+    })
+    .catch((error) => {
+      setCommandStatus(`压缩请求失败: ${error && error.message}`, { stickyMs: 9000 });
+      if (compactContextButton) {
+        compactContextButton.disabled = false;
+      }
+    });
+}
+
+if (compactContextButton) {
+  compactContextButton.addEventListener("click", requestContextCompaction);
 }
 
 function isDraftSessionId(sessionId) {

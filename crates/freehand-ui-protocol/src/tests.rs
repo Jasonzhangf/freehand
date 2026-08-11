@@ -1743,6 +1743,7 @@ fn session_latest_status_does_not_call_text_only_turn_streaming() {
         tool_calls: Vec::new(),
         tool_activities: Vec::new(),
         usage: Vec::new(),
+        usage_projection: None,
         terminal_status: None,
         terminal_text: None,
         errors: Vec::new(),

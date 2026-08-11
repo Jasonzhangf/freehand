@@ -86,8 +86,9 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 #[cfg(test)]
 use chrono::{Datelike, Timelike};
 use freehand_blocks::{
-    CompletionClaim, CompletionDecision, CompletionSchemaIssue, CompletionSchemaRejection,
-    CompletionSubmission, completion_schema_rejection_feedback, parse_completion_submission_block,
+    CompactionTriggerAction, CompletionClaim, CompletionDecision, CompletionSchemaIssue,
+    CompletionSchemaRejection, CompletionSubmission, RewritePolicyThresholds,
+    completion_schema_rejection_feedback, parse_completion_submission_block,
     strip_completion_submission_block, validate_completion_submission,
 };
 pub use freehand_blocks::{ToolDisplayKind, ToolDisplayOutcome, classify_tool_display_kind};
@@ -141,10 +142,11 @@ use freehand_provider_core::{
 use freehand_provider_executors::production_provider_executor_factory;
 pub use freehand_reason::ReasonBroadcastEvent;
 use freehand_reason::{
-    PersistedSessionIndexEntry, PersistedSessionMetadataEntry, ProviderRawLedgerWrite,
-    ProviderRawScenePosition, ReasonPersistence, ReasonPersistenceError,
-    ReasonResp04CompletionSchemaRejected, ReasonResp05ModelContinuationWaiting, ReasonTurnEngine,
-    SessionHistory, SessionRollbackMarker, TurnRecord, TurnStartInput,
+    CompactionPolicyRequest, PersistedSessionIndexEntry, PersistedSessionMetadataEntry,
+    ProviderRawLedgerWrite, ProviderRawScenePosition, ReasonPersistence, ReasonPersistenceError,
+    ReasonResp04CompletionSchemaRejected, ReasonResp05ModelContinuationWaiting,
+    ReasonRewriteRuntime, ReasonTurnEngine, RewriteRuntimeState, SessionHistory,
+    SessionRollbackMarker, TurnRecord, TurnStartInput,
 };
 use freehand_task::{
     AgentCreateRequest, AgentLifecycleActivity, AgentLifecycleSnapshot, AgentLifecycleState,
@@ -4435,6 +4437,65 @@ impl RuntimeCommandDispatcher {
         )))
     }
 
+    fn dispatch_compact_session_context(
+        &self,
+        state: &mut RuntimeCommandDispatcherState,
+        envelope: UiCommandDispatchEnvelope,
+        session_id: SessionId,
+        reason: Option<String>,
+    ) -> Result<UiCommandDispatchReceipt, UiCommandDispatchPortError> {
+        let live = state.config.live.as_ref().ok_or_else(|| {
+            UiCommandDispatchPortError::Unsupported(
+                "session context compaction requires a live runtime home".to_owned(),
+            )
+        })?;
+        let persistence = ReasonPersistence::new(
+            live.runtime_home.clone(),
+            state.config.reason_agent_id.clone(),
+        );
+        let (mut history, _restored_closed_turns) = match persistence.restore(&session_id) {
+            Ok(restored) => (restored.history, restored.closed_turns.len()),
+            Err(ReasonPersistenceError::MissingRecoveryTruth(_)) => (
+                SessionHistory::new(session_id.clone(), Vec::new())
+                    .map_err(|err| UiCommandDispatchPortError::DispatchFailed(err.to_string()))?,
+                0,
+            ),
+            Err(err) => {
+                return Err(UiCommandDispatchPortError::DispatchFailed(err.to_string()));
+            }
+        };
+        let _ = reason;
+        let request = CompactionPolicyRequest {
+            context_window_tokens: None,
+            prompt_tokens: None,
+            provider_usage: None,
+            estimated_stale_reclaim_tokens: None,
+            compaction_payload: None,
+            thresholds: RewritePolicyThresholds::default(),
+        };
+        let mut runtime_state = RewriteRuntimeState::default();
+        let outcome = ReasonRewriteRuntime::new()
+            .apply_compaction_policy(&mut history, &mut runtime_state, request)
+            .map_err(|err| {
+                UiCommandDispatchPortError::DispatchFailed(format!(
+                    "compaction policy failed: {err}"
+                ))
+            })?;
+        let status = match outcome.decision.action {
+            CompactionTriggerAction::Hold => "compaction_hold:provider_summary_payload_required",
+            CompactionTriggerAction::EmitSoftNotice => "compaction_soft_notice",
+            CompactionTriggerAction::PruneStaleOnly => "compaction_stale_prune_only",
+            CompactionTriggerAction::StageCompaction { .. } => {
+                "compaction_staged:requires_provider_summary_payload"
+            }
+        };
+        Ok(UiCommandDispatchReceipt {
+            ingress: envelope.ingress,
+            target_feature_id: envelope.target_feature_id,
+            dispatch_status: format!("{status}:session={}", session_id.as_str()),
+        })
+    }
+
     fn dispatch_session_management(
         &self,
         state: &mut RuntimeCommandDispatcherState,
@@ -5569,6 +5630,9 @@ impl UiCommandDispatchPort for RuntimeCommandDispatcher {
                 self.dispatch_cancel_timer(&mut state, envelope, timer_id)
             }
             UiCommand::ResumeTurn { turn_id } => self.dispatch_resume_turn(envelope, turn_id),
+            UiCommand::CompactSessionContext { session_id, reason } => {
+                self.dispatch_compact_session_context(&mut state, envelope, session_id, reason)
+            }
             UiCommand::SendDirectMessageToSlave { node_id, text } => {
                 self.dispatch_direct_message(&mut state, envelope, node_id, text)
             }

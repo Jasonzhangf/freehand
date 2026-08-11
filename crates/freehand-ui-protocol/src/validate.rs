@@ -39,6 +39,7 @@ pub fn validate_command(command: &UiCommand) -> Result<(), UiProtocolError> {
         | UiCommand::RestoreSession { session_id }
         | UiCommand::DeleteSession { session_id }
         | UiCommand::RollbackLatestSessionTurn { session_id }
+        | UiCommand::CompactSessionContext { session_id, .. }
             if session_id.as_str().trim().is_empty() =>
         {
             Err(UiProtocolError::EmptySessionId)

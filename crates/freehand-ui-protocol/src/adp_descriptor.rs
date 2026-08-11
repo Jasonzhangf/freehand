@@ -527,6 +527,14 @@ pub(crate) const UI_COMMAND_DESCRIPTORS: &[UiCommandDescriptor] = &[
         target_owner_module: "crates/freehand-reason",
         exposure: UiAdpCommandExposure::Public,
     },
+    UiCommandDescriptor {
+        serde_name: "CompactSessionContext",
+        semantic_kind: "compact_session_context",
+        frame_class: UiCommandFrameClass::Mutation,
+        target_owner_feature: "reason.rewrite",
+        target_owner_module: "crates/freehand-reason",
+        exposure: UiAdpCommandExposure::Public,
+    },
 ];
 
 pub(crate) fn command_descriptor_by_serde_name(serde_name: &str) -> &'static UiCommandDescriptor {
@@ -649,6 +657,9 @@ pub(crate) fn command_descriptor(command: &UiCommand) -> &'static UiCommandDescr
             command_descriptor_by_serde_name("CancelLatestActiveTurn")
         }
         UiCommand::ResumeTurn { .. } => command_descriptor_by_serde_name("ResumeTurn"),
+        UiCommand::CompactSessionContext { .. } => {
+            command_descriptor_by_serde_name("CompactSessionContext")
+        }
     }
 }
 
@@ -766,11 +777,31 @@ pub fn turn_projection_from_events(input: TurnProjectionInput) -> UiTurnProjecti
             .iter()
             .map(|usage| {
                 format!(
-                    "input={} output={}",
-                    usage.usage.input_tokens, usage.usage.output_tokens
+                    "input={} output={} cache_create={} cache_read={} reasoning={}",
+                    usage.usage.input_tokens,
+                    usage.usage.output_tokens,
+                    usage.usage.cache_creation_tokens,
+                    usage.usage.cache_read_tokens,
+                    usage.usage.reasoning_tokens.unwrap_or(0)
                 )
             })
             .collect(),
+        usage_projection: input.usage_events.last().map(|usage| UiUsageProjection {
+            input_tokens: usage.usage.input_tokens,
+            output_tokens: usage.usage.output_tokens,
+            total_tokens: usage.usage.resolved_total_tokens(),
+            reasoning_tokens: usage.usage.reasoning_tokens,
+            cache_creation_tokens: usage.usage.cache_creation_tokens,
+            cache_read_tokens: usage.usage.cache_read_tokens,
+            cache_hit_rate_bps: (usage.usage.cache_hit_rate() * 10000.0).round() as u64,
+            context_tokens: usage
+                .usage
+                .input_tokens
+                .saturating_add(usage.usage.cache_creation_tokens)
+                .saturating_add(usage.usage.cache_read_tokens),
+            compacted_tokens: 0,
+            model_label: None,
+        }),
         terminal_status: input
             .terminal_event
             .as_ref()

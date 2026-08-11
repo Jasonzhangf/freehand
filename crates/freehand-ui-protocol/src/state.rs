@@ -460,9 +460,29 @@ impl UiProtocolState {
                 slave_substream_card,
             );
             projection.usage.push(format!(
-                "input={} output={}",
-                event.usage.input_tokens, event.usage.output_tokens
+                "input={} output={} cache_create={} cache_read={} reasoning={}",
+                event.usage.input_tokens,
+                event.usage.output_tokens,
+                event.usage.cache_creation_tokens,
+                event.usage.cache_read_tokens,
+                event.usage.reasoning_tokens.unwrap_or(0)
             ));
+            projection.usage_projection = Some(crate::dto::UiUsageProjection {
+                input_tokens: event.usage.input_tokens,
+                output_tokens: event.usage.output_tokens,
+                total_tokens: event.usage.resolved_total_tokens(),
+                reasoning_tokens: event.usage.reasoning_tokens,
+                cache_creation_tokens: event.usage.cache_creation_tokens,
+                cache_read_tokens: event.usage.cache_read_tokens,
+                cache_hit_rate_bps: (event.usage.cache_hit_rate() * 10000.0).round() as u64,
+                context_tokens: event
+                    .usage
+                    .input_tokens
+                    .saturating_add(event.usage.cache_creation_tokens)
+                    .saturating_add(event.usage.cache_read_tokens),
+                compacted_tokens: 0,
+                model_label: None,
+            });
             projection.model_request = None;
             projection.clone()
         };
@@ -726,6 +746,7 @@ impl UiProtocolState {
                 tool_calls: Vec::new(),
                 tool_activities: Vec::new(),
                 usage: Vec::new(),
+                usage_projection: None,
                 terminal_status: None,
                 terminal_text: None,
                 errors: Vec::new(),

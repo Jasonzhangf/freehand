@@ -256,6 +256,11 @@ pub enum UiCommand {
     ResumeTurn {
         turn_id: TurnId,
     },
+    CompactSessionContext {
+        session_id: SessionId,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        reason: Option<String>,
+    },
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -393,10 +398,33 @@ pub struct UiTurnProjection {
     pub tool_calls: Vec<String>,
     pub tool_activities: Vec<UiToolActivity>,
     pub usage: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub usage_projection: Option<UiUsageProjection>,
     pub terminal_status: Option<TerminalStatus>,
     pub terminal_text: Option<String>,
     pub errors: Vec<String>,
     pub slave_substream_card: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct UiUsageProjection {
+    pub input_tokens: u64,
+    pub output_tokens: u64,
+    pub total_tokens: u64,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reasoning_tokens: Option<u64>,
+    pub cache_creation_tokens: u64,
+    pub cache_read_tokens: u64,
+    /// Cache hit rate in basis points (0-10000; 8000 == 80%).
+    pub cache_hit_rate_bps: u64,
+    /// Context size after this turn, in tokens (input + cache read + cache create).
+    pub context_tokens: u64,
+    /// Context compaction applied before this turn, in tokens.
+    #[serde(default)]
+    pub compacted_tokens: u64,
+    /// Raw model-name or provider label if known.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub model_label: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

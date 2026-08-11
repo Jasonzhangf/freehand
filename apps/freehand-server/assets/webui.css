@@ -2695,6 +2695,51 @@ body.theme-dark .composer-input {
   border-top: 1px solid var(--line);
 }
 
+.composer-context-strip {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px 10px;
+  align-items: center;
+  margin-top: 10px;
+  padding: 8px 10px;
+  border: 1px solid rgba(13, 103, 84, 0.16);
+  border-radius: 12px;
+  background: rgba(13, 103, 84, 0.05);
+  font-size: 10.5px;
+  color: var(--text-soft);
+}
+
+.composer-context-strip[hidden] {
+  display: none;
+}
+
+.context-stat {
+  white-space: nowrap;
+  font-weight: 650;
+}
+
+.context-stat::before {
+  content: "";
+  display: inline-block;
+  width: 4px;
+  height: 4px;
+  border-radius: 50%;
+  background: rgba(13, 103, 84, 0.35);
+  margin-right: 5px;
+  vertical-align: middle;
+}
+
+body.theme-dark .composer-context-strip {
+  background: rgba(88, 176, 141, 0.08);
+  border-color: rgba(88, 176, 141, 0.22);
+}
+
+body[data-layout-shape="phone_portrait"] .composer-context-strip,
+body[data-layout-shape="tall_phone"] .composer-context-strip,
+body[data-layout-shape="tablet_portrait"] .composer-context-strip {
+  font-size: 9.5px;
+}
+
 .control-chip,
 .model-control,
 .cwd-control {

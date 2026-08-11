@@ -38,6 +38,15 @@ export const webuiEdges = Object.freeze([
     forbiddenEffects: ["browser_local_crud_truth", "mutate_transcript_truth", "rename_unselected_session"],
   },
   {
+    id: "session.compact_context",
+    from: WebUiSurface.SessionDetail,
+    event: "session.compact",
+    to: WebUiSurface.SessionDetail,
+    requires: ["session_id"],
+    allowedEffects: ["command_compact_session_context", "query_session_turns"],
+    forbiddenEffects: ["mutate_transcript_truth", "browser_local_crud_truth", "drop_recent_tail"],
+  },
+  {
     id: "home.delete_session",
     from: WebUiSurface.HomeDashboard,
     event: "session.delete",

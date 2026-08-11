@@ -370,6 +370,12 @@ export const ADP_PROTOCOL_MANIFEST = Object.freeze({
       "semantic_kind": "resume_turn",
       "frame_class": "mutation",
       "target_owner_feature": "reason.turn"
+    },
+    {
+      "serde_name": "CompactSessionContext",
+      "semantic_kind": "compact_session_context",
+      "frame_class": "mutation",
+      "target_owner_feature": "reason.rewrite"
     }
   ]
 });
