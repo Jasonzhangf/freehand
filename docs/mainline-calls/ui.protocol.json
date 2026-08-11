@@ -872,6 +872,17 @@
       "binding_status": "bound"
     },
     {
+      "step": "35",
+      "symbol_path": "validate_command / UiCommand::CompactSessionContext",
+      "file_path": "crates/freehand-ui-protocol/src/validate.rs",
+      "responsibility": "validate CompactSessionContext as a protocol-owned mutation command shape requiring a non-empty session id and route it to reason.rewrite-policy through runtime dispatch; runtime supplies the policy/rewrite outcome and must not fabricate a compaction result",
+      "input_semantic": "CompactSessionContext mutation command with session id and optional request reason",
+      "output_semantic": "validated mutation intent or explicit protocol rejection on empty session id",
+      "caller": "ADP command transport",
+      "callee": "runtime.ui-command-dispatch",
+      "binding_status": "bound"
+    },
+    {
       "step": "18a",
       "symbol_path": "UI_COMMAND_DESCRIPTORS / command_descriptor / adp_protocol_manifest / adp_protocol_webui_module",
       "file_path": "crates/freehand-ui-protocol/src/adp_wire.rs",
@@ -927,6 +938,7 @@
     "Phase 2C WorkerControl command/query DTOs are landed and locked by protocol owner tests",
     "Tools dashboard query/result DTOs are landed and locked by `cargo test -p freehand-ui-protocol tool_registry -- --nocapture`; protocol-state local query rejection proves runtime/tool owner code supplies the registry projection",
     "Search dashboard query/result DTOs are landed and locked by `cargo test -p freehand-ui-protocol session_search -- --nocapture --test-threads=1`; protocol-state local query rejection proves runtime/reason owners supply the search projection",
-    "Diagnostics query/result DTOs are landed and locked by cargo test -p freehand-ui-protocol diagnostics_query -- --nocapture; protocol-state local query rejection proves runtime/debug owners supply the diagnostics projection."
+    "Diagnostics query/result DTOs are landed and locked by cargo test -p freehand-ui-protocol diagnostics_query -- --nocapture; protocol-state local query rejection proves runtime/debug owners supply the diagnostics projection.",
+    "CompactSessionContext mutation command DTO is landed, owner-routed to reason.rewrite-policy, validated for non-empty session id, and locked by compact_session_context_roundtrips_through_wire_and_validates plus runtime_compact_session_context_hold_when_no_provider_summary_payload and runtime_compact_session_context_rejects_missing_recovery_truth_explicitly; runtime/reason.rewrite-policy owners supply the policy/rewrite outcome and the dispatch receipt never fabricates a rewrite result"
   ]
 }

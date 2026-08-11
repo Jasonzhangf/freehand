@@ -732,6 +732,15 @@
       "binding_status": "bound"
     },
     {
+      "operation_id": "session.restore",
+      "owner_feature_id": "runtime.ui-command-dispatch",
+      "source_resource": "session",
+      "target_resource": "ui_projection",
+      "effect": "restore persisted session history through the persistence owner so a protocol command can hand the rewrite-policy owner the recovery truth; the restored history is supplied by reason.persistence, never fabricated by protocol or runtime dispatch",
+      "mainline_call_doc": "docs/mainline-calls/runtime.ui-command-dispatch.json",
+      "binding_status": "bound"
+    },
+    {
       "operation_id": "turn.plan_request_context",
       "owner_feature_id": "reason.context-planner",
       "source_resource": "turn",
@@ -1453,6 +1462,17 @@
       "call_table_step": "18",
       "file_path": "crates/freehand-reason/src/persistence.rs",
       "symbol_path": "ReasonPersistence::list_persisted_sessions",
+      "binding_status": "bound"
+    },
+    {
+      "edge_id": "runtime.ui-command-dispatch#31",
+      "operation_id": "session.restore",
+      "source_resource": "session",
+      "target_resource": "ui_projection",
+      "mainline_call_doc": "docs/mainline-calls/runtime.ui-command-dispatch.json",
+      "call_table_step": "31",
+      "file_path": "crates/freehand-runtime/src/lib.rs",
+      "symbol_path": "RuntimeCommandDispatcher::dispatch_compact_session_context",
       "binding_status": "bound"
     },
     {
