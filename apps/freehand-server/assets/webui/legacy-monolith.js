@@ -6989,6 +6989,10 @@ function terminalTaskStatus(status) {
   return ["approved", "closed", "cancelled", "failed"].includes(`${status || ""}`.toLowerCase());
 }
 
+function taskBlockedStatus(status) {
+  return `${status || ""}`.toLowerCase() === "blocked";
+}
+
 function taskLifecycleBucket(status) {
   const normalized = `${status || ""}`.toLowerCase();
   if (["blocked", "failed", "cancelled"].includes(normalized)) {
@@ -7072,7 +7076,7 @@ function taskDurationEndMs(task) {
   if (!task) {
     return null;
   }
-  if (terminalTaskStatus(task.status)) {
+  if (terminalTaskStatus(task.status) || taskBlockedStatus(task.status)) {
     return timestampToMilliseconds(task.updated_at || task.last_progress_at || task.created_at);
   }
   return Date.now();
@@ -7089,14 +7093,15 @@ function taskDurationLabel(task) {
   }
   const elapsed = Math.max(0, endedAt - startedAt);
   const label = formatDuration(elapsed);
-  return label || "0s";
+  const value = label || "0s";
+  return taskBlockedStatus(task.status) ? `已阻塞 · ${value}` : value;
 }
 
 function taskDurationState(task) {
   if (!taskStartedAtMs(task)) {
     return "unavailable";
   }
-  return terminalTaskStatus(task.status) ? "frozen" : "live";
+  return terminalTaskStatus(task.status) || taskBlockedStatus(task.status) ? "frozen" : "live";
 }
 
 function workerTaskStatusLabel(task) {

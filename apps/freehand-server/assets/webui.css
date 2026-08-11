@@ -4774,7 +4774,27 @@ body[data-layout-shape="tablet_portrait"] .session-dashbar-copy {
 body[data-layout-shape="phone_portrait"] .session-dashbar-metrics,
 body[data-layout-shape="tall_phone"] .session-dashbar-metrics,
 body[data-layout-shape="tablet_portrait"] .session-dashbar-metrics {
+  grid-column: 1 / 4;
+  grid-row: 2;
+  justify-self: start;
+  max-width: 100%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
   font-size: 9.5px;
+}
+
+body[data-layout-shape="phone_portrait"] .session-dashbar-copy,
+body[data-layout-shape="tall_phone"] .session-dashbar-copy,
+body[data-layout-shape="tablet_portrait"] .session-dashbar-copy {
+  grid-column: 1 / 4;
+  grid-row: 3;
+}
+
+body[data-layout-shape="phone_portrait"] .session-dashbar-chevron,
+body[data-layout-shape="tall_phone"] .session-dashbar-chevron,
+body[data-layout-shape="tablet_portrait"] .session-dashbar-chevron {
+  grid-row: 1 / 4;
 }
 
 body[data-layout-shape="phone_portrait"] .session-tree-dropdown,
