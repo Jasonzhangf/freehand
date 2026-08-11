@@ -146,7 +146,9 @@ try {
     fixedSessionReused: latestTurn.session_id ? latestTurn.session_id === fixedSessionId : true,
     submitMaterialized: Boolean(submitReceipt) || currentRunTurns.length > 0,
     fixtureSawOneProviderRequest: requestCount === 1,
-    firstRequestDeclaredHostedWebSearch: firstHostedToolTypes.includes('web_search'),
+    firstRequestDeclaredHostedWebSearch: firstHostedToolTypes.some((type) =>
+      ['web_search', 'web_search_preview'].includes(type),
+    ),
     firstRequestHostedWebSearchExternalAccess: requestHostedWebSearchExternalAccess(
       firstProviderRequest,
     ),
@@ -236,7 +238,9 @@ async function startProviderServer() {
           url: req.url,
           functionToolNames: requestFunctionToolNames(parsed),
           hostedToolTypes: requestHostedToolTypes(parsed),
-          hasHostedWebSearch: requestHostedToolTypes(parsed).includes('web_search'),
+          hasHostedWebSearch: requestHostedToolTypes(parsed).some((type) =>
+            ['web_search', 'web_search_preview'].includes(type),
+          ),
           hasFunctionWebSearch: requestFunctionToolNames(parsed).includes('web_search'),
           hasWebFetchFunction: requestFunctionToolNames(parsed).includes('web_fetch'),
           bodyLength: body.length,
@@ -661,7 +665,10 @@ function requestHostedToolTypes(value) {
 function requestHostedWebSearchExternalAccess(value) {
   const tools = value && Array.isArray(value.tools) ? value.tools : [];
   return tools.some(
-    (tool) => tool && tool.type === 'web_search' && tool.external_web_access === true,
+    (tool) =>
+      tool &&
+      ['web_search', 'web_search_preview'].includes(tool.type) &&
+      tool.external_web_access === true,
   );
 }
 

@@ -5914,6 +5914,7 @@ fn selected_master_agent() -> SelectedAgentConfig {
             base_url: "https://example.invalid".to_owned(),
             default_model: "model-master".to_owned(),
             web_search: freehand_config::ProviderWebSearchMode::Auto,
+            web_search_wire: freehand_config::ProviderWebSearchWire::WebSearch,
             auth_type: freehand_config::ProviderAuthType::ApiKey,
             auth_source: freehand_config::ProviderAuthSourceKind::Inline,
             api_key: "secret".to_owned(),
@@ -5957,6 +5958,7 @@ fn live_selected_agent(
             base_url,
             default_model: "MiniMax-M2.7".to_owned(),
             web_search: freehand_config::ProviderWebSearchMode::Auto,
+            web_search_wire: freehand_config::ProviderWebSearchWire::WebSearch,
             auth_type: freehand_config::ProviderAuthType::ApiKey,
             auth_source: freehand_config::ProviderAuthSourceKind::Env,
             api_key: "test-api-key".to_owned(),
@@ -6041,6 +6043,7 @@ fn live_selected_agent_with_fallback(
         base_url: fallback_base_url,
         default_model: "MiniMax-M3".to_owned(),
         web_search: freehand_config::ProviderWebSearchMode::Auto,
+        web_search_wire: freehand_config::ProviderWebSearchWire::WebSearch,
         auth_type: freehand_config::ProviderAuthType::ApiKey,
         auth_source: freehand_config::ProviderAuthSourceKind::Env,
         api_key: "fallback-test-api-key".to_owned(),
@@ -10734,6 +10737,22 @@ fn live_bridge_derives_hosted_web_search_for_configured_provider_native_protocol
     assert_eq!(
         responses.capabilities.web_search,
         ProviderWebSearchCapability::hosted_live_with_functions()
+    );
+
+    let mut preview_responses_agent = live_selected_agent_with_protocol(
+        "https://example.invalid/v1".to_owned(),
+        freehand_config::ProviderType::OpenAi,
+        ConfigProviderProtocol::Responses,
+    );
+    preview_responses_agent.provider.default_model = "gpt-5.6-sol".to_owned();
+    preview_responses_agent.provider.web_search_wire =
+        freehand_config::ProviderWebSearchWire::WebSearchPreview;
+    let preview_responses = provider_descriptor(&preview_responses_agent.provider)
+        .expect("preview responses descriptor");
+    assert_eq!(
+        preview_responses.capabilities.web_search,
+        ProviderWebSearchCapability::hosted_live_with_functions()
+            .with_wire_tool_type(ProviderWebSearchToolType::WebSearchPreview)
     );
     assert_eq!(
         LiveReasonExecutionRole::Master

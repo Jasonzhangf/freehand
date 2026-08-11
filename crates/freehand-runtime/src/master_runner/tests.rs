@@ -7,7 +7,8 @@ use std::time::{SystemTime, UNIX_EPOCH};
 
 use freehand_config::{
     AgentMode, ProviderAuthSourceKind, ProviderAuthType, ProviderProtocol, ProviderType,
-    ProviderWebSearchMode, SelectedAgentConfig, SelectedPeerAgentConfig, SelectedProviderConfig,
+    ProviderWebSearchMode, ProviderWebSearchWire, SelectedAgentConfig, SelectedPeerAgentConfig,
+    SelectedProviderConfig,
 };
 use freehand_contracts::{
     AgentId, ContextCachePolicy, ContextProvenance, ContextRole, ContextSegment, ContextSegmentId,
@@ -4779,6 +4780,7 @@ fn selected_master_with_workers(worker_ids: &[&str]) -> SelectedAgentConfig {
             base_url: "https://example.invalid".to_owned(),
             default_model: "master-model".to_owned(),
             web_search: ProviderWebSearchMode::Auto,
+            web_search_wire: ProviderWebSearchWire::WebSearch,
             auth_type: ProviderAuthType::ApiKey,
             auth_source: ProviderAuthSourceKind::Inline,
             api_key: "test-key".to_owned(),

@@ -87,6 +87,23 @@ impl ProviderWebSearchMode {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
+pub enum ProviderWebSearchWire {
+    #[serde(rename = "web_search")]
+    WebSearch,
+    #[serde(rename = "web_search_preview")]
+    WebSearchPreview,
+}
+
+impl ProviderWebSearchWire {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::WebSearch => "web_search",
+            Self::WebSearchPreview => "web_search_preview",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Deserialize)]
 pub enum ProviderAuthType {
     #[serde(rename = "apikey")]
     ApiKey,
@@ -146,6 +163,7 @@ pub struct ProviderConfig {
     pub base_url: String,
     pub default_model: String,
     pub web_search: ProviderWebSearchMode,
+    pub web_search_wire: ProviderWebSearchWire,
     pub auth_type: ProviderAuthType,
     pub auth: ProviderAuthConfig,
 }
@@ -199,6 +217,7 @@ pub struct SafeProviderConfigProjection {
     pub base_url_host: String,
     pub default_model: String,
     pub web_search: ProviderWebSearchMode,
+    pub web_search_wire: ProviderWebSearchWire,
     pub auth_type: ProviderAuthType,
     pub auth_source: ProviderAuthSourceKind,
 }
@@ -211,6 +230,7 @@ pub struct SelectedProviderConfig {
     pub base_url: String,
     pub default_model: String,
     pub web_search: ProviderWebSearchMode,
+    pub web_search_wire: ProviderWebSearchWire,
     pub auth_type: ProviderAuthType,
     pub auth_source: ProviderAuthSourceKind,
     pub api_key: String,
@@ -995,6 +1015,7 @@ impl ProviderConfig {
             base_url_host: provider_base_url_host_for_projection(&self.base_url),
             default_model: self.default_model.clone(),
             web_search: self.web_search,
+            web_search_wire: self.web_search_wire,
             auth_type: self.auth_type,
             auth_source: self.auth.source_kind(),
         }
@@ -1482,6 +1503,8 @@ struct RawProviderConfig {
     default_model: String,
     #[serde(default)]
     web_search: Option<ProviderWebSearchMode>,
+    #[serde(default, alias = "webSearchWire")]
+    web_search_wire: Option<ProviderWebSearchWire>,
     auth: RawProviderAuthConfig,
 }
 
@@ -2084,6 +2107,9 @@ fn validate_config(parsed: RawConfig) -> Result<LoadedConfig, ConfigError> {
             web_search: raw_provider
                 .web_search
                 .unwrap_or(ProviderWebSearchMode::Auto),
+            web_search_wire: raw_provider
+                .web_search_wire
+                .unwrap_or(ProviderWebSearchWire::WebSearch),
             auth_type,
             auth,
         };
@@ -3381,6 +3407,7 @@ fn select_provider_for_agent(
         base_url: provider.base_url.clone(),
         default_model: provider.default_model.clone(),
         web_search: provider.web_search,
+        web_search_wire: provider.web_search_wire,
         auth_type: provider.auth_type,
         auth_source: provider.auth.source_kind(),
         api_key: resolve_provider_api_key(provider)?,

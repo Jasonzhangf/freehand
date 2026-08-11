@@ -39,6 +39,7 @@ pub enum ProviderWebSearchCapability {
     Hosted {
         mode: ProviderWebSearchMode,
         tool_mixing: ProviderToolMixing,
+        wire_tool_type: ProviderWebSearchToolType,
     },
 }
 
@@ -53,11 +54,27 @@ pub enum ProviderToolMixing {
     SearchOnlyTurn,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ProviderWebSearchToolType {
+    WebSearch,
+    WebSearchPreview,
+}
+
+impl ProviderWebSearchToolType {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::WebSearch => "web_search",
+            Self::WebSearchPreview => "web_search_preview",
+        }
+    }
+}
+
 impl ProviderWebSearchCapability {
     pub fn hosted_live_with_functions() -> Self {
         Self::Hosted {
             mode: ProviderWebSearchMode::Live,
             tool_mixing: ProviderToolMixing::WithFunctionTools,
+            wire_tool_type: ProviderWebSearchToolType::WebSearch,
         }
     }
 
@@ -65,7 +82,19 @@ impl ProviderWebSearchCapability {
         Self::Hosted {
             mode: ProviderWebSearchMode::Live,
             tool_mixing: ProviderToolMixing::SearchOnlyTurn,
+            wire_tool_type: ProviderWebSearchToolType::WebSearch,
         }
+    }
+
+    pub fn with_wire_tool_type(mut self, wire_tool_type: ProviderWebSearchToolType) -> Self {
+        match &mut self {
+            Self::Hosted {
+                wire_tool_type: slot,
+                ..
+            } => *slot = wire_tool_type,
+            Self::Unsupported => {}
+        }
+        self
     }
 
     pub fn can_mix_with_function_tools(&self) -> bool {

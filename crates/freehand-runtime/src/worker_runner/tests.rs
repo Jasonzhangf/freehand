@@ -7,7 +7,8 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use freehand_config::{
     AgentMode, ProviderAuthSourceKind, ProviderAuthType, ProviderProtocol, ProviderType,
-    ProviderWebSearchMode, SelectedAgentConfig, SelectedPeerAgentConfig, SelectedProviderConfig,
+    ProviderWebSearchMode, ProviderWebSearchWire, SelectedAgentConfig, SelectedPeerAgentConfig,
+    SelectedProviderConfig,
 };
 use freehand_contracts::{AgentId, TerminalStatus, TurnId};
 use freehand_task::{
@@ -1699,6 +1700,7 @@ fn selected_worker() -> SelectedAgentConfig {
             base_url: "https://example.invalid".to_owned(),
             default_model: "worker-model".to_owned(),
             web_search: ProviderWebSearchMode::Auto,
+            web_search_wire: ProviderWebSearchWire::WebSearch,
             auth_type: ProviderAuthType::ApiKey,
             auth_source: ProviderAuthSourceKind::Inline,
             api_key: "test-key".to_owned(),

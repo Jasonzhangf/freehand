@@ -16,7 +16,8 @@ use freehand_provider_core::{
     ProviderFamily, ProviderHostedToolDefinition, ProviderInputAttachment,
     ProviderInputAttachmentKind, ProviderLiveExecutor, ProviderLiveExecutorError, ProviderProtocol,
     ProviderRawCapture, ProviderSemanticOutput, ProviderSemanticRequest, ProviderToolChoice,
-    ProviderToolExchange, map_adapter_events,
+    ProviderToolExchange, ProviderWebSearchCapability, ProviderWebSearchToolType,
+    map_adapter_events,
 };
 use serde_json::{Value, json};
 use thiserror::Error;
@@ -926,20 +927,30 @@ fn openai_responses_tools(request: &ProviderSemanticRequest) -> Vec<Value> {
         request
             .hosted_tools
             .iter()
-            .map(openai_responses_hosted_tool),
+            .map(|tool| openai_responses_hosted_tool(tool, request)),
     );
     tools
 }
 
-fn openai_responses_hosted_tool(tool: &ProviderHostedToolDefinition) -> Value {
+fn openai_responses_hosted_tool(
+    tool: &ProviderHostedToolDefinition,
+    request: &ProviderSemanticRequest,
+) -> Value {
     match tool {
         ProviderHostedToolDefinition::WebSearch {
             external_web_access,
             ..
         } => json!({
-            "type": "web_search",
+            "type": openai_responses_hosted_web_search_tool_type(request),
             "external_web_access": external_web_access,
         }),
+    }
+}
+
+fn openai_responses_hosted_web_search_tool_type(request: &ProviderSemanticRequest) -> &'static str {
+    match &request.descriptor.capabilities.web_search {
+        ProviderWebSearchCapability::Hosted { wire_tool_type, .. } => wire_tool_type.as_str(),
+        ProviderWebSearchCapability::Unsupported => ProviderWebSearchToolType::WebSearch.as_str(),
     }
 }
 
@@ -1148,7 +1159,8 @@ mod tests {
     use freehand_provider_core::{
         ProviderCapabilities, ProviderDescriptor, ProviderFamily, ProviderHostedToolDefinition,
         ProviderInputAttachment, ProviderInputAttachmentKind, ProviderWebSearchCapability,
-        ProviderWebSearchMode, RawRetentionPolicy, build_semantic_request,
+        ProviderWebSearchMode, ProviderWebSearchToolType, RawRetentionPolicy,
+        build_semantic_request,
     };
 
     fn ctx() -> ProviderEventContext {
@@ -1343,6 +1355,21 @@ mod tests {
             .expect("render");
         let body: Value = serde_json::from_str(&rendered.body).expect("json");
         assert_eq!(body["tools"][0]["type"], json!("web_search"));
+        assert_eq!(body["tools"][0]["external_web_access"], json!(true));
+        assert!(body["tools"][0].get("name").is_none());
+        assert!(body["tools"][0].get("parameters").is_none());
+    }
+
+    #[test]
+    fn renders_responses_hosted_web_search_preview_tool_when_capability_declares_it() {
+        let mut request = hosted_web_search_request();
+        request.descriptor.capabilities.web_search =
+            ProviderWebSearchCapability::hosted_live_with_functions()
+                .with_wire_tool_type(ProviderWebSearchToolType::WebSearchPreview);
+        let adapter = OpenAiAdapter::new();
+        let rendered = adapter.render_request(&request, true).expect("render");
+        let body: Value = serde_json::from_str(&rendered.body).expect("json");
+        assert_eq!(body["tools"][0]["type"], json!("web_search_preview"));
         assert_eq!(body["tools"][0]["external_web_access"], json!(true));
         assert!(body["tools"][0].get("name").is_none());
         assert!(body["tools"][0].get("parameters").is_none());

@@ -98,8 +98,8 @@ use freehand_config::{
     AgentResourceConfigUpdate, LoadedConfig, MAX_AGENT_RESOURCE_COUNT, ModelGroupConfigUpdate,
     ModelRouteConfig, ModelWeightedRouteConfig, ProviderConfigUpdate,
     ProviderProtocol as ConfigProviderProtocol, ProviderType, ProviderWebSearchMode,
-    SelectedAgentConfig, SelectedProviderConfig, default_config_path, load_config_from_path,
-    load_default_config, provider_base_url_host_for_projection,
+    ProviderWebSearchWire, SelectedAgentConfig, SelectedProviderConfig, default_config_path,
+    load_config_from_path, load_default_config, provider_base_url_host_for_projection,
     safe_provider_base_url_for_projection, switch_agent_model_group_in_path,
     switch_agent_provider_in_path, update_agent_resource_config_in_path,
     update_provider_config_in_path, upsert_model_group_config_in_path,
@@ -136,7 +136,7 @@ use freehand_provider_core::{
     ProviderInputAttachmentKind, ProviderLiveExecutor, ProviderProtocol, ProviderRawCapture,
     ProviderSemanticOutput, ProviderToolChoice, ProviderToolDefinition, ProviderToolExchange,
     ProviderWebSearchCapability, ProviderWebSearchMode as SemanticWebSearchMode,
-    build_semantic_request,
+    ProviderWebSearchToolType, build_semantic_request,
 };
 use freehand_provider_executors::production_provider_executor_factory;
 pub use freehand_reason::ReasonBroadcastEvent;
@@ -4780,6 +4780,7 @@ fn project_config_status_for_ui(
                         provider.provider_type,
                         provider.protocol,
                         provider.web_search,
+                        provider.web_search_wire,
                     );
                     UiProviderConfigSummaryProjection {
                         provider_id: provider.id,
@@ -4828,6 +4829,7 @@ fn project_config_status_for_ui(
             selected.provider.provider_type,
             selected.provider.protocol,
             selected.provider.web_search,
+            selected.provider.web_search_wire,
         );
     UiConfigStatusProjection {
         agent_name: selected.name.clone(),
@@ -4964,6 +4966,7 @@ fn provider_web_search_effective_status(
     provider_type: ProviderType,
     protocol: ConfigProviderProtocol,
     mode: ProviderWebSearchMode,
+    web_search_wire: ProviderWebSearchWire,
 ) -> (String, String) {
     if mode == ProviderWebSearchMode::Disabled {
         return (
@@ -4971,7 +4974,8 @@ fn provider_web_search_effective_status(
             format!("provider `{provider_id}` has web_search=disabled"),
         );
     }
-    match provider_web_search_capability_from_parts(provider_type, protocol, mode) {
+    match provider_web_search_capability_from_parts(provider_type, protocol, mode, web_search_wire)
+    {
         ProviderWebSearchCapability::Hosted { .. } => (
             "hosted_declared".to_owned(),
             format!(
@@ -8784,6 +8788,7 @@ fn provider_web_search_capability(
         provider.provider_type,
         provider.protocol,
         provider.web_search,
+        provider.web_search_wire,
     )
 }
 
@@ -8791,6 +8796,7 @@ fn provider_web_search_capability_from_parts(
     provider_type: ProviderType,
     protocol: ConfigProviderProtocol,
     mode: ProviderWebSearchMode,
+    web_search_wire: ProviderWebSearchWire,
 ) -> ProviderWebSearchCapability {
     if mode == ProviderWebSearchMode::Disabled {
         return ProviderWebSearchCapability::Unsupported;
@@ -8798,7 +8804,14 @@ fn provider_web_search_capability_from_parts(
     match (provider_type, protocol) {
         (ProviderType::OpenAi, ConfigProviderProtocol::Responses)
         | (ProviderType::Anthropic, ConfigProviderProtocol::Messages) => {
+            let wire_tool_type = match web_search_wire {
+                ProviderWebSearchWire::WebSearchPreview => {
+                    ProviderWebSearchToolType::WebSearchPreview
+                }
+                ProviderWebSearchWire::WebSearch => ProviderWebSearchToolType::WebSearch,
+            };
             ProviderWebSearchCapability::hosted_live_with_functions()
+                .with_wire_tool_type(wire_tool_type)
         }
         _ => ProviderWebSearchCapability::Unsupported,
     }
@@ -8814,6 +8827,7 @@ fn provider_web_search_route_guidance(
         selected.provider.provider_type,
         selected.provider.protocol,
         selected.provider.web_search,
+        selected.provider.web_search_wire,
     );
     let worker_routes = provider_web_search_worker_routes(selected);
     let route_line = if selected_descriptor
