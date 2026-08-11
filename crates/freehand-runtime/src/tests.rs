@@ -10872,7 +10872,7 @@ fn provider_web_search_test_declares_hosted_tool_and_requires_observation() {
 
     assert!(status.starts_with("provider_web_search_test_passed:provider=provider-live"));
     assert_eq!(tools.len(), 1);
-    assert_eq!(tools[0]["type"], json!("web_search_preview"));
+    assert_eq!(tools[0]["type"], json!("web_search"));
     assert!(body.to_string().contains("provider-hosted web_search now"));
     assert!(!body.to_string().contains("\"name\":\"web_search\""));
     assert!(!body.to_string().contains("\"type\":\"function\""));
@@ -11069,7 +11069,7 @@ fn clean_search_worker_request_uses_hosted_search_without_local_instruction_scan
         let body = http_request_body_json(&raw_request);
         let tools = body["tools"].as_array().expect("tools array");
         assert_eq!(tools.len(), 1);
-        assert_eq!(tools[0]["type"], json!("web_search_preview"));
+        assert_eq!(tools[0]["type"], json!("web_search"));
         assert_eq!(tools[0]["external_web_access"], json!(true));
         assert!(tools[0].get("name").is_none());
         assert!(tools[0].get("parameters").is_none());

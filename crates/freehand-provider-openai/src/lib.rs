@@ -937,7 +937,7 @@ fn openai_responses_hosted_tool(tool: &ProviderHostedToolDefinition) -> Value {
             external_web_access,
             ..
         } => json!({
-            "type": "web_search_preview",
+            "type": "web_search",
             "external_web_access": external_web_access,
         }),
     }
@@ -1342,7 +1342,7 @@ mod tests {
             .render_request(&hosted_web_search_request(), true)
             .expect("render");
         let body: Value = serde_json::from_str(&rendered.body).expect("json");
-        assert_eq!(body["tools"][0]["type"], json!("web_search_preview"));
+        assert_eq!(body["tools"][0]["type"], json!("web_search"));
         assert_eq!(body["tools"][0]["external_web_access"], json!(true));
         assert!(body["tools"][0].get("name").is_none());
         assert!(body["tools"][0].get("parameters").is_none());
@@ -1364,7 +1364,7 @@ mod tests {
         assert_eq!(tools.len(), 2);
         assert_eq!(tools[0]["type"], json!("function"));
         assert_eq!(tools[0]["name"], json!("read_file"));
-        assert_eq!(tools[1]["type"], json!("web_search_preview"));
+        assert_eq!(tools[1]["type"], json!("web_search"));
         assert_eq!(tools[1]["external_web_access"], json!(true));
         assert!(tools[1].get("name").is_none());
         assert!(tools[1].get("parameters").is_none());
