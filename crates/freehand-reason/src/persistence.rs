@@ -348,13 +348,21 @@ impl ReasonPersistence {
         match self.load_authoritative_state(session_id) {
             Ok(Some(mut restored)) => {
                 let last_applied_seq = restored.cursor.last_applied_reason_seq;
+                let mut applied_any = false;
                 for row in ledger_rows
                     .iter()
                     .filter(|row| row.cursor_after.last_applied_reason_seq > last_applied_seq)
                 {
                     apply_ledger_row(&mut restored, row)?;
+                    applied_any = true;
                 }
-                self.persist_restored_state(session_id, &restored)?;
+                // Authoritative snapshot already reflects every ledger row. Rewriting
+                // history + all closed turns + projections is pure repeated IO for
+                // large sessions; skip it when nothing new was applied so bootstrap
+                // stays fast on sessions that have not changed.
+                if applied_any {
+                    self.persist_restored_state(session_id, &restored)?;
+                }
                 Ok(restored)
             }
             Ok(None) => {
@@ -3593,6 +3601,55 @@ mod tests {
             coordinator
                 .closed_turn_path(history.session_id(), &TurnId::new("runtime-turn-2"))
                 .is_file()
+        );
+
+        fs::remove_dir_all(runtime_home).expect("cleanup");
+    }
+
+    #[test]
+    fn restore_skips_full_rewrite_when_ledger_is_current() {
+        // A session whose authoritative snapshot already reflects every ledger row
+        // must not be fully rewritten on every restore. Large sessions make the
+        // repeated full rewrite (history + closed turns + projections) so slow
+        // that daemon bootstrap appears to hang. Guard with history mtime.
+        let runtime_home = temp_runtime_home();
+        let coordinator = ReasonPersistence::new(&runtime_home, AgentId::new("agent-1"));
+        let session_id = SessionId::new("session-1");
+        let mut history = session_history();
+        let mut turn = started_turn(&mut history);
+        turn.terminal_event = Some(freehand_contracts::ReasonResp03TerminalEvent {
+            session_id: SessionId::new("session-1"),
+            turn_id: TurnId::new("turn-1"),
+            trace_id: TraceId::new("trace-1"),
+            feature_id: FeatureId::new("reason.persistence"),
+            agent_id: AgentId::new("agent-1"),
+            status: TerminalStatus::Success,
+            summary: "closed".to_owned(),
+            user_options: None,
+        });
+        coordinator
+            .record_turn_closed(&history, &turn, 0)
+            .expect("close turn");
+
+        // First restore applies the ledger and (correctly) persists state.
+        let restored = coordinator.restore(&session_id).expect("first restore");
+        assert_eq!(restored.closed_turns.len(), 1);
+        let history_path = coordinator.session_history_path(&session_id);
+        let mtime_after_first = fs::metadata(&history_path)
+            .expect("history meta")
+            .modified()
+            .expect("history mtime");
+
+        // Second restore has no new ledger rows: authoritative state is current,
+        // so no full rewrite should happen and the history file must be untouched.
+        let _ = coordinator.restore(&session_id).expect("second restore");
+        let mtime_after_second = fs::metadata(&history_path)
+            .expect("history meta")
+            .modified()
+            .expect("history mtime");
+        assert_eq!(
+            mtime_after_first, mtime_after_second,
+            "restore must not rewrite an already-current session"
         );
 
         fs::remove_dir_all(runtime_home).expect("cleanup");
