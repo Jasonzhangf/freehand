@@ -1898,6 +1898,7 @@ mod tests {
             agent_id: AgentId::new("agent-1"),
             status: TerminalStatus::Success,
             summary: "done".to_owned(),
+            user_options: None,
         });
 
         coordinator
@@ -1931,6 +1932,7 @@ mod tests {
             agent_id: AgentId::new("agent-1"),
             status: TerminalStatus::Success,
             summary: "done".to_owned(),
+            user_options: None,
         });
 
         coordinator
@@ -2067,6 +2069,7 @@ mod tests {
             agent_id: AgentId::new("agent-1"),
             status: TerminalStatus::Success,
             summary: "done".to_owned(),
+            user_options: None,
         });
 
         coordinator
@@ -2182,6 +2185,7 @@ mod tests {
             agent_id: AgentId::new("agent-1"),
             status: TerminalStatus::ToolPending,
             summary: "authoritative retained-offset restore".to_owned(),
+            user_options: None,
         });
         coordinator
             .record_turn_started(&history, &turn, 0)
@@ -2661,6 +2665,7 @@ mod tests {
             agent_id: AgentId::new("agent-1"),
             status: TerminalStatus::Success,
             summary: "first done".to_owned(),
+            user_options: None,
         });
         coordinator
             .record_turn_closed(&history, &first, 0)
@@ -2675,6 +2680,7 @@ mod tests {
             agent_id: AgentId::new("agent-1"),
             status: TerminalStatus::Success,
             summary: "second precursor".to_owned(),
+            user_options: None,
         });
         coordinator
             .record_turn_closed(&history, &second, 0)
@@ -2690,6 +2696,7 @@ mod tests {
             agent_id: AgentId::new("agent-1"),
             status: TerminalStatus::Success,
             summary: "second final".to_owned(),
+            user_options: None,
         });
         coordinator
             .record_turn_closed(&history, &second_continuation, 0)
@@ -2766,6 +2773,7 @@ mod tests {
                 agent_id: AgentId::new("agent-1"),
                 status: TerminalStatus::Success,
                 summary: summary.to_owned(),
+                user_options: None,
             });
             coordinator
                 .record_turn_closed(&history, &turn, 0)
@@ -2784,6 +2792,7 @@ mod tests {
             agent_id: AgentId::new("agent-1"),
             status: TerminalStatus::Success,
             summary: "third after rollback".to_owned(),
+            user_options: None,
         });
         coordinator
             .record_turn_closed(&history, &third, 0)
@@ -2860,6 +2869,7 @@ mod tests {
                 agent_id: AgentId::new("agent-1"),
                 status: TerminalStatus::Success,
                 summary: format!("{turn_id} done"),
+                user_options: None,
             });
             coordinator
                 .record_turn_closed(&history, &turn, 0)
@@ -2909,6 +2919,7 @@ mod tests {
             agent_id: AgentId::new("agent-1"),
             status: TerminalStatus::Success,
             summary: "base round should be superseded".to_owned(),
+            user_options: None,
         });
         coordinator
             .record_turn_closed(&history, &first, 0)
@@ -2932,6 +2943,7 @@ mod tests {
             agent_id: AgentId::new("agent-1"),
             status: TerminalStatus::Success,
             summary: "repaired round should remain".to_owned(),
+            user_options: None,
         });
         coordinator
             .record_turn_closed(&history, &repaired, 0)
@@ -2946,6 +2958,7 @@ mod tests {
             agent_id: AgentId::new("agent-1"),
             status: TerminalStatus::Success,
             summary: "second logical turn".to_owned(),
+            user_options: None,
         });
         coordinator
             .record_turn_closed(&history, &second, 0)
@@ -3005,6 +3018,7 @@ mod tests {
             agent_id: AgentId::new("agent-1"),
             status: TerminalStatus::Success,
             summary: "second round final".to_owned(),
+            user_options: None,
         });
         coordinator
             .record_turn_started(&history, &continuation, 0)
@@ -3080,6 +3094,7 @@ mod tests {
             agent_id: AgentId::new("agent-1"),
             status: TerminalStatus::ToolPending,
             summary: "Waiting for user choice after continuation".to_owned(),
+            user_options: None,
         });
         coordinator
             .record_turn_started(&history, &continuation, 0)
@@ -3150,6 +3165,7 @@ mod tests {
             agent_id: AgentId::new("agent-1"),
             status: TerminalStatus::ToolPending,
             summary: "Waiting for user choice after continuation".to_owned(),
+            user_options: None,
         });
         coordinator
             .record_turn_started(&history, &continuation, 0)
@@ -3207,6 +3223,7 @@ mod tests {
             agent_id: AgentId::new("agent-1"),
             status: TerminalStatus::ToolPending,
             summary: "Waiting for retained-offset ledger backfill".to_owned(),
+            user_options: None,
         });
         coordinator
             .record_turn_started(&history, &continuation, 0)
@@ -3276,6 +3293,7 @@ mod tests {
             agent_id: AgentId::new("agent-1"),
             status: TerminalStatus::ToolPending,
             summary: "retained offset parent lifecycle checkpoint".to_owned(),
+            user_options: None,
         });
         coordinator
             .record_turn_started(&history, &continuation, 0)
@@ -3442,6 +3460,7 @@ mod tests {
             agent_id: AgentId::new("agent-1"),
             status: TerminalStatus::Blocked,
             summary: "repair round closed".to_owned(),
+            user_options: None,
         });
         coordinator
             .record_turn_closed(&history, &repaired, 0)
@@ -3537,6 +3556,7 @@ mod tests {
                 agent_id: AgentId::new("agent-1"),
                 status: TerminalStatus::Success,
                 summary: summary.to_owned(),
+                user_options: None,
             });
             coordinator
                 .record_turn_closed(&history, &turn, 0)

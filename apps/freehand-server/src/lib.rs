@@ -1149,6 +1149,7 @@ fn sample_slave_turn_projection() -> UiTurnProjection {
             agent_id: AgentId::new("slave-agent"),
             status: TerminalStatus::Success,
             summary: "terminal final text".to_owned(),
+            user_options: None,
         }),
         error_events: Vec::new(),
         slave_substream_card: true,

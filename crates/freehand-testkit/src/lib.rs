@@ -363,6 +363,7 @@ pub fn run_reason_persistence_smoke(
         agent_id,
         status: freehand_contracts::TerminalStatus::Success,
         summary: "persisted smoke terminal".to_owned(),
+        user_options: None,
     });
     persistence
         .record_turn_closed(&history, &turn, 0)

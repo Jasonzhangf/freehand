@@ -90,6 +90,7 @@ fn sample_turn_projection(slave_substream_card: bool) -> UiTurnProjection {
             agent_id: AgentId::new("agent-1"),
             status: TerminalStatus::Success,
             summary: "final text".to_owned(),
+            user_options: None,
         }),
         error_events: vec![ErrorErr01RuntimeClassified {
             session_id: Some(SessionId::new("session-1")),
@@ -154,6 +155,7 @@ fn terminal_refresh_projection(
             agent_id: AgentId::new("agent-1"),
             status,
             summary: "terminal refresh truth".to_owned(),
+            user_options: None,
         }),
         error_events: Vec::new(),
         slave_substream_card: false,
@@ -1739,6 +1741,7 @@ fn failed_terminal_marks_waiting_tool_activity_failed() {
             agent_id: AgentId::new("agent-1"),
             status: TerminalStatus::Failed,
             summary: "tool failed explicitly".to_owned(),
+            user_options: None,
         }),
         error_events: Vec::new(),
         slave_substream_card: false,
@@ -1777,6 +1780,7 @@ fn session_latest_status_does_not_call_text_only_turn_streaming() {
         usage_projection: None,
         terminal_status: None,
         terminal_text: None,
+        user_options: None,
         errors: Vec::new(),
         slave_substream_card: false,
     };
@@ -2441,8 +2445,61 @@ fn terminal_result_projection_smoke() {
         agent_id: AgentId::new("agent-1"),
         status: TerminalStatus::Success,
         summary: "only final text".to_owned(),
+        user_options: None,
     };
     assert_eq!(terminal_text_projection(&event), "only final text");
+}
+
+#[test]
+fn awaiting_user_options_terminal_projects_with_options_passthrough() {
+    let event = ReasonResp03TerminalEvent {
+        session_id: SessionId::new("session-1"),
+        turn_id: TurnId::new("turn-1"),
+        trace_id: TraceId::new("trace-1"),
+        feature_id: FeatureId::new("ui.protocol"),
+        agent_id: AgentId::new("agent-1"),
+        status: TerminalStatus::AwaitingUserOptions,
+        summary: "Waiting for user options: Please choose how to proceed".to_owned(),
+        user_options: Some(vec!["Retry".to_owned(), "Cancel".to_owned()]),
+    };
+    let projection = turn_projection_from_events(TurnProjectionInput {
+        source_agent_id: AgentId::new("agent-1"),
+        source_node_id: "node-1".to_owned(),
+        session_id: SessionId::new("session-1"),
+        turn_id: TurnId::new("turn-1"),
+        created_at: Some(31),
+        timing: None,
+        cwd: None,
+        user_text: Some("run the task".to_owned()),
+        semantic_events: Vec::new(),
+        tool_calls: Vec::new(),
+        tool_results: Vec::new(),
+        usage_events: Vec::new(),
+        terminal_event: Some(event),
+        error_events: Vec::new(),
+        slave_substream_card: false,
+    });
+
+    assert_eq!(
+        projection.terminal_status,
+        Some(TerminalStatus::AwaitingUserOptions)
+    );
+    assert_eq!(
+        projection.user_options,
+        Some(vec!["Retry".to_owned(), "Cancel".to_owned()])
+    );
+
+    let items = public_conversation_items(&projection);
+    let terminal = items
+        .into_iter()
+        .find(|item| item.kind == UiConversationItemKind::Terminal)
+        .expect("terminal item");
+    assert_eq!(terminal.status, "waiting_for_user_options");
+    assert_eq!(terminal.title, "Final");
+    assert_eq!(
+        terminal.body,
+        "Waiting for user options: Please choose how to proceed"
+    );
 }
 
 #[test]
@@ -3375,6 +3432,7 @@ fn incremental_turn_projection_updates_from_shared_contract_events() {
         agent_id: AgentId::new("agent-2"),
         status: TerminalStatus::Success,
         summary: "done".to_owned(),
+        user_options: None,
     };
     let projection = state.apply_terminal_event(
         AgentId::new("agent-2"),

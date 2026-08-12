@@ -2023,6 +2023,49 @@ body.theme-dark .conversation-region {
   min-width: 0;
 }
 
+
+.user-options {
+  margin: 2px 12px 12px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.user-options-heading {
+  color: var(--text-soft);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.user-options-list {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.user-option-button {
+  appearance: none;
+  border: 1px solid #2f6fed;
+  background: transparent;
+  color: #2f6fed;
+  padding: 7px 14px;
+  border-radius: 999px;
+  font-size: 13px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: background 120ms ease, color 120ms ease, opacity 120ms ease;
+}
+
+.user-option-button:hover:not(:disabled) {
+  background: #2f6fed;
+  color: #fff;
+}
+
+.user-option-button:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
 .chat-reasoning-body {
   color: var(--text-soft);
   font-style: italic;

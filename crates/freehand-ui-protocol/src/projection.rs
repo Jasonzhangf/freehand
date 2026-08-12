@@ -69,6 +69,7 @@ pub fn public_conversation_items(projection: &UiTurnProjection) -> Vec<UiConvers
                 Some(TerminalStatus::Blocked) => "blocked",
                 Some(TerminalStatus::Interrupted) => "interrupted",
                 Some(TerminalStatus::ToolPending) => "running",
+                Some(TerminalStatus::AwaitingUserOptions) => "waiting_for_user_options",
                 Some(TerminalStatus::Success) | None => "completed",
             };
             let title = if projection.terminal_status == Some(TerminalStatus::ToolPending) {

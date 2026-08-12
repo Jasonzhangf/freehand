@@ -72,6 +72,7 @@ pub(crate) fn publish_live_cancelled_projection(
                     agent_id: reason_agent_id.clone(),
                     status: freehand_contracts::TerminalStatus::Cancelled,
                     summary: "cancelled by ui command".to_owned(),
+                    user_options: None,
                 }),
                 error_events: Vec::new(),
                 slave_substream_card: false,

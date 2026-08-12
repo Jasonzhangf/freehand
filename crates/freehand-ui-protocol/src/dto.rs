@@ -402,6 +402,8 @@ pub struct UiTurnProjection {
     pub usage_projection: Option<UiUsageProjection>,
     pub terminal_status: Option<TerminalStatus>,
     pub terminal_text: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub user_options: Option<Vec<String>>,
     pub errors: Vec<String>,
     pub slave_substream_card: bool,
 }

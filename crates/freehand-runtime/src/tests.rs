@@ -896,6 +896,7 @@ fn runtime_query_session_turns_restores_background_parent_evaluation() {
         agent_id: AgentId::new("master"),
         status: TerminalStatus::Success,
         summary: "overall goal evaluated; next task or final answer decided".to_owned(),
+        user_options: None,
     });
     persistence
         .record_turn_closed(&history, &turn, 0)
@@ -934,6 +935,7 @@ Injected timer prompt:\ninspect current Task Center truth";
         agent_id: AgentId::new("master"),
         status: TerminalStatus::ToolPending,
         summary: "timer follow-up scheduled next inspection".to_owned(),
+        user_options: None,
     });
     persistence
         .record_turn_closed(&history, &timer_turn, 0)
@@ -1154,6 +1156,7 @@ fn persist_search_fixture_turn(
         agent_id: agent_id.clone(),
         status: TerminalStatus::Success,
         summary: summary.to_owned(),
+        user_options: None,
     });
     persistence
         .record_turn_closed(&history, &turn, 0)
@@ -1408,6 +1411,7 @@ fn runtime_query_session_turns_does_not_reactivate_terminal_error_center_retry()
         agent_id: agent_id.clone(),
         status: TerminalStatus::Success,
         summary: "terminal evaluation already closed".to_owned(),
+        user_options: None,
     });
     persistence
         .record_turn_closed(&history, &turn, 0)
@@ -1540,6 +1544,7 @@ fn runtime_query_session_turns_does_not_reactivate_historical_retry_before_later
         agent_id: agent_id.clone(),
         status: TerminalStatus::Success,
         summary: "later evaluation already closed".to_owned(),
+        user_options: None,
     });
     persistence
         .record_turn_closed(&history, &terminal_turn, 0)
@@ -1857,6 +1862,7 @@ fn runtime_query_session_turns_restores_worker_task_namespace() {
         agent_id: worker_agent_id.clone(),
         status: TerminalStatus::Success,
         summary: "worker task transcript restored".to_owned(),
+        user_options: None,
     });
     worker_persistence
         .record_turn_closed(&history, &turn, 0)
@@ -2007,6 +2013,7 @@ fn closed_turn_for_context(
         agent_id: AgentId::new("agent-live"),
         status,
         summary: summary.to_owned(),
+        user_options: None,
     });
     turn
 }
@@ -3867,6 +3874,7 @@ fn live_bootstrap_clears_dead_owner_master_active_work_without_active_snapshot()
         agent_id: AgentId::new("agent-live"),
         status: TerminalStatus::Success,
         summary: "already completed".to_owned(),
+        user_options: None,
     });
     persistence
         .record_turn_closed(&history, &closed, 0)
@@ -4024,6 +4032,7 @@ fn live_bootstrap_closes_stale_toolpending_without_lifecycle_owner() {
         agent_id: agent_id.clone(),
         status: TerminalStatus::ToolPending,
         summary: "Waiting for lifecycle: user must pick option 1 or 2".to_owned(),
+        user_options: None,
     });
     persistence
         .record_turn_closed(&history, &turn, 0)
@@ -4123,6 +4132,7 @@ fn live_bootstrap_keeps_toolpending_when_child_task_can_wake_parent() {
         agent_id: agent_id.clone(),
         status: TerminalStatus::ToolPending,
         summary: "Waiting for lifecycle: child task still open".to_owned(),
+        user_options: None,
     });
     persistence
         .record_turn_closed(&history, &turn, 0)
@@ -4210,6 +4220,7 @@ fn runtime_dispatches_session_rollback_into_effective_ui_projection() {
             agent_id: AgentId::new("agent-live"),
             status: TerminalStatus::Success,
             summary: summary.to_owned(),
+            user_options: None,
         });
         persistence
             .record_turn_closed(&history, &turn, 0)
@@ -4554,6 +4565,7 @@ fn live_bootstrap_tolerates_incomplete_authoritative_history_with_empty_ledger()
         agent_id: agent_id.clone(),
         status: TerminalStatus::Success,
         summary: "only final repair round remains".to_owned(),
+        user_options: None,
     });
     persistence
         .record_turn_closed(&history, &turn, 0)

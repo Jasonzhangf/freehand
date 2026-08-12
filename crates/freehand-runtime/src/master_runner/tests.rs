@@ -4195,6 +4195,7 @@ fn persist_parent_evaluation_turn(
         agent_id: AgentId::new("master"),
         status: terminal_status,
         summary: summary.to_owned(),
+        user_options: None,
     });
     persistence
         .record_turn_closed(&history, &turn, 0)
@@ -4242,6 +4243,7 @@ fn persist_parent_blocked_follow_up_turn(
         agent_id: AgentId::new("master"),
         status: terminal_status,
         summary: summary.to_owned(),
+        user_options: None,
     });
     persistence
         .record_turn_closed(&history, &turn, 0)
@@ -4356,6 +4358,7 @@ fn persist_parent_user_objective_with_turn_id(
         agent_id: AgentId::new("master"),
         status: terminal_status,
         summary: terminal_summary.to_owned(),
+        user_options: None,
     });
     persistence
         .record_turn_closed(&history, &turn, 0)
@@ -4416,6 +4419,7 @@ fn persist_parent_repair_round_with_original_task_context(
         agent_id: AgentId::new("master"),
         status: terminal_status,
         summary: terminal_summary.to_owned(),
+        user_options: None,
     });
     persistence
         .record_turn_closed(&history, &turn, 0)
@@ -4488,6 +4492,7 @@ fn persist_parent_internal_repair_turn(
         agent_id: AgentId::new("master"),
         status: TerminalStatus::Blocked,
         summary: "internal repair exhausted".to_owned(),
+        user_options: None,
     });
     persistence
         .record_turn_closed(&history, &turn, 0)

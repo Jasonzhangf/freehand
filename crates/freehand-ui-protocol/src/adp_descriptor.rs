@@ -807,6 +807,11 @@ pub fn turn_projection_from_events(input: TurnProjectionInput) -> UiTurnProjecti
             .as_ref()
             .map(|event| event.status.clone()),
         terminal_text: input.terminal_event.as_ref().map(terminal_text_projection),
+        user_options: input
+            .terminal_event
+            .as_ref()
+            .and_then(|event| event.user_options.clone())
+            .filter(|opts| !opts.is_empty()),
         errors: input
             .error_events
             .iter()

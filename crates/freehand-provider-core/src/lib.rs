@@ -454,6 +454,7 @@ pub fn map_adapter_event(
                 agent_id: ctx.agent_id.clone(),
                 status,
                 summary,
+                user_options: None,
             })
         }
         ProviderAdapterEvent::Error(hint) => {

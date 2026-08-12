@@ -43,6 +43,8 @@ pub struct CompletionSubmission {
     pub learned: Option<String>,
     pub next_step: Option<String>,
     pub blocked_reason: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub user_options: Option<Vec<String>>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -54,6 +56,7 @@ pub enum CompletionDecision {
     Waiting {
         status: TerminalStatus,
         terminal_text: String,
+        user_options: Option<Vec<String>>,
     },
     ContinueWithNextStep {
         next_step: String,
@@ -197,6 +200,7 @@ pub fn parse_completion_submission_block(
         learned: optional_string_field(&mut issues, object, "learned"),
         next_step: optional_string_field(&mut issues, object, "next_step"),
         blocked_reason: optional_string_field(&mut issues, object, "blocked_reason"),
+        user_options: optional_string_list_field(&mut issues, object, "user_options"),
     };
 
     if !issues.is_empty() {
@@ -262,6 +266,49 @@ fn string_field(object: &Map<String, Value>, field: &'static str) -> Option<Stri
         .get(field)
         .and_then(Value::as_str)
         .map(ToOwned::to_owned)
+}
+
+fn optional_string_list_field(
+    issues: &mut Vec<CompletionSchemaIssue>,
+    object: &Map<String, Value>,
+    field: &'static str,
+) -> Option<Vec<String>> {
+    match object.get(field) {
+        None | Some(Value::Null) => None,
+        Some(Value::Array(values)) => {
+            let mut strings = Vec::with_capacity(values.len());
+            for value in values {
+                match value {
+                    Value::String(text) => strings.push(text.clone()),
+                    other => {
+                        issues.push(CompletionSchemaIssue {
+                            field: field.to_owned(),
+                            message: format!(
+                                "must be an array of strings, got {}",
+                                schema_value_type_label(other)
+                            ),
+                        });
+                        return None;
+                    }
+                }
+            }
+            if strings.is_empty() {
+                None
+            } else {
+                Some(strings)
+            }
+        }
+        Some(other) => {
+            issues.push(CompletionSchemaIssue {
+                field: field.to_owned(),
+                message: format!(
+                    "must be an array of strings, got {}",
+                    schema_value_type_label(other)
+                ),
+            });
+            None
+        }
+    }
 }
 
 fn schema_value_type_label(value: &Value) -> &'static str {
@@ -447,9 +494,22 @@ pub fn validate_completion_submission(
         CompletionClaim::Waiting => {
             let next_step = required_text(submission.next_step.as_deref(), "next_step")
                 .map_err(|_| CompletionValidationError::MissingNextStep)?;
+            let user_options = submission
+                .user_options
+                .clone()
+                .filter(|options| !options.is_empty());
+            let (status, prefix) = if user_options.is_some() {
+                (
+                    TerminalStatus::AwaitingUserOptions,
+                    "Waiting for user options",
+                )
+            } else {
+                (TerminalStatus::ToolPending, "Waiting for lifecycle")
+            };
             Ok(CompletionDecision::Waiting {
-                status: TerminalStatus::ToolPending,
-                terminal_text: format!("Waiting for lifecycle: {next_step}"),
+                status,
+                terminal_text: format!("{prefix}: {next_step}"),
+                user_options,
             })
         }
         CompletionClaim::Blocked => {
@@ -907,6 +967,7 @@ mod tests {
             learned: Some("keep harness strict".to_owned()),
             next_step: None,
             blocked_reason: None,
+            user_options: None,
         })
         .expect("valid");
 
@@ -933,6 +994,7 @@ mod tests {
             learned: Some("keep harness strict".to_owned()),
             next_step: None,
             blocked_reason: None,
+            user_options: None,
         })
         .expect_err("should fail");
         assert_eq!(err, CompletionValidationError::MissingField("evidence"));
@@ -950,6 +1012,7 @@ mod tests {
                 "Worker task is assigned; timer will re-check TaskBoard before final answer"
                     .to_owned(),
             ),
+            user_options: None,
             blocked_reason: None,
         })
         .expect("valid waiting claim");
@@ -958,10 +1021,71 @@ mod tests {
             CompletionDecision::Waiting {
                 status,
                 terminal_text,
+                user_options: _,
             } => {
                 assert_eq!(status, TerminalStatus::ToolPending);
                 assert!(terminal_text.contains("Waiting for lifecycle"));
                 assert!(terminal_text.contains("Worker task is assigned"));
+            }
+            other => panic!("unexpected decision: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn waiting_submission_with_user_options_projects_awaiting_user_options() {
+        let decision = validate_completion_submission(&CompletionSubmission {
+            claim: CompletionClaim::Waiting,
+            completion_reason: None,
+            evidence: None,
+            summary: None,
+            learned: None,
+            next_step: Some("Please choose how to proceed".to_owned()),
+            user_options: Some(vec!["Retry".to_owned(), "Cancel".to_owned()]),
+            blocked_reason: None,
+        })
+        .expect("valid waiting claim with user options");
+
+        match decision {
+            CompletionDecision::Waiting {
+                status,
+                terminal_text,
+                user_options,
+            } => {
+                assert_eq!(status, TerminalStatus::AwaitingUserOptions);
+                assert!(terminal_text.contains("Waiting for user options"));
+                assert!(terminal_text.contains("Please choose how to proceed"));
+                assert_eq!(
+                    user_options,
+                    Some(vec!["Retry".to_owned(), "Cancel".to_owned()])
+                );
+            }
+            other => panic!("unexpected decision: {other:?}"),
+        }
+    }
+
+    #[test]
+    fn waiting_submission_with_empty_user_options_falls_back_to_tool_pending() {
+        let decision = validate_completion_submission(&CompletionSubmission {
+            claim: CompletionClaim::Waiting,
+            completion_reason: None,
+            evidence: None,
+            summary: None,
+            learned: None,
+            next_step: Some("Waiting on lifecycle".to_owned()),
+            user_options: Some(Vec::new()),
+            blocked_reason: None,
+        })
+        .expect("valid waiting claim");
+
+        match decision {
+            CompletionDecision::Waiting {
+                status,
+                terminal_text,
+                user_options,
+            } => {
+                assert_eq!(status, TerminalStatus::ToolPending);
+                assert!(terminal_text.contains("Waiting for lifecycle"));
+                assert_eq!(user_options, None);
             }
             other => panic!("unexpected decision: {other:?}"),
         }
@@ -1036,6 +1160,7 @@ mod tests {
             learned: None,
             next_step: None,
             blocked_reason: Some("waiting on upstream".to_owned()),
+            user_options: None,
         })
         .expect("valid");
         match decision {

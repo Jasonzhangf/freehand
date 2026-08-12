@@ -451,34 +451,18 @@ impl ReasonTurnEngine {
                 status,
                 terminal_text,
             })
-            | Ok(CompletionDecision::Waiting {
-                status,
-                terminal_text,
-            })
             | Ok(CompletionDecision::Blocked {
                 status,
                 terminal_text,
             }) => {
-                let event = ReasonResp03TerminalEvent {
-                    session_id: turn.request.session_id.clone(),
-                    turn_id: turn.request.turn_id.clone(),
-                    trace_id: turn.request.trace_id.clone(),
-                    feature_id: turn.request.feature_id.clone(),
-                    agent_id: turn.request.agent_id.clone(),
-                    status,
-                    summary: terminal_text,
-                };
-                turn.terminal_event = Some(event.clone());
-                turn.timing.mark_completed(unix_millis_now());
-                self.publish(ReasonBroadcastEvent::Terminal(event.clone()));
-                self.emit_debug(
-                    turn,
-                    "ReasonTurnEngine::submit_completion",
-                    "completion accepted",
-                    vec![format!("terminal_status={:?}", event.status)],
-                );
-                Ok(event)
+                let user_options: Option<Vec<String>> = None;
+                self.handle_completion_close(turn, status, terminal_text, user_options)
             }
+            Ok(CompletionDecision::Waiting {
+                status,
+                terminal_text,
+                user_options,
+            }) => self.handle_completion_close(turn, status, terminal_text, user_options),
             Ok(CompletionDecision::ContinueWithNextStep { next_step }) => {
                 self.emit_debug(
                     turn,
@@ -501,6 +485,35 @@ impl ReasonTurnEngine {
         }
     }
 
+    fn handle_completion_close(
+        &self,
+        turn: &mut TurnRecord,
+        status: TerminalStatus,
+        terminal_text: String,
+        user_options: Option<Vec<String>>,
+    ) -> Result<ReasonResp03TerminalEvent, ReasonTurnError> {
+        let event = ReasonResp03TerminalEvent {
+            session_id: turn.request.session_id.clone(),
+            turn_id: turn.request.turn_id.clone(),
+            trace_id: turn.request.trace_id.clone(),
+            feature_id: turn.request.feature_id.clone(),
+            agent_id: turn.request.agent_id.clone(),
+            status,
+            summary: terminal_text,
+            user_options,
+        };
+        turn.terminal_event = Some(event.clone());
+        turn.timing.mark_completed(unix_millis_now());
+        self.publish(ReasonBroadcastEvent::Terminal(event.clone()));
+        self.emit_debug(
+            turn,
+            "ReasonTurnEngine::submit_completion",
+            "completion accepted",
+            vec![format!("terminal_status={:?}", event.status)],
+        );
+        Ok(event)
+    }
+
     pub fn fail_turn(
         &self,
         turn: &mut TurnRecord,
@@ -514,6 +527,7 @@ impl ReasonTurnEngine {
             agent_id: turn.request.agent_id.clone(),
             status: TerminalStatus::Failed,
             summary: summary.into(),
+            user_options: None,
         };
         turn.terminal_event = Some(event.clone());
         turn.timing.mark_completed(unix_millis_now());
@@ -557,6 +571,7 @@ impl ReasonTurnEngine {
             agent_id: turn.request.agent_id.clone(),
             status,
             summary: summary.into(),
+            user_options: None,
         };
         turn.terminal_event = Some(event.clone());
         turn.timing.mark_completed(unix_millis_now());
@@ -589,6 +604,7 @@ impl ReasonTurnEngine {
             agent_id: turn.request.agent_id.clone(),
             status: TerminalStatus::Cancelled,
             summary: summary.into(),
+            user_options: None,
         };
         turn.terminal_event = Some(event.clone());
         turn.timing.mark_completed(unix_millis_now());
@@ -1038,6 +1054,7 @@ mod tests {
                     learned: Some("keep schema strict".to_owned()),
                     next_step: None,
                     blocked_reason: None,
+                    user_options: None,
                 },
             )
             .expect("terminal");
@@ -1068,6 +1085,7 @@ mod tests {
                     learned: Some("keep schema strict".to_owned()),
                     next_step: None,
                     blocked_reason: None,
+                    user_options: None,
                 },
             )
             .expect("terminal");
@@ -1099,6 +1117,7 @@ mod tests {
                     learned: Some("keep schema strict".to_owned()),
                     next_step: None,
                     blocked_reason: None,
+                    user_options: None,
                 },
             )
             .expect_err("should fail");
@@ -1159,6 +1178,7 @@ mod tests {
             learned: Some("keep schema strict".to_owned()),
             next_step: None,
             blocked_reason: None,
+            user_options: None,
         };
         let terminal = engine
             .submit_completion(&mut turn, &submission)

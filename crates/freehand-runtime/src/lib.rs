@@ -361,6 +361,10 @@ impl LiveReasonExecutionRole {
             (Self::Worker, LiveReasonExecutionProfile::CleanSearch) => {
                 descriptor.capabilities.web_search.is_hosted()
             }
+            (Self::Worker, LiveReasonExecutionProfile::Workspace) => descriptor
+                .capabilities
+                .web_search
+                .can_mix_with_function_tools(),
             _ => false,
         };
         if allow_hosted_search {
@@ -2180,18 +2184,157 @@ where
                         &provider_text,
                         &public_provider_text,
                     );
-                    let submission = CompletionSubmission {
-                        claim: CompletionClaim::Complete,
-                        completion_reason: Some(format!(
-                            "control status accepted {}",
-                            control_decision_label(&decision)
-                        )),
-                        evidence: Some(terminal_summary.clone()),
-                        summary: Some(terminal_summary),
-                        learned: Some("control status stopHook accepted".to_owned()),
-                        next_step: None,
-                        blocked_reason: None,
+                    let user_options = match &decision {
+                        ControlRhythmDecision::StopForUserOptions(options) => {
+                            let filtered: Vec<String> = options
+                                .iter()
+                                .map(|opt| opt.trim().to_owned())
+                                .filter(|opt| !opt.is_empty())
+                                .collect();
+                            if filtered.is_empty() {
+                                None
+                            } else {
+                                Some(filtered)
+                            }
+                        }
+                        _ => None,
                     };
+                    let (claim, completion_reason, evidence, learned, next_step) =
+                        if user_options.is_some() {
+                            (
+                                CompletionClaim::Waiting,
+                                format!(
+                                    "control status accepted {}",
+                                    control_decision_label(&decision)
+                                ),
+                                terminal_summary.clone(),
+                                "control status stopHook accepted; awaiting user choice".to_owned(),
+                                Some(terminal_summary.clone()),
+                            )
+                        } else {
+                            (
+                                CompletionClaim::Complete,
+                                format!(
+                                    "control status accepted {}",
+                                    control_decision_label(&decision)
+                                ),
+                                terminal_summary.clone(),
+                                "control status stopHook accepted".to_owned(),
+                                None,
+                            )
+                        };
+                    let submission = CompletionSubmission {
+                        claim,
+                        completion_reason: Some(completion_reason),
+                        evidence: Some(evidence),
+                        summary: Some(terminal_summary),
+                        learned: Some(learned),
+                        next_step,
+                        blocked_reason: None,
+                        user_options: user_options.clone(),
+                    };
+                    if user_options.is_some() {
+                        let _ =
+                            engine
+                                .submit_completion(&mut turn, &submission)
+                                .map_err(|err| {
+                                    RuntimeLiveBridgeError::TurnStartFailed(err.to_string())
+                                })?;
+                        drain_broadcasts(&receiver, &mut broadcasts, &mut on_broadcast);
+                        drain_debug_events(&debug_receiver, &mut on_debug);
+                        ensure_live_not_cancelled(&request)?;
+                        write_control_hook_metadata(
+                            &metadata_center,
+                            &agent_id,
+                            &request.session_id,
+                            RuntimeControlHookWriteSpec {
+                                turn_id: Some(&turn.request.turn_id),
+                                trace_id: &turn.request.trace_id,
+                                pipeline_node: "ControlHook04BeforeClientReturn",
+                                metadata_suffix: "before_client_return:user_options".to_owned(),
+                                symbol_path: "run_live_provider_reason_turn",
+                                entries: vec![
+                                    MetadataEntry {
+                                        key: "control.hook".to_owned(),
+                                        value: json!("ControlHook04BeforeClientReturn"),
+                                    },
+                                    MetadataEntry {
+                                        key: "control.decision".to_owned(),
+                                        value: json!(control_decision_label(&decision)),
+                                    },
+                                    MetadataEntry {
+                                        key: "control.user_option_count".to_owned(),
+                                        value: json!(
+                                            user_options.as_ref().map(|o| o.len()).unwrap_or(0)
+                                        ),
+                                    },
+                                ],
+                            },
+                        )?;
+                        write_live_bridge_metadata(
+                            &metadata_center,
+                            &agent_id,
+                            &request.session_id,
+                            RuntimeMetadataWriteSpec {
+                                turn_id: Some(&turn.request.turn_id),
+                                trace_id: &turn.request.trace_id,
+                                kind: MetadataKind::RuntimeState,
+                                pipeline_node: "RuntimeLive04TurnClosed",
+                                metadata_suffix: "turn_closed_user_options".to_owned(),
+                                symbol_path: "run_live_provider_reason_turn",
+                                entries: vec![
+                                    MetadataEntry {
+                                        key: "bridge.rounds".to_owned(),
+                                        value: json!(round),
+                                    },
+                                    MetadataEntry {
+                                        key: "bridge.tool_executions".to_owned(),
+                                        value: json!(tool_executions),
+                                    },
+                                    MetadataEntry {
+                                        key: "terminal.status".to_owned(),
+                                        value: json!("AwaitingUserOptions"),
+                                    },
+                                ],
+                            },
+                        )?;
+                        emit_live_bridge_debug(
+                            &debug_hub,
+                            &agent_id,
+                            &request.session_id,
+                            RuntimeDebugEmitSpec {
+                                turn_id: &turn.request.turn_id,
+                                trace_id: &turn.request.trace_id,
+                                pipeline_node: "ControlHook04BeforeClientReturn",
+                                function: "run_live_provider_reason_turn",
+                                status_text: "control status accepted; awaiting user options",
+                                detail_lines: vec![
+                                    format!("decision={}", control_decision_label(&decision)),
+                                    format!(
+                                        "user_option_count={}",
+                                        user_options.as_ref().map(|o| o.len()).unwrap_or(0)
+                                    ),
+                                ],
+                            },
+                        );
+                        drain_debug_events(&debug_receiver, &mut on_debug);
+                        persistence
+                            .record_turn_closed(&history, &turn, schema_rejections.len() as u32)
+                            .map_err(|err| {
+                                RuntimeLiveBridgeError::ReasonPersistenceFailed(err.to_string())
+                            })?;
+                        turns.push(turn.clone());
+                        return Ok(LiveReasonTurnOutcome {
+                            turn,
+                            turns,
+                            broadcasts,
+                            rounds: round,
+                            schema_rejections,
+                            tool_executions,
+                            restore_status,
+                            restored_closed_turns,
+                        });
+                    }
                     if let Some(resolution) =
                         enter_master_terminal_persistence(role, &request, &agent_id)?
                     {
@@ -10545,6 +10688,7 @@ where
                 learned: Some("return control to durable EventInbox polling".to_owned()),
                 next_step: None,
                 blocked_reason: None,
+                user_options: None,
             };
             let _ = engine
                 .submit_completion(turn, &submission)

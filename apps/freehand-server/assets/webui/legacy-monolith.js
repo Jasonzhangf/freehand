@@ -1448,6 +1448,15 @@ function turnLifecycleForRender(turn) {
     if (terminal === "running" || isToolPendingStatus(terminal)) {
       return toolPendingLifecycleForRender(turn);
     }
+    if (isAwaitingUserOptionsStatus(terminal)) {
+      return {
+        phase: "waiting_user_options",
+        className: "pending",
+        label: "等待用户选择",
+        isLive: false,
+        elapsed: "",
+      };
+    }
     const label = terminalTurnStatusLabelForTurn(turn, terminal);
     return {
       phase,
@@ -2024,10 +2033,10 @@ function chatAssistantStatusLabel(lifecycle, rows) {
     return lifecycle.label || "运行中";
   }
   const waitingFinal = rows.find((row) =>
-    row.kind === "final" && ["running", "pending", "waiting_user"].includes(`${row.status || ""}`.toLowerCase())
+    row.kind === "final" && ["running", "pending", "waiting_user", "waiting_for_user_options"].includes(`${row.status || ""}`.toLowerCase())
   );
   if (waitingFinal) {
-    return waitingFinal.label || waitingFinal.statusText || waitingFinal.status || lifecycle.label || "等待中";
+    return waitingFinal.statusText || waitingFinal.label || waitingFinal.status || lifecycle.label || "等待中";
   }
   const finalRow = rows.find((row) => row.kind === "final");
   if (finalRow) {
@@ -2079,6 +2088,7 @@ function chatAssistantSection(row) {
     renderTextLines(body, row.body || []);
   }
   section.appendChild(body);
+  renderUserOptionButtons(section, row);
   return section;
 }
 
@@ -2094,8 +2104,8 @@ function assistantSectionHeadingLabel(row) {
     if (status === "running") {
       return "生命周期";
     }
-    if (status === "waiting_user") {
-      return "等待用户";
+    if (status === "waiting_user" || status === "waiting_for_user_options") {
+      return "等待用户选择";
     }
     return "最终结果";
   }
@@ -2193,6 +2203,46 @@ function parseFinalSummaryLine(line) {
     label: "",
     text: `${line || ""}`.trim(),
   };
+}
+
+function renderUserOptionButtons(section, row) {
+  const options = (row && Array.isArray(row.userOptions) && row.userOptions) || [];
+  if (row.kind !== "final" || options.length === 0) {
+    return;
+  }
+  const wrap = document.createElement("div");
+  wrap.className = "user-options";
+  const heading = document.createElement("div");
+  heading.className = "user-options-heading";
+  heading.textContent = "选择一项继续";
+  wrap.appendChild(heading);
+  const list = document.createElement("div");
+  list.className = "user-options-list";
+  options.forEach((option) => {
+    const button = document.createElement("button");
+    button.type = "button";
+    button.className = "user-option-button";
+    button.textContent = option;
+    button.addEventListener("click", async () => {
+      if (button.disabled) {
+        return;
+      }
+      list.querySelectorAll(".user-option-button").forEach((btn) => {
+        btn.disabled = true;
+      });
+      try {
+        await submitUserInput(option);
+      } catch (error) {
+        list.querySelectorAll(".user-option-button").forEach((btn) => {
+          btn.disabled = false;
+        });
+        setCommandStatus(`选项提交失败：${error && error.message ? error.message : error}`, { stickyMs: 5000 });
+      }
+    });
+    list.appendChild(button);
+  });
+  wrap.appendChild(list);
+  section.appendChild(wrap);
 }
 
 function renderToolSection(section, row) {
@@ -2689,6 +2739,10 @@ function buildTerminalRenderRow(turn, item) {
     title: item.title,
     body: [item.body],
     status: item.status,
+    statusText: isAwaitingUserOptionsStatus(turn.terminal_status)
+      ? "等待用户选择"
+      : item.status,
+    userOptions: (item.userOptions || []).slice(),
     identity: { turnId: turn.turn_id },
   };
 }
@@ -2721,12 +2775,24 @@ function toolStatusLabel(status) {
 
 function isTerminalStatus(status) {
   const normalized = `${status || ""}`.toLowerCase();
-  return ["success", "failed", "blocked", "interrupted", "cancelled"].includes(normalized);
+  return [
+    "success",
+    "failed",
+    "blocked",
+    "interrupted",
+    "cancelled",
+    "awaitinguseroptions",
+  ].includes(normalized);
 }
 
 function isToolPendingStatus(status) {
   const normalized = `${status || ""}`.toLowerCase().replace(/[_-]/g, "");
   return normalized === "toolpending";
+}
+
+function isAwaitingUserOptionsStatus(status) {
+  const normalized = `${status || ""}`.toLowerCase().replace(/[_-]/g, "");
+  return normalized === "awaitinguseroptions";
 }
 
 function lifecycleOwnerTaskProjectionLoaded() {
@@ -2850,6 +2916,9 @@ function terminalTurnStatusLabel(status) {
   }
   if (normalized === "cancelled") {
     return "已取消";
+  }
+  if (normalized === "awaitinguseroptions") {
+    return "等待用户选择";
   }
   return "已完成";
 }
@@ -3251,25 +3320,31 @@ function derivePublicConversation(turn) {
     const terminalStatus = `${turn.terminal_status || "Success"}`.toLowerCase();
     const isToolPending = isToolPendingStatus(terminalStatus);
     const toolPendingIsLifecycle = isToolPending && toolPendingRepresentsLifecycle(turn);
+    const awaitingUserOptions = isAwaitingUserOptionsStatus(terminalStatus);
     const status =
       isToolPending
         ? toolPendingIsLifecycle ? "running" : "waiting_user"
-        : terminalStatus === "failed"
-        ? "failed"
-        : terminalStatus === "cancelled"
-          ? "cancelled"
-          : terminalStatus === "blocked"
-            ? "blocked"
-            : terminalStatus === "interrupted"
-              ? "interrupted"
-              : "completed";
+        : awaitingUserOptions
+          ? "waiting_for_user_options"
+          : terminalStatus === "failed"
+          ? "failed"
+          : terminalStatus === "cancelled"
+            ? "cancelled"
+            : terminalStatus === "blocked"
+              ? "blocked"
+              : terminalStatus === "interrupted"
+                ? "interrupted"
+                : "completed";
     items.push({
       kind: "Terminal",
-      title: isToolPending ? (toolPendingIsLifecycle ? "生命周期" : "等待用户") : "最终结果",
+      title: isToolPending
+        ? toolPendingIsLifecycle ? "生命周期" : "等待用户"
+        : awaitingUserOptions ? "等待用户选择" : "最终结果",
       body: terminalBodyForDisplay(turn.terminal_text, {
         waitingUserToolPending: isToolPending && !toolPendingIsLifecycle,
       }),
       status: isToolPending ? toolPendingStatusLabelForTurn(turn) : status,
+      userOptions: awaitingUserOptions ? turn.user_options || [] : [],
     });
   }
   (turn.errors || []).forEach((error) => {
@@ -5335,11 +5410,13 @@ function sessionLiveObservation(sessionId) {
   const status = `${(summary && summary.latest_status) || ""}`.trim();
   const label = turn && isToolPendingStatus(turn.terminal_status)
     ? toolPendingStatusLabelForTurn(turn)
-    : turn && turnIsWaitingForModelResponse(turn)
-      ? modelRequestLabel(turn)
-      : isToolPendingStatus(status) && lifecycleOwnerTaskProjectionLoaded() && !sessionHasOpenTaskLifecycle(sessionId) && !sessionHasOpenTimerLifecycle(sessionId)
-        ? "等待用户选择"
-        : statusLabel(status || "active");
+    : turn && isAwaitingUserOptionsStatus(turn.terminal_status)
+      ? "等待用户选择"
+      : turn && turnIsWaitingForModelResponse(turn)
+        ? modelRequestLabel(turn)
+        : isToolPendingStatus(status) && lifecycleOwnerTaskProjectionLoaded() && !sessionHasOpenTaskLifecycle(sessionId) && !sessionHasOpenTimerLifecycle(sessionId)
+          ? "等待用户选择"
+          : statusLabel(status || "active");
   const detail = turn && turn.model_request && turn.model_request.detail
     ? turn.model_request.detail
     : (summary && summary.latest_summary) || "";
@@ -7040,6 +7117,9 @@ function statusLabel(status) {
     task: "任务",
     tool_pending: "等待中",
     toolpending: "等待中",
+    awaiting_user_options: "等待用户选择",
+    awaitinguseroptions: "等待用户选择",
+    waiting_for_user_options: "等待用户选择",
     waiting_user: "等待用户选择",
     waiting: "等待中",
     waiting_agent: "等待 Agent",

@@ -252,6 +252,7 @@ pub enum TerminalStatus {
     Interrupted,
     Failed,
     Cancelled,
+    AwaitingUserOptions,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -295,6 +296,8 @@ pub struct ReasonResp03TerminalEvent {
     pub agent_id: AgentId,
     pub status: TerminalStatus,
     pub summary: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub user_options: Option<Vec<String>>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

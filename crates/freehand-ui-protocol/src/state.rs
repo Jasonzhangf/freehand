@@ -749,6 +749,7 @@ impl UiProtocolState {
                 usage_projection: None,
                 terminal_status: None,
                 terminal_text: None,
+                user_options: None,
                 errors: Vec::new(),
                 slave_substream_card,
             })

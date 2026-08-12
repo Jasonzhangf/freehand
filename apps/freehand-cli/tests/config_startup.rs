@@ -3069,6 +3069,8 @@ fn master_autonomy_turn_projection(truth: &MockMasterWorkerAutonomyTruth) -> UiT
             })
             .collect(),
         usage: Vec::new(),
+        usage_projection: None,
+        user_options: None,
         terminal_status: Some(TerminalStatus::Success),
         terminal_text: Some(format!(
             "master autonomy {} terminal status {}",
@@ -3208,6 +3210,8 @@ fn test_turn_projection() -> UiTurnProjection {
         tool_calls: Vec::new(),
         tool_activities: Vec::new(),
         usage: Vec::new(),
+        usage_projection: None,
+        user_options: None,
         terminal_status: None,
         terminal_text: None,
         errors: Vec::new(),
@@ -3270,6 +3274,8 @@ fn test_sample_turn_projection(
             Vec::new()
         },
         usage: Vec::new(),
+        usage_projection: None,
+        user_options: None,
         terminal_status: Some(terminal_status),
         terminal_text: Some(match kind {
             MockAdpSampleKind::Failure => "sample recovered after tool failure".to_owned(),
