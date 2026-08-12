@@ -16,6 +16,7 @@
     "runtime receives a provider tool call named `task`",
     "runtime routes `task` tool calls to `execute_task_tool` instead of generic file/tool execution",
     "`TaskRuntime::boot` loads task snapshots, task leases, self-agent snapshot, and persisted agent lifecycle snapshots into memory",
+    "`TaskRuntime::boot_master` runs the master-only recovery path: full lifecycle reconcile plus the stale-blocked sweep that cancels long-blocked worker tasks and releases their lifecycle projections on the same boot; only the master may cancel abandoned worker-blocked tasks because workers boot with the master as task owner",
     "`TaskRuntime::boot_read_only` loads the same persisted projection without creating a self-agent snapshot and without running lease/lifecycle reconcile writes; ADP query/projection paths use it so read routes cannot mutate Task Center truth",
     "`TaskRuntime::boot` preserves freshly resumed running tasks during the bounded lease-acquisition window, then interrupts running tasks whose lease remains missing, mismatched, inactive, or expired",
     "lease-expiry recovery writes `TaskInterrupted` with the old `execution_id` as a fencing token and clears active execution truth so late facts from the stale worker generation are rejected",
@@ -118,6 +119,19 @@
         "stale_execution_fact_after_interrupted_fencing_is_rejected"
       ],
       "why_shared": "keeps startup recovery in task owner, not UI/runtime glue"
+    },
+    {
+      "symbol": "TaskRuntime::boot_master",
+      "owner": "crates/freehand-task/src/lib.rs",
+      "purpose": "master recovery boot that additionally cancels abandoned stale-blocked worker tasks and releases their lifecycle projections",
+      "allowed_callers": [
+        "master runner open_task_center"
+      ],
+      "related_tests": [
+        "boot_promotes_stale_blocked_task_to_cancelled_after_ttl",
+        "boot_worker_reconcile_preserves_stale_blocked_task_from_other_worker"
+      ],
+      "why_shared": "keeps the master-only stale-blocked sweep in the task owner so a worker boot (which owns the master as task owner) cannot cancel other workers' blocked tasks"
     },
     {
       "symbol": "write_json_atomic",
@@ -372,6 +386,18 @@
       "why_shared": "one writer boundary prevents cross-process seq collisions and partial ledger/snapshot/index updates"
     },
     {
+      "symbol": "TaskStore::append_event_and_snapshot_if_status",
+      "owner": "crates/freehand-task/src/lib.rs",
+      "purpose": "lock ledger append that re-reads the persisted task snapshot under the lock and only appends when the disk status still equals the expected status; makes one-time boot recovery transitions idempotent across concurrent owner boots",
+      "allowed_callers": [
+        "reconcile_stale_blocked boot recovery writer"
+      ],
+      "related_tests": [
+        "boot_master_cancels_stale_blocked_only_once_across_recovery_boots"
+      ],
+      "why_shared": "prevents duplicate TaskCancelled events and repeated agent release when two master processes boot against the same stale task"
+    },
+    {
       "symbol": "TaskStore::load_master_visible_events_after_watermark",
       "owner": "crates/freehand-task/src/lib.rs",
       "purpose": "load only master-visible task ledger rows whose per-task sequence is newer than the v2 EventInbox watermark",
@@ -412,9 +438,9 @@
     },
     {
       "step": "03",
-      "symbol_path": "TaskRuntime::boot / TaskRuntime::boot_read_only",
+      "symbol_path": "TaskRuntime::boot / TaskRuntime::boot_master / TaskRuntime::boot_read_only",
       "file_path": "crates/freehand-task/src/lib.rs",
-      "responsibility": "load task and agent snapshots into memory; owner runners reconcile lease/lifecycle truth, read-only query callers do not write recovery truth",
+      "responsibility": "load task and agent snapshots into memory; owner runners reconcile lease/lifecycle truth, master recovery additionally sweeps stale-blocked worker tasks, read-only query callers do not write recovery truth",
       "input_semantic": "runtime home and owner agent",
       "output_semantic": "ready task runtime, either reconciled owner state or side-effect-free projection state",
       "caller": "runtime task bridge",
@@ -716,6 +742,17 @@
       "input_semantic": "task snapshot + pending ledger event",
       "output_semantic": "durable unique-seq ledger/snapshot/index truth",
       "caller": "TaskRuntime mutation and recovery writers",
+      "callee": "filesystem advisory lock + task store atomic writers",
+      "binding_status": "bound"
+    },
+    {
+      "step": "27",
+      "symbol_path": "TaskStore::append_event_and_snapshot_if_status",
+      "file_path": "crates/freehand-task/src/lib.rs",
+      "responsibility": "same ledger-locked append as `append_event_and_snapshot`, but re-reads disk status under the lock and skips when the task is no longer in the expected status (idempotent one-time recovery)",
+      "input_semantic": "task snapshot + pending ledger event + expected disk status",
+      "output_semantic": "appended unique-seq ledger/snapshot/index truth, or skipped because the disk status advanced",
+      "caller": "reconcile_stale_blocked boot recovery writer",
       "callee": "filesystem advisory lock + task store atomic writers",
       "binding_status": "bound"
     },

@@ -50,6 +50,8 @@
   - `session_has_lifecycle_owner_for_turn`
   - `task_can_wake_parent_lifecycle`
   - `owner_turn_matches_target`
+  - `parent_logical_turn_waits_for_lifecycle_cached`
+  - `authoritative_turn_snapshots_fingerprint`
 
 ## Resource Map Binding
 

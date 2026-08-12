@@ -3893,6 +3893,85 @@ fn production_master_runner_parent_context_excludes_prior_user_turn_children() {
     fs::remove_dir_all(runtime_home).expect("cleanup");
 }
 
+#[test]
+fn parent_turn_waits_lifecycle_lookup_is_cached_across_idle_ticks() {
+    let runtime_home = temp_path("parent-turn-waits-cache");
+    bootstrap_runner(&runtime_home);
+    let parent_session_id = SessionId::new("parent-session-waits-cache");
+    persist_parent_user_objective_with_turn_id(
+        &runtime_home,
+        &parent_session_id,
+        &TurnId::new("runtime-turn-1"),
+        "wait for the blocked child lifecycle",
+        TerminalStatus::ToolPending,
+        "Waiting for lifecycle: blocked child.",
+    );
+    seed_parent_blocked_child_for_turn(
+        &runtime_home,
+        &parent_session_id,
+        &TurnId::new("runtime-turn-1"),
+        "cached-blocked-child",
+    );
+    let executor = Arc::new(StubMasterExecutor::new(|_| {
+        Err("cached parent wait must not trigger blocked follow-up on unchanged state".to_owned())
+    }));
+    let runner = test_runner(runtime_home.clone(), executor.clone());
+
+    let runtime = TaskRuntime::boot(&runtime_home, AgentId::new("master")).expect("task runtime");
+    let inbox = runtime
+        .query_event_inbox(TaskEventInboxQuery {
+            after_cursor: None,
+            limit: usize::MAX,
+        })
+        .expect("event inbox");
+    let state_path = runner.state_path();
+    let mut state: MasterLoopState =
+        serde_json::from_str(&fs::read_to_string(&state_path).expect("read state"))
+            .expect("parse state");
+    state.cursor = inbox.next_cursor;
+    state.pending_attention.clear();
+    state.completed_parent_evaluations.clear();
+    state.skipped_parent_evaluations.clear();
+    fs::write(
+        &state_path,
+        serde_json::to_string_pretty(&state).expect("render state"),
+    )
+    .expect("write advanced cursor state");
+
+    let first = runner.run_once().expect("first tick");
+    assert!(matches!(
+        first,
+        ProductionMasterTickOutcome::ParentEvaluated { .. } | ProductionMasterTickOutcome::Idle
+    ));
+
+    let after_first = runner.load_state().expect("load after first");
+    let hits_after_first = after_first.parent_turn_waits_cache.cache_hits;
+    let lookups_after_first = after_first.parent_turn_waits_cache.lookups;
+    assert!(
+        lookups_after_first >= 1,
+        "first tick must perform at least one parent-turn-waits lookup"
+    );
+
+    let second = runner.run_once().expect("second tick");
+    assert_eq!(
+        second,
+        ProductionMasterTickOutcome::Idle,
+        "unchanged blocked parent state must not re-trigger follow-up work"
+    );
+    let after_second = runner.load_state().expect("load after second");
+    assert!(
+        after_second.parent_turn_waits_cache.cache_hits > hits_after_first,
+        "unchanged session-history mtime must be served from the cache, not re-read"
+    );
+    assert!(
+        after_second.parent_turn_waits_cache.lookups >= lookups_after_first,
+        "cache lookups must not regress across ticks"
+    );
+    assert_eq!(executor.calls.load(Ordering::Relaxed), 0);
+
+    fs::remove_dir_all(runtime_home).expect("cleanup");
+}
+
 fn test_runner(
     runtime_home: PathBuf,
     executor: Arc<dyn MasterTurnExecutor>,

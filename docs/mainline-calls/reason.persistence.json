@@ -205,6 +205,19 @@
         "rollback_filters_model_visible_history_to_effective_turn_truth"
       ],
       "why_shared": "snapshot restore, ledger-only rebuild, and rollback persistence must use one effective-turn filter instead of drifting independently"
+    },
+    {
+      "symbol": "ReasonPersistence::authoritative_turn_snapshots_fingerprint",
+      "owner": "crates/freehand-reason/src/persistence.rs",
+      "purpose": "serve a deterministic change fingerprint over every authoritative turn-snapshot file (history, cursor, active, closed turns, rollback markers) plus the monotonic cursor sequence so runtime can use it as a conservative cache key; file names participate in the key so same-mtime/same-size content changes and snapshot renames invalidate the entry; runtime never reads the persistence file layout or coerces IO errors into valid cache keys",
+      "allowed_callers": [
+        "Master parent-workset reconciliation",
+        "owner-crate tests"
+      ],
+      "related_tests": [
+        "authoritative_turn_snapshots_fingerprint_covers_all_files"
+      ],
+      "why_shared": "authoritative session-history metadata must be served by the persistence owner so runtime never reads the file path itself or coerces IO errors into valid cache keys"
     }
   ],
   "call_table": [
@@ -373,6 +386,17 @@
       "input_semantic": "authoritative turn snapshots plus rollback markers",
       "output_semantic": "lightweight exact-per-file UI snapshots with created-time truth",
       "caller": "runtime bootstrap",
+      "callee": "persistence owner",
+      "binding_status": "bound"
+    },
+    {
+      "step": "14a",
+      "symbol_path": "ReasonPersistence::authoritative_turn_snapshots_fingerprint",
+      "file_path": "crates/freehand-reason/src/persistence.rs",
+      "responsibility": "return a deterministic change fingerprint over every authoritative turn-snapshot file plus the monotonic cursor sequence; Ok(None) when no authoritative truth exists yet, Err on real filesystem failures; file names participate in the key so same-mtime/same-size content changes and renames invalidate cache entries",
+      "input_semantic": "session id",
+      "output_semantic": "Ok(None) or Ok(Some((mtime_nanos, size_bytes))) or Err",
+      "caller": "runtime Master parent-workset reconciliation cache",
       "callee": "persistence owner",
       "binding_status": "bound"
     },

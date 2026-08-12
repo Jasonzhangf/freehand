@@ -378,6 +378,37 @@ struct MasterLoopState {
     pending_attention: Vec<MasterAttentionItem>,
     #[serde(default)]
     next_attention_sequence: u64,
+    #[serde(default)]
+    parent_turn_waits_cache: ParentTurnWaitsCache,
+}
+
+#[derive(Debug, Default, Serialize, Deserialize)]
+struct ParentTurnWaitsCache {
+    #[serde(default)]
+    entries: BTreeMap<String, ParentTurnWaitsCacheEntry>,
+    #[serde(default)]
+    lookups: u64,
+    #[serde(default)]
+    cache_hits: u64,
+}
+
+/// Hard cap on cached parent-turn-waits entries so the serialized master loop
+/// state cannot grow without bound as sessions accumulate. Exceeding it clears
+/// the whole cache (safe cold re-read), rather than tracking per-entry LRU.
+const PARENT_TURN_WAITS_CACHE_MAX_ENTRIES: usize = 256;
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct ParentTurnWaitsCacheEntry {
+    /// Deterministic fingerprint of every authoritative turn-snapshot file
+    /// (history, cursor, active turn, closed turns, rollback markers) from the
+    /// reason owner. Any authoritative mutation invalidates the entry.
+    /// `#[serde(default)]` keeps previously persisted master loop state files
+    /// (which stored mtime+size pairs) readable; such legacy entries simply
+    /// never match the new fingerprint and are cold-refilled on the next tick.
+    #[serde(default)]
+    authoritative_fingerprint: String,
+    turn_group_key: String,
+    waits: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -1414,6 +1445,73 @@ impl ProductionMasterRunner {
         )
     }
 
+    fn parent_logical_turn_waits_for_lifecycle_cached(
+        &self,
+        state: &mut MasterLoopState,
+        parent_session_id: &SessionId,
+        parent_turn_id: Option<&TurnId>,
+    ) -> Result<bool, ProductionMasterRunnerError> {
+        // Cache keyed on the reason owner's authoritative fingerprint, which
+        // covers every file `restore_authoritative_turn_snapshots_for_ui`
+        // reads (history, cursor, active turn, closed turns, rollback
+        // markers). This prevents serving a `waits` result computed from an
+        // intermediate persistence state where history was written but turn
+        // snapshots were not yet, because any authoritative mutation changes
+        // at least one (mtime, size) pair in the fingerprint. The reason owner
+        // is the only reader of that file layout; runtime never touches the
+        // path directly. A fingerprint error is propagated, never coerced into
+        // a valid cache key.
+        state.parent_turn_waits_cache.lookups =
+            state.parent_turn_waits_cache.lookups.saturating_add(1);
+        let Some(parent_turn_id) = parent_turn_id else {
+            return Ok(false);
+        };
+        let turn_group_key = parent_turn_group_key(Some(parent_turn_id));
+        let cache_key = format!("{}|{}", parent_session_id.as_str(), turn_group_key);
+        let persistence =
+            ReasonPersistence::new(self.runtime_home.clone(), self.master_agent_id.clone());
+        let fingerprint = persistence
+            .authoritative_turn_snapshots_fingerprint(parent_session_id)
+            .map_err(|error| ProductionMasterRunnerError::State(error.to_string()))?;
+        let Some(fingerprint) = fingerprint else {
+            return parent_logical_turn_waits_for_lifecycle(
+                &self.runtime_home,
+                &self.master_agent_id,
+                parent_session_id,
+                Some(parent_turn_id),
+            );
+        };
+        if let Some(entry) = state.parent_turn_waits_cache.entries.get(&cache_key)
+            && entry.authoritative_fingerprint == fingerprint
+            && entry.turn_group_key == turn_group_key
+        {
+            state.parent_turn_waits_cache.cache_hits =
+                state.parent_turn_waits_cache.cache_hits.saturating_add(1);
+            return Ok(entry.waits);
+        }
+        let waits = parent_logical_turn_waits_for_lifecycle(
+            &self.runtime_home,
+            &self.master_agent_id,
+            parent_session_id,
+            Some(parent_turn_id),
+        )?;
+        state.parent_turn_waits_cache.entries.insert(
+            cache_key,
+            ParentTurnWaitsCacheEntry {
+                authoritative_fingerprint: fingerprint,
+                turn_group_key,
+                waits,
+            },
+        );
+        if state.parent_turn_waits_cache.entries.len() > PARENT_TURN_WAITS_CACHE_MAX_ENTRIES {
+            // Bound the on-disk master loop state growth. Entries are pure
+            // cache; clearing them only forces a cold re-read, never a wrong
+            // result, so a full reset is safe and cheaper than tracking LRU.
+            state.parent_turn_waits_cache.entries.clear();
+        }
+        Ok(waits)
+    }
+
     fn reconcile_closed_parent_worksets(
         &self,
         task_runtime: &TaskRuntime,
@@ -1450,9 +1548,8 @@ impl ProductionMasterRunner {
                 continue;
             };
             let parent_turn_id = children[0].parent.turn_id.clone();
-            if !parent_logical_turn_waits_for_lifecycle(
-                &self.runtime_home,
-                &self.master_agent_id,
+            if !self.parent_logical_turn_waits_for_lifecycle_cached(
+                state,
                 &parent_session_id,
                 parent_turn_id.as_ref(),
             )? {
@@ -1503,9 +1600,8 @@ impl ProductionMasterRunner {
                 continue;
             };
             let parent_turn_id = children[0].parent.turn_id.clone();
-            if !parent_logical_turn_waits_for_lifecycle(
-                &self.runtime_home,
-                &self.master_agent_id,
+            if !self.parent_logical_turn_waits_for_lifecycle_cached(
+                state,
                 &parent_session_id,
                 parent_turn_id.as_ref(),
             )? {
@@ -1699,7 +1795,7 @@ impl ProductionMasterRunner {
     }
 
     fn open_task_center(&self) -> Result<TaskRuntime, ProductionMasterRunnerError> {
-        TaskRuntime::boot(&self.runtime_home, self.master_agent_id.clone())
+        TaskRuntime::boot_master(&self.runtime_home, self.master_agent_id.clone())
             .map_err(task_center_error)
     }
 

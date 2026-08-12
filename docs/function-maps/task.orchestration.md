@@ -5,6 +5,7 @@
 - owner module: `crates/freehand-task/src/lib.rs`
 - owner entry symbols:
   - `TaskRuntime::boot`
+  - `TaskRuntime::boot_master`
   - `TaskRuntime::boot_read_only`
   - `TaskRuntime::create_task`
   - `TaskRuntime::append_task`
@@ -67,6 +68,7 @@
 - runtime receives a provider tool call named `task`
 - runtime routes `task` tool calls to `execute_task_tool` instead of generic file/tool execution
 - `TaskRuntime::boot` loads task snapshots, task leases, self-agent snapshot, and persisted agent lifecycle snapshots into memory
+- `TaskRuntime::boot_master` runs the master-only recovery path: full lifecycle reconcile plus the stale-blocked sweep that cancels long-blocked worker tasks and releases their lifecycle projections on the same boot; only the master may cancel abandoned worker-blocked tasks because workers boot with the master as task owner
 - `TaskRuntime::boot_read_only` loads the same persisted projection without creating a self-agent snapshot and without running lease/lifecycle reconcile writes; ADP query/projection paths use it so read routes cannot mutate Task Center truth
 - `TaskRuntime::boot` preserves freshly resumed running tasks during the bounded lease-acquisition window, then interrupts running tasks whose lease remains missing, mismatched, inactive, or expired
 - lease-expiry recovery writes `TaskInterrupted` with the old `execution_id` as a fencing token and clears active execution truth so late facts from the stale worker generation are rejected
@@ -186,6 +188,12 @@
   - purpose: rebuild memory state from persisted task, agent, and lifecycle snapshots
   - allowed callers: runtime task tool bridge, future daemon bootstrap
   - why shared: keeps startup recovery in task owner, not UI/runtime glue
+- `TaskRuntime::boot_master`
+  - owner: `crates/freehand-task/src/lib.rs`
+  - purpose: master recovery boot that additionally cancels abandoned stale-blocked worker tasks and releases their lifecycle projections
+  - allowed callers: master runner `open_task_center`
+  - related tests: `boot_promotes_stale_blocked_task_to_cancelled_after_ttl`, `boot_worker_reconcile_preserves_stale_blocked_task_from_other_worker`
+  - why shared: keeps the master-only stale-blocked sweep in the task owner so a worker boot (which owns the master as task owner) cannot cancel other workers' blocked tasks
 - `write_json_atomic`
   - owner: `crates/freehand-task/src/lib.rs`
   - purpose: atomically replace task/agent/index/lease JSON truth with unique
@@ -224,6 +232,16 @@
     `concurrent_runtimes_never_produce_duplicate_event_ids`
   - why shared: one writer boundary prevents cross-process seq collisions and
     partial ledger/snapshot/index updates
+- `TaskStore::append_event_and_snapshot_if_status`
+  - owner: `crates/freehand-task/src/lib.rs`
+  - purpose: same ledger-locked append as `append_event_and_snapshot`, but
+    re-reads the persisted task snapshot under the lock and only appends when
+    the disk status still equals the expected status; makes one-time boot
+    recovery transitions idempotent across concurrent owner boots
+  - allowed callers: boot recovery writers such as `reconcile_stale_blocked`
+  - related tests: `boot_master_cancels_stale_blocked_only_once_across_recovery_boots`
+  - why shared: prevents duplicate cancellation events and repeated agent
+    release when two master processes boot against the same stale task
 - `TaskStore::load_master_visible_events_after_watermark`
   - owner: `crates/freehand-task/src/lib.rs`
   - purpose: load only master-visible task ledger rows whose per-task sequence is
@@ -300,7 +318,7 @@
 | --- | --- | --- | --- | --- | --- | --- | --- | --- |
 | 01 | `reasonix_aligned_builtin_specs` | `crates/freehand-tools/src/lib.rs` | expose one `task` tool schema with op-dispatched arguments | static registry truth | provider tool definition | runtime live bridge | tool registry | bound |
 | 02 | `execute_task_tool` | `crates/freehand-runtime/src/lib.rs` | route task tool calls into task owner with runtime home/session/turn context and append target_cwd path diagnostics to create results | task tool call | tool result text with task truth and optional path diagnostic | runtime live bridge | task runtime + path diagnostic helper | bound |
-| 03 | `TaskRuntime::boot` / `TaskRuntime::boot_read_only` | `crates/freehand-task/src/lib.rs` | load task and agent snapshots; owner runners reconcile lease/lifecycle truth, read-only query callers do not write recovery truth | runtime home + owner agent | ready reconciled runtime or side-effect-free projection runtime | runtime task bridge / runtime query dispatch | task owner | bound |
+| 03 | `TaskRuntime::boot` / `TaskRuntime::boot_master` / `TaskRuntime::boot_read_only` | `crates/freehand-task/src/lib.rs` | load task and agent snapshots; owner runners reconcile lease/lifecycle truth, master recovery additionally sweeps stale-blocked worker tasks, read-only query callers do not write recovery truth | runtime home + owner agent | ready reconciled runtime or side-effect-free projection runtime | runtime task bridge / runtime query dispatch | task owner | bound |
 | 04 | `TaskRuntime::create_task` | `crates/freehand-task/src/lib.rs` | validate, persist, attach optional parent session, assign/wait, and update memory state | task create request | task snapshot + ledger events | runtime task bridge | task owner | bound |
 | 05 | `TaskRuntime::query_task` | `crates/freehand-task/src/lib.rs` | return one task snapshot truth | task id | task snapshot | runtime task bridge | task owner | bound |
 | 06 | `TaskRuntime::list_tasks` | `crates/freehand-task/src/lib.rs` | return task snapshots filtered by status and assignee for queue/UI projection | task list query | task snapshots | runtime task bridge | task owner | bound |
@@ -324,8 +342,9 @@
 | 24 | `TaskRuntime::run_master_poll` / `TaskRuntime::preview_master_poll` | `crates/freehand-task/src/lib.rs` | load TaskBoard, AgentBoard, EventInbox, classify master-visible states, and either persist processed cursor for command mode or leave cursor truth untouched for query preview | master poll request + persisted cursor | master poll outcome with classifications and next cursor | runtime ADP command/query dispatch / CLI sample | task owner | bound |
 | 25 | `write_json_atomic` | `crates/freehand-task/src/lib.rs` | atomically replace JSON persistence files with process/nanos/counter-qualified temp paths | serializable task owner truth | replaced JSON truth without cross-writer temp collisions | TaskStore persistence helpers | filesystem atomic rename | bound |
 | 26 | `TaskStore::with_lease_state_lock` | `crates/freehand-task/src/lib.rs` | serialize shared lease read-modify-write mutation across independent Worker processes | lease create/refresh/remove mutation | complete `leases.json` truth without lost updates or stale reintroduction | TaskStore lease helpers | filesystem advisory lock + atomic rename | bound |
-| 27 | `TaskStore::append_event_and_snapshot` | `crates/freehand-task/src/lib.rs` | lock ledger mutation, assign disk-based seq, append ledger row, atomically write task snapshot, and rewrite task index as one cross-process critical section | task snapshot + pending ledger event | durable unique-seq ledger/snapshot/index truth | TaskRuntime mutation and recovery writers | filesystem advisory lock + task store atomic writers | bound |
+| 27 | `TaskStore::append_event_and_snapshot` / `TaskStore::append_event_and_snapshot_if_status` | `crates/freehand-task/src/lib.rs` | lock ledger mutation, assign disk-based seq, append ledger row, atomically write task snapshot, and rewrite task index as one cross-process critical section; the `if_status` variant re-reads disk status under the lock and skips when it no longer matches (idempotent one-time recovery) | task snapshot + pending ledger event + optional expected status | durable unique-seq ledger/snapshot/index truth, or skip when status advanced | TaskRuntime mutation and recovery writers | filesystem advisory lock + task store atomic writers | bound |
 | 28 | `TaskRuntime::query_task_space_snapshot` | `crates/freehand-task/src/lib.rs` | project a bounded read-only task-space snapshot for provider prompt context without boot recovery, scheduler fact replay, or EventInbox cursor pagination | runtime home + owner agent + task/event limits | bounded TaskSpaceSnapshotProjection with tasks, blocked/review-ready queues, AgentLifecycle health, and newest master-visible events | provider.reason-live-bridge live context builder | task owner | bound |
+| 29 | `reconcile_stale_blocked` | `crates/freehand-task/src/lib.rs` | promote a Blocked task that stays Blocked beyond `STALE_BLOCKED_TTL_SECONDS` (7 days) with no fresh progress to Cancelled during master-only recovery boot, clearing `active_execution_id` and releasing the assigned agent; uses `append_event_and_snapshot_if_status` so concurrent master boots append exactly one `TaskCancelled` event | persisted task snapshots + agent snapshots | recovered runtime state + one `TaskCancelled` event with `reason=stale_blocked_ttl` + released agent | task boot ReconcileMaster block | task owner | bound |
 
 ## Sync Status Against Code
 

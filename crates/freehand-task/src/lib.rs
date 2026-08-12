@@ -832,7 +832,13 @@ struct TaskRuntimeState {
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 enum TaskBootMode {
+    // Reconcile lifecycle for the owning agent but never run the master-only
+    // stale-blocked sweep. Used by worker boot so a restarting worker cannot
+    // cancel tasks owned by other workers (or the master).
     Reconcile,
+    // Master recovery path: full reconcile plus the stale-blocked sweep that
+    // may cancel long-blocked tasks and release their lifecycle projections.
+    ReconcileMaster,
     ReadOnly,
 }
 
@@ -851,6 +857,17 @@ impl TaskRuntime {
         Self::boot_with_mode(runtime_home, owner_agent_id, TaskBootMode::ReadOnly)
     }
 
+    /// Master recovery boot: full lifecycle reconcile plus the stale-blocked
+    /// sweep. Only the master may cancel abandoned worker-blocked tasks,
+    /// because workers boot with the master as the task owner and would
+    /// otherwise cancel tasks owned by other workers.
+    pub fn boot_master(
+        runtime_home: impl Into<PathBuf>,
+        owner_agent_id: AgentId,
+    ) -> Result<Self, TaskError> {
+        Self::boot_with_mode(runtime_home, owner_agent_id, TaskBootMode::ReconcileMaster)
+    }
+
     fn boot_with_mode(
         runtime_home: impl Into<PathBuf>,
         owner_agent_id: AgentId,
@@ -860,6 +877,7 @@ impl TaskRuntime {
         let mut state = TaskRuntimeState::default();
         let self_agent = match mode {
             TaskBootMode::Reconcile => store.load_or_create_self_agent(&owner_agent_id)?,
+            TaskBootMode::ReconcileMaster => store.load_or_create_self_agent(&owner_agent_id)?,
             TaskBootMode::ReadOnly => store.load_or_default_self_agent(&owner_agent_id)?,
         };
         for agent in store.load_agent_snapshots()? {
@@ -888,9 +906,23 @@ impl TaskRuntime {
             state.tasks.insert(task.task_id.clone(), task);
         }
         state.leases = store.load_leases()?;
-        if mode == TaskBootMode::Reconcile {
+        if mode == TaskBootMode::Reconcile || mode == TaskBootMode::ReconcileMaster {
             reconcile_running_leases(&store, &mut state, now_unix_seconds())?;
             reconcile_paused_agents(&store, &mut state, now_unix_seconds())?;
+        }
+        // Only the master recovery path cancels abandoned worker-blocked tasks.
+        // Worker boot (Reconcile) must not touch other workers' blocked tasks,
+        // since every worker boots with the master as task owner. It must run
+        // before the lifecycle binding release so a stale-blocked Cancelled
+        // task releases its worker lifecycle projection (not just the agent
+        // snapshot) on this same boot instead of the next one.
+        if mode == TaskBootMode::ReconcileMaster {
+            reconcile_stale_blocked(&store, &mut state, now_unix_seconds())?;
+        }
+        // Release lifecycle bindings for terminal tasks on any reconcile boot.
+        // This only cleans projections and never cancels tasks, so it is safe
+        // for workers too.
+        if mode == TaskBootMode::Reconcile || mode == TaskBootMode::ReconcileMaster {
             reconcile_released_lifecycle_bindings(&store, &mut state, now_unix_seconds())?;
         }
         state.scheduler_facts = store.load_scheduler_facts(state.tasks.keys())?;
@@ -2490,6 +2522,11 @@ impl TaskRuntime {
 const DEFAULT_TASK_LEASE_TTL_SECONDS: u64 = 300;
 const RUNNING_LEASE_ACQUISITION_GRACE_SECONDS: u64 = 5;
 pub const AGENT_PROCESS_HEARTBEAT_TTL_SECONDS: u64 = 5;
+/// A blocked task that stays Blocked beyond this TTL with no fresh progress is
+/// treated as abandoned by the worker. Boot reconciliation promotes it to
+/// Cancelled so the ledger does not accumulate stale open blocked entries that
+/// hold nothing but keep the parent turn waiting forever.
+const STALE_BLOCKED_TTL_SECONDS: u64 = 7 * 24 * 60 * 60;
 static ATOMIC_WRITE_TEMP_COUNTER: AtomicU64 = AtomicU64::new(0);
 
 #[derive(Debug, Clone)]
@@ -2805,6 +2842,49 @@ impl TaskStore {
             writeln!(file, "{line}").map_err(io_err)?;
             write_json_atomic(&store.task_snapshot_path(&snapshot.task_id), &*snapshot)?;
             store.write_task_index()
+        })
+    }
+
+    /// Conditional append used by boot-time recovery. Under the shared ledger
+    /// lock, re-reads the persisted task snapshot and only appends `event`
+    /// when the disk truth still has `expected_status`. This makes one-time
+    /// recovery transitions idempotent across concurrent owner boots: if
+    /// another process already cancelled the task, the second boot skips the
+    /// duplicate cancellation instead of appending a second event.
+    /// Returns `Ok(true)` when appended, `Ok(false)` when skipped because the
+    /// persisted status no longer matches.
+    fn append_event_and_snapshot_if_status(
+        &self,
+        snapshot: &mut TaskSnapshot,
+        event: &mut TaskLedgerEvent,
+        expected_status: &TaskStatus,
+    ) -> Result<bool, TaskError> {
+        self.with_task_ledger_lock(|store| {
+            let disk_path = store.task_snapshot_path(&snapshot.task_id);
+            let disk: TaskSnapshot = read_json(&disk_path)?;
+            if disk.status != *expected_status {
+                return Ok(false);
+            }
+            let disk_last_seq = store.load_disk_last_event_seq_from_ledger(&snapshot.task_id)?;
+            if event.seq <= disk_last_seq {
+                let seq = disk_last_seq.saturating_add(1);
+                event.seq = seq;
+                event.event_id = format!("{}:{seq}", snapshot.task_id.as_str());
+                snapshot.last_event_seq = seq;
+                snapshot.last_event_id = event.event_id.clone();
+            }
+            let ledger_path = store.task_ledger_path(&snapshot.task_id);
+            ensure_parent_dir(&ledger_path)?;
+            let line = serde_json::to_string(&*event).map_err(json_err)?;
+            let mut file = OpenOptions::new()
+                .create(true)
+                .append(true)
+                .open(&ledger_path)
+                .map_err(io_err)?;
+            writeln!(file, "{line}").map_err(io_err)?;
+            write_json_atomic(&store.task_snapshot_path(&snapshot.task_id), &*snapshot)?;
+            store.write_task_index()?;
+            Ok(true)
         })
     }
 
@@ -3334,6 +3414,83 @@ fn reconcile_paused_agents(
         };
         store.write_agent_lifecycle_snapshot(&lifecycle)?;
         state.lifecycle.insert(agent_id, lifecycle);
+    }
+    Ok(())
+}
+
+fn reconcile_stale_blocked(
+    store: &TaskStore,
+    state: &mut TaskRuntimeState,
+    now: u64,
+) -> Result<(), TaskError> {
+    // Only worker-reported `Blocked` tasks (set via `ExecutionFactKind::Blocked`)
+    // reach this status. A Master-side blocked decision is tracked separately
+    // in parent-session markers, never as a task `Blocked` status, so this
+    // reconciliation cannot cancel Master-owned blocked truth. A task stuck
+    // in worker Blocked for `STALE_BLOCKED_TTL_SECONDS` with no fresh progress
+    // is abandoned by the worker; promote it to Cancelled, clear the fenced
+    // active execution id, and release the assignee so the ledger and the
+    // parent turn cannot wait on it forever.
+    let stale_task_ids = state
+        .tasks
+        .values()
+        .filter(|task| {
+            matches!(task.status, TaskStatus::Blocked)
+                && now >= task.updated_at.saturating_add(STALE_BLOCKED_TTL_SECONDS)
+        })
+        .map(|task| task.task_id.clone())
+        .collect::<Vec<_>>();
+    for task_id in stale_task_ids {
+        let Some(mut task) = state.tasks.get(&task_id).cloned() else {
+            continue;
+        };
+        let mut event = build_event(
+            &task,
+            Some(TaskStatus::Blocked),
+            TaskStatus::Cancelled,
+            "TaskCancelled",
+            &TaskActor {
+                agent_id: store.owner_agent_id.clone(),
+                source: "task.orchestration.stale_blocked".to_owned(),
+                session_id: task.parent.session_id.clone(),
+                turn_id: task.parent.turn_id.clone(),
+                trace_id: task.parent.trace_id.clone(),
+            },
+            &TaskWatermark {
+                metadata_id: None,
+                hook: Some("TaskRuntime::boot::stale_blocked".to_owned()),
+                action_tool_call_id: None,
+            },
+            json!({
+                "reason": "stale_blocked_ttl",
+                "blocked_updated_at": task.updated_at,
+                "expired_after_seconds": STALE_BLOCKED_TTL_SECONDS
+            }),
+        );
+        apply_event(&mut task, &event);
+        clear_inactive_execution_after_event(&mut task, "TaskCancelled");
+        let appended = store.append_event_and_snapshot_if_status(
+            &mut task,
+            &mut event,
+            &TaskStatus::Blocked,
+        )?;
+        if !appended {
+            // Another concurrent owner boot already cancelled this task
+            // (or otherwise advanced its status). The disk snapshot is now
+            // authoritative; do not append a duplicate TaskCancelled event
+            // and do not re-release the assignee.
+            let disk: TaskSnapshot = read_json(&store.task_snapshot_path(&task_id))?;
+            state.tasks.insert(task_id.clone(), disk);
+            continue;
+        }
+        if let Some(assignee) = task.assignee.as_ref()
+            && let Some(agent) = state.agents.get_mut(&assignee.agent_id)
+        {
+            release_agent_task(agent, &TaskStatus::Cancelled);
+            agent.last_seen_at = now;
+            store.write_agent_snapshot(agent)?;
+        }
+        state.tasks.insert(task_id.clone(), task);
     }
     Ok(())
 }
@@ -5818,6 +5975,248 @@ mod tests {
             read_json(&runtime_home.join("state/task-runtime/master/leases.json")).expect("leases");
         assert!(leases.is_empty());
         assert_eq!(actor.source, "control.center");
+        let _ = fs::remove_dir_all(runtime_home);
+    }
+
+    #[test]
+    fn boot_promotes_stale_blocked_task_to_cancelled_after_ttl() {
+        let runtime_home = temp_runtime_home("task-stale-blocked-cancel");
+        let agent_id = AgentId::new("master");
+        let runtime = TaskRuntime::boot(&runtime_home, agent_id.clone()).expect("boot");
+        let worker_id = AgentId::new("worker-stale-blocked");
+        create_worker_agent(&runtime, &agent_id, &worker_id);
+        let task = create_claimed_worker_task(
+            &runtime,
+            &agent_id,
+            &worker_id,
+            "task-stale-blocked",
+            "exec-stale-blocked",
+            80,
+        );
+        runtime
+            .apply_execution_fact(ExecutionFact {
+                execution_id: "exec-stale-blocked".to_owned(),
+                task_id: task.task_id.clone(),
+                agent_id: worker_id.clone(),
+                turn_id: Some(TurnId::new("turn-stale-blocked")),
+                occurred_at: now_unix_seconds(),
+                kind: ExecutionFactKind::Blocked {
+                    reason: "provider offline".to_owned(),
+                    evidence: vec!["network timeout".to_owned()],
+                },
+                watermark: sample_watermark(),
+            })
+            .expect("block worker task");
+        let snapshot_path = runtime.store.task_snapshot_path(&task.task_id);
+        let mut aged: TaskSnapshot = read_json(&snapshot_path).expect("load snapshot");
+        aged.updated_at = now_unix_seconds().saturating_sub(STALE_BLOCKED_TTL_SECONDS + 60);
+        write_json_atomic(&snapshot_path, &aged).expect("age blocked snapshot");
+
+        let recovered = TaskRuntime::boot_master(&runtime_home, agent_id.clone()).expect("recover");
+        let cancelled = recovered
+            .query_task(&task.task_id)
+            .expect("query cancelled");
+        assert_eq!(cancelled.status, TaskStatus::Cancelled);
+        let history = recovered
+            .task_history(&task.task_id)
+            .expect("stale blocked history");
+        assert!(
+            history.iter().any(|event| {
+                event.event_type == "TaskCancelled"
+                    && event.actor.source == "task.orchestration.stale_blocked"
+                    && event
+                        .payload
+                        .get("reason")
+                        .and_then(serde_json::Value::as_str)
+                        == Some("stale_blocked_ttl")
+            }),
+            "stale blocked task must be cancelled with stale_blocked_ttl reason and boot actor"
+        );
+        assert_eq!(
+            cancelled.active_execution_id, None,
+            "stale blocked cancellation must clear active execution id"
+        );
+        let recovered_worker = recovered.query_agent(&worker_id).expect("worker");
+        assert_eq!(recovered_worker.status, AgentStatus::Available);
+        assert_eq!(recovered_worker.running_tasks, 0);
+        let recovered_lifecycle = recovered
+            .query_agent_lifecycle(&worker_id)
+            .expect("worker lifecycle after stale blocked cancel");
+        assert_eq!(
+            recovered_lifecycle.current_task_id, None,
+            "stale blocked cancellation must release the worker lifecycle task binding on the same boot"
+        );
+        assert_eq!(
+            recovered_lifecycle.current_execution_id, None,
+            "stale blocked cancellation must release the worker lifecycle execution binding on the same boot"
+        );
+        let _ = fs::remove_dir_all(runtime_home);
+    }
+
+    #[test]
+    fn boot_worker_reconcile_preserves_stale_blocked_task_from_other_worker() {
+        let runtime_home = temp_runtime_home("task-worker-reconcile-preserves-stale-blocked");
+        let master_id = AgentId::new("master");
+        let master =
+            TaskRuntime::boot_master(&runtime_home, master_id.clone()).expect("boot master");
+        let worker_id = AgentId::new("worker-other");
+        create_worker_agent(&master, &master_id, &worker_id);
+        let task = create_claimed_worker_task(
+            &master,
+            &master_id,
+            &worker_id,
+            "task-worker-stale-blocked",
+            "exec-worker-stale-blocked",
+            80,
+        );
+        master
+            .apply_execution_fact(ExecutionFact {
+                execution_id: "exec-worker-stale-blocked".to_owned(),
+                task_id: task.task_id.clone(),
+                agent_id: worker_id.clone(),
+                turn_id: Some(TurnId::new("turn-worker-stale-blocked")),
+                occurred_at: now_unix_seconds(),
+                kind: ExecutionFactKind::Blocked {
+                    reason: "provider offline".to_owned(),
+                    evidence: vec!["network timeout".to_owned()],
+                },
+                watermark: sample_watermark(),
+            })
+            .expect("block worker task");
+        let snapshot_path = master.store.task_snapshot_path(&task.task_id);
+        let mut aged: TaskSnapshot = read_json(&snapshot_path).expect("load snapshot");
+        aged.updated_at = now_unix_seconds().saturating_sub(STALE_BLOCKED_TTL_SECONDS + 60);
+        write_json_atomic(&snapshot_path, &aged).expect("age blocked snapshot");
+
+        // A worker boots with the master as task owner (Reconcile path). It
+        // must not cancel stale-blocked tasks owned by other workers.
+        let worker_recovered =
+            TaskRuntime::boot(&runtime_home, master_id.clone()).expect("worker boot");
+        let preserved = worker_recovered
+            .query_task(&task.task_id)
+            .expect("query stale blocked after worker boot");
+        assert_eq!(
+            preserved.status,
+            TaskStatus::Blocked,
+            "worker reconcile boot must not cancel another worker's stale blocked task"
+        );
+        assert_eq!(
+            preserved.active_execution_id,
+            Some("exec-worker-stale-blocked".to_owned()),
+            "worker reconcile boot must preserve the active execution binding"
+        );
+
+        // The master recovery path still promotes the same stale task.
+        let master_recovered =
+            TaskRuntime::boot_master(&runtime_home, master_id).expect("master boot");
+        let cancelled = master_recovered
+            .query_task(&task.task_id)
+            .expect("query cancelled");
+        assert_eq!(cancelled.status, TaskStatus::Cancelled);
+        let _ = fs::remove_dir_all(runtime_home);
+    }
+
+    #[test]
+    fn boot_master_cancels_stale_blocked_only_once_across_recovery_boots() {
+        let runtime_home = temp_runtime_home("task-stale-blocked-idempotent");
+        let agent_id = AgentId::new("master");
+        let runtime = TaskRuntime::boot(&runtime_home, agent_id.clone()).expect("boot");
+        let worker_id = AgentId::new("worker-idem-blocked");
+        create_worker_agent(&runtime, &agent_id, &worker_id);
+        let task = create_claimed_worker_task(
+            &runtime,
+            &agent_id,
+            &worker_id,
+            "task-stale-blocked-idem",
+            "exec-stale-blocked-idem",
+            80,
+        );
+        runtime
+            .apply_execution_fact(ExecutionFact {
+                execution_id: "exec-stale-blocked-idem".to_owned(),
+                task_id: task.task_id.clone(),
+                agent_id: worker_id.clone(),
+                turn_id: Some(TurnId::new("turn-stale-blocked-idem")),
+                occurred_at: now_unix_seconds(),
+                kind: ExecutionFactKind::Blocked {
+                    reason: "provider offline".to_owned(),
+                    evidence: vec!["network timeout".to_owned()],
+                },
+                watermark: sample_watermark(),
+            })
+            .expect("block worker task");
+        let snapshot_path = runtime.store.task_snapshot_path(&task.task_id);
+        let mut aged: TaskSnapshot = read_json(&snapshot_path).expect("load snapshot");
+        aged.updated_at = now_unix_seconds().saturating_sub(STALE_BLOCKED_TTL_SECONDS + 60);
+        write_json_atomic(&snapshot_path, &aged).expect("age blocked snapshot");
+
+        let first = TaskRuntime::boot_master(&runtime_home, agent_id.clone()).expect("first boot");
+        let first_cancelled = first
+            .query_task(&task.task_id)
+            .expect("query after first boot");
+        assert_eq!(first_cancelled.status, TaskStatus::Cancelled);
+
+        // A second concurrent/sequential master recovery boot sees the already
+        // cancelled truth and must not append a duplicate TaskCancelled event.
+        let second =
+            TaskRuntime::boot_master(&runtime_home, agent_id.clone()).expect("second boot");
+        let second_cancelled = second
+            .query_task(&task.task_id)
+            .expect("query after second boot");
+        assert_eq!(second_cancelled.status, TaskStatus::Cancelled);
+        let history = second
+            .task_history(&task.task_id)
+            .expect("stale blocked history");
+        let cancel_events = history
+            .iter()
+            .filter(|event| event.event_type == "TaskCancelled")
+            .count();
+        assert_eq!(
+            cancel_events, 1,
+            "stale blocked recovery must append exactly one TaskCancelled event across recovery boots"
+        );
+        let _ = fs::remove_dir_all(runtime_home);
+    }
+
+    #[test]
+    fn boot_preserves_fresh_blocked_task_before_stale_ttl() {
+        let runtime_home = temp_runtime_home("task-fresh-blocked-preserved");
+        let agent_id = AgentId::new("master");
+        let runtime = TaskRuntime::boot(&runtime_home, agent_id.clone()).expect("boot");
+        let worker_id = AgentId::new("worker-fresh-blocked");
+        create_worker_agent(&runtime, &agent_id, &worker_id);
+        let task = create_claimed_worker_task(
+            &runtime,
+            &agent_id,
+            &worker_id,
+            "task-fresh-blocked",
+            "exec-fresh-blocked",
+            80,
+        );
+        runtime
+            .apply_execution_fact(ExecutionFact {
+                execution_id: "exec-fresh-blocked".to_owned(),
+                task_id: task.task_id.clone(),
+                agent_id: worker_id.clone(),
+                turn_id: Some(TurnId::new("turn-fresh-blocked")),
+                occurred_at: now_unix_seconds(),
+                kind: ExecutionFactKind::Blocked {
+                    reason: "provider rate limited".to_owned(),
+                    evidence: vec!["429".to_owned()],
+                },
+                watermark: sample_watermark(),
+            })
+            .expect("block worker task");
+
+        let recovered = TaskRuntime::boot_master(&runtime_home, agent_id.clone()).expect("recover");
+        let fresh = recovered
+            .query_task(&task.task_id)
+            .expect("query fresh blocked");
+        assert_eq!(
+            fresh.status,
+            TaskStatus::Blocked,
+            "fresh blocked tasks within TTL must stay Blocked until the master decides"
+        );
         let _ = fs::remove_dir_all(runtime_home);
     }
 

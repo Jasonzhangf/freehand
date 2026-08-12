@@ -1150,6 +1150,93 @@ impl ReasonPersistence {
         self.session_dir(session_id).join("session-history.json")
     }
 
+    /// Deterministic change fingerprint over every authoritative file that
+    /// `restore_authoritative_turn_snapshots_for_ui` reads: session history,
+    /// cursor, active turn, closed turn snapshots, and rollback markers.
+    /// `Ok(None)` means no authoritative truth exists for the session yet.
+    /// `Err` surfaces real filesystem failures instead of coercing them into
+    /// a valid cache key. The caller uses this as a conservative cache key:
+    /// any authoritative mutation changes at least one (file name, mtime,
+    /// size) triple, and the monotonic reason cursor sequence is included so
+    /// owner-led content changes invalidate the key even if a file happens to
+    /// keep the same mtime and byte size.
+    pub fn authoritative_turn_snapshots_fingerprint(
+        &self,
+        session_id: &SessionId,
+    ) -> Result<Option<String>, ReasonPersistenceError> {
+        let mut parts = Vec::<(String, u64, u64)>::new();
+        let mut push_file = |path: PathBuf, key: &str| -> Result<(), ReasonPersistenceError> {
+            match std::fs::metadata(&path) {
+                Ok(metadata) => {
+                    let mtime_nanos = metadata
+                        .modified()
+                        .map_err(|error| ReasonPersistenceError::FileIoFailed(error.to_string()))?
+                        .duration_since(std::time::UNIX_EPOCH)
+                        .map(|duration| duration.as_nanos() as u64)
+                        .map_err(|error| ReasonPersistenceError::FileIoFailed(error.to_string()))?;
+                    parts.push((key.to_owned(), mtime_nanos, metadata.len()));
+                }
+                Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+                Err(error) => {
+                    return Err(ReasonPersistenceError::FileIoFailed(error.to_string()));
+                }
+            }
+            Ok(())
+        };
+        push_file(
+            self.session_history_path(session_id),
+            "session-history.json",
+        )?;
+        push_file(self.cursor_path(session_id), "session-cursor.json")?;
+        push_file(self.active_turn_path(session_id), "active-turn.json")?;
+        push_file(
+            self.rollback_markers_path(session_id),
+            "rollback-markers.json",
+        )?;
+        let turns_dir = self.turns_dir(session_id);
+        match std::fs::metadata(&turns_dir) {
+            Ok(metadata) if metadata.is_dir() => {
+                let mut entries = std::fs::read_dir(&turns_dir)
+                    .map_err(|error| ReasonPersistenceError::FileIoFailed(error.to_string()))?
+                    .collect::<Result<Vec<_>, _>>()
+                    .map_err(|error| ReasonPersistenceError::FileIoFailed(error.to_string()))?;
+                entries.sort_by_key(|entry| entry.file_name());
+                for entry in entries {
+                    let path = entry.path();
+                    let is_file = entry
+                        .file_type()
+                        .map_err(|error| ReasonPersistenceError::FileIoFailed(error.to_string()))?
+                        .is_file();
+                    if is_file && is_closed_turn_snapshot_path(&path) {
+                        push_file(path, &entry.file_name().to_string_lossy())?;
+                    }
+                }
+            }
+            Ok(_) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => {
+                return Err(ReasonPersistenceError::FileIoFailed(error.to_string()));
+            }
+        }
+        // Monotonic persistence revision from the reason owner's cursor, so a
+        // content mutation that keeps the same mtime and byte size still
+        // invalidates the cache key.
+        if self.cursor_path(session_id).is_file() {
+            let cursor: ReasonPersistenceCursor = read_json_file(&self.cursor_path(session_id))?;
+            parts.push(("cursor-seq".to_owned(), cursor.last_applied_reason_seq, 0));
+        }
+        if parts.is_empty() {
+            return Ok(None);
+        }
+        parts.sort();
+        let fingerprint = parts
+            .into_iter()
+            .map(|(key, mtime, size)| format!("{key}:{mtime}:{size}"))
+            .collect::<Vec<_>>()
+            .join("|");
+        Ok(Some(fingerprint))
+    }
+
     fn cursor_path(&self, session_id: &SessionId) -> PathBuf {
         self.session_dir(session_id).join("session-cursor.json")
     }
@@ -3650,6 +3737,108 @@ mod tests {
         assert_eq!(
             mtime_after_first, mtime_after_second,
             "restore must not rewrite an already-current session"
+        );
+
+        fs::remove_dir_all(runtime_home).expect("cleanup");
+    }
+
+    #[test]
+    fn authoritative_turn_snapshots_fingerprint_covers_all_files() {
+        let runtime_home = temp_runtime_home();
+        let coordinator = ReasonPersistence::new(&runtime_home, AgentId::new("agent-1"));
+        let session_id = SessionId::new("session-meta");
+
+        // No authoritative truth yet => Ok(None), never a fabricated key.
+        let none = coordinator
+            .authoritative_turn_snapshots_fingerprint(&session_id)
+            .expect("fingerprint for missing session must be Ok(None)");
+        assert_eq!(none, None);
+
+        // After a real authoritative session history exists, fingerprint
+        // reports Some and changes when a turn snapshot is written.
+        let history = session_history();
+        write_json_atomic(&coordinator.session_history_path(&session_id), &history)
+            .expect("write history");
+        let present = coordinator
+            .authoritative_turn_snapshots_fingerprint(&session_id)
+            .expect("fingerprint for present history");
+        assert!(
+            present.is_some(),
+            "present history must report Some fingerprint"
+        );
+
+        // A closed turn snapshot write must change the fingerprint so a cache
+        // keyed on it cannot serve a stale waits result.
+        let mut turn = started_turn(&mut session_history());
+        turn.terminal_event = Some(freehand_contracts::ReasonResp03TerminalEvent {
+            session_id: session_id.clone(),
+            turn_id: TurnId::new("turn-fp"),
+            trace_id: TraceId::new("trace-fp"),
+            feature_id: FeatureId::new("reason.persistence"),
+            agent_id: AgentId::new("agent-1"),
+            status: TerminalStatus::Success,
+            summary: "closed".to_owned(),
+            user_options: None,
+        });
+        coordinator
+            .record_turn_closed(&session_history(), &turn, 0)
+            .expect("close turn");
+        write_json_atomic(
+            &coordinator.turns_dir(&session_id).join("turn-fp.json"),
+            &turn,
+        )
+        .expect("write turn snapshot");
+        let after_turn = coordinator
+            .authoritative_turn_snapshots_fingerprint(&session_id)
+            .expect("fingerprint after turn snapshot");
+        assert!(
+            after_turn.is_some() && after_turn != present,
+            "turn snapshot write must change the authoritative fingerprint"
+        );
+
+        // A same-content turn snapshot under a different file name must change
+        // the fingerprint (path names are part of the key), so a rename or
+        // replacement of a same-sized snapshot cannot leave the cache key
+        // unchanged.
+        write_json_atomic(
+            &coordinator
+                .turns_dir(&session_id)
+                .join("turn-fp-renamed.json"),
+            &turn,
+        )
+        .expect("write renamed turn snapshot");
+        let after_rename = coordinator
+            .authoritative_turn_snapshots_fingerprint(&session_id)
+            .expect("fingerprint after turn rename");
+        assert!(
+            after_rename.is_some() && after_rename != after_turn,
+            "turn snapshot rename must change the authoritative fingerprint"
+        );
+
+        // The monotonic cursor sequence must participate in the key: a cursor
+        // with a higher last_applied_reason_seq yields a different fingerprint
+        // even if no other file metadata changed.
+        let cursor_path = coordinator.cursor_path(&session_id);
+        write_json_atomic(
+            &cursor_path,
+            &ReasonPersistenceCursor {
+                last_applied_reason_seq: 100,
+                ..Default::default()
+            },
+        )
+        .expect("write base cursor");
+        let after_base_cursor = coordinator
+            .authoritative_turn_snapshots_fingerprint(&session_id)
+            .expect("fingerprint after base cursor");
+        let mut cursor: ReasonPersistenceCursor = read_json_file(&cursor_path).expect("cursor");
+        cursor.last_applied_reason_seq = cursor.last_applied_reason_seq.saturating_add(10);
+        write_json_atomic(&cursor_path, &cursor).expect("bump cursor seq");
+        let after_cursor_bump = coordinator
+            .authoritative_turn_snapshots_fingerprint(&session_id)
+            .expect("fingerprint after cursor seq bump");
+        assert!(
+            after_cursor_bump.is_some() && after_cursor_bump != after_base_cursor,
+            "cursor sequence bump must change the authoritative fingerprint"
         );
 
         fs::remove_dir_all(runtime_home).expect("cleanup");
