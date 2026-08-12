@@ -289,7 +289,6 @@ impl BuiltinToolRegistry {
                 spec.implemented
                     && spec.definition.name != "task"
                     && spec.definition.name != "timer"
-                    && spec.definition.name != "camo"
                     && self.execution_scope(&spec.definition.name)
                         != Some(BuiltinToolExecutionScope::Shell)
             })
@@ -356,7 +355,7 @@ impl BuiltinToolRegistry {
                     .to_owned(),
                 "Path tools are locked to the current workspace: relative paths are resolved there, leading-~ is expanded, and absolute or symlink paths are accepted only when canonicalized inside the locked workspace.".to_owned(),
                 "Provider-hosted broad search is not a Freehand local function tool named web_search; inspect provider capability status or use task clean_search when configured.".to_owned(),
-                "Master exposes local workspace tools, concrete-url web_fetch, task, and timer; Worker exposes workspace tools, todo_write, complete_step, and web_fetch only.".to_owned(),
+                "Master exposes local workspace tools, concrete-url web_fetch, task, timer, and camo; Worker exposes workspace tools, todo_write, complete_step, web_fetch, and camo; provider-hosted web_search is additionally exposed on Worker Workspace when the selected provider supports function-tool mixing.".to_owned(),
             ],
             tools: self
                 .tools
@@ -547,6 +546,7 @@ fn builtin_tool_guidance(name: &str) -> Vec<String> {
             "Positionals are limited to: `goto <url>`, `type <text>`, `fetch-page <url>`, `search <platform> <query>`, and `daemon <start|stop|status>`.".to_owned(),
             "click/hover/get-text/find-elements/upload/select take `--selector`; click/hover/find-elements also accept a `--text` locator.".to_owned(),
             "Create a profile with `camo profile create <id>` before first use; without an existing profile the daemon fails fast with `profile not found`.".to_owned(),
+            "A camo daemon may already be running for the target profile. Before calling `start`/`daemon start`, run `camo daemon status` to check; if a daemon is already running for the profile, call `goto`, `fetch-page`, or the inspection command directly and never call `start` again. `camo start`/`camo daemon start` hang when a daemon for that profile is already active, so do not call them when the profile is already started.".to_owned(),
             "For long-running browser tasks, start the named profile once, reuse it across calls, then `camo stop` when done. Do not start/stop per call.".to_owned(),
             "JavaScript eval is `camo evaluate --script <js>` (named `--script`).".to_owned(),
             "For stable page fetch, prefer `camo fetch-page <url>` then `camo get-readable` over raw HTTP when the target needs browser rendering.".to_owned(),
@@ -2906,6 +2906,7 @@ mod tests {
         assert_eq!(
             names,
             vec![
+                "camo".to_owned(),
                 "complete_step".to_owned(),
                 "delete_range".to_owned(),
                 "edit_file".to_owned(),

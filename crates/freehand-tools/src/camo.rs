@@ -13,9 +13,15 @@
 //!   system commands in 0.4.2 (daemon status via `camo daemon status`).
 
 use serde_json::Value;
-use std::process::Command;
+use std::io::Read;
+use std::process::{Command, Stdio};
+use std::thread::sleep;
+use std::time::{Duration, Instant};
 
 use crate::{ToolArgument, ToolExecutionOutput, ToolRegistryError};
+
+const CAMO_DEFAULT_TIMEOUT_SECONDS: u64 = 90;
+const CAMO_POLL_INTERVAL_MS: u64 = 100;
 
 // ---------------------------------------------------------------------------
 // Command model — each variant corresponds to one camo 0.4.2 subcommand tree
@@ -466,23 +472,70 @@ pub fn execute_camo_impl(
 
     let argv = build_camo_argv(op, profile, &args)?;
 
-    let output = Command::new(&argv[0])
+    let timeout_arg = arguments
+        .iter()
+        .find(|a| a.name == "timeout_seconds")
+        .and_then(|a| a.value.as_u64())
+        .filter(|n| *n > 0)
+        .unwrap_or(CAMO_DEFAULT_TIMEOUT_SECONDS);
+
+    let mut command = Command::new(&argv[0]);
+    command
         .args(&argv[1..])
-        .output()
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    let mut child = command
+        .spawn()
         .map_err(|err| ToolRegistryError::ExecutionFailed {
             tool: "camo".to_owned(),
             message: format!("cannot run `{}`: {err}", argv.join(" ")),
         })?;
 
-    let stdout = String::from_utf8_lossy(&output.stdout);
-    let stderr = String::from_utf8_lossy(&output.stderr);
+    let deadline = Instant::now() + Duration::from_secs(timeout_arg);
+    let status = loop {
+        match child.try_wait() {
+            Ok(Some(status)) => break Ok(status),
+            Ok(None) => {
+                if Instant::now() >= deadline {
+                    let _ = child.kill();
+                    let _ = child.wait();
+                    return Err(ToolRegistryError::ExecutionFailed {
+                        tool: "camo".to_owned(),
+                        message: format!(
+                            "camo `{}` exceeded {}s execution timeout and was killed",
+                            argv.join(" "),
+                            timeout_arg
+                        ),
+                    });
+                }
+                sleep(Duration::from_millis(CAMO_POLL_INTERVAL_MS));
+            }
+            Err(err) => break Err(err),
+        }
+    };
 
-    if !output.status.success() {
+    let status = status.map_err(|err| ToolRegistryError::ExecutionFailed {
+        tool: "camo".to_owned(),
+        message: format!("cannot wait on `{}`: {err}", argv.join(" ")),
+    })?;
+
+    let mut stdout_bytes = Vec::new();
+    if let Some(mut out) = child.stdout.take() {
+        let _ = out.read_to_end(&mut stdout_bytes);
+    }
+    let mut stderr_bytes = Vec::new();
+    if let Some(mut err) = child.stderr.take() {
+        let _ = err.read_to_end(&mut stderr_bytes);
+    }
+    let stdout = String::from_utf8_lossy(&stdout_bytes);
+    let stderr = String::from_utf8_lossy(&stderr_bytes);
+
+    if !status.success() {
         return Err(ToolRegistryError::ExecutionFailed {
             tool: "camo".to_owned(),
             message: format!(
                 "camo exited with {}\nstdout: {}\nstderr: {}",
-                output.status, stdout, stderr
+                status, stdout, stderr
             ),
         });
     }
@@ -1059,5 +1112,67 @@ mod tests {
     fn empty_profile_treated_as_no_profile() {
         let argv = build_argv(CamoOp::Stop, Some(""), &[]).unwrap();
         assert_eq!(argv, &["camo", "stop"]);
+    }
+}
+
+#[cfg(test)]
+mod live_tests {
+    use super::*;
+    use crate::ToolArgument;
+    use serde_json::json;
+
+    fn args(pairs: &[(&str, &str)]) -> Vec<ToolArgument> {
+        pairs
+            .iter()
+            .map(|(k, v)| ToolArgument {
+                name: k.to_string(),
+                value: json!(v),
+            })
+            .collect()
+    }
+
+    fn live(command: &str, pairs: &[(&str, &str)]) -> Result<String, String> {
+        let mut all = vec![("command", command)];
+        all.extend_from_slice(pairs);
+        let out = execute_camo_impl(&args(&all)).map_err(|e| format!("{e:?}"))?;
+        Ok(out.text)
+    }
+
+    #[test]
+    #[ignore = "live camo 0.4.2 integration; requires camo CLI + profile"]
+    fn live_camo_full_session() {
+        let profile = "freehand-camo-integration";
+        let _ = live("stop", &[("profile", profile)]);
+        let start = live("start", &[("profile", profile)]).unwrap();
+        assert!(start.contains("sessionId"), "start: {start}");
+        let goto = live(
+            "goto",
+            &[("profile", profile), ("url", "https://example.com")],
+        )
+        .unwrap();
+        assert!(goto.contains("\"navigated\": true"), "goto: {goto}");
+        let readable = live(
+            "get-readable",
+            &[("profile", profile), ("maxLength", "500")],
+        )
+        .unwrap();
+        assert!(readable.contains("Example Domain"), "readable: {readable}");
+        let ev = live(
+            "evaluate",
+            &[("profile", profile), ("script", "document.title")],
+        )
+        .unwrap();
+        assert!(ev.contains("Example Domain"), "evaluate: {ev}");
+        let shot = live(
+            "screenshot",
+            &[
+                ("profile", profile),
+                ("path", "/tmp/camo-freehand-live.png"),
+            ],
+        )
+        .unwrap();
+        assert!(shot.contains("\"saved\": true"), "screenshot: {shot}");
+        let stop = live("stop", &[("profile", profile)]).unwrap();
+        assert!(stop.contains("stopped"), "stop: {stop}");
     }
 }
