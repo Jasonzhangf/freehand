@@ -5973,7 +5973,7 @@ mod tests {
             | CiFixtureMode::CiWorkflowPartialGate
             | CiFixtureMode::LaunchdMissingEnvBind
             | CiFixtureMode::LaunchdRepoRootWorkdir => {
-                ".PHONY: provision-openminis-source build fmt clippy test mainlines gates relay-deployment-smoke relay-local-online ci verify-webui-online verify-webui-release-online release install-global install-symlink install-launchd install-launchdS install-worker-launchd install-worker-launchdS restart-launchd restart-launchdS restart-worker-launchd restart-worker-launchdS uninstall-launchd uninstall-launchdS uninstall-worker-launchd uninstall-worker-launchdS launchd-status launchd-statusS worker-launchd-status worker-launchd-statusS launchd-logs launchd-logsS worker-launchd-logs worker-launchd-logsS hooks\n\
+                ".PHONY: provision-openminis-source build fmt clippy test mainlines gates relay-deployment-smoke relay-local-online relay-account-config-smoke ci verify-webui-online verify-webui-release-online release install-global install-symlink install-launchd install-launchdS install-worker-launchd install-worker-launchdS restart-launchd restart-launchdS restart-worker-launchd restart-worker-launchdS uninstall-launchd uninstall-launchdS uninstall-worker-launchd uninstall-worker-launchdS launchd-status launchd-statusS worker-launchd-status worker-launchd-statusS launchd-logs launchd-logsS worker-launchd-logs worker-launchd-logsS hooks\n\
 provision-openminis-source:\n\tscripts/provision-openminis-source.sh\n\
 build:\n\tcargo build --workspace\n\
 fmt:\n\tcargo fmt --check\n\
@@ -5983,7 +5983,8 @@ mainlines:\n\tcargo run -p xtask -- mainlines check\n\
 gates: provision-openminis-source\n\tcargo run -p xtask -- gates check\n\
 relay-deployment-smoke:\n\tscripts/verify-relay-deployment-smoke.sh\n\
 relay-local-online:\n\tscripts/verify-remote-relay-local-online.sh\n\
-ci: provision-openminis-source build fmt clippy test mainlines gates relay-deployment-smoke relay-local-online\n\
+relay-account-config-smoke:\n\tscripts/verify-relay-account-config-smoke.sh\n\
+ci: provision-openminis-source build fmt clippy test mainlines gates relay-deployment-smoke relay-local-online relay-account-config-smoke\n\
 verify-webui-online:\n\tscripts/verify-webui-online.sh\n\
 verify-webui-release-online:\n\tscripts/verify-webui-release-online.sh\n\
 release:\n\tscripts/release.sh\n\
