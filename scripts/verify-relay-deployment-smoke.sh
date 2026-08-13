@@ -43,6 +43,7 @@ wait_health() {
 RELAY_PORT="$(free_port)"
 UPSTREAM_PORT="$(free_port)"
 STORE_PATH="$TMP_DIR/store.json"
+ACCOUNT_CONFIG_DIR="$TMP_DIR/account-config"
 mkdir -p "$TMP_DIR/upstream"
 printf '%s\n' '<script src="/assets/app.js"></script><script>new WebSocket("/adp")</script>' > "$TMP_DIR/upstream/index.html"
 mkdir -p "$TMP_DIR/upstream/assets"
@@ -65,10 +66,11 @@ ruby -run -e httpd "$TMP_DIR/upstream" -b 127.0.0.1 -p "$UPSTREAM_PORT" >"$TMP_D
 UPSTREAM_PID=$!
 
 start_relay() {
-  FREEHAND_RELAY_BIND="127.0.0.1:$RELAY_PORT" \
-  FREEHAND_RELAY_STORE="$STORE_PATH" \
-  FREEHAND_RELAY_PRESENCE_LEASE_SECONDS=45 \
-  FREEHAND_RELAY_SECURE_COOKIE=false \
+FREEHAND_RELAY_BIND="127.0.0.1:$RELAY_PORT" \
+FREEHAND_RELAY_STORE="$STORE_PATH" \
+FREEHAND_RELAY_PRESENCE_LEASE_SECONDS=45 \
+FREEHAND_RELAY_SECURE_COOKIE=false \
+FREEHAND_RELAY_ACCOUNT_CONFIG_DIR="$ACCOUNT_CONFIG_DIR" \
     "$TARGET_DIR/debug/freehand-relay-server" serve >"$TMP_DIR/relay.log" 2>&1 &
   RELAY_PID=$!
   wait_health "http://127.0.0.1:$RELAY_PORT/relay/health"

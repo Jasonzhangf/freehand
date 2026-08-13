@@ -107,11 +107,21 @@ const settingsModelGroupTitleModelInput = document.getElementById("settings-mode
 const settingsModelGroupFallbackProviderInput = document.getElementById("settings-model-group-fallback-provider-input");
 const settingsModelGroupFallbackModelInput = document.getElementById("settings-model-group-fallback-model-input");
 const settingsModelGroupLoadBalanceInput = document.getElementById("settings-model-group-load-balance-input");
+const settingsModelGroupContextWindowInput = document.getElementById("settings-model-group-context-window-input");
+const settingsModelGroupCompactionThresholdInput = document.getElementById("settings-model-group-compaction-threshold-input");
 const settingsModelGroupSaveButton = document.getElementById("settings-model-group-save-button");
 const settingsApkUpdateSummary = document.getElementById("settings-apk-update-summary");
 const settingsApkUpdateSource = document.getElementById("settings-apk-update-source");
 const settingsApkUpdateStatus = document.getElementById("settings-apk-update-status");
 const settingsApkUpdateCheckButton = document.getElementById("settings-apk-update-check-button");
+const settingsAccountConfigSyncMarker = document.getElementById("settings-account-config-sync-marker");
+const settingsAccountConfigSyncSummary = document.getElementById("settings-account-config-sync-summary");
+const settingsAccountConfigSyncAccount = document.getElementById("settings-account-config-sync-account");
+const settingsAccountConfigSyncRevision = document.getElementById("settings-account-config-sync-revision");
+const settingsAccountConfigSyncContent = document.getElementById("settings-account-config-sync-content");
+const settingsAccountConfigSyncStatus = document.getElementById("settings-account-config-sync-status");
+const settingsAccountConfigPullButton = document.getElementById("settings-account-config-pull-button");
+const settingsAccountConfigPushButton = document.getElementById("settings-account-config-push-button");
 const settingsDiagnosticsSummary = document.getElementById("settings-diagnostics-summary");
 const settingsDiagnosticsRuntimeHome = document.getElementById("settings-diagnostics-runtime-home");
 const settingsDiagnosticsStatus = document.getElementById("settings-diagnostics-status");
@@ -268,6 +278,7 @@ const state = {
   workerControlInFlight: false,
   configStatus: null,
   configStatusError: null,
+  accountConfigSyncInFlight: false,
   configSaveInFlight: false,
   providerSelectionInFlight: false,
   providerWebSearchTestInFlight: "",
@@ -1828,7 +1839,9 @@ function assistantChatBubble(renderTurn, rows) {
   rows.forEach((row) => {
     article.appendChild(chatAssistantSection(row));
   });
-  appendTurnActionBar(article, renderTurn, rows);
+  // Assistant output has no editable/forkable/rerunnable input: the edit,
+  // fork and rerun actions belong to the user message that started the turn,
+  // so the turn action bar is intentionally omitted here.
   return article;
 }
 
@@ -2374,6 +2387,8 @@ function commandReceiptStatus(receipt) {
     case "model_group_config_upserted_restart_required":
     case "model_group_selection_saved_restart_required":
     case "agent_resource_config_saved_restart_required":
+    case "account_config_pulled":
+    case "account_config_pushed":
       return "设置已保存";
     case "node_direct_message_dispatched":
       return "Worker 消息已发送";
@@ -5005,6 +5020,10 @@ function updateComposerClearance() {
   }
   const height = Math.ceil(composerCard.getBoundingClientRect().height);
   const clearance = Math.max(96, height + 28);
+  const conversationRegion = document.querySelector(".conversation-region");
+  if (conversationRegion) {
+    conversationRegion.style.setProperty("--measured-composer-clearance", `${clearance}px`);
+  }
   shell.style.setProperty("--composer-clearance", `${clearance}px`);
   document.documentElement.style.setProperty("--composer-clearance", `${clearance}px`);
 }
@@ -6074,33 +6093,19 @@ function renderMobileAgentSummaryStrip(model = buildMobileAgentDashboardModel())
   const lifecycleSummary = mobileAgentLifecycleSummary(counts);
   const workerLimit = Number(state.configStatus?.agent_resource_count);
   const resourceSummary = Number.isFinite(workerLimit) && workerLimit > 0
-    ? ` · limit ${workerLimit}`
+    ? `/${workerLimit}`
     : "";
   const liveObservation = model.liveObservation || null;
   const directoryMode = !state.selectedSessionId;
-  setText(
-    "mobile-agent-summary-title",
-    liveObservation
-      ? `${liveObservation.label} · ${liveObservation.turnId || "活动 turn"}`
-      : directoryMode
-      ? `${model.agents.length} 个 Agent · ${runningAgents.length} 个活动`
-      : `${runningAgents.length} 运行中 · ${lifecycleSummary}${resourceSummary}`,
-  );
-  const activeTask =
-    model.tasks.find((task) => taskLifecycleBucket(task.status) === "active") ||
-    model.tasks.find((task) => taskLifecycleBucket(task.status) === "review") ||
-    model.tasks.find((task) => taskLifecycleBucket(task.status) === "blocked") ||
-    model.tasks[0];
-  setText(
-    "mobile-agent-summary-copy",
-    liveObservation
-      ? compactSentence(`${liveObservation.scope}: ${liveObservation.title} · ${liveObservation.sessionId}`, 96)
-      : directoryMode
-      ? "点开选择一个 Agent 进入独立会话"
-      : activeTask
-      ? compactSentence(`${statusLabel(activeTask.status)}: ${taskTitle(activeTask)}`, 72)
-      : "当前会话没有 工作器任务",
-  );
+ setText(
+   "mobile-agent-summary-title",
+   liveObservation
+     ? `${liveObservation.label} · ${liveObservation.turnId || "活动 turn"}`
+     : directoryMode
+     ? `${model.agents.length} 个 Agent · ${runningAgents.length} 个活动`
+     : `${runningAgents.length} 运行中 · ${lifecycleSummary}${resourceSummary}`,
+ );
+  // copy omitted on mobile - title and dot carry the signal; full detail in Agent sheet
   setText("mobile-agent-summary-dot", "");
   if (shell) {
     shell.dataset.lifecycleClockCount = `${state.lifecycleClocks.size}`;
@@ -6763,13 +6768,13 @@ function renderSessionRelationHeader(model = buildMobileAgentDashboardModel()) {
   sessionRelationHeader.dataset.liveTurnId = liveObservation ? liveObservation.turnId : "";
   setText("session-relation-kicker", selectedWorkerSession ? "工作器会话" : "当前会话");
   setText("session-relation-title", compactSentence(title, 96));
-  setText(
-    "session-relation-metrics",
-    liveObservation
-      ? `${liveObservation.label} · ${liveObservation.turnId || "活动 turn"} · ${runningAgents} 个 Agent${workerLimitText}`
-      : `${counts.activeCount} 运行 · ${counts.reviewCount} 审核 · ${counts.blockedCount} 阻塞 · ${counts.closedCount} 关闭 · ${runningAgents} 个 Agent${workerLimitText}`,
-  );
-  setText("session-relation-copy", compactSentence(copy, 132));
+ setText(
+   "session-relation-metrics",
+   liveObservation
+     ? `${liveObservation.label} · ${liveObservation.turnId || "活动 turn"} · ${runningAgents} 个 Agent${workerLimitText}`
+     : `${counts.activeCount}A · ${counts.reviewCount}R · ${counts.blockedCount}B · ${counts.closedCount}C`,
+ );
+  // copy omitted on mobile - compact metrics pill + title carry the signal
   if (sessionRelationToggleButton) {
     sessionRelationToggleButton.setAttribute("aria-expanded", state.sessionTreeOpen ? "true" : "false");
   }
@@ -7744,6 +7749,62 @@ function renderSettingsShell() {
   renderSettingsShellSurface(settingsSurfaceContext());
 }
 
+function accountConfigSyncStatusLabel(status) {
+  switch (`${status || ""}`) {
+    case "synced":
+      return "已同步";
+    case "conflict":
+      return "存在冲突";
+    case "failed":
+      return "同步失败";
+    case "not_configured":
+      return "未配置";
+    default:
+      return "未连接";
+  }
+}
+
+function renderAccountConfigSync() {
+  const sync = state.configStatus?.account_config_sync || {};
+  const status = `${sync.status || "not_configured"}`;
+  const summary = accountConfigSyncStatusLabel(status);
+  const document = sync.server_document || null;
+  const contentSummary = document
+    ? `${document.provider_count || 0} 个模型服务 · ${document.model_group_count || 0} 个模型组 · ${document.relay_endpoint_count || 0} 个连接端点 · ${document.remote_daemon_count || 0} 个远端 daemon`
+    : "未同步";
+  setText("settings-account-config-sync-summary", summary);
+  setText("settings-account-config-sync-account", sync.account_id || "未配置");
+  setText(
+    "settings-account-config-sync-revision",
+    sync.revision === undefined || sync.revision === null ? "未同步" : `revision ${sync.revision}`,
+  );
+  setText("settings-account-config-sync-content", contentSummary);
+  setText(
+    "settings-account-config-sync-status",
+    sync.error_message ||
+      (status === "conflict"
+        ? "服务器文档已变化。请先拉取并检查，再决定是否重新上传本机非 Secret 配置。"
+        : status === "synced"
+          ? "设备镜像与服务器文档已同步。上传只发送 schema 允许的非 Secret 配置。"
+          : status === "not_configured"
+            ? "当前账号尚无共享配置文档。上传入口保持显式，不会因登录自动上传。"
+            : "登录后可显式拉取同账号配置。"),
+  );
+  if (settingsAccountConfigSyncMarker) {
+    settingsAccountConfigSyncMarker.className = `settings-status-marker ${
+      status === "synced" ? "ok" : status === "failed" || status === "conflict" ? "attention" : "partial"
+    }`;
+  }
+  const disabled = state.accountConfigSyncInFlight || !state.configStatus;
+  if (settingsAccountConfigPullButton) {
+    settingsAccountConfigPullButton.disabled = disabled;
+    settingsAccountConfigPullButton.textContent = state.accountConfigSyncInFlight ? "同步中..." : "拉取账号配置";
+  }
+  if (settingsAccountConfigPushButton) {
+    settingsAccountConfigPushButton.disabled = disabled;
+  }
+}
+
 function renderSettingsNavigation() {
   renderSettingsNavigationSurface(settingsSurfaceContext());
 }
@@ -7788,6 +7849,7 @@ function settingsSurfaceContext() {
     renderSettingsModelGroupRegistry,
     renderSystemAgentResourceConfig,
     renderAndroidApkUpdateSettings,
+    renderAccountConfigSync,
     showInspectorPanel,
   };
 }
@@ -7999,6 +8061,9 @@ function replaceSelectOptions(select, providers, value, options = {}) {
 function syncProviderSelectionControls() {
   const status = state.configStatus;
   const providers = configProviderRegistry();
+  const routeSource = status?.route_source || "agent";
+  const modelGroupId = status?.model_group_id || "";
+  const modelGroupLocked = routeSource === "model_group";
   const primaryId = state.providerSelectionDraft?.providerId || status?.provider_id || "";
   replaceSelectOptions(settingsProviderCurrentSelect, providers, primaryId);
   const selectedPrimary = settingsProviderCurrentSelect?.value || status?.provider_id || "";
@@ -8022,10 +8087,28 @@ function syncProviderSelectionControls() {
       currentFallback !== (status.fallback_provider_id || ""));
   if (settingsProviderSwitchButton) {
     settingsProviderSwitchButton.disabled =
-      state.providerSelectionInFlight || !status || !selectedPrimary || !selectionChanged;
+      state.providerSelectionInFlight ||
+      !status ||
+      !selectedPrimary ||
+      !selectionChanged ||
+      modelGroupLocked;
     settingsProviderSwitchButton.textContent = state.providerSelectionInFlight
       ? "保存中..."
       : "切换模型服务";
+  }
+  const strategyStatus = document.getElementById("settings-provider-switch-status");
+  if (strategyStatus) {
+    if (modelGroupLocked) {
+      strategyStatus.textContent = `当前 Agent 由模型组 ${modelGroupId || "(未命名)"} 决定主/备用路由；请到「模型组」页修改，切换模型服务在此处已锁定。`;
+    } else {
+      strategyStatus.textContent = "切换会保存选中的 Agent 模型服务；重启后活动运行时才会生效。";
+    }
+  }
+  if (settingsProviderCurrentSelect) {
+    settingsProviderCurrentSelect.disabled = modelGroupLocked;
+  }
+  if (settingsProviderFallbackSelect) {
+    settingsProviderFallbackSelect.disabled = modelGroupLocked;
   }
 }
 
@@ -8431,6 +8514,8 @@ function renderSettingsModelGroupRegistry() {
       `title=${modelRouteLabel(group.title)}`,
       `fallback=${modelRouteLabel(group.fallback)}`,
       `load_balance=${Array.isArray(group.load_balance) ? group.load_balance.length : 0}`,
+      `context=${formatTokenCount(group.context_window_tokens)}`,
+      `compact_at=${formatTokenCount(group.compaction_threshold_tokens)}`,
     ].join(" · ");
     const action = document.createElement("button");
     action.className = "settings-secondary-action";
@@ -8464,6 +8549,14 @@ function fillSettingsModelGroupForm(group) {
           .map((route) => `${route.provider_id}:${route.model}:${route.weight}`)
           .join(", ")
       : "",
+  );
+  setInputDirect(
+    settingsModelGroupContextWindowInput,
+    group.context_window_tokens || 128000,
+  );
+  setInputDirect(
+    settingsModelGroupCompactionThresholdInput,
+    group.compaction_threshold_tokens || 100000,
   );
 }
 
@@ -8552,7 +8645,15 @@ async function submitModelGroupConfigUpdate(event) {
       title: routeUpdateFromControls("title"),
       fallback: routeUpdateFromControls("fallback"),
       load_balance: parseLoadBalanceRoutes(settingsModelGroupLoadBalanceInput?.value || ""),
+      context_window_tokens: Number.parseInt(settingsModelGroupContextWindowInput?.value || "0", 10),
+      compaction_threshold_tokens: Number.parseInt(settingsModelGroupCompactionThresholdInput?.value || "0", 10),
     };
+    if (!Number.isInteger(group.context_window_tokens) || group.context_window_tokens <= 0
+      || !Number.isInteger(group.compaction_threshold_tokens)
+      || group.compaction_threshold_tokens <= 0
+      || group.compaction_threshold_tokens >= group.context_window_tokens) {
+      throw new Error("压缩门限必须大于 0 且小于上下文窗口");
+    }
   } catch (error) {
     setText("settings-model-group-save-status", `模型组无效: ${error.message}`);
     return;
@@ -8788,6 +8889,25 @@ async function refreshConfigStatus() {
     state.configStatusError = error.message;
     renderSettingsShell();
     renderPhase2Dashboard();
+  }
+}
+
+async function dispatchAccountConfigSync(commandName) {
+  if (state.accountConfigSyncInFlight) {
+    return;
+  }
+  state.accountConfigSyncInFlight = true;
+  renderSettingsShell();
+  try {
+    const receipt = await adpCommand(adpCommandOf(commandName));
+    setCommandStatus(commandReceiptStatus(receipt), { stickyMs: 7000 });
+    await refreshConfigStatus();
+  } catch (error) {
+    setCommandStatus(`账号配置同步失败：${error.message}`, { stickyMs: 9000 });
+    await refreshConfigStatus().catch(() => {});
+  } finally {
+    state.accountConfigSyncInFlight = false;
+    renderSettingsShell();
   }
 }
 
@@ -9601,6 +9721,16 @@ if (settingsModelGroupSwitchButton) {
 if (settingsApkUpdateCheckButton) {
   settingsApkUpdateCheckButton.addEventListener("click", () => {
     requestAndroidApkUpdateCheck();
+  });
+}
+if (settingsAccountConfigPullButton) {
+  settingsAccountConfigPullButton.addEventListener("click", () => {
+    dispatchAccountConfigSync("PullAccountConfig");
+  });
+}
+if (settingsAccountConfigPushButton) {
+  settingsAccountConfigPushButton.addEventListener("click", () => {
+    dispatchAccountConfigSync("PushAccountConfig");
   });
 }
 if (settingsDiagnosticsRefreshButton) {

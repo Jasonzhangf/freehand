@@ -24,6 +24,7 @@ Generated from `docs/mainline-calls/relay.transport.json`. Do not edit by hand.
 - relay_data_tunnel.proxy_websocket
 - relay_data_tunnel.accept_generation
 - relay_error_tunnel.correlate
+- relay_update_artifact.serve
 
 ## Request Mainline
 
@@ -32,18 +33,21 @@ Generated from `docs/mainline-calls/relay.transport.json`. Do not edit by hand.
 - Agent control tunnel authenticates identity and persists account-scoped presence
 - directory subscription and proxy requests authenticate before accessing presence
 - transport opens typed data exchanges only through an authenticated control tunnel
+- optional FREEHAND_RELAY_UPDATES_DIR enables a separate Relay update route without changing tunnel or business payload contracts
 
 ## Response Mainline
 
 - directory query and subscription project account-scoped online state, role, status, last seen, and Agent-reported active-session count
 - HTTP, ADP, and generic WebSocket pass through opaque typed data frames without Relay ownership of Agent business truth
 - restart restores persisted account, token hash, and Agent presence records
+- Relay update routes stream deployment-staged manifest/APK bytes with no-store headers and preserve manifest payload bytes
 
 ## Error Mainline
 
 - invalid credentials and tokens fail explicitly
 - cross-account, expired, and unknown Agent access fails explicitly
 - corrupt store, failed persistence, and failed tunnel or local bridge IO fail explicitly
+- unset/inaccessible updates directory, missing files, and traversal paths fail explicitly; no daemon fallback is attempted
 
 ## Shared Multi-Reference Functions
 
@@ -80,6 +84,7 @@ Generated from `docs/mainline-calls/relay.transport.json`. Do not edit by hand.
 | 13a | `RelayAgentClient::run / RelayAgentClient::current_heartbeat` | `crates/freehand-relay/src/agent_client.rs` | read the typed Agent status and active-session count at control admission and every heartbeat; terminate the tunnel explicitly when the source fails | typed presence source closure | current authenticated Agent presence heartbeat or explicit source error | RelayAgentClient::run | RelayAgentClient::current_heartbeat | agent_presence | agent_presence | agent_presence.heartbeat | bound |
 | 14 | `attach_error / RelayTunnelRegistry::admit_error_for_control` | `crates/freehand-relay/src/websocket_tunnel.rs / crates/freehand-relay/src/tunnel.rs` | atomically admit one error channel only when its server-issued control generation still owns the authenticated Agent identity | authenticated Agent identity, server-issued control generation header, and typed error sender | control-generation-bound typed error tunnel or explicit stale-generation failure | attach_error | RelayTunnelRegistry::admit_error_for_control | relay_control_tunnel | relay_error_tunnel | relay_control_tunnel.admit_error | bound |
 | 15 | `run_data_socket / RelayTunnelRegistry::accept_data_generation / RelayTunnelRegistry::accept_data` | `crates/freehand-relay/src/websocket_tunnel.rs / crates/freehand-relay/src/tunnel.rs` | validate the authenticated data attachment generation before delivering an inbound response frame to current pending-exchange truth | typed Agent response frame plus authenticated tunnel identity and attachment generation | current-generation correlated delivery or explicit stale-generation terminal failure | run_data_socket | RelayTunnelRegistry::accept_data_generation | relay_data_tunnel | relay_data_tunnel | relay_data_tunnel.accept_generation | bound |
+| 16 | `serve_updates_path / sanitize_updates_relative_path` | `crates/freehand-relay/src/service.rs` | serve deployment-staged manifest and APK bytes beneath the canonical updates directory with traversal rejection and no-store headers | configured updates directory plus relative update path | update bytes or explicit configuration/not-found/path error | serve_updates_path | tokio::fs::read | relay_update_artifact | relay_update_artifact | relay_update_artifact.serve | bound |
 
 ## Sync Status Against Mainline Call
 

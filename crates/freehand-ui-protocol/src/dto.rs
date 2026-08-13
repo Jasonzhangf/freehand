@@ -141,6 +141,8 @@ pub enum UiCommand {
     },
     QueryToolRegistry,
     QueryDiagnostics,
+    PullAccountConfig,
+    PushAccountConfig,
     QueryErrorCenterEvents {
         session_id: SessionId,
         #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -316,6 +318,8 @@ pub struct UiModelGroupConfigUpdate {
     pub fallback: Option<UiModelRouteUpdate>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub load_balance: Vec<UiModelWeightedRouteUpdate>,
+    pub context_window_tokens: u32,
+    pub compaction_threshold_tokens: u32,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -938,6 +942,8 @@ pub struct UiConfigStatusProjection {
     pub fallback_provider_id: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub model_group_id: Option<String>,
+    #[serde(default)]
+    pub route_source: String,
     pub provider_type: String,
     pub provider_protocol: String,
     #[serde(default, skip_serializing_if = "String::is_empty")]
@@ -955,6 +961,53 @@ pub struct UiConfigStatusProjection {
     pub provider_auth_type: String,
     pub provider_auth_source: String,
     pub restart_required_on_change: bool,
+    #[serde(default)]
+    pub account_config_sync: UiAccountConfigSyncProjection,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UiAccountConfigSyncProjection {
+    pub status: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub account_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub revision: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub etag: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub updated_at: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error_message: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub server_document: Option<UiAccountConfigDocumentSummaryProjection>,
+}
+
+impl Default for UiAccountConfigSyncProjection {
+    fn default() -> Self {
+        Self {
+            status: "not_configured".to_owned(),
+            account_id: None,
+            revision: None,
+            etag: None,
+            updated_at: None,
+            error_message: None,
+            server_document: None,
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize, Default)]
+#[serde(rename_all = "camelCase")]
+pub struct UiAccountConfigDocumentSummaryProjection {
+    pub provider_count: usize,
+    pub model_group_count: usize,
+    pub relay_endpoint_count: usize,
+    pub remote_daemon_count: usize,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub revision: Option<u64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub etag: Option<String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -1018,6 +1071,8 @@ pub struct UiModelGroupConfigProjection {
     pub fallback: Option<UiModelRouteProjection>,
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub load_balance: Vec<UiModelWeightedRouteProjection>,
+    pub context_window_tokens: u32,
+    pub compaction_threshold_tokens: u32,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

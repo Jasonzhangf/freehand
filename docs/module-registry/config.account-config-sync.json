@@ -1,0 +1,62 @@
+{
+  "schema_version": 1,
+  "registry_id": "config.account-config-sync.modules",
+  "feature_id": "config.account-config-sync",
+  "status": "active",
+  "coverage_roots": [
+    "crates/freehand-account-config"
+  ],
+  "modules": [
+    {
+      "module_id": "config.account-config-sync.library",
+      "owner_feature_id": "config.account-config-sync",
+      "status": "active",
+      "owned_paths": [
+        "crates/freehand-account-config/Cargo.toml",
+        "crates/freehand-account-config/src/client.rs",
+        "crates/freehand-account-config/src/lib.rs",
+        "crates/freehand-account-config/src/mirror.rs"
+      ],
+      "allowed_dependencies": [
+        "rust.std",
+        "third_party.axum",
+        "third_party.reqwest",
+        "third_party.serde",
+        "third_party.serde_json",
+        "third_party.sha2",
+        "third_party.thiserror",
+        "third_party.tokio"
+      ],
+      "forbidden_dependencies": [
+        "freehand-relay",
+        "freehand-config",
+        "freehand-runtime",
+        "freehand-server",
+        "freehand-node",
+        "freehand-reason",
+        "freehand-ui-protocol"
+      ]
+    },
+    {
+      "module_id": "config.account-config-sync.module-tests",
+      "owner_feature_id": "config.account-config-sync",
+      "status": "active",
+      "owned_paths": [
+        "crates/freehand-account-config/tests/account_config_http_blackbox.rs"
+      ],
+      "allowed_dependencies": [
+        "config.account-config-sync.library",
+        "third_party.test-harness"
+      ],
+      "forbidden_dependencies": []
+    }
+  ],
+  "declared_edges": [
+    {
+      "edge_id": "config.account-config-sync.module-tests_to_library",
+      "from_module_id": "config.account-config-sync.module-tests",
+      "to_module_id": "config.account-config-sync.library",
+      "import_name": "freehand_account_config"
+    }
+  ]
+}

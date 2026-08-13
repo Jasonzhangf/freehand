@@ -1707,6 +1707,8 @@ fn selected_worker() -> SelectedAgentConfig {
         },
         fallback_provider: None,
         model_group_id: None,
+        context_window_tokens: 128_000,
+        compaction_threshold_tokens: 100_000,
         restart_required_on_change: true,
         relay_connection: None,
     }

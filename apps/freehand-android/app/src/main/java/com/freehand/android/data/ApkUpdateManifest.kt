@@ -11,15 +11,27 @@ data class ApkUpdateManifest(
     val apkUrl: String,
     val required: Boolean,
     val releaseNotes: String,
+    val sha256: String? = null,
+    val size: Long? = null,
+    val signerSha256: String? = null,
 ) {
     fun updatePlan(currentVersionCode: Long, hostConfig: HostConfig): ApkUpdatePlan? {
         if (versionCode <= currentVersionCode) return null
+        val verifiedSha256 = sha256
+            ?: throw ApkUpdateManifestException("sha256 is required for a higher-version APK")
+        val verifiedSize = size
+            ?: throw ApkUpdateManifestException("size is required for a higher-version APK")
+        val verifiedSignerSha256 = signerSha256
+            ?: throw ApkUpdateManifestException("signerSha256 is required for a higher-version APK")
         return ApkUpdatePlan(
             versionCode = versionCode,
             versionName = versionName,
             apkUrl = hostConfig.resolveDaemonUrl(apkUrl),
             required = required,
             releaseNotes = releaseNotes,
+            sha256 = verifiedSha256,
+            size = verifiedSize,
+            signerSha256 = verifiedSignerSha256,
         )
     }
 
@@ -33,7 +45,16 @@ data class ApkUpdateManifest(
                 throw ApkUpdateManifestException("invalid apk update manifest json: ${error.message}", error)
             }
             root.rejectUnknownFields(
-                setOf("versionCode", "versionName", "apkUrl", "releaseNotes", "required"),
+                setOf(
+                    "versionCode",
+                    "versionName",
+                    "apkUrl",
+                    "releaseNotes",
+                    "required",
+                    "sha256",
+                    "size",
+                    "signerSha256",
+                ),
             )
             val versionCode = root.requiredLong("versionCode")
             if (versionCode <= 0L) {
@@ -41,12 +62,18 @@ data class ApkUpdateManifest(
             }
             val apkUrl = root.requiredString("apkUrl")
             validateApkUrl(apkUrl)
+            val sha256 = root.optionalSha256("sha256")
+            val size = root.optionalPositiveLong("size")
+            val signerSha256 = root.optionalSha256("signerSha256")
             return ApkUpdateManifest(
                 versionCode = versionCode,
                 versionName = root.optionalString("versionName") ?: "",
                 apkUrl = apkUrl,
                 required = root.optionalBoolean("required") ?: false,
                 releaseNotes = root.optionalString("releaseNotes") ?: "",
+                sha256 = sha256,
+                size = size,
+                signerSha256 = signerSha256,
             )
         }
 
@@ -97,6 +124,30 @@ data class ApkUpdateManifest(
             if (value == null || value.isJsonNull) return null
             return value.asBoolean
         }
+
+        private fun JsonObject.optionalSha256(field: String): String? {
+            val value = optionalString(field) ?: return null
+            val normalized = value.lowercase()
+            if (!SHA256_HEX.matches(normalized)) {
+                throw ApkUpdateManifestException("$field must be a 64-char lowercase hex digest")
+            }
+            return normalized
+        }
+
+        private fun JsonObject.optionalPositiveLong(field: String): Long? {
+            val value = get(field)
+            if (value == null || value.isJsonNull) return null
+            if (!value.isJsonPrimitive) {
+                throw ApkUpdateManifestException("$field must be a positive integer")
+            }
+            val parsed = value.asLong
+            if (parsed <= 0L) {
+                throw ApkUpdateManifestException("$field must be positive")
+            }
+            return parsed
+        }
+
+        private val SHA256_HEX = Regex("^[0-9a-f]{64}$")
     }
 }
 
@@ -106,6 +157,9 @@ data class ApkUpdatePlan(
     val apkUrl: String,
     val required: Boolean,
     val releaseNotes: String,
+    val sha256: String,
+    val size: Long,
+    val signerSha256: String,
 )
 
 class ApkUpdateManifestException(

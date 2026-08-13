@@ -1,0 +1,60 @@
+{
+  "schema_version": 1,
+  "verification_map_id": "config.account-config-sync.verification",
+  "feature_id": "config.account-config-sync",
+  "status": "active",
+  "module_registry": "docs/module-registry/config.account-config-sync.json",
+  "function_map": "docs/function-maps/config.account-config-sync.md",
+  "mainline_call_map": "docs/mainline-calls/config.account-config-sync.json",
+  "test_design": "docs/testing/config.account-config-sync.md",
+  "gates": [
+    {
+      "gate_id": "config.account-config-sync.unit",
+      "kind": "test",
+      "command": "cargo test -p freehand-account-config --lib -- --nocapture",
+      "binding_status": "active"
+    },
+    {
+      "gate_id": "config.account-config-sync.module-blackbox",
+      "kind": "test",
+      "command": "cargo test -p freehand-account-config --test account_config_http_blackbox -- --nocapture",
+      "binding_status": "active"
+    },
+    {
+      "gate_id": "config.account-config-sync.server-check",
+      "kind": "build",
+      "command": "cargo check -p freehand-relay-server",
+      "binding_status": "active"
+    },
+    {
+      "gate_id": "config.account-config-sync.clippy",
+      "kind": "lint",
+      "command": "cargo clippy -p freehand-account-config --all-targets -- -D warnings",
+      "binding_status": "active"
+    },
+    {
+      "gate_id": "config.account-config-sync.process-smoke",
+      "kind": "project-blackbox",
+      "command": "scripts/verify-relay-account-config-smoke.sh",
+      "binding_status": "active"
+    },
+    {
+      "gate_id": "config.account-config-sync.mainline",
+      "kind": "architecture",
+      "command": "cargo run -p xtask -- mainlines check",
+      "binding_status": "active"
+    },
+    {
+      "gate_id": "config.account-config-sync.architecture",
+      "kind": "architecture",
+      "command": "cargo run -p xtask -- gates check",
+      "binding_status": "active"
+    },
+    {
+      "gate_id": "config.account-config-sync.claw-online",
+      "kind": "online-remote",
+      "command": "manual Claw smoke: same-account PUT/restart/GET, stale 409, cross-account isolation, and secret rejection",
+      "binding_status": "manual-required"
+    }
+  ]
+}

@@ -21,6 +21,12 @@
       "binding_status": "active"
     },
     {
+      "gate_id": "relay.transport.updates-blackbox",
+      "kind": "test",
+      "command": "cargo test -p freehand-relay --test relay_http_blackbox relay_updates -- --nocapture",
+      "binding_status": "active"
+    },
+    {
       "gate_id": "relay.transport.server-check",
       "kind": "build",
       "command": "cargo check -p freehand-relay-server",
@@ -72,6 +78,12 @@
       "gate_id": "relay.transport.codex-review",
       "kind": "review",
       "command": "codex review - < ~/.claude/skills/codex-review/review-prompt.md; only if unavailable or without a final conclusion use codex -p asxs review --uncommitted, then codex -p tcm review --uncommitted",
+      "binding_status": "manual-required"
+    },
+    {
+      "gate_id": "relay.transport.dual-path-update",
+      "kind": "online-remote",
+      "command": "scripts/verify-dual-path-update.sh <tailscale-manifest-url> <relay-manifest-url>",
       "binding_status": "manual-required"
     }
   ]

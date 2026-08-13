@@ -890,3 +890,19 @@ Tags: #architecture #gap5 #node #ui-protocol #dependency-edge
 - Installed daemon SHA-512 `6d55a7d3b076e3e315df361472a88716f75ac3678fff9a0accf4b0c08b688fb60e165779cddfbd85cda393cb9182f45fe6c397763feb115eebc41705a1d883f5` (matches build & install).
 - codex-review via opencode-go/deepseek-v4-flash produced `VERDICT: PASS` (1 P1 advisory: `remote` semantic dual-truth between contracts constant and relay enum; 2 P2). Key fix: plain `opencode run` drops deepseek-v4-flash's final assistant message after tool calls; `--format json` event stream (`part.type=="text"`) captures the verdict. Recorded in `~/.agents/skills/codex-review/SKILL.md`.
 - Unclaimed: cross-Agent conversation, Relay server version sync, Android real-device evidence.
+
+## 2026-08-12 - Account config sync owner landed; Claw deployment pending
+
+- Owner: `config.account-config-sync` (`crates/freehand-account-config`) + `runtime.ui-command-dispatch` WebUI Settings card; `relay.transport` keeps only the authenticated account boundary; `config.core` exports env-name-only shared config; `app.android-client` updates remain dual-manifest URL only.
+- Schema v1 surfaces: `providerRegistry` (env-name only, no inline auth), `modelGroups`, `relayEndpointCandidates` (URL + token env name), `remoteDaemonRegistry` (no one-time credentials). Secret-shaped values, absolute paths, and whole `config.toml` uploads are rejected by schema + secret boundary checks.
+- APIs: `GET/PUT /relay/api/config` over `Bearer` auth, `If-Match` required after first write, 409 + serverDocument on stale match, 404 on missing account document, 401 on missing auth, 400 on invalid schema/secret-shaped value, atomic temp+rename+fsync persistence.
+- Fix (this round): `put_config` maps `AccountConfigError::Invalid(_)` -> 400 (was 500), `AccountConfigStore::put` `(None, Some(_))` -> NotFound (was Conflict). Added red test `account_config_put_to_missing_account_returns_not_found`.
+- Local proof: `freehand-account-config` 14/14 lib + 2/2 http blackbox; `freehand-config` 47/47; `freehand-server` 18/18; `freehand-runtime` `runtime_account_config_sync` 4/4; `verify-relay-account-config-smoke.sh` process smoke passes (`relay_account_config_smoke_ok revision=1 etag="a0c0...37bb"`); local temp Relay end-to-end on 127.0.0.1:19199 covers jason PUT/GET/409/secret/isolation/reload.
+- Android `./gradlew testDebugUnitTest assembleDebug` BUILD SUCCESSFUL; `node --check` for `legacy-monolith.js` and `adp-protocol.js` passes.
+- Claw Tailscale baseline (100.124.49.106:19091): `/relay/health=ok`, `/relay/updates/latest.json` version=0.2.8/20260731 sha256=979906f5...611 size=2741777; `/relay/updates/freehand-android.apk` byte-identical to manifest sha256; `/relay/api/config` GET/PUT still 404 because the deployed Claw Relay binary is older than this round.
+- Workspace baseline: `cargo fmt --check`, `cargo build --workspace`, `cargo clippy -p freehand-account-config -p freehand-config -p freehand-runtime -p freehand-server -p freehand-relay --all-targets -- -D warnings`, `cargo run -p xtask -- mainlines check`, `cargo run -p xtask -- gates check` all green.
+- Unblocked blockers requiring explicit user authorization / reachable device:
+  - Claw (159.75.134.56) deployment of the new `freehand-relay-server` binary so `/relay/api/config` becomes live (external state change).
+  - Android real-device in-place upgrade through both Tailscale and Relay manifests with `versionCode`/signer/SHA-256 evidence (needs explicit upgrade window).
+  - Workspace clippy: `apps/freehand-cli/tests/config_startup.rs` has 3 `UiTurnProjection` initializations missing `usage_projection`/`user_options` from an unrelated worker; not addressed in this round.
+- codex-review not run yet; requires the three blockers above plus an explicit `codex-review` PASS before delivery per AGENTS rule 36.

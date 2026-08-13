@@ -2,6 +2,7 @@ package com.freehand.android.ui
 
 import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageManager
 import android.net.Uri
 import android.os.Build
 import android.os.Environment
@@ -11,8 +12,10 @@ import com.freehand.android.BuildConfig
 import com.freehand.android.data.ApkUpdateManifest
 import com.freehand.android.data.HostConfig
 import java.io.File
+import java.io.FileInputStream
 import java.net.HttpURLConnection
 import java.net.URL
+import java.security.MessageDigest
 import java.util.concurrent.atomic.AtomicBoolean
 
 class AndroidApkUpdater(
@@ -40,7 +43,13 @@ class AndroidApkUpdater(
                 Log.i(LOG_TAG, "apk_update_available versionCode=${plan.versionCode} url=${plan.apkUrl}")
                 onStatus(ApkUpdateStatus.available(plan.versionCode, plan.versionName, plan.apkUrl))
                 onStatus(ApkUpdateStatus.downloading(plan.versionCode, plan.apkUrl))
-                val apkFile = downloadApk(plan.apkUrl, plan.versionCode)
+                val apkFile = downloadApk(
+                    plan.apkUrl,
+                    plan.versionCode,
+                    plan.sha256,
+                    plan.size,
+                    plan.signerSha256,
+                )
                 onStatus(ApkUpdateStatus.downloaded(plan.versionCode, apkFile.length()))
                 val installIntent = buildInstallIntent(apkFile)
                 context.startActivity(installIntent)
@@ -59,7 +68,13 @@ class AndroidApkUpdater(
         }
     }
 
-    private fun downloadApk(apkUrl: String, versionCode: Long): File {
+    private fun downloadApk(
+        apkUrl: String,
+        versionCode: Long,
+        expectedSha256: String,
+        expectedSize: Long,
+        expectedSignerSha256: String,
+    ): File {
         val outputDir = File(
             context.getExternalFilesDir(Environment.DIRECTORY_DOWNLOADS),
             "apk-updates",
@@ -83,7 +98,73 @@ class AndroidApkUpdater(
         if (output.length() <= 0L) {
             throw IllegalStateException("apk download produced an empty file")
         }
+        if (output.length() != expectedSize) {
+            throw IllegalStateException(
+                "apk size mismatch expected=$expectedSize actual=${output.length()}",
+            )
+        }
+        val actualSha256 = sha256Hex(output)
+        if (actualSha256 != expectedSha256) {
+            throw IllegalStateException(
+                "apk sha256 mismatch expected=$expectedSha256 actual=$actualSha256",
+            )
+        }
+        verifyApkSigner(apkFile = output, expectedSignerSha256 = expectedSignerSha256)
+        Log.i(LOG_TAG, "apk_hash_verified versionCode=$versionCode sha256=$actualSha256")
         return output
+    }
+
+    private fun verifyApkSigner(apkFile: File, expectedSignerSha256: String) {
+        val flags = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            PackageManager.GET_SIGNING_CERTIFICATES
+        } else {
+            @Suppress("DEPRECATION")
+            PackageManager.GET_SIGNATURES
+        }
+        val packageInfo = context.packageManager.getPackageArchiveInfo(apkFile.absolutePath, flags)
+            ?: throw IllegalStateException("cannot read APK package metadata")
+        if (packageInfo.packageName != context.packageName) {
+            throw IllegalStateException(
+                "apk package name mismatch expected=${context.packageName} actual=${packageInfo.packageName}",
+            )
+        }
+        val signatures = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+            packageInfo.signingInfo?.apkContentsSigners
+        } else {
+            @Suppress("DEPRECATION")
+            packageInfo.signatures
+        }.orEmpty()
+        if (signatures.size != 1) {
+            throw IllegalStateException("APK must contain exactly one signer")
+        }
+        val actualSignerSha256 = sha256Hex(signatures.single().toByteArray())
+        if (actualSignerSha256 != expectedSignerSha256) {
+            throw IllegalStateException(
+                "apk signerSha256 mismatch expected=$expectedSignerSha256 actual=$actualSignerSha256",
+            )
+        }
+        Log.i(LOG_TAG, "apk_signer_verified signerSha256=$actualSignerSha256")
+    }
+
+    private fun sha256Hex(file: File): String {
+        return FileInputStream(file).use { input ->
+            sha256Hex(input)
+        }
+    }
+
+    private fun sha256Hex(bytes: ByteArray): String {
+        return sha256Hex(bytes.inputStream())
+    }
+
+    private fun sha256Hex(input: java.io.InputStream): String {
+        val digest = MessageDigest.getInstance("SHA-256")
+        val buffer = ByteArray(8192)
+        while (true) {
+            val read = input.read(buffer)
+            if (read <= 0) break
+            digest.update(buffer, 0, read)
+        }
+        return digest.digest().joinToString("") { byte -> "%02x".format(byte) }
     }
 
     private fun waitForDownload(

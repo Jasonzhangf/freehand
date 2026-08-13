@@ -85,6 +85,9 @@ use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 #[cfg(test)]
 use chrono::{Datelike, Timelike};
+use freehand_account_config::{
+    AccountConfigClient, AccountConfigClientError, AccountConfigMirror, AccountConfigSyncStatus,
+};
 use freehand_blocks::{
     CompactionTriggerAction, CompletionClaim, CompletionDecision, CompletionSchemaIssue,
     CompletionSchemaRejection, CompletionSubmission, RewritePolicyThresholds,
@@ -100,11 +103,11 @@ use freehand_config::{
     ModelRouteConfig, ModelWeightedRouteConfig, ProviderConfigUpdate,
     ProviderProtocol as ConfigProviderProtocol, ProviderType, ProviderWebSearchMode,
     ProviderWebSearchWire, SelectedAgentConfig, SelectedProviderConfig, default_config_path,
-    load_config_from_path, load_default_config, provider_base_url_host_for_projection,
-    safe_provider_base_url_for_projection, switch_agent_model_group_in_path,
-    switch_agent_provider_in_path, update_agent_resource_config_in_path,
-    update_provider_config_in_path, upsert_model_group_config_in_path,
-    upsert_provider_config_in_path,
+    export_shared_account_config, load_config_from_path, load_default_config,
+    provider_base_url_host_for_projection, safe_provider_base_url_for_projection,
+    switch_agent_model_group_in_path, switch_agent_provider_in_path,
+    update_agent_resource_config_in_path, update_provider_config_in_path,
+    upsert_model_group_config_in_path, upsert_provider_config_in_path,
 };
 use freehand_contracts::{
     AgentId, ContextCachePolicy, ContextProvenance, ContextRole, ContextSegment, ContextSegmentId,
@@ -165,32 +168,32 @@ use freehand_tools::{
 };
 use freehand_ui_protocol::{NodeStatusSnapshot as UiNodeStatusSnapshot, UiSource, UiStreamKind};
 use freehand_ui_protocol::{
-    TurnProjectionInput, UiAgentBoardProjection, UiAgentLifecycleActivityProjection,
-    UiAgentLifecycleProjection, UiAgentModelGroupSelectionUpdate, UiAgentProcessProjection,
-    UiAgentProviderSelectionUpdate, UiAgentResourceConfigUpdate, UiAgentSnapshotProjection,
-    UiAttachmentMetadataProjection, UiClientKind, UiCommand, UiCommandDispatchEnvelope,
-    UiCommandDispatchPort, UiCommandDispatchPortError, UiCommandDispatchReceipt,
-    UiCompletionSchemaRetryWaiting, UiConfigPeerProjection, UiConfigStatusProjection,
-    UiDiagnosticLogFileProjection, UiDiagnosticsProjection, UiErrorCenterEventListProjection,
-    UiErrorCenterEventProjection, UiExecutionFactCommand, UiExecutionFactKind,
-    UiInputAttachmentKind, UiLocalAgentProjection, UiMasterPollClassificationProjection,
-    UiMasterPollProjection, UiModelGroupConfigProjection, UiModelGroupConfigUpdate,
-    UiModelRequestKind, UiModelRequestWaiting, UiModelRouteProjection, UiModelRouteUpdate,
-    UiModelTransportActivity, UiModelTransportKind, UiModelWeightedRouteProjection,
-    UiModelWeightedRouteUpdate, UiProtocolState, UiProviderConfigSummaryProjection,
-    UiProviderConfigUpdate, UiQueryAccessScope, UiQueryResult, UiRuntimeQueryPort,
-    UiSchedulerTickCommand, UiSessionMetadataProjection, UiSessionSearchChildProjection,
-    UiSessionSearchProjection, UiSessionSearchResultProjection, UiSubmitMetadata,
-    UiTaskAgentCreateCommand, UiTaskAssignCommand, UiTaskBoardProjection, UiTaskClaimCommand,
-    UiTaskCreateCommand, UiTaskDispatchCommand, UiTaskEventInboxEntryProjection,
-    UiTaskEventInboxProjection, UiTaskHistoryProjection, UiTaskLedgerEventProjection,
-    UiTaskListProjection, UiTaskReviewCommand, UiTaskReviewRejectionCommand,
-    UiTaskSnapshotProjection, UiTimerEventProjection, UiTimerListProjection, UiTimerProjection,
-    UiTimerRepeatCommand, UiTimerScheduleCommand, UiToolRegistryProjection,
-    UiToolRegistryToolProjection, UiTurnProjection, UiTurnTimingProjection, UiWorkerControlCommand,
-    UiWorkerControlEventProjection, UiWorkerControlProjection,
-    checkpoint_projection_from_runtime_summary, turn_projection_for_client,
-    turn_projection_from_events,
+    TurnProjectionInput, UiAccountConfigDocumentSummaryProjection, UiAccountConfigSyncProjection,
+    UiAgentBoardProjection, UiAgentLifecycleActivityProjection, UiAgentLifecycleProjection,
+    UiAgentModelGroupSelectionUpdate, UiAgentProcessProjection, UiAgentProviderSelectionUpdate,
+    UiAgentResourceConfigUpdate, UiAgentSnapshotProjection, UiAttachmentMetadataProjection,
+    UiClientKind, UiCommand, UiCommandDispatchEnvelope, UiCommandDispatchPort,
+    UiCommandDispatchPortError, UiCommandDispatchReceipt, UiCompletionSchemaRetryWaiting,
+    UiConfigPeerProjection, UiConfigStatusProjection, UiDiagnosticLogFileProjection,
+    UiDiagnosticsProjection, UiErrorCenterEventListProjection, UiErrorCenterEventProjection,
+    UiExecutionFactCommand, UiExecutionFactKind, UiInputAttachmentKind, UiLocalAgentProjection,
+    UiMasterPollClassificationProjection, UiMasterPollProjection, UiModelGroupConfigProjection,
+    UiModelGroupConfigUpdate, UiModelRequestKind, UiModelRequestWaiting, UiModelRouteProjection,
+    UiModelRouteUpdate, UiModelTransportActivity, UiModelTransportKind,
+    UiModelWeightedRouteProjection, UiModelWeightedRouteUpdate, UiProtocolState,
+    UiProviderConfigSummaryProjection, UiProviderConfigUpdate, UiQueryAccessScope, UiQueryResult,
+    UiRuntimeQueryPort, UiSchedulerTickCommand, UiSessionMetadataProjection,
+    UiSessionSearchChildProjection, UiSessionSearchProjection, UiSessionSearchResultProjection,
+    UiSubmitMetadata, UiTaskAgentCreateCommand, UiTaskAssignCommand, UiTaskBoardProjection,
+    UiTaskClaimCommand, UiTaskCreateCommand, UiTaskDispatchCommand,
+    UiTaskEventInboxEntryProjection, UiTaskEventInboxProjection, UiTaskHistoryProjection,
+    UiTaskLedgerEventProjection, UiTaskListProjection, UiTaskReviewCommand,
+    UiTaskReviewRejectionCommand, UiTaskSnapshotProjection, UiTimerEventProjection,
+    UiTimerListProjection, UiTimerProjection, UiTimerRepeatCommand, UiTimerScheduleCommand,
+    UiToolRegistryProjection, UiToolRegistryToolProjection, UiTurnProjection,
+    UiTurnTimingProjection, UiWorkerControlCommand, UiWorkerControlEventProjection,
+    UiWorkerControlProjection, checkpoint_projection_from_runtime_summary,
+    turn_projection_for_client, turn_projection_from_events,
 };
 use serde_json::{Map, Value, json};
 use thiserror::Error;
@@ -3304,6 +3307,8 @@ struct RuntimeCommandDispatcherState {
     node_runtime: LocalNodeRuntime,
     next_turn_ordinal: u64,
     pending_config_agent_name: Option<String>,
+    account_config_mirror: Option<AccountConfigMirror>,
+    account_config_mirror_error: Option<String>,
 }
 
 type PersistedSessionFingerprint = (Option<TurnId>, Option<TurnId>);
@@ -3572,6 +3577,24 @@ impl RuntimeCommandDispatcher {
                 }
             }
         }
+        let mut account_config_mirror = None;
+        let mut account_config_mirror_error = None;
+        if let Some(live) = &config.live {
+            match AccountConfigMirror::load_from_runtime_home(&live.runtime_home) {
+                Ok(mirror) => account_config_mirror = mirror,
+                Err(error) => {
+                    account_config_mirror_error = Some(match error {
+                        freehand_account_config::AccountConfigMirrorError::Io(message) => message,
+                        freehand_account_config::AccountConfigMirrorError::Invalid(message) => {
+                            message
+                        }
+                        freehand_account_config::AccountConfigMirrorError::Corrupt(message) => {
+                            message
+                        }
+                    })
+                }
+            }
+        }
         let dispatcher = Self {
             ui_state,
             persisted_session_fingerprints: Mutex::new(BTreeMap::new()),
@@ -3587,6 +3610,8 @@ impl RuntimeCommandDispatcher {
                 node_runtime,
                 next_turn_ordinal,
                 pending_config_agent_name: None,
+                account_config_mirror,
+                account_config_mirror_error,
             }),
         };
         dispatcher
@@ -3726,13 +3751,16 @@ impl RuntimeCommandDispatcher {
                     .pending_config_agent_name
                     .as_deref()
                     .unwrap_or(&live.selected_agent.name);
-                Ok(Some(UiQueryResult::ConfigStatus(
-                    project_config_status_from_path_for_ui(
-                        &live.runtime_home.join("config.toml"),
-                        agent_name,
-                        scope,
-                    )?,
-                )))
+                let mut status = project_config_status_from_path_for_ui(
+                    &live.runtime_home.join("config.toml"),
+                    agent_name,
+                    scope,
+                )?;
+                status.account_config_sync = project_account_config_sync(
+                    state.account_config_mirror.as_ref(),
+                    state.account_config_mirror_error.as_deref(),
+                );
+                Ok(Some(UiQueryResult::ConfigStatus(status)))
             }
             UiCommand::QueryTaskList { status, agent_id } => {
                 let Some(live) = state.config.live.as_ref() else {
@@ -5023,6 +5051,8 @@ fn project_config_status_for_ui(
                     search: group.search.map(ui_model_route_from_config),
                     title: group.title.map(ui_model_route_from_config),
                     fallback: group.fallback.map(ui_model_route_from_config),
+                    context_window_tokens: group.context_window_tokens,
+                    compaction_threshold_tokens: group.compaction_threshold_tokens,
                     load_balance: group
                         .load_balance
                         .into_iter()
@@ -5121,6 +5151,11 @@ fn project_config_status_for_ui(
             .as_ref()
             .map(|provider| provider.id.clone()),
         model_group_id: selected.model_group_id.clone(),
+        route_source: if selected.model_group_id.is_some() {
+            "model_group".to_owned()
+        } else {
+            "agent".to_owned()
+        },
         provider_type: selected.provider.provider_type.as_str().to_owned(),
         provider_protocol: selected.provider.protocol.as_str().to_owned(),
         provider_base_url: safe_provider_base_url_for_projection(&selected.provider.base_url),
@@ -5133,6 +5168,225 @@ fn project_config_status_for_ui(
         provider_auth_type: selected.provider.auth_type.as_str().to_owned(),
         provider_auth_source: selected.provider.auth_source.as_str().to_owned(),
         restart_required_on_change: selected.restart_required_on_change,
+        account_config_sync: UiAccountConfigSyncProjection::default(),
+    }
+}
+
+fn dispatch_pull_account_config(
+    state: &mut RuntimeCommandDispatcherState,
+    envelope: UiCommandDispatchEnvelope,
+) -> Result<UiCommandDispatchReceipt, UiCommandDispatchPortError> {
+    let (live, client, account_id) = relay_session_for_account_config(state)?;
+    let runtime_home = live.runtime_home.clone();
+    match client.pull() {
+        Ok(document) => {
+            let mirror =
+                AccountConfigMirror::synced(&account_id, document.clone()).map_err(|error| {
+                    UiCommandDispatchPortError::DispatchFailed(format!(
+                        "synced mirror invalid: {error}"
+                    ))
+                })?;
+            mirror
+                .save_to_runtime_home(&runtime_home)
+                .map_err(|error| {
+                    UiCommandDispatchPortError::DispatchFailed(format!("persist mirror: {error}"))
+                })?;
+            state.account_config_mirror = Some(mirror);
+            state.account_config_mirror_error = None;
+            Ok(UiCommandDispatchReceipt {
+                ingress: envelope.ingress,
+                target_feature_id: envelope.target_feature_id,
+                dispatch_status: format!(
+                    "account_config_pulled:account={} revision={}",
+                    account_id,
+                    document.revision.unwrap_or(0)
+                ),
+            })
+        }
+        Err(AccountConfigClientError::NotFound) => {
+            let mirror = AccountConfigMirror::not_configured(&account_id);
+            mirror
+                .save_to_runtime_home(&runtime_home)
+                .map_err(|error| {
+                    UiCommandDispatchPortError::DispatchFailed(format!("persist mirror: {error}"))
+                })?;
+            state.account_config_mirror = Some(mirror);
+            state.account_config_mirror_error = None;
+            Ok(UiCommandDispatchReceipt {
+                ingress: envelope.ingress,
+                target_feature_id: envelope.target_feature_id,
+                dispatch_status: format!(
+                    "account_config_pulled:account={account_id} status=not_configured"
+                ),
+            })
+        }
+        Err(error) => {
+            let message = format!("pull account config: {error}");
+            state.account_config_mirror_error = Some(message.clone());
+            let mirror = AccountConfigMirror::failed(&account_id, &message);
+            let _ = mirror.save_to_runtime_home(&runtime_home);
+            state.account_config_mirror = Some(mirror);
+            Err(UiCommandDispatchPortError::DispatchFailed(message))
+        }
+    }
+}
+
+fn dispatch_push_account_config(
+    state: &mut RuntimeCommandDispatcherState,
+    envelope: UiCommandDispatchEnvelope,
+) -> Result<UiCommandDispatchReceipt, UiCommandDispatchPortError> {
+    let (live, client, account_id) = relay_session_for_account_config(state)?;
+    let runtime_home = live.runtime_home.clone();
+    let etag = state
+        .account_config_mirror
+        .as_ref()
+        .and_then(|mirror| mirror.etag.clone());
+    let loaded_config =
+        load_config_from_path(live.runtime_home.join("config.toml")).map_err(|error| {
+            UiCommandDispatchPortError::DispatchFailed(format!(
+                "load local config for account upload: {error}"
+            ))
+        })?;
+    let content = export_shared_account_config(&loaded_config)
+        .map_err(|error| UiCommandDispatchPortError::DispatchFailed(error.to_string()))?;
+    match client.push(etag.as_deref(), content) {
+        Ok(document) => {
+            let mirror =
+                AccountConfigMirror::synced(&account_id, document.clone()).map_err(|error| {
+                    UiCommandDispatchPortError::DispatchFailed(format!(
+                        "synced mirror invalid: {error}"
+                    ))
+                })?;
+            mirror
+                .save_to_runtime_home(&runtime_home)
+                .map_err(|error| {
+                    UiCommandDispatchPortError::DispatchFailed(format!("persist mirror: {error}"))
+                })?;
+            state.account_config_mirror = Some(mirror);
+            state.account_config_mirror_error = None;
+            Ok(UiCommandDispatchReceipt {
+                ingress: envelope.ingress,
+                target_feature_id: envelope.target_feature_id,
+                dispatch_status: format!(
+                    "account_config_pushed:account={} revision={}",
+                    account_id,
+                    document.revision.unwrap_or(0)
+                ),
+            })
+        }
+        Err(AccountConfigClientError::Conflict(server_document)) => {
+            let server_document = *server_document;
+            let mirror = AccountConfigMirror::conflict(&account_id, server_document.clone())
+                .map_err(|error| {
+                    UiCommandDispatchPortError::DispatchFailed(format!(
+                        "conflict mirror invalid: {error}"
+                    ))
+                })?;
+            mirror
+                .save_to_runtime_home(&runtime_home)
+                .map_err(|error| {
+                    UiCommandDispatchPortError::DispatchFailed(format!("persist mirror: {error}"))
+                })?;
+            state.account_config_mirror = Some(mirror);
+            Err(UiCommandDispatchPortError::DispatchFailed(format!(
+                "account config revision conflict; server document revision={} is attached",
+                server_document.revision.unwrap_or(0)
+            )))
+        }
+        Err(error) => {
+            let message = format!("push account config: {error}");
+            state.account_config_mirror_error = Some(message.clone());
+            let mirror = AccountConfigMirror::failed(&account_id, &message);
+            let _ = mirror.save_to_runtime_home(&runtime_home);
+            state.account_config_mirror = Some(mirror);
+            Err(UiCommandDispatchPortError::DispatchFailed(message))
+        }
+    }
+}
+
+fn relay_session_for_account_config(
+    state: &RuntimeCommandDispatcherState,
+) -> Result<(&RuntimeLiveDispatcherConfig, AccountConfigClient, String), UiCommandDispatchPortError>
+{
+    let live = state.config.live.as_ref().ok_or_else(|| {
+        UiCommandDispatchPortError::Unsupported(
+            "account config sync requires a live runtime home".to_owned(),
+        )
+    })?;
+    if live.selected_agent.relay_connection.is_none() {
+        return Err(UiCommandDispatchPortError::Unsupported(
+            "account config sync requires an authenticated Relay agent".to_owned(),
+        ));
+    }
+    let connection = live
+        .selected_agent
+        .relay_connection
+        .as_ref()
+        .ok_or_else(|| {
+            UiCommandDispatchPortError::Unsupported(
+                "account config sync requires an authenticated Relay agent".to_owned(),
+            )
+        })?;
+    let client = AccountConfigClient::new(
+        connection.relay_url.clone(),
+        connection.access_token.clone(),
+    )
+    .map_err(|error| UiCommandDispatchPortError::DispatchFailed(error.to_string()))?;
+    let account_id = client.account_id().map_err(|error| {
+        UiCommandDispatchPortError::DispatchFailed(format!(
+            "resolve authenticated Relay account: {error}"
+        ))
+    })?;
+    Ok((live, client, account_id))
+}
+
+fn project_account_config_sync(
+    mirror: Option<&AccountConfigMirror>,
+    load_error: Option<&str>,
+) -> UiAccountConfigSyncProjection {
+    if let Some(error) = load_error {
+        return UiAccountConfigSyncProjection {
+            status: "failed".to_owned(),
+            error_message: Some(error.to_owned()),
+            ..UiAccountConfigSyncProjection::default()
+        };
+    }
+    match mirror {
+        None => UiAccountConfigSyncProjection::default(),
+        Some(mirror) => {
+            let summary = if matches!(
+                mirror.status,
+                AccountConfigSyncStatus::Synced | AccountConfigSyncStatus::Conflict
+            ) {
+                Some(UiAccountConfigDocumentSummaryProjection {
+                    provider_count: mirror.document.provider_registry.len(),
+                    model_group_count: mirror.document.model_groups.len(),
+                    relay_endpoint_count: mirror.document.relay_endpoint_candidates.len(),
+                    remote_daemon_count: mirror.document.remote_daemon_registry.len(),
+                    revision: mirror.revision,
+                    etag: mirror.etag.clone(),
+                })
+            } else {
+                None
+            };
+            let (status, error_message, server_document) = match &mirror.status {
+                AccountConfigSyncStatus::Synced => ("synced".to_owned(), None, summary),
+                AccountConfigSyncStatus::Conflict => ("conflict".to_owned(), None, summary),
+                AccountConfigSyncStatus::Failed { message } => {
+                    ("failed".to_owned(), Some(message.clone()), summary)
+                }
+                AccountConfigSyncStatus::NotConfigured => ("not_configured".to_owned(), None, None),
+            };
+            UiAccountConfigSyncProjection {
+                status,
+                account_id: Some(mirror.account_id.clone()),
+                revision: mirror.revision,
+                etag: mirror.etag.clone(),
+                updated_at: mirror.updated_at.clone(),
+                error_message,
+                server_document,
+            }
+        }
     }
 }
 
@@ -5706,6 +5960,12 @@ impl UiCommandDispatchPort for RuntimeCommandDispatcher {
         }
 
         let mut state = self.state.lock().expect("lock runtime dispatcher state");
+        if matches!(envelope.command, UiCommand::PullAccountConfig) {
+            return dispatch_pull_account_config(&mut state, envelope);
+        }
+        if matches!(envelope.command, UiCommand::PushAccountConfig) {
+            return dispatch_push_account_config(&mut state, envelope);
+        }
         match envelope.command.clone() {
             UiCommand::CreateSession { .. }
             | UiCommand::RenameSession { .. }
@@ -5767,6 +6027,8 @@ impl UiCommandDispatchPort for RuntimeCommandDispatcher {
             UiCommand::RunSchedulerTick { tick } => {
                 self.dispatch_run_scheduler_tick(&mut state, envelope, tick)
             }
+            UiCommand::PullAccountConfig => dispatch_pull_account_config(&mut state, envelope),
+            UiCommand::PushAccountConfig => dispatch_push_account_config(&mut state, envelope),
             UiCommand::RunMasterPoll { .. } => self.dispatch_run_master_poll(&mut state, envelope),
             UiCommand::WorkerControl { control } => {
                 self.dispatch_worker_control(&mut state, envelope, control)
@@ -6346,6 +6608,8 @@ impl RuntimeCommandDispatcher {
                     .into_iter()
                     .map(model_weighted_route_config_from_ui)
                     .collect(),
+                context_window_tokens: group.context_window_tokens,
+                compaction_threshold_tokens: group.compaction_threshold_tokens,
             },
         )
         .map_err(|err| UiCommandDispatchPortError::DispatchFailed(err.to_string()))?;

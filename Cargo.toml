@@ -3,6 +3,7 @@ members = [
   "crates/freehand-contracts",
   "crates/freehand-blocks",
   "crates/freehand-config",
+  "crates/freehand-account-config",
   "crates/freehand-provider-core",
   "crates/freehand-provider-openai",
   "crates/freehand-provider-anthropic",

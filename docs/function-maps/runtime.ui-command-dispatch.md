@@ -380,6 +380,7 @@
 - runtime Phase 1 execution fact and scheduler tick dispatch is bound as a thin mutation route into `task.orchestration`; scheduler ticks emit facts/recommendations only
 - runtime error-center query dispatch is bound as a thin read-only route to `metadata.core` rows written by `error.center`
 - runtime config status query dispatch is bound as a thin read-only route from selected `config.core` truth to `UiConfigStatusProjection`, including complete provider registry and current fallback id
+- runtime PullAccountConfig/PushAccountConfig dispatch is bound as a thin route to `config.account-config-sync`; Relay authentication remains runtime-selected connection truth, while client validation/mirror persistence stays in the account-config owner
 - runtime provider definition upsert and active provider selection dispatch are bound as thin mutation routes into `config.core`; successful saves project restart-required pending status and active runtime config remains unchanged until restart
 - runtime legacy provider/model update dispatch remains bound as a thin mutation route into `config.core` for existing callers
 - runtime Agent resource-count update dispatch is bound as a thin mutation route into `config.core`; successful saves project restart-required pending status and active AgentBoard truth remains unchanged until restart/process startup

@@ -8,12 +8,18 @@ use std::net::IpAddr;
 use std::path::{Path, PathBuf};
 
 use base64::{Engine as _, engine::general_purpose::URL_SAFE_NO_PAD};
+use freehand_account_config::{
+    ConfigDocumentContent, ModelRoute, ProviderAuthReference, RelayEndpointCandidate,
+    RemoteDaemonEntry, SharedModelGroup, SharedProviderDefinition, validate_config_document,
+};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
 pub const CONFIG_FILE_RELATIVE_PATH: &str = ".freehand/config.toml";
 pub const MIN_AGENT_RESOURCE_COUNT: usize = 1;
 pub const MAX_AGENT_RESOURCE_COUNT: usize = 5;
+pub const DEFAULT_CONTEXT_WINDOW_TOKENS: u32 = 128_000;
+pub const DEFAULT_COMPACTION_THRESHOLD_TOKENS: u32 = 100_000;
 pub const REMOTE_DAEMON_BOOTSTRAP_KIND: &str = "freehand.remote-daemon-bootstrap";
 pub const REMOTE_DAEMON_BOOTSTRAP_SCHEMA_VERSION: u32 = 1;
 const REMOTE_DAEMON_BOOTSTRAP_URL_PREFIX: &str = "freehand://daemon/import?payload=";
@@ -192,6 +198,8 @@ pub struct ModelGroupConfig {
     pub title: Option<ModelRouteConfig>,
     pub fallback: Option<ModelRouteConfig>,
     pub load_balance: Vec<ModelWeightedRouteConfig>,
+    pub context_window_tokens: u32,
+    pub compaction_threshold_tokens: u32,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -205,6 +213,8 @@ pub struct SafeModelGroupConfigProjection {
     pub title: Option<ModelRouteConfig>,
     pub fallback: Option<ModelRouteConfig>,
     pub load_balance: Vec<ModelWeightedRouteConfig>,
+    pub context_window_tokens: u32,
+    pub compaction_threshold_tokens: u32,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -267,6 +277,8 @@ pub struct ModelGroupConfigUpdate {
     pub title: Option<ModelRouteConfig>,
     pub fallback: Option<ModelRouteConfig>,
     pub load_balance: Vec<ModelWeightedRouteConfig>,
+    pub context_window_tokens: u32,
+    pub compaction_threshold_tokens: u32,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -886,49 +898,13 @@ impl LoadedConfig {
             }
             None => None,
         };
-        let (provider, fallback_provider) = if let Some(group) = active_model_group {
-            let provider = select_provider_for_model_route(
-                &self.providers,
-                &agent.name,
-                &group.primary,
-                ProviderRouteRole::Primary,
-            )?;
-            let fallback_provider = match &group.fallback {
-                Some(route) => Some(select_provider_for_model_route(
-                    &self.providers,
-                    &agent.name,
-                    route,
-                    ProviderRouteRole::Fallback,
-                )?),
-                None => None,
-            };
-            (provider, fallback_provider)
-        } else {
-            let provider = select_provider_for_agent(
-                &self.providers,
-                &agent.name,
-                &agent.provider_id,
-                ProviderRouteRole::Primary,
-            )?;
-            let fallback_provider = match agent.fallback_provider_id.as_deref() {
-                Some(fallback_provider_id) => {
-                    if fallback_provider_id == agent.provider_id {
-                        return Err(ConfigError::FallbackProviderMatchesPrimary {
-                            agent_name: agent.name.clone(),
-                            provider_id: agent.provider_id.clone(),
-                        });
-                    }
-                    Some(select_provider_for_agent(
-                        &self.providers,
-                        &agent.name,
-                        fallback_provider_id,
-                        ProviderRouteRole::Fallback,
-                    )?)
-                }
-                None => None,
-            };
-            (provider, fallback_provider)
-        };
+        let (provider, fallback_provider) = resolve_agent_provider_pair(
+            &self.providers,
+            &agent.name,
+            active_model_group,
+            &agent.provider_id,
+            agent.fallback_provider_id.as_deref(),
+        )?;
         let mut paired_agents = Vec::new();
         for paired_agent_name in &agent.paired_agent_names {
             let paired = self.agents.get(paired_agent_name).ok_or_else(|| {
@@ -989,10 +965,142 @@ impl LoadedConfig {
             provider,
             fallback_provider,
             model_group_id: agent.model_group_id.clone(),
+            context_window_tokens: active_model_group
+                .map(|group| group.context_window_tokens)
+                .unwrap_or(DEFAULT_CONTEXT_WINDOW_TOKENS),
+            compaction_threshold_tokens: active_model_group
+                .map(|group| group.compaction_threshold_tokens)
+                .unwrap_or(DEFAULT_COMPACTION_THRESHOLD_TOKENS),
             relay_connection,
             restart_required_on_change: true,
         })
     }
+}
+
+#[derive(Debug, Error)]
+pub enum SharedAccountConfigExportError {
+    #[error("shared account config export failed: {0}")]
+    AccountConfig(String),
+}
+
+/// Project the local non-secret config surface into the account-config shared
+/// document schema. Inline credentials, host paths, and token values are
+/// never exported; providers whose auth is not an env reference are skipped.
+pub fn export_shared_account_config(
+    loaded: &LoadedConfig,
+) -> Result<ConfigDocumentContent, SharedAccountConfigExportError> {
+    let mut providers = Vec::new();
+    let mut provider_ids = BTreeSet::new();
+    for provider in loaded.providers().values() {
+        let env_var = match &provider.auth {
+            ProviderAuthConfig::ApiKeyInline { .. } => continue,
+            ProviderAuthConfig::ApiKeyEnv { env_var } => env_var.clone(),
+        };
+        provider_ids.insert(provider.id.clone());
+        providers.push(SharedProviderDefinition {
+            id: provider.id.clone(),
+            label: provider.id.clone(),
+            provider_type: provider.provider_type.as_str().to_owned(),
+            protocol: provider.protocol.as_str().to_owned(),
+            base_url: provider.base_url.clone(),
+            auth: ProviderAuthReference {
+                auth_type: "env".to_owned(),
+                auth_source: env_var,
+            },
+            model: provider.default_model.clone(),
+        });
+    }
+
+    let mut model_groups = Vec::new();
+    for group in loaded.model_groups().values() {
+        if !group_routes_reference_shared_providers(group, &provider_ids) {
+            continue;
+        }
+        model_groups.push(SharedModelGroup {
+            id: group.id.clone(),
+            label: group.label.clone(),
+            primary: shared_model_route(&group.primary),
+            fallback: group.fallback.as_ref().map(shared_model_route),
+            load_balance: group
+                .load_balance
+                .iter()
+                .map(|route| ModelRoute {
+                    provider_id: route.provider_id.clone(),
+                    model: route.model.clone(),
+                    weight: Some(route.weight),
+                })
+                .collect(),
+        });
+    }
+
+    let mut endpoint_candidates = BTreeMap::new();
+    for agent in loaded.agents().values() {
+        if let (Some(url), Some(token_env_name)) = (&agent.relay_url, &agent.relay_token_env) {
+            endpoint_candidates.insert(
+                format!("agent:{}", agent.name),
+                RelayEndpointCandidate {
+                    id: format!("agent:{}", agent.name),
+                    url: url.clone(),
+                    token_env_name: token_env_name.clone(),
+                },
+            );
+        }
+    }
+    for account in loaded.remote_daemon_registry().accounts().values() {
+        if let (Some(url), Some(token_env_name)) = (&account.relay_url, &account.auth_token_env) {
+            endpoint_candidates.insert(
+                format!("account:{}", account.id),
+                RelayEndpointCandidate {
+                    id: format!("account:{}", account.id),
+                    url: url.clone(),
+                    token_env_name: token_env_name.clone(),
+                },
+            );
+        }
+    }
+
+    let mut remote_daemons = Vec::new();
+    for daemon in loaded.remote_daemon_registry().daemons().values() {
+        let candidate_id = format!("account:{}", daemon.account_id);
+        if endpoint_candidates.contains_key(&candidate_id) {
+            remote_daemons.push(RemoteDaemonEntry {
+                daemon_id: daemon.id.clone(),
+                display_name: daemon.label.clone(),
+                relay_endpoint_id: candidate_id,
+            });
+        }
+    }
+
+    let content = ConfigDocumentContent {
+        provider_registry: providers,
+        model_groups,
+        relay_endpoint_candidates: endpoint_candidates.into_values().collect(),
+        remote_daemon_registry: remote_daemons,
+    };
+    validate_config_document(&content)
+        .map_err(|error| SharedAccountConfigExportError::AccountConfig(error.to_string()))?;
+    Ok(content)
+}
+
+fn shared_model_route(route: &ModelRouteConfig) -> ModelRoute {
+    ModelRoute {
+        provider_id: route.provider_id.clone(),
+        model: route.model.clone(),
+        weight: None,
+    }
+}
+
+fn group_routes_reference_shared_providers(
+    group: &ModelGroupConfig,
+    provider_ids: &BTreeSet<String>,
+) -> bool {
+    std::iter::once(&group.primary.provider_id)
+        .chain(group.sub.iter().map(|route| &route.provider_id))
+        .chain(group.search.iter().map(|route| &route.provider_id))
+        .chain(group.title.iter().map(|route| &route.provider_id))
+        .chain(group.fallback.iter().map(|route| &route.provider_id))
+        .chain(group.load_balance.iter().map(|route| &route.provider_id))
+        .all(|provider_id| provider_ids.contains(provider_id))
 }
 
 impl ProviderAuthConfig {
@@ -1034,6 +1142,8 @@ impl ModelGroupConfig {
             title: self.title.clone(),
             fallback: self.fallback.clone(),
             load_balance: self.load_balance.clone(),
+            context_window_tokens: self.context_window_tokens,
+            compaction_threshold_tokens: self.compaction_threshold_tokens,
         }
     }
 }
@@ -1050,6 +1160,8 @@ pub struct SelectedAgentConfig {
     pub provider: SelectedProviderConfig,
     pub fallback_provider: Option<SelectedProviderConfig>,
     pub model_group_id: Option<String>,
+    pub context_window_tokens: u32,
+    pub compaction_threshold_tokens: u32,
     pub relay_connection: Option<SelectedAgentRelayConnection>,
     pub restart_required_on_change: bool,
 }
@@ -1189,6 +1301,21 @@ pub enum ConfigError {
     InvalidModelGroupId { model_group_id: String },
     #[error("model group `{model_group_id}` primary route is required")]
     MissingModelGroupPrimaryRoute { model_group_id: String },
+    #[error(
+        "model group `{model_group_id}` context_window_tokens must be greater than zero, got {context_window_tokens}"
+    )]
+    InvalidModelContextWindow {
+        model_group_id: String,
+        context_window_tokens: u32,
+    },
+    #[error(
+        "model group `{model_group_id}` compaction_threshold_tokens must be greater than zero and less than context_window_tokens ({context_window_tokens}), got {compaction_threshold_tokens}"
+    )]
+    InvalidModelCompactionThreshold {
+        model_group_id: String,
+        compaction_threshold_tokens: u32,
+        context_window_tokens: u32,
+    },
     #[error("model group `{model_group_id}` route `{route}` provider must be non-empty")]
     EmptyModelRouteProvider {
         model_group_id: String,
@@ -1537,6 +1664,18 @@ struct RawModelGroupConfig {
     fallback: Option<RawModelRouteConfig>,
     #[serde(default)]
     load_balance: Vec<RawModelWeightedRouteConfig>,
+    #[serde(default = "default_context_window_tokens")]
+    context_window_tokens: u32,
+    #[serde(default = "default_compaction_threshold_tokens")]
+    compaction_threshold_tokens: u32,
+}
+
+fn default_context_window_tokens() -> u32 {
+    DEFAULT_CONTEXT_WINDOW_TOKENS
+}
+
+fn default_compaction_threshold_tokens() -> u32 {
+    DEFAULT_COMPACTION_THRESHOLD_TOKENS
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -2696,6 +2835,14 @@ fn apply_model_group_config_update(
             ),
         );
     }
+    group.insert(
+        "context_window_tokens".to_owned(),
+        toml::Value::Integer(i64::from(update.context_window_tokens)),
+    );
+    group.insert(
+        "compaction_threshold_tokens".to_owned(),
+        toml::Value::Integer(i64::from(update.compaction_threshold_tokens)),
+    );
     model_groups.insert(group_id.to_owned(), toml::Value::Table(group));
     Ok(())
 }
@@ -2748,6 +2895,8 @@ fn model_group_update_to_raw(
             .iter()
             .map(model_weighted_route_to_raw)
             .collect(),
+        context_window_tokens: update.context_window_tokens,
+        compaction_threshold_tokens: update.compaction_threshold_tokens,
     }
 }
 
@@ -3021,6 +3170,21 @@ fn validate_model_group_config(
     group_id: &str,
     providers: &BTreeMap<String, ProviderConfig>,
 ) -> Result<ModelGroupConfig, ConfigError> {
+    if raw.context_window_tokens == 0 {
+        return Err(ConfigError::InvalidModelContextWindow {
+            model_group_id: group_id.to_owned(),
+            context_window_tokens: raw.context_window_tokens,
+        });
+    }
+    if raw.compaction_threshold_tokens == 0
+        || raw.compaction_threshold_tokens >= raw.context_window_tokens
+    {
+        return Err(ConfigError::InvalidModelCompactionThreshold {
+            model_group_id: group_id.to_owned(),
+            compaction_threshold_tokens: raw.compaction_threshold_tokens,
+            context_window_tokens: raw.context_window_tokens,
+        });
+    }
     let enabled = raw.enabled;
     let primary = validate_model_route(raw.primary, group_id, "primary", enabled, providers)?;
     let sub = raw
@@ -3039,6 +3203,14 @@ fn validate_model_group_config(
         .fallback
         .map(|route| validate_model_route(route, group_id, "fallback", enabled, providers))
         .transpose()?;
+    if let Some(fallback_route) = &fallback
+        && fallback_route.provider_id == primary.provider_id
+    {
+        return Err(ConfigError::FallbackProviderMatchesPrimary {
+            agent_name: format!("model_group `{group_id}`"),
+            provider_id: primary.provider_id.clone(),
+        });
+    }
     let mut load_balance = Vec::new();
     for (index, route) in raw.load_balance.into_iter().enumerate() {
         load_balance.push(validate_model_weighted_route(
@@ -3065,6 +3237,8 @@ fn validate_model_group_config(
         title,
         fallback,
         load_balance,
+        context_window_tokens: raw.context_window_tokens,
+        compaction_threshold_tokens: raw.compaction_threshold_tokens,
     })
 }
 
@@ -3423,6 +3597,65 @@ fn select_provider_for_model_route(
     let mut provider = select_provider_for_agent(providers, agent_name, &route.provider_id, role)?;
     provider.default_model = route.model.clone();
     Ok(provider)
+}
+
+fn resolve_agent_provider_pair(
+    providers: &BTreeMap<String, ProviderConfig>,
+    agent_name: &str,
+    active_model_group: Option<&ModelGroupConfig>,
+    agent_provider_id: &str,
+    agent_fallback_provider_id: Option<&str>,
+) -> Result<(SelectedProviderConfig, Option<SelectedProviderConfig>), ConfigError> {
+    if let Some(group) = active_model_group {
+        let primary = select_provider_for_model_route(
+            providers,
+            agent_name,
+            &group.primary,
+            ProviderRouteRole::Primary,
+        )?;
+        let fallback = match &group.fallback {
+            Some(route) => {
+                if route.provider_id == group.primary.provider_id {
+                    return Err(ConfigError::FallbackProviderMatchesPrimary {
+                        agent_name: agent_name.to_owned(),
+                        provider_id: group.primary.provider_id.clone(),
+                    });
+                }
+                Some(select_provider_for_model_route(
+                    providers,
+                    agent_name,
+                    route,
+                    ProviderRouteRole::Fallback,
+                )?)
+            }
+            None => None,
+        };
+        return Ok((primary, fallback));
+    }
+    let primary = select_provider_for_agent(
+        providers,
+        agent_name,
+        agent_provider_id,
+        ProviderRouteRole::Primary,
+    )?;
+    let fallback = match agent_fallback_provider_id {
+        Some(fallback_provider_id) => {
+            if fallback_provider_id == agent_provider_id {
+                return Err(ConfigError::FallbackProviderMatchesPrimary {
+                    agent_name: agent_name.to_owned(),
+                    provider_id: agent_provider_id.to_owned(),
+                });
+            }
+            Some(select_provider_for_agent(
+                providers,
+                agent_name,
+                fallback_provider_id,
+                ProviderRouteRole::Fallback,
+            )?)
+        }
+        None => None,
+    };
+    Ok((primary, fallback))
 }
 
 #[cfg(test)]
@@ -5767,6 +6000,8 @@ provider = "minimax"
                     model: "gpt-ui-primary".to_owned(),
                     weight: 3,
                 }],
+                context_window_tokens: 128_000,
+                compaction_threshold_tokens: 100_000,
             },
         )
         .expect("upsert model group");
@@ -5803,6 +6038,136 @@ provider = "minimax"
         assert_eq!(selected.provider.id, "minimax");
         let raw = fs::read_to_string(&path).expect("read after provider switch");
         assert!(!raw.contains("model_group ="));
+
+        // SAFETY: undo the test environment mutation before exit.
+        unsafe { env::remove_var(&pair_token_env) };
+        fs::remove_file(path).expect("cleanup");
+    }
+
+    #[test]
+    fn model_group_fallback_matching_primary_is_rejected_on_upsert() {
+        let pair_token_env = unique_env_name("FREEHAND_MODEL_GROUP_FALLBACK_PAIR_TOKEN");
+        let path = write_temp_config(&format!(
+            r#"
+[providers.cc]
+id = "cc"
+enabled = true
+type = "openai"
+protocol = "responses"
+base_url = "https://api.anyint.ai/openai/v1"
+default_model = "gpt-5.5"
+
+[providers.cc.auth]
+type = "apikey"
+api_key = "sk-cc-inline"
+
+[agents.master]
+name = "master"
+mode = "master"
+node_id = "master-node"
+paired_agents = ["worker"]
+pair_token = "{pair_token_env}"
+provider = "cc"
+
+[agents.worker]
+name = "worker"
+mode = "slave"
+node_id = "worker-node"
+paired_agents = ["master"]
+pair_token = "WORKER_TOKEN"
+provider = "cc"
+"#
+        ));
+        // SAFETY: test process controls this unique environment variable.
+        unsafe { env::set_var(&pair_token_env, "pair-token") };
+
+        let before = fs::read_to_string(&path).expect("read before");
+        let same_fallback_err = upsert_model_group_config_in_path(
+            &path,
+            ModelGroupConfigUpdate {
+                agent_name: "master".to_owned(),
+                group_id: "same-route".to_owned(),
+                enabled: true,
+                label: "Same Route".to_owned(),
+                primary: ModelRouteConfig {
+                    provider_id: "cc".to_owned(),
+                    model: "gpt-same-primary".to_owned(),
+                },
+                sub: None,
+                search: None,
+                title: None,
+                fallback: Some(ModelRouteConfig {
+                    provider_id: "cc".to_owned(),
+                    model: "gpt-same-fallback".to_owned(),
+                }),
+                load_balance: Vec::new(),
+                context_window_tokens: 128_000,
+                compaction_threshold_tokens: 100_000,
+            },
+        )
+        .expect_err("same fallback rejected on model group upsert");
+        assert!(matches!(
+            same_fallback_err,
+            ConfigError::FallbackProviderMatchesPrimary { .. }
+        ));
+        assert_eq!(fs::read_to_string(&path).expect("read after"), before);
+
+        // SAFETY: undo the test environment mutation before exit.
+        unsafe { env::remove_var(&pair_token_env) };
+        fs::remove_file(path).expect("cleanup");
+    }
+
+    #[test]
+    fn model_group_fallback_matching_primary_is_rejected_on_select_agent() {
+        let pair_token_env = unique_env_name("FREEHAND_MODEL_GROUP_SELECT_PAIR_TOKEN");
+        let path = write_temp_config(&format!(
+            r#"
+[providers.cc]
+id = "cc"
+enabled = true
+type = "openai"
+protocol = "responses"
+base_url = "https://api.anyint.ai/openai/v1"
+default_model = "gpt-5.5"
+
+[providers.cc.auth]
+type = "apikey"
+api_key = "sk-cc-inline"
+
+[model_groups.same-route]
+id = "same-route"
+enabled = true
+label = "Same Route"
+primary = {{ provider = "cc", model = "gpt-same-primary" }}
+fallback = {{ provider = "cc", model = "gpt-same-fallback" }}
+
+[agents.master]
+name = "master"
+mode = "master"
+node_id = "master-node"
+paired_agents = ["worker"]
+pair_token = "{pair_token_env}"
+provider = "cc"
+model_group = "same-route"
+
+[agents.worker]
+name = "worker"
+mode = "slave"
+node_id = "worker-node"
+paired_agents = ["master"]
+pair_token = "WORKER_TOKEN"
+provider = "cc"
+"#
+        ));
+        // SAFETY: test process controls this unique environment variable.
+        unsafe { env::set_var(&pair_token_env, "pair-token") };
+
+        let load_err =
+            load_config_from_path(&path).expect_err("same fallback rejected while loading config");
+        assert!(matches!(
+            load_err,
+            ConfigError::FallbackProviderMatchesPrimary { .. }
+        ));
 
         // SAFETY: undo the test environment mutation before exit.
         unsafe { env::remove_var(&pair_token_env) };
@@ -6363,6 +6728,195 @@ local_web_url = "http://127.0.0.1:4043"
             fs::read_to_string(&path).expect("read unchanged config"),
             before
         );
+        fs::remove_file(path).expect("cleanup");
+    }
+
+    #[test]
+    fn export_shared_account_config_exports_env_auth_surface_only() {
+        let path = write_temp_config(
+            r#"
+[providers.inline]
+id = "inline"
+enabled = true
+type = "openai"
+protocol = "responses"
+base_url = "https://provider.invalid"
+default_model = "inline-model"
+
+[providers.inline.auth]
+type = "apikey"
+api_key = "sk-inline-secret"
+
+[providers.primary]
+id = "primary"
+enabled = true
+type = "openai"
+protocol = "responses"
+base_url = "https://api.primary.invalid"
+default_model = "primary-model"
+
+[providers.primary.auth]
+type = "apikey"
+api_key_env = "PRIMARY_API_KEY"
+
+[model_groups.group-a]
+id = "group-a"
+enabled = true
+label = "Group A"
+
+[model_groups.group-a.primary]
+provider = "primary"
+model = "primary-model"
+
+[[model_groups.group-a.load_balance]]
+provider = "primary"
+model = "primary-model"
+weight = 3
+
+[agents.master]
+name = "master"
+mode = "master"
+node_id = "master-node"
+paired_agents = ["worker"]
+pair_token = "MASTER_TOKEN"
+provider = "primary"
+relay_url = "http://100.124.49.106:19091"
+relay_token_env = "MASTER_RELAY_TOKEN"
+
+[agents.worker]
+name = "worker"
+mode = "slave"
+node_id = "worker-node"
+paired_agents = ["master"]
+pair_token = "WORKER_TOKEN"
+provider = "primary"
+
+[remote_daemon_accounts.acct-1]
+id = "acct-1"
+label = "Claw"
+relay_url = "http://159.75.134.56:19091"
+auth_token_env = "CLAW_RELAY_TOKEN"
+
+[remote_daemons.daemon-1]
+id = "daemon-1"
+account = "acct-1"
+label = "Claw daemon"
+node_id = "claw-node"
+active_endpoint = "ep-1"
+
+[[remote_daemons.daemon-1.endpoints]]
+id = "ep-1"
+kind = "relay"
+web_url = "http://159.75.134.56:19091"
+adp_url = "http://159.75.134.56:19092"
+"#,
+        );
+
+        let loaded = load_config_from_path(&path).expect("load config");
+        let exported = export_shared_account_config(&loaded).expect("export shared account config");
+
+        assert_eq!(exported.provider_registry.len(), 1);
+        let provider = &exported.provider_registry[0];
+        assert_eq!(provider.id, "primary");
+        assert_eq!(provider.provider_type, "openai");
+        assert_eq!(provider.protocol, "responses");
+        assert_eq!(provider.base_url, "https://api.primary.invalid");
+        assert_eq!(provider.model, "primary-model");
+        assert_eq!(provider.auth.auth_type, "env");
+        assert_eq!(provider.auth.auth_source, "PRIMARY_API_KEY");
+
+        assert_eq!(exported.model_groups.len(), 1);
+        let group = &exported.model_groups[0];
+        assert_eq!(group.id, "group-a");
+        assert_eq!(group.label, "Group A");
+        assert_eq!(
+            group.primary,
+            freehand_account_config::ModelRoute {
+                provider_id: "primary".to_owned(),
+                model: "primary-model".to_owned(),
+                weight: None,
+            }
+        );
+        assert_eq!(group.fallback, None);
+        assert_eq!(
+            group.load_balance,
+            vec![freehand_account_config::ModelRoute {
+                provider_id: "primary".to_owned(),
+                model: "primary-model".to_owned(),
+                weight: Some(3),
+            }]
+        );
+
+        let endpoint_ids = exported
+            .relay_endpoint_candidates
+            .iter()
+            .map(|endpoint| endpoint.id.as_str())
+            .collect::<Vec<_>>();
+        assert_eq!(
+            endpoint_ids,
+            vec!["account:acct-1", "agent:master"],
+            "endpoint candidates must include account and agent relay endpoints"
+        );
+        let account_endpoint = exported
+            .relay_endpoint_candidates
+            .iter()
+            .find(|endpoint| endpoint.id == "account:acct-1")
+            .expect("account endpoint");
+        assert_eq!(
+            account_endpoint.url, "http://159.75.134.56:19091",
+            "endpoint carries url only, never the token value"
+        );
+        assert_eq!(account_endpoint.token_env_name, "CLAW_RELAY_TOKEN");
+
+        assert_eq!(exported.remote_daemon_registry.len(), 1);
+        let daemon = &exported.remote_daemon_registry[0];
+        assert_eq!(daemon.daemon_id, "daemon-1");
+        assert_eq!(daemon.display_name, "Claw daemon");
+        assert_eq!(daemon.relay_endpoint_id, "account:acct-1");
+
+        freehand_account_config::validate_config_document(&exported)
+            .expect("exported document valid");
+        fs::remove_file(path).expect("cleanup");
+    }
+
+    #[test]
+    fn export_shared_account_config_rejects_secret_shaped_value() {
+        let path = write_temp_config(
+            r#"
+[providers.primary]
+id = "primary"
+enabled = true
+type = "openai"
+protocol = "responses"
+base_url = "https://api.primary.invalid"
+default_model = "sk-prohibited"
+
+[providers.primary.auth]
+type = "apikey"
+api_key_env = "PRIMARY_API_KEY"
+
+[agents.master]
+name = "master"
+mode = "master"
+node_id = "master-node"
+paired_agents = ["worker"]
+pair_token = "MASTER_TOKEN"
+provider = "primary"
+
+[agents.worker]
+name = "worker"
+mode = "slave"
+node_id = "worker-node"
+paired_agents = ["master"]
+pair_token = "WORKER_TOKEN"
+provider = "primary"
+"#,
+        );
+
+        let loaded = load_config_from_path(&path).expect("load config");
+        let error = export_shared_account_config(&loaded)
+            .expect_err("secret-shaped model must be rejected at the shared boundary");
+        assert!(error.to_string().contains("secret-shaped"), "{error}");
         fs::remove_file(path).expect("cleanup");
     }
 }

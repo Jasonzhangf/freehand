@@ -1951,6 +1951,11 @@ mod tests {
         assert!(html.contains("id=\"settings-apk-update-check-button\""));
         assert!(html.contains("id=\"settings-apk-update-status\""));
         assert!(html.contains("检查 APK 升级"));
+        assert!(html.contains("id=\"settings-account-config-sync\""));
+        assert!(html.contains("id=\"settings-account-config-pull-button\""));
+        assert!(html.contains("id=\"settings-account-config-push-button\""));
+        assert_eq!(html.matches("type=\"password\"").count(), 1);
+        assert!(html.contains("id=\"settings-relay-password-input\""));
         assert!(!html.contains("rootfs"));
         assert!(!html.contains("shared-folder"));
         assert!(!html.contains("mount-directory"));
@@ -1958,7 +1963,6 @@ mod tests {
         assert!(!html.contains("Task settings pending"));
         assert!(!html.contains("Active agent"));
         assert!(!html.contains("Sessions and workspace"));
-        assert!(!html.contains("type=\"password\""));
         assert!(!html.contains("api-key"));
         assert!(html.contains("id=\"new-session-dialog\""));
         assert!(html.contains("id=\"new-session-form\""));
@@ -2191,11 +2195,14 @@ mod tests {
         assert!(root_body.contains("任务与智能体生命周期"));
         assert!(root_body.contains("生命周期观察"));
         assert!(root_body.contains("新增/更新模型服务"));
+        assert!(root_body.contains("id=\"settings-account-config-sync\""));
+        assert!(root_body.contains("id=\"settings-account-config-pull-button\""));
+        assert!(root_body.contains("id=\"settings-account-config-push-button\""));
         assert!(!root_body.contains("id=\"settings-agent-value\""));
         assert!(!root_body.contains("Task settings pending"));
         assert!(!root_body.contains("Active agent"));
         assert!(!root_body.contains("Sessions and workspace"));
-        assert!(!root_body.contains("type=\"password\""));
+        assert_eq!(root_body.matches("type=\"password\"").count(), 1);
         assert!(!root_body.contains("api-key"));
         assert!(!root_body.contains("rootfs"));
         assert!(!root_body.contains("shared-folder"));

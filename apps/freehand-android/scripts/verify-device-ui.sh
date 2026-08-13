@@ -125,7 +125,7 @@ system_file_access_settings_is_foreground() {
 wait_for_webui_layout_probe() {
   for _ in $(seq 1 "${FREEHAND_ANDROID_SETTLE_SECONDS:-12}"); do
     sleep 1
-    if capture_webui_layout_logcat | grep -F 'FreehandWebUiLayout' >/dev/null; then
+    if capture_webui_layout_logcat | grep -F '"webuiJsReady":true' >/dev/null; then
       return 0
     fi
   done

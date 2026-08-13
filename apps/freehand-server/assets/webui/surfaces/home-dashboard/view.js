@@ -10,7 +10,7 @@ export function renderHomeDashboard(model, context) {
     'mobile-home-active-copy',
     activeSessions.length > 0
       ? '运行、重试、可自动唤醒的会话都在这里；可以同时存在多个活着的 Agent。'
-      : '运行、重试或可自动唤醒的会话会显示在这里。',
+      : '',
   );
   if (context.dom.mobileHomeActiveMarker) {
     context.dom.mobileHomeActiveMarker.classList.toggle('ok', activeSessions.length > 0);

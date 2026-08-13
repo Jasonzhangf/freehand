@@ -67,6 +67,7 @@
     provider payloads, secrets, absolute paths, or browser-local fallback rows
   - runtime-backed read-only error-center queries route to metadata ledger projection and return UI-safe rows without becoming error truth writers
   - runtime-backed read-only config status queries reload config-owner truth and project the complete safe provider registry plus current primary/fallback selection without becoming config truth writers
+  - runtime account-config pull/push commands route through the authenticated Relay connection and account-config client/mirror owners without putting credentials into UI projections or local mirror state
   - runtime-backed ConfigStatus projection consumes a typed query access scope: local scope may include loopback `web_url`, while remote scope physically omits every loopback URL and exposes only declared Relay URLs
   - runtime-backed provider definition upsert commands route to `config.core` persistence without changing the active provider binding, then expose pending restart-required projection without hot-reloading active runtime config
   - runtime-backed provider selection commands route to `config.core` persistence without rewriting provider definitions, then expose pending restart-required projection without hot-reloading active runtime config
@@ -119,6 +120,7 @@
     assistant decision visibility plus Worker task prompt hiding with Worker
     assistant/tool/final truth and source-agent attribution still visible
   - ConfigStatus positive/reverse coverage proving local scope receives configured loopback Agent URLs, remote scope receives no `web_url` or peer `local_web_url`, and neither scope receives Relay credentials
+  - account-config pull/push positive/reverse coverage: synced pull, not-configured 404, conflict 409 with server document, unsupported without Relay connection, and missing local config failure without mirror write
   - runtime query-session-turns coverage for background lifecycle retry observability: a latest nonterminal persisted parent/Master turn with same-session ErrorCenter `retry_same_step` metadata projects `model_request.transport.kind=ProviderRetry`, updates the session list to `waiting_model`, and exposes the owning turn id; a terminal persisted turn with the same metadata remains terminal and has no `model_request`; an earlier historical retry turn followed by a later terminal round remains historical and is not reactivated
   - runtime/project online coverage for inactive partial authoritative restore: production ADP `QuerySessionTurns` on a legacy partial session must return surviving snapshots and the integrity warning rather than `command_dispatch_port_failure`
   - session metadata negative coverage for unknown session id and empty title rejection before runtime dispatch

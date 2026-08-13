@@ -17,6 +17,8 @@ import android.net.Uri
 import android.os.Build
 import android.os.Bundle
 import android.os.Environment
+import android.os.Handler
+import android.os.Looper
 import android.provider.OpenableColumns
 import android.provider.Settings
 import android.util.Base64
@@ -25,6 +27,7 @@ import android.view.Gravity
 import android.view.View
 import android.webkit.JavascriptInterface
 import android.webkit.ValueCallback
+import android.webkit.WebResourceResponse
 import android.webkit.WebChromeClient
 import android.webkit.WebResourceError
 import android.webkit.WebResourceRequest
@@ -66,6 +69,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var webView: WebView
     private lateinit var startupOverlay: FrameLayout
     private lateinit var startupStatus: TextView
+    private val mainHandler = Handler(Looper.getMainLooper())
     private var startupAnimator: AnimatorSet? = null
     private var fileChooserCallback: ValueCallback<Array<Uri>>? = null
     private var nativeAttachmentKind: String? = null
@@ -160,6 +164,20 @@ class MainActivity : AppCompatActivity() {
                         showStartupError(error?.description?.toString() ?: "WebUI load failed")
                     }
                 }
+
+                override fun onReceivedHttpError(
+                    view: WebView?,
+                    request: WebResourceRequest?,
+                    errorResponse: WebResourceResponse?,
+                ) {
+                    super.onReceivedHttpError(view, request, errorResponse)
+                    val statusCode = errorResponse?.statusCode ?: return
+                    if (statusCode < 400) return
+                    Log.e(
+                        WEBUI_ASSET_TAG,
+                        "http_status=$statusCode main_frame=${request?.isForMainFrame == true}",
+                    )
+                }
             }
         }
         root.addView(
@@ -229,6 +247,15 @@ class MainActivity : AppCompatActivity() {
     }
 
     private inner class AndroidWebChromeClient : WebChromeClient() {
+        override fun onConsoleMessage(consoleMessage: android.webkit.ConsoleMessage?): Boolean {
+            val message = consoleMessage ?: return super.onConsoleMessage(consoleMessage)
+            Log.i(
+                WEBUI_CONSOLE_TAG,
+                "event=console level=${message.messageLevel()} line=${message.lineNumber()}",
+            )
+            return true
+        }
+
         override fun onShowFileChooser(
             webView: WebView?,
             filePathCallback: ValueCallback<Array<Uri>>?,
@@ -675,7 +702,23 @@ class MainActivity : AppCompatActivity() {
         }
 
     private fun reportCanonicalWebUiLayout(view: WebView?) {
-        view?.evaluateJavascript(
+        if (view == null) return
+        webUiLayoutRetriesRemaining = WEBUI_LAYOUT_PROBE_RETRIES
+        mainHandler.removeCallbacks(webUiLayoutRetry)
+        mainHandler.postDelayed(webUiLayoutRetry, WEBUI_LAYOUT_PROBE_RETRY_MS)
+    }
+
+    private val webUiLayoutRetry = object : Runnable {
+        override fun run() {
+            if (!isFinishing) {
+                evaluateCanonicalWebUiLayout(webView)
+            }
+        }
+    }
+    private var webUiLayoutRetriesRemaining = 0
+
+    private fun evaluateCanonicalWebUiLayout(targetView: WebView) {
+        targetView.evaluateJavascript(
             "(" +
                 "function(){" +
                 "const shell=document.querySelector('[data-webui-shell=true]');" +
@@ -696,8 +739,13 @@ class MainActivity : AppCompatActivity() {
             Log.i(WEBUI_LAYOUT_TAG, value ?: "null")
             val verdict = WebUiStartupGate.evaluate(value)
             if (verdict.ready) {
+                mainHandler.removeCallbacks(webUiLayoutRetry)
                 dismissStartupOverlay()
+            } else if (webUiLayoutRetriesRemaining > 0 && !isFinishing) {
+                webUiLayoutRetriesRemaining -= 1
+                mainHandler.postDelayed(webUiLayoutRetry, WEBUI_LAYOUT_PROBE_RETRY_MS)
             } else {
+                mainHandler.removeCallbacks(webUiLayoutRetry)
                 showStartupError(verdict.status)
             }
         }
@@ -892,15 +940,22 @@ class MainActivity : AppCompatActivity() {
         fileChooserCallback = null
         startupAnimator?.cancel()
         startupAnimator = null
-        if (::webView.isInitialized) webView.destroy()
+        if (::webView.isInitialized) {
+            mainHandler.removeCallbacks(webUiLayoutRetry)
+            webView.destroy()
+        }
         super.onDestroy()
     }
 
     companion object {
         private const val LOG_TAG = "FreehandAndroid"
         private const val WEBUI_LAYOUT_TAG = "FreehandWebUiLayout"
+        private const val WEBUI_CONSOLE_TAG = "FreehandWebConsole"
+        private const val WEBUI_ASSET_TAG = "FreehandWebAsset"
         private const val FILE_ACCESS_TAG = "FreehandFileAccess"
         private const val NOTIFICATION_TAG = "FreehandNotification"
         private const val TURN_FINISHED_CHANNEL_ID = "freehand_turn_finished"
+        private const val WEBUI_LAYOUT_PROBE_RETRY_MS = 500L
+        private const val WEBUI_LAYOUT_PROBE_RETRIES = 20
     }
 }

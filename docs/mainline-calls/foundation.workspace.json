@@ -25,7 +25,7 @@
     "gate runner verifies `make ci`, pre-push, CI, and release paths include the canonical full gate with mainline freshness",
     "gate runner verifies launchd defaults the master daemon workdir to `$HOME/.freehand`, creates it before bootstrap, and rejects the former repository-root default",
     "gate runner verifies source-only search policy so implementation searches use source code, tests, maintained scripts, and canonical docs rather than generated/runtime output; the wrapper rejects unsafe rg ignore-bypass options and keeps hard generated-output exclusions after caller args",
-    "release script runs full regression, release binary builds, Android JVM regression, Android release APK packaging with Android release lint disabled in Gradle config, extracts APK version truth, and stages deterministic artifacts including dist/android/update.json",
+    "release script runs full regression, host and Relay server release binary builds, Android JVM regression, Android release APK packaging with Android release lint disabled in Gradle config, extracts APK version truth, and stages deterministic artifacts including dist/android/update.json plus dist/relay/updates",
     "WebUI online verification wrapper checks fixed S-profile 127.0.0.1:4042 daemon health and invokes the real browser WebUI plus ADP proof for alpha promotion; release-profile 127.0.0.1:4041 proof is a separate explicit target",
     "fixed-session ADP observability verifier submits with the correct internally tagged ADP envelope and queries selected session plus TaskBoard/AgentBoard owner truth so receipt waits cannot masquerade as lifecycle proof",
     "global install script installs the staged host binaries into one explicit prefix and copies compiled Android update artifacts into runtime-home distribution truth without inventing runtime config truth",
@@ -5321,6 +5321,17 @@
       "callee": "crate::openminis_ui_migration::evidence::provenance::verify_online_report_provenance",
       "binding_status": "bound",
       "graph_id": "openminis_ui_migration"
+    },
+    {
+      "step": "20a",
+      "symbol_path": "verify_dual_path_update",
+      "file_path": "scripts/verify-dual-path-update.sh",
+      "responsibility": "download Tailscale and Relay manifests and APKs, then prove one versionCode/sha256/size/signerSha256 and actual-byte/signer identity",
+      "input_semantic": "explicit Tailscale and Relay manifest URLs",
+      "output_semantic": "dual_path_update_ok or explicit mismatch/download failure",
+      "caller": "operator / release closeout",
+      "callee": "curl, jq, shasum, apksigner",
+      "binding_status": "bound"
     }
   ],
   "sync_status": [

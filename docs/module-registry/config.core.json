@@ -17,6 +17,7 @@
       ],
       "allowed_dependencies": [
         "rust.std",
+        "config.account-config-sync.library",
         "freehand-contracts",
         "third_party.base64",
         "third_party.serde",

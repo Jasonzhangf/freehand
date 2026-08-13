@@ -22,6 +22,7 @@
   - control identity acknowledgement precedes data/error admission; a mismatched, missing, or timed-out acknowledgement closes the Agent connection explicitly
   - process restart restores account/token/presence truth
   - canonical `make ci` executes both deployment and local-online smoke gates rather than only validating their command strings
+  - configured Relay updates directory serves `latest.json` and APK bytes with no-store headers; unset/missing/traversal paths fail explicitly without daemon fallback
 - resource operations under test:
   - `relay_account.register`
   - `relay_account.authenticate`
@@ -37,12 +38,15 @@
   - `relay_data_tunnel.proxy_websocket`
   - `relay_data_tunnel.accept_generation`
   - `relay_error_tunnel.correlate`
+  - `relay_update_artifact.serve`
 
 ## Resource Operation Test Coverage
 
 | resource operation | status | white-box coverage | module black-box coverage | project black-box coverage |
 | --- | --- | --- | --- | --- |
+| `relay_update_artifact.serve` | bound | `cargo test -p freehand-relay --test relay_http_blackbox relay_updates -- --nocapture` proves configured/unconfigured/static file/path isolation behavior | `cargo test -p freehand-relay --test relay_http_blackbox relay_updates -- --nocapture` serves manifest and APK bytes, checks content type/no-store, rejects missing/traversal, and preserves manifest hash/url | `scripts/verify-dual-path-update.sh <tailscale-manifest-url> <relay-manifest-url>` downloads both manifests and APKs, requires matching versionCode/sha256/size, and hashes actual bytes |
 | `relay_account.register` | bound | `cargo test -p freehand-relay store::tests::account_token_and_presence_survive_restart -- --nocapture` proves persisted hash-only account/token truth; `failed_persistence_does_not_publish_candidate_truth` proves failed durable writes cannot mutate live truth | `cargo test -p freehand-relay --test relay_http_blackbox -- --nocapture` proves registration, duplicate rejection, short-password rejection, explicit initialization, and strict corrupt/incomplete store loading | `scripts/verify-relay-deployment-smoke.sh` explicitly initializes, registers through the standalone binary, and inspects persisted secret isolation |
+| `relay_update_artifact.serve` | bound | `cargo test -p freehand-relay --test relay_http_blackbox relay_updates -- --nocapture` proves configured manifest/APK serving and explicit missing-directory failure | `cargo check -p freehand-relay-server` plus `bash -n apps/freehand-relay-server/deploy/claw-deploy.sh` validate the standalone host and deployment evidence path | `apps/freehand-relay-server/deploy/claw-deploy.sh root@159.75.134.56 ~/.ssh/claw.pem` records remote binary/unit/env/store/health/update evidence and fails on hash or signer mismatch |
 | `relay_account.authenticate` | bound | `cargo test -p freehand-relay store::tests::wrong_password_cross_account_and_expired_presence_are_rejected -- --nocapture` proves wrong-password and token isolation | `cargo test -p freehand-relay --test relay_http_blackbox -- --nocapture` proves Bearer/cookie success plus missing-token failure | `scripts/verify-relay-deployment-smoke.sh` logs in before and after restart with the same persisted account |
 | Relay session cookie policy | bound | `cargo test -p freehand-relay config::tests::secure_cookie_accepts_only_explicit_boolean_values -- --nocapture` proves ambiguous values fail | `cargo test -p freehand-relay --test relay_http_blackbox -- --nocapture` proves HTTP cookie-only authentication and explicit TLS `Secure` emission | deployment smoke sets HTTP mode explicitly; production env example sets TLS mode explicitly |
 | `agent_presence.heartbeat` | bound | `cargo test -p freehand-relay store::tests::account_token_and_presence_survive_restart -- --nocapture` proves persisted heartbeat recovery | `cargo test -p freehand-relay --test relay_http_blackbox agent_presence_tracks_typed_runtime_source_and_closes_on_source_failure -- --nocapture` proves dynamic status/count updates and source failure terminates the tunnel instead of reusing static heartbeat truth | `scripts/verify-relay-deployment-smoke.sh` posts a real-process heartbeat and verifies persistence after restart |
@@ -114,7 +118,8 @@
 
 ## Known Gaps And Non-Goals
 
-- This module does not own Agent startup config, daemon supervisor policy, WebUI Agent Dashboard, Android login, TLS certificate termination, session truth, or task/lifecycle truth.
+- This module does not own Agent startup config, daemon supervisor policy, WebUI Agent Dashboard, Android login, TLS certificate termination, session truth, task/lifecycle truth, or release artifact construction.
+- `foundation.workspace` stages one release artifact into the updates directory; Relay only serves the declared bytes and never selects or rebuilds artifacts.
 - Product wiring begins only after all module checks, deployment smoke, architecture gates, and independent review pass.
 
 ## Outbound Tunnel Test Design

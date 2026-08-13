@@ -10,6 +10,8 @@
   - `input_attachment.validate_submit_metadata`
   - `debug_trace.read_snapshot`
   - `config.compile_agent_local_web_directory`
+  - `account_config_document.pull`
+  - `account_config_document.push`
 
 ## Resource Operation Test Coverage
 
@@ -19,6 +21,8 @@
 | `input_attachment.validate_submit_metadata` | bound | `cargo test -p freehand-ui-protocol image -- --nocapture` covers image-only submit admission and missing-payload rejection | `cargo test -p freehand-server --lib android -- --nocapture` covers WebUI asset wiring for attachment metadata submit helpers and Android bridge payload fields | `node scripts/verify-webui-image-attachment-online.mjs` proves online WebUI submit sends `SubmitUserInput.metadata.attachments` with image base64 while persisted turn projection keeps metadata only |
 | `debug_trace.read_snapshot` | bound | `cargo test -p freehand-ui-protocol diagnostics_query -- --nocapture` covers Diagnostics DTO JSON, route separation, and protocol-state rejection | `cargo test -p freehand-runtime runtime_query_projects_diagnostics_without_raw_secrets_or_absolute_home -- --nocapture --test-threads=1` covers runtime-owned projection, redaction, and no absolute home path | `node scripts/verify-webui-diagnostics-online.mjs` proves browser Settings rows match `QueryDiagnostics` owner projection and do not create sessions |
 | `config.compile_agent_local_web_directory` | bound | `cargo test -p freehand-ui-protocol config_status -- --nocapture` covers typed config-status roundtrip | `cargo test -p freehand-runtime runtime_query_projects_config_status_without_secrets -- --nocapture` proves all configured local endpoints and Relay URLs are projected without credentials | `cargo test -p freehand-server --lib` proves page/asset paths are relative and can remain under a Relay Agent prefix |
+| `account_config_document.pull` | bound | `cargo test -p freehand-ui-protocol -- --nocapture` covers PullAccountConfig wire/descriptor exhaustiveness and ConfigStatus sync projection | `cargo test -p freehand-runtime --lib runtime_account_config_sync_pull -- --nocapture` covers runtime-owned pull receipt and projection | WebUI Settings online proof must match the ADP account_config_sync projection after an explicit pull |
+| `account_config_document.push` | bound | `cargo test -p freehand-ui-protocol -- --nocapture` covers PushAccountConfig wire/descriptor exhaustiveness | `cargo test -p freehand-runtime --lib runtime_account_config_sync_push_conflict -- --nocapture` covers explicit push/conflict receipt behavior | WebUI Settings online proof must show upload remains explicit and displays conflict/success from ADP truth |
 
 The config-status projection also carries a Relay-backed Agent URL for non-loopback clients; it never serializes the Relay access token.
 
@@ -61,6 +65,7 @@ The config-status projection also carries a Relay-backed Agent URL for non-loopb
   - provider definition upsert ADP command frames use protocol-owned DTOs while runtime/config owners perform validation, persistence, and restart-required projection without switching active selection
   - provider selection ADP command frames use protocol-owned DTOs while runtime/config owners validate primary/fallback ids and persist only agent selection
   - model group definition and selection ADP command frames use protocol-owned DTOs while runtime/config owners validate route providers/models, load-balance weights, and active model group selection
+  - account-config Pull/Push ADP command frames use protocol-owned DTOs while runtime/account-config owners perform authenticated Relay sync, mirror persistence, and explicit conflict handling
   - Agent resource-count ADP command frames carry only non-empty `agent_name` plus `resource_count`; protocol rejects values outside `1..=5` before dispatch
   - debug query returns per-turn read-only debug snapshot truth
   - checkpoint query returns read-only runtime-owned checkpoint summary projections

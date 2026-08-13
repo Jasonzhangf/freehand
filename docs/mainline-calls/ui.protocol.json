@@ -883,6 +883,17 @@
       "binding_status": "bound"
     },
     {
+      "step": "36",
+      "symbol_path": "UiCommand::PullAccountConfig / UiCommand::PushAccountConfig / UiAccountConfigSyncProjection / UiAccountConfigDocumentSummaryProjection",
+      "file_path": "crates/freehand-ui-protocol/src/dto.rs",
+      "responsibility": "define explicit account-config pull/push command DTOs and the credential-free sync status projection embedded in ConfigStatus",
+      "input_semantic": "pull or push account-config mutation command",
+      "output_semantic": "UI-safe account config sync status with account id, revision, etag, and non-secret document counts",
+      "caller": "ADP command/query transport",
+      "callee": "runtime.ui-command-dispatch",
+      "binding_status": "bound"
+    },
+    {
       "step": "18a",
       "symbol_path": "UI_COMMAND_DESCRIPTORS / command_descriptor / adp_protocol_manifest / adp_protocol_webui_module",
       "file_path": "crates/freehand-ui-protocol/src/adp_wire.rs",
@@ -939,6 +950,7 @@
     "Tools dashboard query/result DTOs are landed and locked by `cargo test -p freehand-ui-protocol tool_registry -- --nocapture`; protocol-state local query rejection proves runtime/tool owner code supplies the registry projection",
     "Search dashboard query/result DTOs are landed and locked by `cargo test -p freehand-ui-protocol session_search -- --nocapture --test-threads=1`; protocol-state local query rejection proves runtime/reason owners supply the search projection",
     "Diagnostics query/result DTOs are landed and locked by cargo test -p freehand-ui-protocol diagnostics_query -- --nocapture; protocol-state local query rejection proves runtime/debug owners supply the diagnostics projection.",
-    "CompactSessionContext mutation command DTO is landed, owner-routed to reason.rewrite-policy, validated for non-empty session id, and locked by compact_session_context_roundtrips_through_wire_and_validates plus runtime_compact_session_context_hold_when_no_provider_summary_payload and runtime_compact_session_context_rejects_missing_recovery_truth_explicitly; runtime/reason.rewrite-policy owners supply the policy/rewrite outcome and the dispatch receipt never fabricates a rewrite result"
+    "CompactSessionContext mutation command DTO is landed, owner-routed to reason.rewrite-policy, validated for non-empty session id, and locked by compact_session_context_roundtrips_through_wire_and_validates plus runtime_compact_session_context_hold_when_no_provider_summary_payload and runtime_compact_session_context_rejects_missing_recovery_truth_explicitly; runtime/reason.rewrite-policy owners supply the policy/rewrite outcome and the dispatch receipt never fabricates a rewrite result",
+    "PullAccountConfig/PushAccountConfig command DTOs and UiAccountConfigSyncProjection are landed in dto.rs, exposed through the ADP descriptor, and consumed by the WebUI Settings connectivity card; protocol-state local queries reject runtime-owned sync state"
   ]
 }

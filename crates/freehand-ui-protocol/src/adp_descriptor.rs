@@ -272,6 +272,22 @@ pub(crate) const UI_COMMAND_DESCRIPTORS: &[UiCommandDescriptor] = &[
         exposure: UiAdpCommandExposure::Public,
     },
     UiCommandDescriptor {
+        serde_name: "PullAccountConfig",
+        semantic_kind: "pull_account_config",
+        frame_class: UiCommandFrameClass::Mutation,
+        target_owner_feature: "config.account-config-sync",
+        target_owner_module: "crates/freehand-account-config",
+        exposure: UiAdpCommandExposure::Public,
+    },
+    UiCommandDescriptor {
+        serde_name: "PushAccountConfig",
+        semantic_kind: "push_account_config",
+        frame_class: UiCommandFrameClass::Mutation,
+        target_owner_feature: "config.account-config-sync",
+        target_owner_module: "crates/freehand-account-config",
+        exposure: UiAdpCommandExposure::Public,
+    },
+    UiCommandDescriptor {
         serde_name: "QueryErrorCenterEvents",
         semantic_kind: "query_error_center_events",
         frame_class: UiCommandFrameClass::Query,
@@ -599,6 +615,8 @@ pub(crate) fn command_descriptor(command: &UiCommand) -> &'static UiCommandDescr
         UiCommand::QueryTimerList { .. } => command_descriptor_by_serde_name("QueryTimerList"),
         UiCommand::QueryToolRegistry => command_descriptor_by_serde_name("QueryToolRegistry"),
         UiCommand::QueryDiagnostics => command_descriptor_by_serde_name("QueryDiagnostics"),
+        UiCommand::PullAccountConfig => command_descriptor_by_serde_name("PullAccountConfig"),
+        UiCommand::PushAccountConfig => command_descriptor_by_serde_name("PushAccountConfig"),
         UiCommand::QueryErrorCenterEvents { .. } => {
             command_descriptor_by_serde_name("QueryErrorCenterEvents")
         }

@@ -2679,6 +2679,467 @@ local_web_url = "http://127.0.0.1:4143"
 }
 
 #[test]
+fn runtime_account_config_sync_pull_projects_synced_mirror() {
+    let runtime_home = temp_runtime_home();
+    fs::create_dir_all(&runtime_home).expect("create runtime home");
+    fs::write(
+        runtime_home.join("config.toml"),
+        r#"
+[providers.provider-live]
+id = "provider-live"
+enabled = true
+type = "openai"
+protocol = "responses"
+base_url = "https://provider.example.invalid"
+default_model = "shared-model"
+
+[providers.provider-live.auth]
+type = "apikey"
+api_key_env = "PUSH_CONFLICT_API_KEY"
+
+[agents.agent-live]
+name = "agent-live"
+mode = "master"
+node_id = "agent-live-node"
+paired_agents = ["agent-live-worker"]
+pair_token = "PUSH_CONFLICT_MASTER_TOKEN"
+provider = "provider-live"
+
+[agents.agent-live-worker]
+name = "agent-live-worker"
+mode = "slave"
+node_id = "agent-live-worker-node"
+paired_agents = ["agent-live"]
+pair_token = "PUSH_CONFLICT_WORKER_TOKEN"
+provider = "provider-live"
+"#,
+    )
+    .expect("write runtime config");
+    unsafe {
+        std::env::set_var("PUSH_CONFLICT_API_KEY", "test-api-key");
+        std::env::set_var("PUSH_CONFLICT_MASTER_TOKEN", "pair-token");
+        std::env::set_var("PUSH_CONFLICT_WORKER_TOKEN", "pair-token");
+    }
+    let content = freehand_account_config::ConfigDocumentContent {
+        provider_registry: vec![freehand_account_config::SharedProviderDefinition {
+            id: "shared-provider".to_owned(),
+            label: "Shared Provider".to_owned(),
+            provider_type: "openai".to_owned(),
+            protocol: "responses".to_owned(),
+            base_url: "https://api.example.invalid".to_owned(),
+            auth: freehand_account_config::ProviderAuthReference {
+                auth_type: "env".to_owned(),
+                auth_source: "SHARED_API_KEY".to_owned(),
+            },
+            model: "shared-model".to_owned(),
+        }],
+        ..Default::default()
+    };
+    let document = freehand_account_config::AccountConfigDocument {
+        schema_version: freehand_account_config::ACCOUNT_CONFIG_SCHEMA_VERSION,
+        revision: Some(7),
+        etag: Some("\"etag-7\"".to_owned()),
+        updated_at: Some("1780000000".to_owned()),
+        document: content,
+    };
+    let response = serde_json::to_string(&document).expect("serialize config");
+    let (base_url, requests, handle) = spawn_status_sequence_server(vec![
+        (
+            200,
+            "application/json",
+            r#"{"accountId":"jason"}"#.to_owned(),
+        ),
+        (200, "application/json", response),
+    ]);
+    let mut selected = live_selected_agent_with_protocol(
+        "https://provider.example.invalid".to_owned(),
+        freehand_config::ProviderType::OpenAi,
+        ConfigProviderProtocol::Responses,
+    );
+    selected.relay_connection = Some(freehand_config::SelectedAgentRelayConnection {
+        relay_url: base_url,
+        access_token: "relay-access-token".to_owned(),
+    });
+    let runtime = RuntimeCommandDispatcher::from_selected_agent_with_live(
+        &selected,
+        runtime_home.clone(),
+        false,
+    )
+    .expect("runtime bootstrap");
+
+    runtime
+        .dispatch(build_command_dispatch_envelope(&UiCommand::PullAccountConfig).expect("envelope"))
+        .expect("pull account config");
+    handle.join().expect("join server");
+    let first_request = requests.recv().expect("auth request");
+    let second_request = requests.recv().expect("config request");
+    assert!(first_request.starts_with("GET /relay/api/auth/me "));
+    assert!(second_request.starts_with("GET /relay/api/config "));
+    assert!(second_request.contains("authorization: Bearer relay-access-token"));
+
+    match runtime
+        .query_runtime(&UiCommand::QueryConfigStatus)
+        .expect("config query")
+        .expect("config result")
+    {
+        UiQueryResult::ConfigStatus(status) => {
+            assert_eq!(status.account_config_sync.status, "synced");
+            assert_eq!(
+                status.account_config_sync.account_id.as_deref(),
+                Some("jason")
+            );
+            assert_eq!(status.account_config_sync.revision, Some(7));
+            assert_eq!(
+                status
+                    .account_config_sync
+                    .server_document
+                    .as_ref()
+                    .expect("document summary")
+                    .provider_count,
+                1
+            );
+        }
+        other => panic!("unexpected query result: {other:?}"),
+    }
+    assert!(
+        runtime_home.join("account-config.mirror.json").is_file(),
+        "pull must persist the device mirror"
+    );
+    unsafe {
+        std::env::remove_var("SHARED_RUNTIME_API_KEY");
+        std::env::remove_var("SHARED_MASTER_TOKEN");
+        std::env::remove_var("SHARED_WORKER_TOKEN");
+    }
+    fs::remove_dir_all(runtime_home).expect("cleanup runtime home");
+}
+
+#[test]
+fn runtime_account_config_sync_push_conflict_persists_server_document() {
+    let runtime_home = temp_runtime_home();
+    fs::create_dir_all(&runtime_home).expect("create runtime home");
+    fs::write(
+        runtime_home.join("config.toml"),
+        r#"
+[providers.provider-live]
+id = "provider-live"
+enabled = true
+type = "openai"
+protocol = "responses"
+base_url = "https://provider.example.invalid"
+default_model = "shared-model"
+
+[providers.provider-live.auth]
+type = "apikey"
+api_key_env = "SHARED_RUNTIME_API_KEY"
+
+[agents.agent-live]
+name = "agent-live"
+mode = "master"
+node_id = "agent-live-node"
+paired_agents = ["agent-live-worker"]
+pair_token = "SHARED_MASTER_TOKEN"
+provider = "provider-live"
+
+[agents.agent-live-worker]
+name = "agent-live-worker"
+mode = "slave"
+node_id = "agent-live-worker-node"
+paired_agents = ["agent-live"]
+pair_token = "SHARED_WORKER_TOKEN"
+provider = "provider-live"
+"#,
+    )
+    .expect("write runtime config");
+    unsafe {
+        std::env::set_var("SHARED_RUNTIME_API_KEY", "test-api-key");
+        std::env::set_var("SHARED_MASTER_TOKEN", "pair-token");
+        std::env::set_var("SHARED_WORKER_TOKEN", "pair-token");
+    }
+    let content = freehand_account_config::ConfigDocumentContent {
+        provider_registry: vec![freehand_account_config::SharedProviderDefinition {
+            id: "shared-provider".to_owned(),
+            label: "Shared Provider".to_owned(),
+            provider_type: "openai".to_owned(),
+            protocol: "responses".to_owned(),
+            base_url: "https://api.example.invalid".to_owned(),
+            auth: freehand_account_config::ProviderAuthReference {
+                auth_type: "env".to_owned(),
+                auth_source: "SHARED_API_KEY".to_owned(),
+            },
+            model: "shared-model".to_owned(),
+        }],
+        ..Default::default()
+    };
+    let server_document = freehand_account_config::AccountConfigDocument {
+        schema_version: freehand_account_config::ACCOUNT_CONFIG_SCHEMA_VERSION,
+        revision: Some(7),
+        etag: Some("\"etag-7\"".to_owned()),
+        updated_at: Some("1780000000".to_owned()),
+        document: content.clone(),
+    };
+    let conflict_body = format!(
+        r#"{{"code":"revision_conflict","message":"stale etag","serverDocument":{}}}"#,
+        serde_json::to_string(&server_document).expect("serialize server document")
+    );
+    let (base_url, requests, handle) = spawn_status_sequence_server(vec![
+        (
+            200,
+            "application/json",
+            r#"{"accountId":"jason"}"#.to_owned(),
+        ),
+        (409, "application/json", conflict_body),
+    ]);
+    let mut selected = live_selected_agent_with_protocol(
+        "https://provider.example.invalid".to_owned(),
+        freehand_config::ProviderType::OpenAi,
+        ConfigProviderProtocol::Responses,
+    );
+    selected.relay_connection = Some(freehand_config::SelectedAgentRelayConnection {
+        relay_url: base_url,
+        access_token: "relay-access-token".to_owned(),
+    });
+    let runtime = RuntimeCommandDispatcher::from_selected_agent_with_live(
+        &selected,
+        runtime_home.clone(),
+        false,
+    )
+    .expect("runtime bootstrap");
+
+    let err = runtime
+        .dispatch(build_command_dispatch_envelope(&UiCommand::PushAccountConfig).expect("envelope"))
+        .expect_err("push conflict must fail explicitly");
+    handle.join().expect("join server");
+    let first_request = requests.recv().expect("auth request");
+    let second_request = requests.recv().expect("push request");
+    assert!(first_request.starts_with("GET /relay/api/auth/me "));
+    assert!(second_request.starts_with("PUT /relay/api/config "));
+    assert!(second_request.contains("authorization: Bearer relay-access-token"));
+    match err {
+        UiCommandDispatchPortError::DispatchFailed(message) => {
+            assert!(
+                message.contains("revision conflict"),
+                "unexpected failure message: {message}"
+            );
+            assert!(
+                message.contains("revision=7"),
+                "unexpected failure message: {message}"
+            );
+        }
+        other => panic!("expected DispatchFailed, got {other:?}"),
+    }
+
+    let mirror_raw =
+        fs::read(runtime_home.join("account-config.mirror.json")).expect("read mirror");
+    let mirror: freehand_account_config::AccountConfigMirror =
+        serde_json::from_slice(&mirror_raw).expect("decode mirror");
+    assert_eq!(
+        mirror.status,
+        freehand_account_config::AccountConfigSyncStatus::Conflict
+    );
+    assert_eq!(mirror.account_id, "jason");
+    assert_eq!(mirror.revision, Some(7));
+    assert_eq!(mirror.document.provider_registry.len(), 1);
+    unsafe {
+        std::env::remove_var("PUSH_CONFLICT_API_KEY");
+        std::env::remove_var("PUSH_CONFLICT_MASTER_TOKEN");
+        std::env::remove_var("PUSH_CONFLICT_WORKER_TOKEN");
+    }
+    fs::remove_dir_all(runtime_home).expect("cleanup runtime home");
+}
+
+#[test]
+fn runtime_account_config_sync_pull_not_found_marks_not_configured() {
+    let runtime_home = temp_runtime_home();
+    fs::create_dir_all(&runtime_home).expect("create runtime home");
+    fs::write(
+        runtime_home.join("config.toml"),
+        r#"
+[providers.provider-live]
+id = "provider-live"
+enabled = true
+type = "openai"
+protocol = "responses"
+base_url = "https://provider.example.invalid"
+default_model = "shared-model"
+
+[providers.provider-live.auth]
+type = "apikey"
+api_key_env = "PULL_NOT_FOUND_API_KEY"
+
+[agents.agent-live]
+name = "agent-live"
+mode = "master"
+node_id = "agent-live-node"
+paired_agents = ["agent-live-worker"]
+pair_token = "PULL_NOT_FOUND_MASTER_TOKEN"
+provider = "provider-live"
+
+[agents.agent-live-worker]
+name = "agent-live-worker"
+mode = "slave"
+node_id = "agent-live-worker-node"
+paired_agents = ["agent-live"]
+pair_token = "PULL_NOT_FOUND_WORKER_TOKEN"
+provider = "provider-live"
+"#,
+    )
+    .expect("write runtime config");
+    unsafe {
+        std::env::set_var("PULL_NOT_FOUND_API_KEY", "test-api-key");
+        std::env::set_var("PULL_NOT_FOUND_MASTER_TOKEN", "pair-token");
+        std::env::set_var("PULL_NOT_FOUND_WORKER_TOKEN", "pair-token");
+    }
+    let (base_url, requests, handle) = spawn_status_sequence_server(vec![
+        (
+            200,
+            "application/json",
+            r#"{"accountId":"jason"}"#.to_owned(),
+        ),
+        (
+            404,
+            "application/json",
+            r#"{"message":"not found"}"#.to_owned(),
+        ),
+    ]);
+    let mut selected = live_selected_agent_with_protocol(
+        "https://provider.example.invalid".to_owned(),
+        freehand_config::ProviderType::OpenAi,
+        ConfigProviderProtocol::Responses,
+    );
+    selected.relay_connection = Some(freehand_config::SelectedAgentRelayConnection {
+        relay_url: base_url,
+        access_token: "relay-access-token".to_owned(),
+    });
+    let runtime = RuntimeCommandDispatcher::from_selected_agent_with_live(
+        &selected,
+        runtime_home.clone(),
+        false,
+    )
+    .expect("runtime bootstrap");
+
+    runtime
+        .dispatch(build_command_dispatch_envelope(&UiCommand::PullAccountConfig).expect("envelope"))
+        .expect("pull not found is an explicit not-configured outcome");
+    handle.join().expect("join server");
+    let first_request = requests.recv().expect("auth request");
+    let second_request = requests.recv().expect("config request");
+    assert!(first_request.starts_with("GET /relay/api/auth/me "));
+    assert!(second_request.starts_with("GET /relay/api/config "));
+
+    match runtime
+        .query_runtime(&UiCommand::QueryConfigStatus)
+        .expect("config query")
+        .expect("config result")
+    {
+        UiQueryResult::ConfigStatus(status) => {
+            assert_eq!(status.account_config_sync.status, "not_configured");
+            assert_eq!(
+                status.account_config_sync.account_id.as_deref(),
+                Some("jason")
+            );
+            assert_eq!(status.account_config_sync.revision, None);
+        }
+        other => panic!("unexpected query result: {other:?}"),
+    }
+    let mirror_raw =
+        fs::read(runtime_home.join("account-config.mirror.json")).expect("read mirror");
+    let mirror: freehand_account_config::AccountConfigMirror =
+        serde_json::from_slice(&mirror_raw).expect("decode mirror");
+    assert_eq!(
+        mirror.status,
+        freehand_account_config::AccountConfigSyncStatus::NotConfigured
+    );
+    unsafe {
+        std::env::remove_var("PULL_NOT_FOUND_API_KEY");
+        std::env::remove_var("PULL_NOT_FOUND_MASTER_TOKEN");
+        std::env::remove_var("PULL_NOT_FOUND_WORKER_TOKEN");
+    }
+    fs::remove_dir_all(runtime_home).expect("cleanup runtime home");
+}
+
+#[test]
+fn runtime_account_config_sync_without_relay_connection_is_unsupported() {
+    let runtime_home = temp_runtime_home();
+    fs::create_dir_all(&runtime_home).expect("create runtime home");
+    let selected = live_selected_agent_with_protocol(
+        "https://provider.example.invalid".to_owned(),
+        freehand_config::ProviderType::OpenAi,
+        ConfigProviderProtocol::Responses,
+    );
+    let runtime = RuntimeCommandDispatcher::from_selected_agent_with_live(
+        &selected,
+        runtime_home.clone(),
+        false,
+    )
+    .expect("runtime bootstrap");
+
+    let err = runtime
+        .dispatch(build_command_dispatch_envelope(&UiCommand::PullAccountConfig).expect("envelope"))
+        .expect_err("no relay connection must not reach the server");
+    match err {
+        UiCommandDispatchPortError::Unsupported(message) => {
+            assert!(
+                message.contains("Relay agent"),
+                "unexpected failure message: {message}"
+            );
+        }
+        other => panic!("expected Unsupported, got {other:?}"),
+    }
+    assert!(
+        !runtime_home.join("account-config.mirror.json").exists(),
+        "unsupported sync must not write a mirror"
+    );
+    fs::remove_dir_all(runtime_home).expect("cleanup runtime home");
+}
+
+#[test]
+fn runtime_account_config_push_without_local_config_fails_without_writing_mirror() {
+    let runtime_home = temp_runtime_home();
+    fs::create_dir_all(&runtime_home).expect("create runtime home");
+    let (base_url, requests, handle) = spawn_status_sequence_server(vec![(
+        200,
+        "application/json",
+        r#"{"accountId":"jason"}"#.to_owned(),
+    )]);
+    let mut selected = live_selected_agent_with_protocol(
+        "https://provider.example.invalid".to_owned(),
+        freehand_config::ProviderType::OpenAi,
+        ConfigProviderProtocol::Responses,
+    );
+    selected.relay_connection = Some(freehand_config::SelectedAgentRelayConnection {
+        relay_url: base_url,
+        access_token: "relay-access-token".to_owned(),
+    });
+    let runtime = RuntimeCommandDispatcher::from_selected_agent_with_live(
+        &selected,
+        runtime_home.clone(),
+        false,
+    )
+    .expect("runtime bootstrap");
+
+    let err = runtime
+        .dispatch(build_command_dispatch_envelope(&UiCommand::PushAccountConfig).expect("envelope"))
+        .expect_err("missing local config must fail explicitly");
+    handle.join().expect("join server");
+    let first_request = requests.recv().expect("auth request");
+    assert!(first_request.starts_with("GET /relay/api/auth/me "));
+    match err {
+        UiCommandDispatchPortError::DispatchFailed(message) => {
+            assert!(
+                message.contains("load local config"),
+                "unexpected failure message: {message}"
+            );
+        }
+        other => panic!("expected DispatchFailed, got {other:?}"),
+    }
+    assert!(
+        !runtime_home.join("account-config.mirror.json").exists(),
+        "missing local config must not write a mirror"
+    );
+    fs::remove_dir_all(runtime_home).expect("cleanup runtime home");
+}
+
+#[test]
 fn runtime_dispatch_updates_provider_config_without_hot_reloading_active_model() {
     let runtime_home = temp_runtime_home();
     fs::create_dir_all(&runtime_home).expect("create runtime home");
@@ -3063,6 +3524,8 @@ provider = "minimax"
                         model: "gpt-research-primary".to_owned(),
                         weight: 2,
                     }],
+                    context_window_tokens: 128_000,
+                    compaction_threshold_tokens: 100_000,
                 },
             })
             .expect("model group upsert envelope"),
@@ -6028,6 +6491,8 @@ fn selected_master_agent() -> SelectedAgentConfig {
         },
         fallback_provider: None,
         model_group_id: None,
+        context_window_tokens: 128_000,
+        compaction_threshold_tokens: 100_000,
         restart_required_on_change: true,
         relay_connection: None,
     }
@@ -6072,6 +6537,8 @@ fn live_selected_agent(
         },
         fallback_provider: None,
         model_group_id: None,
+        context_window_tokens: 128_000,
+        compaction_threshold_tokens: 100_000,
         restart_required_on_change: true,
         relay_connection: None,
     }
@@ -10867,10 +11334,12 @@ fn live_bridge_derives_hosted_web_search_for_configured_provider_native_protocol
             .len(),
         1
     );
-    assert!(
+    assert_eq!(
         LiveReasonExecutionRole::Worker
             .hosted_tool_definitions(&responses, LiveReasonExecutionProfile::Workspace)
-            .is_empty()
+            .len(),
+        1,
+        "worker Workspace profile must expose hosted web search when provider supports function-tool mixing"
     );
     assert_eq!(
         LiveReasonExecutionRole::Worker
@@ -11124,10 +11593,12 @@ fn clean_search_worker_profile_exposes_hosted_search_without_function_tools() {
             .iter()
             .any(|tool| tool.name == "read_file")
     );
-    assert!(
+    assert_eq!(
         LiveReasonExecutionRole::Worker
             .hosted_tool_definitions(&descriptor, LiveReasonExecutionProfile::Workspace)
-            .is_empty()
+            .len(),
+        1,
+        "worker Workspace profile must expose hosted web search when provider supports function-tool mixing"
     );
 }
 

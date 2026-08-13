@@ -95,6 +95,7 @@ async fn run_remote_relay_mode() -> Result<String, String> {
         RelayServiceConfig {
             presence_lease_seconds: config.runtime.presence_lease_seconds,
             secure_cookie: config.secure_cookie,
+            updates_dir: config.runtime.updates_dir.clone(),
         },
     )
     .map_err(|error| format!("failed to initialize Relay service: {error}"))?;

@@ -5,5 +5,7 @@ edition.workspace = true
 license.workspace = true
 
 [dependencies]
+axum = { version = "0.8.9", features = ["http1", "json", "tokio"] }
+freehand-account-config = { path = "../../crates/freehand-account-config" }
 freehand-relay = { path = "../../crates/freehand-relay" }
 tokio = { version = "1", features = ["macros", "net", "rt-multi-thread", "signal"] }

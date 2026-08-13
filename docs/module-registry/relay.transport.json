@@ -70,14 +70,17 @@
       "status": "active",
       "owned_paths": [
         "apps/freehand-relay-server/Cargo.toml",
-        "apps/freehand-relay-server/src/main.rs",
+        "apps/freehand-relay-server/deploy/claw-deploy.sh",
         "apps/freehand-relay-server/deploy/freehand-relay.service",
-        "apps/freehand-relay-server/deploy/relay.env.example"
+    "apps/freehand-relay-server/deploy/relay.env.example",
+    "apps/freehand-relay-server/src/main.rs"
       ],
-      "allowed_dependencies": [
-        "relay.transport.library",
-        "third_party.tokio"
-      ],
+   "allowed_dependencies": [
+    "relay.transport.library",
+    "config.account-config-sync.library",
+    "third_party.axum",
+    "third_party.tokio"
+   ],
       "forbidden_dependencies": [
         "freehand-config",
         "freehand-runtime",
@@ -92,11 +95,17 @@
       "to_module_id": "relay.transport.library",
       "import_name": "freehand_relay"
     },
-    {
-      "edge_id": "relay.transport.server-host_to_library",
-      "from_module_id": "relay.transport.server-host",
-      "to_module_id": "relay.transport.library",
-      "import_name": "freehand_relay"
-    }
-  ]
+  {
+   "edge_id": "relay.transport.server-host_to_library",
+   "from_module_id": "relay.transport.server-host",
+   "to_module_id": "relay.transport.library",
+   "import_name": "freehand_relay"
+  },
+  {
+   "edge_id": "relay.transport.server-host_to_account-config",
+   "from_module_id": "relay.transport.server-host",
+   "to_module_id": "config.account-config-sync.library",
+   "import_name": "freehand_account_config"
+  }
+ ]
 }

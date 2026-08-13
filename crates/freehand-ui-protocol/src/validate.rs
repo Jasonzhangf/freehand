@@ -293,6 +293,12 @@ fn validate_model_group_config_update(
     if group.group_id.trim().is_empty() {
         return Err(UiProtocolError::EmptyModelGroupId);
     }
+    if group.context_window_tokens == 0
+        || group.compaction_threshold_tokens == 0
+        || group.compaction_threshold_tokens >= group.context_window_tokens
+    {
+        return Err(UiProtocolError::InvalidModelCompactionThreshold);
+    }
     validate_model_route_update(&group.primary)?;
     for route in [
         group.sub.as_ref(),
@@ -571,6 +577,7 @@ pub fn protocol_rejection(err: UiProtocolError) -> UiProtocolRejection {
         UiProtocolError::EmptyProviderDefaultModel => "empty_provider_default_model",
         UiProtocolError::EmptyProviderApiKeyEnv => "empty_provider_api_key_env",
         UiProtocolError::EmptyModelGroupId => "empty_model_group_id",
+        UiProtocolError::InvalidModelCompactionThreshold => "invalid_model_compaction_threshold",
         UiProtocolError::EmptyModelRouteProvider => "empty_model_route_provider",
         UiProtocolError::EmptyModelRouteModel => "empty_model_route_model",
         UiProtocolError::EmptyModelRouteWeight => "empty_model_route_weight",

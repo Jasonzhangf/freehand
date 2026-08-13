@@ -3093,6 +3093,8 @@ fn config_status_query_stays_runtime_owned_and_secret_free() {
                 model: "MiniMax-M2".to_owned(),
                 weight: 1,
             }],
+            context_window_tokens: 128_000,
+            compaction_threshold_tokens: 100_000,
         }],
         agent_resource_count: 1,
         agent_resource_limit: 5,
@@ -3101,6 +3103,7 @@ fn config_status_query_stays_runtime_owned_and_secret_free() {
         provider_id: "minimonth".to_owned(),
         fallback_provider_id: None,
         model_group_id: Some("default".to_owned()),
+        route_source: "model_group".to_owned(),
         provider_type: "anthropic".to_owned(),
         provider_protocol: "messages".to_owned(),
         provider_base_url: "https://api.example.test/anthropic".to_owned(),
@@ -3113,6 +3116,7 @@ fn config_status_query_stays_runtime_owned_and_secret_free() {
         provider_auth_type: "apikey".to_owned(),
         provider_auth_source: "env".to_owned(),
         restart_required_on_change: true,
+        account_config_sync: UiAccountConfigSyncProjection::default(),
     });
     let encoded = serde_json::to_string(&result).expect("config status json");
     assert!(encoded.contains("ConfigStatus"));
@@ -3274,6 +3278,8 @@ fn model_group_upsert_and_selection_route_to_config_owner() {
                 model: "gpt-5.5-main".to_owned(),
                 weight: 2,
             }],
+            context_window_tokens: 128_000,
+            compaction_threshold_tokens: 100_000,
         },
     };
     validate_command(&upsert).expect("valid model group upsert");
@@ -3312,6 +3318,8 @@ fn model_group_upsert_and_selection_route_to_config_owner() {
             title: None,
             fallback: None,
             load_balance: Vec::new(),
+            context_window_tokens: 128_000,
+            compaction_threshold_tokens: 100_000,
         },
     })
     .expect_err("empty group rejected");
@@ -3333,6 +3341,8 @@ fn model_group_upsert_and_selection_route_to_config_owner() {
             title: None,
             fallback: None,
             load_balance: Vec::new(),
+            context_window_tokens: 128_000,
+            compaction_threshold_tokens: 100_000,
         },
     })
     .expect_err("empty route model rejected");

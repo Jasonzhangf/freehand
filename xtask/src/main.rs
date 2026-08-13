@@ -82,6 +82,7 @@ fn run_gates_check() -> Result<(), String> {
             "docs/resource-maps/core.json",
             "docs/function-maps/foundation.workspace.md",
             "docs/function-maps/config.core.md",
+            "docs/function-maps/config.account-config-sync.md",
             "docs/function-maps/provider.semantic.md",
             "docs/function-maps/provider.openai-adapter.md",
             "docs/function-maps/provider.anthropic-adapter.md",
@@ -116,6 +117,7 @@ fn run_gates_check() -> Result<(), String> {
             "docs/mainline-calls/ui.protocol.json",
             "docs/mainline-calls/foundation.workspace.json",
             "docs/mainline-calls/config.core.json",
+            "docs/mainline-calls/config.account-config-sync.json",
             "docs/mainline-calls/contracts.core.json",
             "docs/mainline-calls/metadata.core.json",
             "docs/mainline-calls/node.master-slave.json",
@@ -143,6 +145,7 @@ fn run_gates_check() -> Result<(), String> {
             "docs/wiki/ui.protocol.md",
             "docs/wiki/foundation.workspace.md",
             "docs/wiki/config.core.md",
+            "docs/wiki/config.account-config-sync.md",
             "docs/wiki/contracts.core.md",
             "docs/wiki/metadata.core.md",
             "docs/wiki/node.master-slave.md",
@@ -165,6 +168,7 @@ fn run_gates_check() -> Result<(), String> {
             "docs/architecture/test-strategy.md",
             "docs/testing/foundation.workspace.md",
             "docs/testing/config.core.md",
+            "docs/testing/config.account-config-sync.md",
             "docs/testing/provider.semantic.md",
             "docs/testing/provider.openai-adapter.md",
             "docs/testing/provider.anthropic-adapter.md",
@@ -229,8 +233,11 @@ fn run_gates_check() -> Result<(), String> {
             "docs/mainline-calls/app.acp-server.json",
             "docs/testing/app.acp-server.md",
             "docs/verification-maps/app.acp-server.json",
+            "docs/module-registry/config.account-config-sync.json",
+            "docs/verification-maps/config.account-config-sync.json",
             "docs/wiki/app.acp-server.md",
             "scripts/verify-acp-stdio.sh",
+            "scripts/verify-relay-account-config-smoke.sh",
             "scripts/source-search.sh",
             "scripts/verify-webui-foundation-contracts.mjs",
             ".agents/skills/freehand-dev/SKILL.md",
@@ -258,6 +265,7 @@ fn run_gates_check() -> Result<(), String> {
     verify_webui_foundation_contracts(&root)?;
     verify_runtime_daemon_boundary(&root)?;
     verify_relay_transport_boundary(&root)?;
+    verify_account_config_sync_boundary(&root)?;
     verify_runtime_master_worker_loop_boundary(&root)?;
     verify_dependency_graph(&root)?;
     verify_task_status_single_writer(&root)?;
@@ -2300,7 +2308,7 @@ fn verify_ci_cd_gate_commands(root: &Path) -> Result<(), String> {
         fs::read_to_string(root.join("Makefile")).map_err(|err| format!("read Makefile: {err}"))?;
     require_contains(
         &makefile,
-        ".PHONY: provision-openminis-source build fmt clippy test mainlines gates relay-deployment-smoke relay-local-online ci verify-webui-online verify-webui-release-online release install-global install-symlink install-launchd install-launchdS install-worker-launchd install-worker-launchdS restart-launchd restart-launchdS restart-worker-launchd restart-worker-launchdS uninstall-launchd uninstall-launchdS uninstall-worker-launchd uninstall-worker-launchdS launchd-status launchd-statusS worker-launchd-status worker-launchd-statusS launchd-logs launchd-logsS worker-launchd-logs worker-launchd-logsS hooks",
+        ".PHONY: provision-openminis-source build fmt clippy test mainlines gates relay-deployment-smoke relay-local-online relay-account-config-smoke ci verify-webui-online verify-webui-release-online release install-global install-symlink install-launchd install-launchdS install-worker-launchd install-worker-launchdS restart-launchd restart-launchdS restart-worker-launchd restart-worker-launchdS uninstall-launchd uninstall-launchdS uninstall-worker-launchd uninstall-worker-launchdS launchd-status launchd-statusS worker-launchd-status worker-launchd-statusS launchd-logs launchd-logsS worker-launchd-logs worker-launchd-logsS hooks",
         "Makefile",
     )?;
     require_contains(
@@ -2317,7 +2325,7 @@ fn verify_ci_cd_gate_commands(root: &Path) -> Result<(), String> {
     )?;
     require_contains(
         &makefile,
-        "ci: provision-openminis-source build fmt clippy test mainlines gates relay-deployment-smoke relay-local-online",
+        "ci: provision-openminis-source build fmt clippy test mainlines gates relay-deployment-smoke relay-local-online relay-account-config-smoke",
         "Makefile",
     )?;
     require_contains(&makefile, "release:\n\tscripts/release.sh", "Makefile")?;
@@ -3760,6 +3768,13 @@ fn verify_relay_transport_boundary(root: &Path) -> Result<(), String> {
             ));
         }
     }
+    for required in ["freehand-account-config", "axum"] {
+        if !relay_host_cargo.contains(required) {
+            return Err(format!(
+                "freehand-relay-server account-config composition must depend on {required}"
+            ));
+        }
+    }
 
     let daemon_cargo = fs::read_to_string(root.join("apps/freehand-daemon/Cargo.toml"))
         .map_err(|error| error.to_string())?;
@@ -3875,9 +3890,12 @@ fn verify_relay_transport_boundary(root: &Path) -> Result<(), String> {
             "run_data_socket",
             "RelayTunnelRegistry::accept_data_generation",
         ),
+        ("16", "serve_updates_path", "tokio::fs::read"),
     ];
     if relay_doc.call_table.len() != expected_edges.len() {
-        return Err("relay.transport call map must contain exactly sixteen bound edges".to_owned());
+        return Err(
+            "relay.transport call map must contain exactly seventeen bound edges".to_owned(),
+        );
     }
     for (row, (step, caller, callee)) in relay_doc.call_table.iter().zip(expected_edges) {
         if row.step != step || row.caller != caller || row.callee != callee {
@@ -3961,7 +3979,7 @@ fn verify_relay_transport_boundary(root: &Path) -> Result<(), String> {
         .map_err(|error| error.to_string())?;
     require_contains(
         &relay_main,
-        "service.serve(listener).await?",
+        "axum::serve(listener, router).await?",
         "apps/freehand-relay-server/src/main.rs",
     )?;
 
@@ -4234,9 +4252,15 @@ fn verify_relay_module_registry(root: &Path) -> Result<(), String> {
             "relay.transport.library",
             "freehand_relay",
         ),
+        (
+            "relay.transport.server-host_to_account-config",
+            "relay.transport.server-host",
+            "config.account-config-sync.library",
+            "freehand_account_config",
+        ),
     ];
     if registry.declared_edges.len() != expected_edges.len() {
-        return Err("relay module registry must declare exactly two internal edges".to_owned());
+        return Err("relay module registry must declare exactly three registered edges".to_owned());
     }
     for (edge, expected) in registry.declared_edges.iter().zip(expected_edges) {
         if (
@@ -4265,6 +4289,11 @@ fn verify_relay_module_registry(root: &Path) -> Result<(), String> {
     require_contains(
         &host_source,
         "use freehand_relay::{",
+        "apps/freehand-relay-server/src/main.rs",
+    )?;
+    require_contains(
+        &host_source,
+        "use freehand_account_config::{",
         "apps/freehand-relay-server/src/main.rs",
     )?;
     let daemon_source = fs::read_to_string(root.join("apps/freehand-daemon/src/main.rs"))
@@ -4393,6 +4422,111 @@ fn verify_config_module_registry(root: &Path) -> Result<(), String> {
     Ok(())
 }
 
+fn verify_account_config_sync_boundary(root: &Path) -> Result<(), String> {
+    let module_path = root.join("docs/module-registry/config.account-config-sync.json");
+    let module_source = fs::read_to_string(&module_path).map_err(|error| error.to_string())?;
+    let registry: RelayModuleRegistry =
+        serde_json::from_str(&module_source).map_err(|error| error.to_string())?;
+    if registry.schema_version != 1
+        || registry.registry_id != "config.account-config-sync.modules"
+        || registry.feature_id != "config.account-config-sync"
+        || registry.status != "active"
+        || registry.coverage_roots != ["crates/freehand-account-config"]
+        || registry.modules.len() != 2
+        || registry.declared_edges.len() != 1
+    {
+        return Err(
+            "config.account-config-sync module registry identity/shape is invalid".to_owned(),
+        );
+    }
+    let mut covered_files = BTreeSet::new();
+    collect_all_file_paths(
+        root,
+        &root.join("crates/freehand-account-config"),
+        &mut covered_files,
+    )?;
+    let owned_files = registry
+        .modules
+        .iter()
+        .flat_map(|module| module.owned_paths.iter().cloned())
+        .collect::<BTreeSet<_>>();
+    if covered_files != owned_files {
+        return Err(format!(
+            "config.account-config-sync module coverage mismatch; covered={covered_files:?}; owned={owned_files:?}"
+        ));
+    }
+    let cargo = fs::read_to_string(root.join("crates/freehand-account-config/Cargo.toml"))
+        .map_err(|error| error.to_string())?;
+    for forbidden in [
+        "freehand-relay",
+        "freehand-config",
+        "freehand-runtime",
+        "freehand-server",
+        "freehand-node",
+        "freehand-reason",
+        "freehand-ui-protocol",
+    ] {
+        if cargo.contains(forbidden) {
+            return Err(format!(
+                "freehand-account-config must remain independent and cannot depend on {forbidden}"
+            ));
+        }
+    }
+    let source = fs::read_to_string(root.join("crates/freehand-account-config/src/lib.rs"))
+        .map_err(|error| error.to_string())?;
+    for required in [
+        "pub fn validate_config_document",
+        "pub fn project_safe_document",
+        "pub fn get(&self, account_id: &str)",
+        "pub fn put(",
+        "header::IF_MATCH",
+        "StatusCode::CONFLICT",
+        "persist_atomically",
+    ] {
+        require_contains(
+            &source,
+            required,
+            "crates/freehand-account-config/src/lib.rs",
+        )?;
+    }
+    for forbidden in [
+        "api_key:",
+        "access_token:",
+        "password:",
+        "pair_token:",
+        "local_web_url:",
+        "metadata:",
+    ] {
+        require_absent(
+            &source,
+            forbidden,
+            "crates/freehand-account-config/src/lib.rs",
+        )?;
+    }
+    let verification_source =
+        fs::read_to_string(root.join("docs/verification-maps/config.account-config-sync.json"))
+            .map_err(|error| error.to_string())?;
+    let verification: serde_json::Value = serde_json::from_str(&verification_source)
+        .map_err(|error| format!("config.account-config-sync verification map invalid: {error}"))?;
+    if verification["verification_map_id"] != "config.account-config-sync.verification"
+        || verification["feature_id"] != "config.account-config-sync"
+        || verification["status"] != "active"
+        || verification["module_registry"] != "docs/module-registry/config.account-config-sync.json"
+    {
+        return Err("config.account-config-sync verification map identity is invalid".to_owned());
+    }
+    let host = fs::read_to_string(root.join("apps/freehand-relay-server/src/main.rs"))
+        .map_err(|error| error.to_string())?;
+    for required in [
+        "AccountConfigStore::from_env()?",
+        "service.clone_account_resolver()",
+        ".merge(config_router(account_config_store, authenticator))",
+    ] {
+        require_contains(&host, required, "apps/freehand-relay-server/src/main.rs")?;
+    }
+    Ok(())
+}
+
 fn collect_all_file_paths(
     root: &Path,
     directory: &Path,
@@ -4431,6 +4565,7 @@ fn verify_relay_verification_map(root: &Path) -> Result<(), String> {
     let expected_active = [
         "relay.transport.unit-module",
         "relay.transport.module-blackbox",
+        "relay.transport.updates-blackbox",
         "relay.transport.server-check",
         "relay.transport.clippy",
         "relay.transport.deployment-smoke",
@@ -4475,6 +4610,21 @@ fn verify_relay_verification_map(root: &Path) -> Result<(), String> {
     if remote.binding_status != "manual-required" || remote.command.trim().is_empty() {
         return Err(
             "relay remote-network verification must be an explicit manual-required gate".to_owned(),
+        );
+    }
+    let dual_path = map
+        .gates
+        .iter()
+        .find(|gate| gate.gate_id == "relay.transport.dual-path-update")
+        .ok_or_else(|| "relay verification map is missing dual-path-update gate".to_owned())?;
+    if dual_path.binding_status != "manual-required"
+        || dual_path.kind != "online-remote"
+        || dual_path.command.trim().is_empty()
+        || !dual_path.command.contains("verify-dual-path-update.sh")
+    {
+        return Err(
+            "relay dual-path-update must be an explicit manual-required online-remote gate"
+                .to_owned(),
         );
     }
     let makefile = fs::read_to_string(root.join("Makefile")).map_err(|error| error.to_string())?;

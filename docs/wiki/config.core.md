@@ -14,6 +14,7 @@ Generated from `docs/mainline-calls/config.core.json`. Do not edit by hand.
 - config.mutate_provider_config
 - config.mutate_model_group_config
 - config.compile_remote_daemon_registry
+- config.project_shared_account_config
 
 ## Request Mainline
 
@@ -80,6 +81,7 @@ Generated from `docs/mainline-calls/config.core.json`. Do not edit by hand.
 | 05 | `validate_config` | `crates/freehand-config/src/lib.rs` | validate agent registry, ordered multi-peer topology, provider registry, protocol declaration, auth invariants, and unknown-field rejection | raw parsed config | validated loaded config | parser | validator |  |  |  | bound |
 | 06 | `LoadedConfig::providers` | `crates/freehand-config/src/lib.rs` | expose validated provider registry truth | loaded config | provider registry view | tests/runtime wiring | registry accessor |  |  |  | bound |
 | 06a | `LoadedConfig::safe_provider_registry / ProviderConfig::safe_projection` | `crates/freehand-config/src/lib.rs` | project every configured provider without credential values | loaded provider registry | safe provider registry projection | runtime.ui-command-dispatch / tests | provider registry projector |  |  |  | bound |
+| 06s | `export_shared_account_config` | `crates/freehand-config/src/lib.rs` | project env-auth providers, compatible model groups, Relay endpoint candidates, and remote daemon entries into the strict account-scoped non-secret document | loaded local config | validated account-scoped non-secret config content or explicit export error | dispatch_push_account_config | freehand-account-config::validate_config_document | config | account_config_document | config.project_shared_account_config | bound |
 | 06b | `LoadedConfig::model_groups` | `crates/freehand-config/src/lib.rs` | expose validated model group registry truth | loaded config | model group registry view | tests/runtime wiring | registry accessor |  |  |  | bound |
 | 06c | `LoadedConfig::safe_model_group_registry / ModelGroupConfig::safe_projection` | `crates/freehand-config/src/lib.rs` | project every configured model group route without credential values | loaded model group registry | safe model group registry projection | runtime.ui-command-dispatch / tests | model group registry projector |  |  |  | bound |
 | 07 | `LoadedConfig::select_agent` | `crates/freehand-config/src/lib.rs` | select one agent and resolve its provider binding, ordered typed peer topology, env-backed provider auth, and optional atomic Relay URL plus token-env connection | agent name plus env | selected agent runtime config with runtime-only resolved Relay token when configured | CLI/server startup | env resolver | config | config | config.compile_agent_relay_connection | bound |

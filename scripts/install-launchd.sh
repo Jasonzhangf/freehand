@@ -164,9 +164,32 @@ stage_android_update_dist_if_available() {
     echo "Android update distribution is incomplete under $source_dir; expected update.json and freehand-android-release.apk" >&2
     exit 2
   fi
+  jq -e '
+    (.versionCode | type == "number" and . > 0) and
+    (.versionName | type == "string" and length > 0) and
+    (.apkUrl == "/android/freehand-android.apk") and
+    (.sha256 | type == "string" and test("^[0-9a-f]{64}$")) and
+    (.size | type == "number" and . > 0) and
+    (.signerSha256 | type == "string" and test("^[0-9a-f]{64}$"))
+  ' "$source_manifest" >/dev/null || {
+    echo "Android update manifest is missing required dual-path integrity fields: $source_manifest" >&2
+    exit 2
+  }
+  actual_size="$(wc -c <"$source_apk" | tr -d ' ')"
+  expected_size="$(jq -r '.size' "$source_manifest")"
+  actual_sha256="$(shasum -a 256 "$source_apk" | cut -d ' ' -f 1)"
+  expected_sha256="$(jq -r '.sha256' "$source_manifest")"
+  [[ "$actual_size" == "$expected_size" ]] || {
+    echo "Android update APK size does not match manifest: expected=$expected_size actual=$actual_size" >&2
+    exit 2
+  }
+  [[ "$actual_sha256" == "$expected_sha256" ]] || {
+    echo "Android update APK SHA-256 does not match manifest: expected=$expected_sha256 actual=$actual_sha256" >&2
+    exit 2
+  }
   mkdir -p "$runtime_android_dist_dir"
-  cp "$source_manifest" "$runtime_android_update_manifest"
-  cp "$source_apk" "$runtime_android_apk"
+  install -m 0644 "$source_manifest" "$runtime_android_update_manifest"
+  install -m 0644 "$source_apk" "$runtime_android_apk"
 }
 
 copy_worker_provider_env_from_master() {

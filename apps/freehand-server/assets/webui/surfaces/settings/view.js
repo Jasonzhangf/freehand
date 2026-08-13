@@ -38,6 +38,7 @@ export function renderSettingsShellSurface(context) {
   context.syncSettingsModelGroupForm();
   context.renderSettingsModelGroupRegistry();
   context.renderSystemAgentResourceConfig();
+  context.renderAccountConfigSync();
   context.renderAndroidApkUpdateSettings();
   renderSettingsDiagnosticsSurface(context);
   renderSettingsNavigationSurface(context);

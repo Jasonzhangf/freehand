@@ -48,6 +48,26 @@ verify_android_apk_signature() {
   "$apksigner_bin" verify --verbose "$apk_path" >/dev/null
 }
 
+extract_android_signer_sha256() {
+  local apk_path="$1"
+  local apksigner_bin
+  apksigner_bin="$(find_apksigner)"
+  if [[ -z "$apksigner_bin" ]]; then
+    echo "missing required command: apksigner; set ANDROID_HOME or install Android build-tools" >&2
+    exit 2
+  fi
+  local digest
+  digest="$("$apksigner_bin" verify --verbose --print-certs "$apk_path" \
+    | sed -n 's/^Signer #1 certificate SHA-256 digest: //p' \
+    | tr 'A-Z' 'a-z' \
+    | head -n 1)"
+  if [[ ! "$digest" =~ ^[0-9a-f]{64}$ ]]; then
+    echo "failed to extract signer certificate SHA-256 digest from $apk_path" >&2
+    exit 2
+  fi
+  printf '%s\n' "$digest"
+}
+
 write_android_update_manifest() {
   local apk_path="$1"
   local manifest_path="$2"
@@ -58,10 +78,13 @@ write_android_update_manifest() {
     exit 2
   fi
 
-  local package_line version_code version_name
+  local package_line version_code version_name apk_sha256 apk_size apk_signer_sha256
   package_line="$("$aapt_bin" dump badging "$apk_path" | sed -n '1p')"
   version_code="$(printf '%s\n' "$package_line" | sed -n "s/.*versionCode='\([^']*\)'.*/\1/p")"
   version_name="$(printf '%s\n' "$package_line" | sed -n "s/.*versionName='\([^']*\)'.*/\1/p")"
+  apk_sha256="$(shasum -a 256 "$apk_path" | cut -d ' ' -f 1)"
+  apk_size="$(wc -c < "$apk_path" | tr -d ' ')"
+  apk_signer_sha256="$(extract_android_signer_sha256 "$apk_path")"
   if [[ ! "$version_code" =~ ^[1-9][0-9]*$ ]]; then
     echo "failed to extract positive Android versionCode from $apk_path" >&2
     exit 2
@@ -72,14 +95,47 @@ write_android_update_manifest() {
   fi
 
   cat >"$manifest_path" <<EOF
-{"versionCode":$version_code,"versionName":"$version_name","apkUrl":"/android/freehand-android.apk","releaseNotes":"Freehand Android release artifact served by the current daemon.","required":false}
+{"versionCode":$version_code,"versionName":"$version_name","apkUrl":"/android/freehand-android.apk","sha256":"$apk_sha256","size":$apk_size,"signerSha256":"$apk_signer_sha256","releaseNotes":"Freehand Android release artifact served by the current daemon.","required":false}
 EOF
-  echo "[freehand-release] android update manifest versionCode=$version_code versionName=$version_name"
+  echo "[freehand-release] android update manifest versionCode=$version_code versionName=$version_name sha256=$apk_sha256 size=$apk_size signerSha256=$apk_signer_sha256"
+}
+
+stage_relay_update_bundle() {
+  local android_dir="$1"
+  local relay_dir="$2"
+  mkdir -p "$relay_dir"
+  cp "$android_dir/freehand-android-release.apk" "$relay_dir/freehand-android.apk"
+  local version_code version_name sha256 size signer_sha256 release_notes required
+  version_code="$(jq -r '.versionCode' "$android_dir/update.json")"
+  version_name="$(jq -r '.versionName' "$android_dir/update.json")"
+  sha256="$(jq -r '.sha256' "$android_dir/update.json")"
+  size="$(jq -r '.size' "$android_dir/update.json")"
+  signer_sha256="$(jq -r '.signerSha256' "$android_dir/update.json")"
+  release_notes="$(jq -r '.releaseNotes' "$android_dir/update.json")"
+  required="$(jq -r '.required' "$android_dir/update.json")"
+  if [[ ! "$signer_sha256" =~ ^[0-9a-f]{64}$ ]]; then
+    echo "android update manifest is missing signerSha256: $android_dir/update.json" >&2
+    exit 2
+  fi
+  jq -n \
+    --argjson versionCode "$version_code" \
+    --arg versionName "$version_name" \
+    --arg apkUrl "/relay/updates/freehand-android.apk" \
+    --arg sha256 "$sha256" \
+    --argjson size "$size" \
+    --arg signerSha256 "$signer_sha256" \
+    --arg releaseNotes "$release_notes" \
+    --argjson required "$required" \
+    '{versionCode:$versionCode,versionName:$versionName,apkUrl:$apkUrl,sha256:$sha256,size:$size,signerSha256:$signerSha256,releaseNotes:$releaseNotes,required:$required}' \
+    > "$relay_dir/latest.json"
+  echo "[freehand-release] relay update bundle sha256=$sha256 size=$size signerSha256=$signer_sha256"
 }
 
 run_release() {
   require_cmd cargo
+  require_cmd jq
   require_cmd make
+  require_cmd shasum
 
   if [[ -n "${JAVA_HOME:-}" ]]; then
     export PATH="$JAVA_HOME/bin:$PATH"
@@ -96,7 +152,11 @@ run_release() {
   )
 
   echo "[freehand-release] rust release binaries"
-  cargo build --release -p freehand-cli -p freehand-server -p freehand-daemon
+  cargo build --release \
+    -p freehand-cli \
+    -p freehand-server \
+    -p freehand-daemon \
+    -p freehand-relay-server
 
   echo "[freehand-release] android release apk"
   (
@@ -105,17 +165,21 @@ run_release() {
   )
 
   rm -rf "$dist_dir"
-  mkdir -p "$dist_dir/bin" "$dist_dir/android"
+  mkdir -p "$dist_dir/bin" "$dist_dir/android" "$dist_dir/relay/updates"
 
   cp target/release/freehand-cli "$dist_dir/bin/freehand-cli"
   cp target/release/freehand-server "$dist_dir/bin/freehand-server"
   cp target/release/freehand-daemon "$dist_dir/bin/freehand-daemon"
+  cp target/release/freehand-relay-server "$dist_dir/bin/freehand-relay-server"
   cp apps/freehand-android/app/build/outputs/apk/release/app-release.apk \
     "$dist_dir/android/freehand-android-release.apk"
   verify_android_apk_signature "$dist_dir/android/freehand-android-release.apk"
   write_android_update_manifest \
     "$dist_dir/android/freehand-android-release.apk" \
     "$dist_dir/android/update.json"
+  stage_relay_update_bundle \
+    "$dist_dir/android" \
+    "$dist_dir/relay/updates"
 
   echo "[freehand-release] artifacts:"
   find "$dist_dir" -type f -maxdepth 3 -print | sort

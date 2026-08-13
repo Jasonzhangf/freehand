@@ -82,6 +82,7 @@ This table is the feature-map backlink for `docs/resource-maps/core.json`. The r
 | feature_id | owned resources | resource map |
 | --- | --- | --- |
 | `config.core` | `config`, `remote_daemon_registry` | `docs/resource-maps/core.json` |
+| `config.account-config-sync` | `account_config_document` | `docs/resource-maps/core.json` |
 | `reason.persistence` | `session` | `docs/resource-maps/core.json` |
 | `reason.turn` | `turn` | `docs/resource-maps/core.json` |
 | `reason.context-planner` | `request_context` | `docs/resource-maps/core.json` |
@@ -101,7 +102,7 @@ This table is the feature-map backlink for `docs/resource-maps/core.json`. The r
 | `app.acp-server` | `acp_transport` | `docs/resource-maps/core.json` |
 | `runtime.checkpoint-rewind` | `checkpoint` | `docs/resource-maps/core.json` |
 | `node.master-slave` | `node_pairing`, `remote_daemon_directory` | `docs/resource-maps/core.json` |
-| `relay.transport` | `relay_account`, `agent_presence`, `relay_control_tunnel`, `relay_data_tunnel`, `relay_error_tunnel` | `docs/resource-maps/core.json` |
+| `relay.transport` | `relay_account`, `agent_presence`, `relay_control_tunnel`, `relay_data_tunnel`, `relay_error_tunnel`, `relay_update_artifact` | `docs/resource-maps/core.json` |
 | `app.android-client` | `android_apk_update`, `android_file_access`, `android_notification` | `docs/resource-maps/core.json` |
 | `instruction.capability-loader` | `instruction_capability` | `docs/resource-maps/core.json` |
 
@@ -526,6 +527,49 @@ Non-violation pending items live in `docs/architecture/architecture-gaps.md`. Ea
   - remote daemon accounts, daemon endpoint candidates, route diagnostics, and QR bootstrap bundles remain config-owned and secret-safe
   - migrated mainline call source and generated wiki stay in sync with the function map
 
+### `config.account-config-sync`
+
+- owner: `crates/freehand-account-config`; `apps/freehand-relay-server` provides the authenticated Relay-host composition boundary
+- allowed_paths: `crates/freehand-account-config/**`, `apps/freehand-relay-server/**`, `docs/module-registry/config.account-config-sync.json`, `docs/verification-maps/config.account-config-sync.json`, `docs/function-maps/config.account-config-sync.md`, `docs/testing/config.account-config-sync.md`, `docs/mainline-calls/config.account-config-sync.json`, `docs/wiki/config.account-config-sync.md`, `docs/resource-maps/core.json`, `docs/architecture/feature-map.md`, `scripts/verify-relay-account-config-smoke.sh`, `Makefile`, `xtask/**`, `Cargo.toml`, `Cargo.lock`, `MEMORY.md`, `note.md`
+- forbidden_paths: Relay store/agent directory/tunnel truth, provider credential values, whole-machine `config.toml` upload, WebUI local-state truth, ADP/business payload config content
+- required_checks:
+  - `cargo test -p freehand-account-config -- --nocapture`
+  - `cargo test -p freehand-account-config --test account_config_http_blackbox -- --nocapture`
+  - `cargo check -p freehand-relay-server`
+  - `scripts/verify-relay-account-config-smoke.sh`
+  - `cargo run -p xtask -- mainlines check`
+  - `cargo run -p xtask -- gates check`
+- required_white_box_tests:
+  - same-account multi-device document reads
+  - revision/etag generation and If-Match conflict rejection
+  - cross-account isolation
+  - secret-field and whole-config rejection
+  - failed persistence never publishes a new revision
+- required_module_black_box_tests:
+  - authenticated GET/PUT round trip through the merged Relay host router
+  - missing token, stale If-Match 409 with server document, and cross-account 404 rejection
+- required_project_black_box_tests:
+  - standalone Relay host process serves account-scoped config and preserves the document across restart
+- test_design_doc: `docs/testing/config.account-config-sync.md`
+- module_registry: `docs/module-registry/config.account-config-sync.json`
+- function_map_doc: `docs/function-maps/config.account-config-sync.md`
+- mainline_call_doc: `docs/mainline-calls/config.account-config-sync.json`
+- generated_wiki_doc: `docs/wiki/config.account-config-sync.md`
+- debug_artifacts:
+  - account-scoped config document files under `FREEHAND_RELAY_ACCOUNT_CONFIG_DIR`
+- runtime_paths:
+  - `FREEHAND_RELAY_ACCOUNT_CONFIG_DIR` (Claw: `/var/lib/freehand-relay/account-config`)
+- update_triggers:
+  - account config document schema changes
+  - revision/etag or If-Match conflict policy changes
+  - secret-boundary or safe-projection changes
+  - Relay-host config route wiring changes
+- lifecycle_checks:
+  - account-scoped document is the only server-side config truth
+  - secret values never enter the document or any response
+  - conflict updates return the server current document instead of last-write-wins
+  - migrated mainline call source and generated wiki stay in sync with the function map
+
 ### `app.cli-runtime-smoke`
 
 - owner: `apps/freehand-cli`
@@ -668,7 +712,7 @@ Non-violation pending items live in `docs/architecture/architecture-gaps.md`. Ea
 ### `relay.transport`
 
 - owner: `crates/freehand-relay` for account, presence, and proxy semantics; `apps/freehand-relay-server` is the thin process/deployment host; `apps/freehand-daemon` may only expose the registered compatibility-host edge to the Relay public API
-- allowed_paths: `crates/freehand-relay/**`, `apps/freehand-relay-server/**`, registered compatibility-host wiring in `apps/freehand-daemon/Cargo.toml` and `apps/freehand-daemon/src/main.rs`, `docs/module-registry/relay.transport.json`, `docs/verification-maps/relay.transport.json`, `docs/function-maps/relay.transport.md`, `docs/testing/relay.transport.md`, `docs/lifecycles/relay-outbound-tunnel.json`, `docs/mainline-calls/relay.transport.json`, `docs/mainline-calls/app.runtime-daemon.json`, `docs/wiki/relay.transport.md`, `docs/wiki/app.runtime-daemon.md`, `docs/resource-maps/core.json`, `docs/architecture/feature-map.md`, `docs/architecture/dev-gates.md`, `scripts/verify-relay-deployment-smoke.sh`, `scripts/verify-remote-relay-local-online.sh`, `Makefile`, `xtask/**`, `Cargo.toml`, `Cargo.lock`, `MEMORY.md`, `note.md`
+- allowed_paths: `crates/freehand-relay/**`, `apps/freehand-relay-server/**`, registered compatibility-host wiring in `apps/freehand-daemon/Cargo.toml` and `apps/freehand-daemon/src/main.rs`, `docs/module-registry/relay.transport.json`, `docs/verification-maps/relay.transport.json`, `docs/function-maps/relay.transport.md`, `docs/testing/relay.transport.md`, `docs/lifecycles/relay-outbound-tunnel.json`, `docs/mainline-calls/relay.transport.json`, `docs/mainline-calls/app.runtime-daemon.json`, `docs/wiki/relay.transport.md`, `docs/wiki/app.runtime-daemon.md`, `docs/resource-maps/core.json`, `docs/architecture/feature-map.md`, `docs/architecture/dev-gates.md`, `scripts/verify-relay-deployment-smoke.sh`, `scripts/verify-remote-relay-local-online.sh`, `scripts/verify-dual-path-update.sh`, `Makefile`, `xtask/**`, `Cargo.toml`, `Cargo.lock`, `MEMORY.md`, `note.md`
 - forbidden_paths: account/password/token/presence semantic ownership in `apps/freehand-server/**`, `apps/freehand-daemon/**`, `crates/freehand-config/**`, WebUI/Android session/task truth, provider configuration payloads
 - required_checks:
   - `cargo test -p freehand-relay -- --nocapture`
@@ -677,6 +721,7 @@ Non-violation pending items live in `docs/architecture/architecture-gaps.md`. Ea
   - `cargo check -p freehand-relay-server`
   - `scripts/verify-relay-deployment-smoke.sh`
   - `scripts/verify-remote-relay-local-online.sh`
+  - `scripts/verify-dual-path-update.sh <tailscale-manifest-url> <relay-manifest-url>`
   - `cargo run -p xtask -- mainlines check`
   - `cargo run -p xtask -- gates check`
 - required_white_box_tests:
@@ -691,8 +736,10 @@ Non-violation pending items live in `docs/architecture/architecture-gaps.md`. Ea
   - same-account directory and cross-account isolation
   - authenticated heartbeat and lease expiry
   - namespaced WebUI HTTP rewrite and ADP WebSocket round trip
+  - configured update manifest/APK bytes, unconfigured route failure, missing file, and traversal rejection
 - required_project_black_box_tests:
   - standalone release binary restart preserves account/token/presence truth and deployment manifest starts without product daemon/WebUI wiring
+  - Claw Relay serves the same versionCode/sha256/size APK bytes as the explicit Tailscale daemon update route
 - test_design_doc: `docs/testing/relay.transport.md`
 - module_registry: `docs/module-registry/relay.transport.json`
 - verification_map: `docs/verification-maps/relay.transport.json`
@@ -705,11 +752,13 @@ Non-violation pending items live in `docs/architecture/architecture-gaps.md`. Ea
 - runtime_paths:
   - `/var/lib/freehand-relay/store.json`
   - `/etc/freehand-relay/relay.env`
+  - `/var/lib/freehand-relay/updates`
 - update_triggers:
   - Relay account/token contract changes
   - Agent heartbeat/directory projection changes
   - HTTP/ADP proxy route changes
   - deployment unit/env changes
+  - Relay update artifact route or release-bundle contract changes
 - lifecycle_checks:
   - Relay restart restores account/token/presence truth before serving
   - expired Agent presence is offline and cannot be proxied

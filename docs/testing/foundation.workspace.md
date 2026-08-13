@@ -100,7 +100,9 @@
 - project black-box impact:
   - full workspace `make ci` gate smoke, including `cargo run -p xtask -- mainlines check`
   - `cargo run -p xtask -- gates check` invokes `verify_webui_foundation_contracts`, so WebUI foundation schema drift blocks the canonical project gate
-  - `scripts/release.sh` stages host and Android release artifacts plus `dist/android/update.json` under `dist/`
+  - `scripts/release.sh` stages host and Android release artifacts plus `dist/android/update.json` under `dist/`; the manifest carries the APK signer certificate SHA-256 digest and Relay staging preserves it
+  - `scripts/verify-dual-path-update.sh` validates manifest and downloaded APK version, SHA-256, byte size, and signer certificate identity on both explicit endpoints
+  - `bash -n apps/freehand-relay-server/deploy/claw-deploy.sh` validates the Claw deployment evidence script before any external deployment
   - `scripts/install-global.sh` installs `freehand-cli`, `freehand-server`, `freehand-daemon`, and runtime-home Android update artifacts
   - `scripts/install-symlink.sh` installs `freehand-cliS`, `freehand-serverS`, `freehand-daemonS`, and `freehand-daemon-launchdS` as symlinks
   - `scripts/install-launchd.sh` starts `com.freehand.daemon` with `RunAtLoad`, `KeepAlive`, explicit daemon binary path, explicit Android update manifest/APK paths, fixed `127.0.0.1:4041`, and logs under `~/.freehand/logs`

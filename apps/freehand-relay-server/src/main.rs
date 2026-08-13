@@ -1,6 +1,8 @@
 use std::net::SocketAddr;
+use std::sync::Arc;
 use std::time::Duration;
 
+use freehand_account_config::{AccountConfigError, AccountConfigStore, config_router};
 use freehand_relay::{
     AgentHeartbeat, AgentRole, AgentWorkStatus, RelayAgentClient, RelayAgentClientConfig,
     RelayServerConfig, RelayService, RelayServiceConfig, RelayStore,
@@ -37,12 +39,30 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         RelayServiceConfig {
             presence_lease_seconds: config.runtime.presence_lease_seconds,
             secure_cookie: config.secure_cookie,
+            updates_dir: config.runtime.updates_dir.clone(),
         },
     )?;
     let listener = TcpListener::bind(config.bind).await?;
+    let router = compose_router(service, Arc::new(AccountConfigStore::from_env()?));
     eprintln!("freehand relay listening on {}", config.bind);
-    service.serve(listener).await?;
+    axum::serve(listener, router).await?;
     Ok(())
+}
+
+fn compose_router(
+    service: RelayService,
+    account_config_store: Arc<AccountConfigStore>,
+) -> axum::Router {
+    let account_resolver = service.clone_account_resolver();
+    let authenticator: Arc<dyn freehand_account_config::AccountAuthenticator> =
+        Arc::new(move |headers: &axum::http::HeaderMap| {
+            account_resolver(headers).map_err(|error| {
+                AccountConfigError::Invalid(format!("Relay authentication failed: {error}"))
+            })
+        });
+    service
+        .router()
+        .merge(config_router(account_config_store, authenticator))
 }
 
 fn agent_tunnel_config_from_env() -> Result<RelayAgentClientConfig, Box<dyn std::error::Error>> {

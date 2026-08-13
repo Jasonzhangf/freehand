@@ -12,6 +12,7 @@
   - `select_provider_for_agent`
   - `ProviderAuthConfig::source_kind`
   - `LoadedConfig::providers`
+  - `export_shared_account_config`
   - `LoadedConfig::model_groups`
   - `LoadedConfig::safe_provider_registry`
   - `LoadedConfig::safe_model_group_registry`
@@ -41,9 +42,9 @@
 ## Resource Map Binding
 
 - owned resources: `config`, `remote_daemon_registry`
-- touched resources: `config`, `remote_daemon_registry`
-- resource operations: `config.compile_agent_relay_connection`, `config.mutate_provider_config`, `config.mutate_model_group_config`, `config.compile_remote_daemon_registry`
-- operation source/target: `config` -> `config`; `config` -> `remote_daemon_registry`
+- touched resources: `config`, `remote_daemon_registry`, `account_config_document`
+- resource operations: `config.compile_agent_relay_connection`, `config.mutate_provider_config`, `config.mutate_model_group_config`, `config.compile_remote_daemon_registry`, `config.project_shared_account_config`
+- operation source/target: `config` -> `config`; `config` -> `remote_daemon_registry`; `config` -> `account_config_document`
 - forbidden shortcuts: Android, WebUI, runtime, and node pairing must not invent account directory truth, endpoint candidate truth, route scoring, or QR/deep-link credential semantics outside `config.core`.
 - secret boundary: provider keys, pair tokens, and remote daemon one-time credentials must not enter safe config projections; QR safe summaries may expose account/daemon/endpoint ids but not credential values.
 
@@ -111,6 +112,7 @@
 | 04 | `parse_config` | `crates/freehand-config/src/lib.rs` | parse raw TOML into typed config | raw config text | raw parsed config | file loader | TOML parser |  |  |  | bound |
 | 05 | `validate_config` | `crates/freehand-config/src/lib.rs` | validate agent registry, ordered multi-peer topology, and provider registry invariants | raw parsed config | validated loaded config | parser | validator |  |  |  | bound |
 | 06 | `LoadedConfig::providers` | `crates/freehand-config/src/lib.rs` | expose validated provider registry truth | loaded config | provider registry view | tests/runtime wiring | registry accessor |  |  |  | bound |
+| 06s | `export_shared_account_config` | `crates/freehand-config/src/lib.rs` | project env-auth providers, compatible model groups, Relay endpoint candidates, and remote daemon entries into the strict account-scoped non-secret document | loaded config | validated shared account config content | runtime account-config push | freehand-account-config::validate_config_document | `config` | `account_config_document` | `config.project_shared_account_config` | bound |
 | 06a | `LoadedConfig::safe_provider_registry` / `ProviderConfig::safe_projection` | `crates/freehand-config/src/lib.rs` | project every configured provider without credential values | loaded provider registry | safe provider registry projection | runtime.ui-command-dispatch / tests | provider registry projector |  |  |  | bound |
 | 06b | `LoadedConfig::model_groups` | `crates/freehand-config/src/lib.rs` | expose validated model group registry truth | loaded config | model group registry view | tests/runtime wiring | registry accessor |  |  |  | bound |
 | 06c | `LoadedConfig::safe_model_group_registry` / `ModelGroupConfig::safe_projection` | `crates/freehand-config/src/lib.rs` | project every configured model group route without credential values | loaded model group registry | safe model group registry projection | runtime.ui-command-dispatch / tests | model group registry projector |  |  |  | bound |

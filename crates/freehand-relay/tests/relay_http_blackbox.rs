@@ -129,13 +129,22 @@ async fn spawn_upstream() -> TestServer {
 }
 
 async fn spawn_relay(store_path: &Path, lease_seconds: u64) -> TestServer {
-    spawn_relay_with_cookie_policy(store_path, lease_seconds, false).await
+    spawn_relay_with_options(store_path, lease_seconds, false, None).await
 }
 
 async fn spawn_relay_with_cookie_policy(
     store_path: &Path,
     lease_seconds: u64,
     secure_cookie: bool,
+) -> TestServer {
+    spawn_relay_with_options(store_path, lease_seconds, secure_cookie, None).await
+}
+
+async fn spawn_relay_with_options(
+    store_path: &Path,
+    lease_seconds: u64,
+    secure_cookie: bool,
+    updates_dir: Option<&Path>,
 ) -> TestServer {
     let listener = TcpListener::bind("127.0.0.1:0").await.expect("relay bind");
     let address = listener.local_addr().expect("relay address");
@@ -146,6 +155,7 @@ async fn spawn_relay_with_cookie_policy(
         RelayServiceConfig {
             presence_lease_seconds: lease_seconds,
             secure_cookie,
+            updates_dir: updates_dir.map(Path::to_path_buf),
         },
     )
     .expect("relay service");
@@ -983,4 +993,111 @@ async fn auth_errors_expiry_and_corrupt_restart_fail_explicitly() {
     )
     .expect("incomplete store");
     assert!(RelayStore::load(&absent_store).is_err());
+}
+
+#[tokio::test]
+async fn relay_updates_return_explicit_error_when_directory_unset() {
+    let temp = TempDir::new().expect("tempdir");
+    let relay = spawn_relay(&temp.path().join("relay.json"), 45).await;
+    let client = Client::new();
+    let response = client
+        .get(format!("{}/relay/updates/latest.json", relay.base_url))
+        .send()
+        .await
+        .expect("updates request");
+    assert_eq!(response.status(), StatusCode::BAD_REQUEST);
+    let body: serde_json::Value = response.json().await.expect("error body");
+    assert_eq!(body["code"], "relay_invalid_request");
+    assert!(
+        body["message"]
+            .as_str()
+            .unwrap_or_default()
+            .contains("updates directory is not configured"),
+        "unexpected message: {body}"
+    );
+}
+
+#[tokio::test]
+async fn relay_updates_serve_manifest_and_apk_when_configured() {
+    let temp = TempDir::new().expect("tempdir");
+    let updates_dir = temp.path().join("updates");
+    std::fs::create_dir_all(&updates_dir).expect("updates dir");
+    let manifest = r#"{"versionCode":20260731,"versionName":"0.2.8","apkUrl":"/relay/updates/freehand-android.apk","sha256":"979906f579118625c1f57e6db1eef8f055475ed884abb93934e180d0b8f14611","required":false}"#;
+    std::fs::write(updates_dir.join("latest.json"), manifest).expect("write manifest");
+    let apk_bytes = b"freehand-apk-fixture-bytes";
+    std::fs::write(updates_dir.join("freehand-android.apk"), apk_bytes).expect("write apk");
+
+    let relay = spawn_relay_with_options(
+        &temp.path().join("relay.json"),
+        45,
+        false,
+        Some(updates_dir.as_path()),
+    )
+    .await;
+    let client = Client::new();
+
+    let latest = client
+        .get(format!("{}/relay/updates/latest.json", relay.base_url))
+        .send()
+        .await
+        .expect("latest request");
+    assert_eq!(latest.status(), StatusCode::OK);
+    assert_eq!(
+        latest
+            .headers()
+            .get("content-type")
+            .and_then(|value| value.to_str().ok()),
+        Some("application/json")
+    );
+    assert_eq!(
+        latest
+            .headers()
+            .get("cache-control")
+            .and_then(|value| value.to_str().ok()),
+        Some("no-store, max-age=0")
+    );
+    let body: serde_json::Value = latest.json().await.expect("latest body");
+    assert_eq!(body["versionCode"], 20260731);
+    assert_eq!(
+        body["sha256"],
+        "979906f579118625c1f57e6db1eef8f055475ed884abb93934e180d0b8f14611"
+    );
+    assert_eq!(body["apkUrl"], "/relay/updates/freehand-android.apk");
+
+    let apk = client
+        .get(format!(
+            "{}/relay/updates/freehand-android.apk",
+            relay.base_url
+        ))
+        .send()
+        .await
+        .expect("apk request");
+    assert_eq!(apk.status(), StatusCode::OK);
+    assert_eq!(
+        apk.headers()
+            .get("content-type")
+            .and_then(|value| value.to_str().ok()),
+        Some("application/vnd.android.package-archive")
+    );
+    let downloaded = apk.bytes().await.expect("apk body");
+    assert_eq!(downloaded.as_ref(), apk_bytes);
+
+    let missing = client
+        .get(format!("{}/relay/updates/missing.apk", relay.base_url))
+        .send()
+        .await
+        .expect("missing request");
+    assert_eq!(missing.status(), StatusCode::NOT_FOUND);
+
+    let traversal = client
+        .get(format!("{}/relay/updates/../latest.json", relay.base_url))
+        .send()
+        .await
+        .expect("traversal request");
+    assert!(
+        traversal.status() == StatusCode::BAD_REQUEST
+            || traversal.status() == StatusCode::NOT_FOUND,
+        "path traversal must not succeed: {}",
+        traversal.status()
+    );
 }

@@ -35,19 +35,19 @@
   "response_mainline": [
     "daemon root returns the canonical WebUI shell and mobile layout attributes",
     "remote_registry import persists scanned account, daemon, active endpoint, endpoint candidates, and one-time credential in app-owned registry sidecar before WebView navigation, while also rewriting the legacy config file to a connection-compatible projection older APKs can still read",
-    "a positive higher-version daemon APK manifest with a relative or http(s) APK URL downloads the APK into app cache and opens Android's system package installer with a FileProvider URI",
+    "a positive higher-version daemon APK manifest with a relative or http(s) APK URL plus required SHA-256, byte size, and signer certificate identity downloads the APK into app cache, verifies package identity and all integrity fields, and opens Android's system package installer with a FileProvider URI; current or older legacy manifests may omit integrity fields because they produce no update plan",
     "APK update status phases are pushed to window.__freehandAndroidApkUpdateStatus for the daemon WebUI Settings card",
     "File-access startup permission status is logged as FreehandFileAccess rows for requested, settings handoff, granted, restricted, or settings-unavailable states",
     "Notification startup permission status, missing-permission outcomes, duplicate suppression, and posted turn-finished notifications are logged as FreehandNotification rows",
     "Turn-finished notifications route taps back to MainActivity through the existing Android package launch intent",
-    "WebViewClient::onPageFinished logs canonical WebUI selector/layout/asset readiness evidence and removes the startup overlay only after WebUiStartupGate accepts the Android WebUI shell, applied stylesheet, and module-JavaScript probe",
+    "WebViewClient::onPageFinished starts canonical WebUI selector/layout/asset readiness probing and removes the startup overlay only after WebUiStartupGate accepts the Android WebUI shell, applied stylesheet, and module-JavaScript probe",
     "MainActivity::handleAndroidBackPressed treats a true result from window.__freehandHandleAndroidBack as handled UI navigation and otherwise falls through to WebView history or Activity finish",
     "Android file-picker result returns URI metadata to window.__freehandAndroidAttachmentSelected"
   ],
   "error_mainline": [
     "config parse/load failure is an explicit Android startup failure",
     "unknown config fields, including removed ADP/SSE/command path or top-level relay fields, are rejected rather than ignored or migrated",
-    "APK update manifest parse errors, non-positive versions, non-http absolute APK URLs, HTTP download failures, empty files, or installer handoff failures are logged as FreehandApkUpdate errors and do not become false upgrade success",
+    "APK update manifest parse errors, missing integrity fields on a higher-version update, invalid supplied integrity fields, non-positive versions, non-http absolute APK URLs, HTTP download failures, empty or mismatched files/package/signer identity, or installer handoff failures are logged as FreehandApkUpdate errors and do not become false upgrade success",
     "concurrent Settings clicks return an already_checking status instead of starting duplicate update checks",
     "runtime permission denial or Android all-files settings denial remains visible as FreehandFileAccess restricted status and does not cause repeated prompts during later file actions in the same package install marker",
     "notification permission denial remains visible as FreehandNotification missing-permission status; Android does not repeatedly prompt in the same package install marker and does not pretend the notification was posted",
@@ -104,13 +104,13 @@
     },
     {
       "step": "05",
-      "symbol_path": "com.freehand.android.ui.MainActivity.AndroidWebChromeClient::onShowFileChooser",
+      "symbol_path": "com.freehand.android.ui.MainActivity.AndroidWebChromeClient::onShowFileChooser / com.freehand.android.ui.MainActivity.AndroidWebChromeClient::onConsoleMessage",
       "file_path": "apps/freehand-android/app/src/main/java/com/freehand/android/ui/MainActivity.kt",
-      "responsibility": "route WebUI input type=file to Android system picker",
-      "input_semantic": "WebUI file chooser request",
-      "output_semantic": "selected URI array or explicit picker failure",
+      "responsibility": "route WebUI input type=file to Android system picker and project redacted WebView console diagnostics without changing UI truth",
+      "input_semantic": "WebUI file chooser request or console event",
+      "output_semantic": "selected URI array, explicit picker failure, or console level/line FreehandWebConsole diagnostic",
       "caller": "WebView",
-      "callee": "Android activity result API",
+      "callee": "Android activity result API and Logcat",
       "binding_status": "bound"
     },
     {
@@ -139,10 +139,10 @@
       "step": "08",
       "symbol_path": "com.freehand.android.ui.MainActivity::reportCanonicalWebUiLayout",
       "file_path": "apps/freehand-android/app/src/main/java/com/freehand/android/ui/MainActivity.kt",
-      "responsibility": "log canonical WebUI selector/layout/style/script evidence and hide startup overlay only after canonical shell plus asset readiness",
+      "responsibility": "log canonical WebUI selector/layout/style/script evidence, retry a bounded module-bootstrap readiness window, and hide startup overlay only after canonical shell plus asset readiness",
       "input_semantic": "loaded page DOM",
       "output_semantic": "FreehandWebUiLayout logcat row plus startup overlay readiness decision",
-      "caller": "WebViewClient::onPageFinished",
+      "caller": "WebViewClient::onPageFinished and bounded retry callback",
       "callee": "WebView JavaScript / WebUiStartupGate",
       "binding_status": "bound"
     },
@@ -205,7 +205,7 @@
       "step": "12",
       "symbol_path": "com.freehand.android.ui.AndroidApkUpdater::checkForUpdateAsync",
       "file_path": "apps/freehand-android/app/src/main/java/com/freehand/android/ui/AndroidApkUpdater.kt",
-      "responsibility": "check selected daemon update manifest against installed version without blocking canonical WebUI startup, rejecting non-positive versions and non-http absolute APK URLs, and emitting stable update phases to the caller",
+      "responsibility": "check selected daemon update manifest against installed version without blocking canonical WebUI startup, rejecting non-positive versions and non-http absolute APK URLs, and requiring SHA-256, byte size, and signer certificate identity for higher versions",
       "input_semantic": "HostConfig.updateManifestUrl plus BuildConfig.VERSION_CODE",
       "output_semantic": "status callbacks plus current-version no-op log or valid higher-version update plan",
       "caller": "MainActivity::startAndroidApkUpdateCheck",
@@ -213,7 +213,8 @@
       "resource_operation": "android_apk_update.check_manifest",
       "source_resource": "android_apk_update",
       "target_resource": "android_apk_update",
-      "binding_status": "bound"
+      "binding_status": "bound",
+      "notes": "manifest parse validates sha256, size, and signerSha256 when supplied; updatePlan requires all three for a higher version and carries them into ApkUpdatePlan; current or older legacy manifests create no plan; downloadApk verifies byte size, APK SHA-256, package name, and signer certificate SHA-256 before installer handoff"
     },
     {
       "step": "12a",
@@ -242,10 +243,10 @@
       "symbol_path": "com.freehand.android.ui.AndroidApkUpdater::downloadApk",
       "file_path": "apps/freehand-android/app/src/main/java/com/freehand/android/ui/AndroidApkUpdater.kt",
       "responsibility": "download the manifest-selected higher-version APK into app cache",
-      "input_semantic": "resolved relative/http(s) APK URL and target versionCode",
-      "output_semantic": "non-empty cached APK file",
+      "input_semantic": "resolved relative/http(s) APK URL + target versionCode + required sha256, byte size, and signerSha256",
+      "output_semantic": "cached APK file verified against manifest size, hash, package name, and signer identity",
       "caller": "AndroidApkUpdater::checkForUpdateAsync",
-      "callee": "HttpURLConnection plus app cache",
+      "callee": "Android DownloadManager plus app cache",
       "resource_operation": "android_apk_update.download_apk",
       "source_resource": "android_apk_update",
       "target_resource": "android_apk_update",
@@ -355,8 +356,12 @@
       "symbol": "reportCanonicalWebUiLayout",
       "owner": "apps/freehand-android/app/src/main/java/com/freehand/android/ui/MainActivity.kt",
       "purpose": "provide true-device evidence that the canonical WebUI rendered",
-      "allowed_callers": ["WebViewClient::onPageFinished"],
-      "related_tests": ["apps/freehand-android/scripts/verify-device-ui.sh"],
+      "allowed_callers": [
+        "WebViewClient::onPageFinished"
+      ],
+      "related_tests": [
+        "apps/freehand-android/scripts/verify-device-ui.sh"
+      ],
       "why_shared": "device validation and runtime page-load evidence must use the same canonical WebUI selector probe"
     }
   ],

@@ -1,8 +1,10 @@
+use std::path::{Component, Path, PathBuf};
 use std::sync::atomic::AtomicU64;
 use std::sync::{Arc, Mutex};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use axum::extract::State;
+use axum::body::Body;
+use axum::extract::{Path as AxumPath, State};
 use axum::http::{HeaderMap, HeaderValue, StatusCode, header};
 use axum::response::{IntoResponse, Response};
 use axum::routing::{any, get, post};
@@ -24,6 +26,10 @@ const SESSION_COOKIE: &str = "freehand_relay_session";
 pub struct RelayServiceConfig {
     pub presence_lease_seconds: u64,
     pub secure_cookie: bool,
+    /// Optional directory of dual-path upgrade artifacts.
+    /// When set, Relay serves `/relay/updates/latest.json` and `/relay/updates/<file>`.
+    /// When unset, those routes return 404 explicitly (no fallback).
+    pub updates_dir: Option<PathBuf>,
 }
 
 #[derive(Clone)]
@@ -77,7 +83,25 @@ impl RelayService {
             .route("/relay/agents/{agent_id}", any(proxy_http_root))
             .route("/relay/agents/{agent_id}/", any(proxy_http_root))
             .route("/relay/agents/{agent_id}/{*path}", any(proxy_http_path))
+            .route("/relay/updates/latest.json", get(serve_updates_latest))
+            .route("/relay/updates/{*path}", get(serve_updates_file))
             .with_state(self.state.clone())
+    }
+
+    pub fn clone_account_resolver(
+        &self,
+    ) -> impl Fn(&HeaderMap) -> Result<String, RelayStoreError> + Clone + Send + Sync + 'static
+    {
+        let store = Arc::clone(&self.state.store);
+        move |headers: &HeaderMap| {
+            let token = bearer_token(headers)
+                .or_else(|| cookie_token(headers))
+                .ok_or(RelayStoreError::Unauthorized)?;
+            let store = store.lock().map_err(|error| {
+                RelayStoreError::Io(format!("relay store lock poisoned: {error}"))
+            })?;
+            store.authenticate(token)
+        }
     }
 
     pub async fn serve(self, listener: TcpListener) -> Result<(), RelayStoreError> {
@@ -89,6 +113,139 @@ impl RelayService {
 
 async fn health() -> &'static str {
     "ok"
+}
+
+async fn serve_updates_latest(State(state): State<RelayState>) -> Response {
+    serve_updates_path(&state, "latest.json").await
+}
+
+async fn serve_updates_file(
+    State(state): State<RelayState>,
+    AxumPath(path): AxumPath<String>,
+) -> Response {
+    serve_updates_path(&state, &path).await
+}
+
+async fn serve_updates_path(state: &RelayState, relative: &str) -> Response {
+    let Some(updates_dir) = state.config.updates_dir.as_ref() else {
+        return error_response(RelayStoreError::Invalid(
+            "relay updates directory is not configured".to_owned(),
+        ));
+    };
+    let safe_relative = match sanitize_updates_relative_path(relative) {
+        Ok(path) => path,
+        Err(error) => return error_response(error),
+    };
+    let full_path = updates_dir.join(&safe_relative);
+    // Defense in depth: reject any resolved path that escapes updates_dir.
+    let canonical_root = match updates_dir.canonicalize() {
+        Ok(path) => path,
+        Err(error) => {
+            return error_response(RelayStoreError::Io(format!(
+                "relay updates directory is not accessible: {error}"
+            )));
+        }
+    };
+    let canonical_file = match full_path.canonicalize() {
+        Ok(path) => path,
+        Err(_) => {
+            return (
+                StatusCode::NOT_FOUND,
+                Json(ErrorBody {
+                    code: "relay_update_not_found".to_owned(),
+                    message: format!("update file `{safe_relative}` not found"),
+                }),
+            )
+                .into_response();
+        }
+    };
+    if !canonical_file.starts_with(&canonical_root) {
+        return error_response(RelayStoreError::Invalid(
+            "update path escapes updates directory".to_owned(),
+        ));
+    }
+    if !canonical_file.is_file() {
+        return (
+            StatusCode::NOT_FOUND,
+            Json(ErrorBody {
+                code: "relay_update_not_found".to_owned(),
+                message: format!("update file `{safe_relative}` not found"),
+            }),
+        )
+            .into_response();
+    }
+    let body = match tokio::fs::read(&canonical_file).await {
+        Ok(bytes) => bytes,
+        Err(error) => {
+            return error_response(RelayStoreError::Io(format!(
+                "failed to read update file `{safe_relative}`: {error}"
+            )));
+        }
+    };
+    let content_type = content_type_for_update_file(&safe_relative);
+    match Response::builder()
+        .status(StatusCode::OK)
+        .header(header::CONTENT_TYPE, content_type)
+        .header(header::CACHE_CONTROL, "no-store, max-age=0")
+        .body(Body::from(body))
+    {
+        Ok(response) => response,
+        Err(error) => error_response(RelayStoreError::Io(format!(
+            "failed to build update response: {error}"
+        ))),
+    }
+}
+
+fn sanitize_updates_relative_path(relative: &str) -> Result<String, RelayStoreError> {
+    let trimmed = relative.trim().trim_start_matches('/');
+    if trimmed.is_empty() {
+        return Err(RelayStoreError::Invalid(
+            "update path must not be empty".to_owned(),
+        ));
+    }
+    let path = Path::new(trimmed);
+    if path.is_absolute() {
+        return Err(RelayStoreError::Invalid(
+            "update path must be relative".to_owned(),
+        ));
+    }
+    let mut parts = Vec::new();
+    for component in path.components() {
+        match component {
+            Component::Normal(part) => {
+                let value = part.to_string_lossy();
+                if value.is_empty() || value == "." || value == ".." {
+                    return Err(RelayStoreError::Invalid(
+                        "update path contains invalid component".to_owned(),
+                    ));
+                }
+                parts.push(value.into_owned());
+            }
+            Component::CurDir => {}
+            Component::ParentDir | Component::RootDir | Component::Prefix(_) => {
+                return Err(RelayStoreError::Invalid(
+                    "update path contains invalid component".to_owned(),
+                ));
+            }
+        }
+    }
+    if parts.is_empty() {
+        return Err(RelayStoreError::Invalid(
+            "update path must not be empty".to_owned(),
+        ));
+    }
+    Ok(parts.join("/"))
+}
+
+fn content_type_for_update_file(relative: &str) -> &'static str {
+    let lower = relative.to_ascii_lowercase();
+    if lower.ends_with(".json") {
+        "application/json"
+    } else if lower.ends_with(".apk") {
+        "application/vnd.android.package-archive"
+    } else {
+        "application/octet-stream"
+    }
 }
 
 async fn register(State(state): State<RelayState>, Json(request): Json<AuthRequest>) -> Response {

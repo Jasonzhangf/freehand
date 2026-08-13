@@ -204,6 +204,18 @@ export const ADP_PROTOCOL_MANIFEST = Object.freeze({
       "target_owner_feature": "ui.protocol"
     },
     {
+      "serde_name": "PullAccountConfig",
+      "semantic_kind": "pull_account_config",
+      "frame_class": "mutation",
+      "target_owner_feature": "config.account-config-sync"
+    },
+    {
+      "serde_name": "PushAccountConfig",
+      "semantic_kind": "push_account_config",
+      "frame_class": "mutation",
+      "target_owner_feature": "config.account-config-sync"
+    },
+    {
       "serde_name": "QueryErrorCenterEvents",
       "semantic_kind": "query_error_center_events",
       "frame_class": "query",

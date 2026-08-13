@@ -48,12 +48,14 @@
   - `relay_control_tunnel`
   - `relay_data_tunnel`
   - `relay_error_tunnel`
+  - `relay_update_artifact`
 - touched resources:
   - `relay_account`
   - `agent_presence`
   - `relay_control_tunnel`
   - `relay_data_tunnel`
   - `relay_error_tunnel`
+  - `relay_update_artifact`
 - resource operations:
   - `relay_account.register`
   - `relay_account.authenticate`
@@ -69,6 +71,7 @@
   - `relay_data_tunnel.proxy_websocket`
   - `relay_data_tunnel.accept_generation`
   - `relay_error_tunnel.correlate`
+  - `relay_update_artifact.serve`
 - forbidden shortcuts:
   - config, daemon, WebUI, and Android must not own password hashing, token persistence, Agent presence, or route authorization
   - Relay must not read, infer, or mutate Agent session, task, lifecycle, provider, or model truth
@@ -76,7 +79,8 @@
 
 ## Request Mainline
 
-- standalone process requires an explicit persisted-store path and explicit HTTP/TLS session-cookie mode before binding one Relay listener
+- standalone process requires an explicit persisted-store path and explicit HTTP/TLS session-cookie mode before binding one Relay listener; optional `FREEHAND_RELAY_UPDATES_DIR` enables the explicit Relay upgrade channel
+- `/relay/updates/latest.json` and `/relay/updates/<file>` read only deployment-staged files beneath the canonical updates directory; missing configuration/files and path traversal fail explicitly
 - registration validates username/password, stores Argon2 password hash plus token hash, and returns the raw opaque token once
 - login verifies the Argon2 hash and issues a new opaque token whose hash is persisted
 - API and proxy requests authenticate Bearer or HttpOnly-cookie credentials to one account id; the deployment-owned cookie mode controls only the `Secure` response attribute
@@ -95,7 +99,9 @@
 - Agent directory query and subscription return one row per registered Agent with online state, role, status, last seen, and Agent-reported active-session count
 - HTTP proxy strips Relay and Agent-local authentication cookies at the trust boundary, preserves non-control request semantics, blocks upstream `Set-Cookie` from entering the Relay origin, and streams every response body as opaque bytes without content-type inspection or path rewriting
 - ADP and generic WebSocket proxies forward opaque frame kinds and bytes bidirectionally without parsing payload semantics
-- standalone deployment package contains the binary host, systemd unit, and non-secret env schema
+- standalone deployment package contains the binary host, Claw deploy script, systemd unit, non-secret env schema, and deployment-staged update bundle
+- Claw deployment evidence records local/remote binary hash, unit/env fingerprints, service paths, store/account-config presence, health, and served update artifact hashes without recording secret values
+- update manifest/APK bytes are served with no-store semantics and are never rewritten from daemon or Relay control state; the manifest carries the release signer certificate digest unchanged
 
 ## Error Mainline
 
@@ -148,3 +154,4 @@ Deployment uses two explicit commands: `freehand-relay-server init-store` initia
 | 13a | `RelayAgentClient::run / RelayAgentClient::current_heartbeat` | `crates/freehand-relay/src/agent_client.rs` | read typed status/count at identity admission and every control heartbeat; source failure terminates the tunnel instead of reusing stale projection | typed presence source closure | current authenticated Agent heartbeat or explicit source error | `RelayAgentClient::run` | `RelayAgentClient::current_heartbeat` | bound (`agent_presence.heartbeat`: `agent_presence` -> `agent_presence`) |
 | 14 | `attach_error / RelayTunnelRegistry::admit_error_for_control` | `crates/freehand-relay/src/websocket_tunnel.rs / crates/freehand-relay/src/tunnel.rs` | admit error only while the server-issued control generation still owns the authenticated Agent identity | authenticated Agent identity, control generation header, and typed error sender | control-generation-bound typed error tunnel or explicit stale-generation failure | `attach_error` | `RelayTunnelRegistry::admit_error_for_control` | bound (`relay_control_tunnel.admit_error`: `relay_control_tunnel` -> `relay_error_tunnel`) |
 | 15 | `run_data_socket / RelayTunnelRegistry::accept_data_generation / RelayTunnelRegistry::accept_data` | `crates/freehand-relay/src/websocket_tunnel.rs / crates/freehand-relay/src/tunnel.rs` | generation-fence an authenticated Agent response before it can mutate current pending-exchange truth | typed Agent response frame, tunnel identity, and attachment generation | current-generation correlated delivery or explicit stale terminal failure | `run_data_socket` | `RelayTunnelRegistry::accept_data_generation` | bound |
+| 16 | `serve_updates_path / sanitize_updates_relative_path` | `crates/freehand-relay/src/service.rs` | serve deployment-staged manifest/APK bytes beneath the canonical updates directory with traversal rejection and no-store headers | explicit `FREEHAND_RELAY_UPDATES_DIR` plus relative update path | update bytes or explicit configuration/not-found/path error | `serve_updates_path` | `tokio::fs::read` | bound (`relay_update_artifact.serve`: `relay_update_artifact` -> `relay_update_artifact`) |

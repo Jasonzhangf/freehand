@@ -20,24 +20,28 @@
     "relay_data_tunnel.proxy_adp",
     "relay_data_tunnel.proxy_websocket",
     "relay_data_tunnel.accept_generation",
-    "relay_error_tunnel.correlate"
+    "relay_error_tunnel.correlate",
+    "relay_update_artifact.serve"
   ],
   "request_mainline": [
     "standalone process loads explicit bind, persisted-store, lease, and HTTP/TLS session-cookie policy before binding",
     "account register or login establishes one opaque account-scoped access token",
     "Agent control tunnel authenticates identity and persists account-scoped presence",
     "directory subscription and proxy requests authenticate before accessing presence",
-    "transport opens typed data exchanges only through an authenticated control tunnel"
+    "transport opens typed data exchanges only through an authenticated control tunnel",
+    "optional FREEHAND_RELAY_UPDATES_DIR enables a separate Relay update route without changing tunnel or business payload contracts"
   ],
   "response_mainline": [
     "directory query and subscription project account-scoped online state, role, status, last seen, and Agent-reported active-session count",
     "HTTP, ADP, and generic WebSocket pass through opaque typed data frames without Relay ownership of Agent business truth",
-    "restart restores persisted account, token hash, and Agent presence records"
+    "restart restores persisted account, token hash, and Agent presence records",
+    "Relay update routes stream deployment-staged manifest/APK bytes with no-store headers and preserve manifest payload bytes"
   ],
   "error_mainline": [
     "invalid credentials and tokens fail explicitly",
     "cross-account, expired, and unknown Agent access fails explicitly",
-    "corrupt store, failed persistence, and failed tunnel or local bridge IO fail explicitly"
+    "corrupt store, failed persistence, and failed tunnel or local bridge IO fail explicitly",
+    "unset/inaccessible updates directory, missing files, and traversal paths fail explicitly; no daemon fallback is attempted"
   ],
   "transport_invariants": [
     "local ADP bearer injection is admitted only for RelayDataProtocol::Adp and never for generic WebSocket exchanges",
@@ -291,6 +295,20 @@
       "source_resource": "relay_data_tunnel",
       "target_resource": "relay_data_tunnel",
       "resource_operation": "relay_data_tunnel.accept_generation",
+      "binding_status": "bound"
+    },
+    {
+      "step": "16",
+      "symbol_path": "serve_updates_path / sanitize_updates_relative_path",
+      "file_path": "crates/freehand-relay/src/service.rs",
+      "responsibility": "serve deployment-staged manifest and APK bytes beneath the canonical updates directory with traversal rejection and no-store headers",
+      "input_semantic": "configured updates directory plus relative update path",
+      "output_semantic": "update bytes or explicit configuration/not-found/path error",
+      "caller": "serve_updates_path",
+      "callee": "tokio::fs::read",
+      "source_resource": "relay_update_artifact",
+      "target_resource": "relay_update_artifact",
+      "resource_operation": "relay_update_artifact.serve",
       "binding_status": "bound"
     }
   ],

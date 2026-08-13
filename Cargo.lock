@@ -628,6 +628,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "freehand-account-config"
+version = "0.1.0"
+dependencies = [
+ "axum",
+ "reqwest",
+ "serde",
+ "serde_json",
+ "sha2",
+ "tempfile",
+ "thiserror",
+ "tokio",
+ "tower",
+]
+
+[[package]]
 name = "freehand-acp"
 version = "0.1.0"
 dependencies = [
@@ -671,6 +686,7 @@ name = "freehand-config"
 version = "0.1.0"
 dependencies = [
  "base64",
+ "freehand-account-config",
  "freehand-contracts",
  "serde",
  "serde_json",
@@ -855,6 +871,8 @@ dependencies = [
 name = "freehand-relay-server"
 version = "0.1.0"
 dependencies = [
+ "axum",
+ "freehand-account-config",
  "freehand-relay",
  "tokio",
 ]
@@ -864,6 +882,7 @@ name = "freehand-runtime"
 version = "0.1.0"
 dependencies = [
  "chrono",
+ "freehand-account-config",
  "freehand-blocks",
  "freehand-config",
  "freehand-contracts",

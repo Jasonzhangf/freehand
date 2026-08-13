@@ -521,6 +521,7 @@ mod tests {
             config: RelayServiceConfig {
                 presence_lease_seconds: 45,
                 secure_cookie: false,
+                updates_dir: None,
             },
         };
         let identity = RelayTunnelIdentity {
@@ -604,6 +605,7 @@ mod tests {
             config: RelayServiceConfig {
                 presence_lease_seconds: 45,
                 secure_cookie: false,
+                updates_dir: None,
             },
         };
         let identity = RelayTunnelIdentity {

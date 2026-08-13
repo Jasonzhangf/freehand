@@ -19,6 +19,7 @@
         "mutate_provider_config",
         "mutate_model_group_config",
         "mutate_agent_resource_topology",
+        "project_shared_account_config",
         "bootstrap_node_pairing",
         "compile_instruction_capability"
       ],
@@ -232,7 +233,7 @@
       "resource_type": "android_apk_update",
       "owner_feature_id": "app.android-client",
       "owner_crate": "apps/freehand-android",
-      "identity": "installed Android package versionCode plus daemon update manifest URL",
+      "identity": "installed Android package versionCode plus daemon update manifest URL and release signer certificate identity",
       "truth_store": "daemon-hosted /android/update.json plus Android app cache apk-updates/ for downloaded installer artifacts",
       "operations": [
         "check_manifest",
@@ -710,6 +711,41 @@
         "instruction capability manifest",
         "manifest error records"
       ]
+    },
+    {
+      "resource_type": "relay_update_artifact",
+      "owner_feature_id": "relay.transport",
+      "owner_crate": "crates/freehand-relay",
+      "identity": "release versionCode plus sha256 plus size plus signerSha256 plus immutable filename under deployment-owned updates directory",
+      "truth_store": "deployment-owned FREEHAND_RELAY_UPDATES_DIR containing latest.json and release artifacts staged by foundation.workspace",
+      "operations": [
+        "serve"
+      ],
+      "projections": [
+        "/relay/updates/latest.json",
+        "/relay/updates/<file>"
+      ]
+    },
+    {
+      "resource_type": "account_config_document",
+      "owner_feature_id": "config.account-config-sync",
+      "owner_crate": "crates/freehand-account-config",
+      "identity": "relay account id plus schemaVersion plus revision plus content etag",
+      "truth_store": "account-scoped versioned JSON documents under deployment-owned FREEHAND_RELAY_ACCOUNT_CONFIG_DIR, one file per account id, written atomically before publication",
+      "operations": [
+        "validate",
+        "get",
+        "put",
+        "project_safe",
+        "pull",
+        "push"
+      ],
+      "projections": [
+        "GET /relay/api/config document with revision and etag",
+        "PUT /relay/api/config response with next revision and etag",
+        "409 conflict response carrying the server current document",
+        "safe non-secret account config projection"
+      ]
     }
   ],
   "operation_bindings": [
@@ -1108,6 +1144,15 @@
       "binding_status": "bound"
     },
     {
+      "operation_id": "config.project_shared_account_config",
+      "owner_feature_id": "config.core",
+      "source_resource": "config",
+      "target_resource": "account_config_document",
+      "effect": "project only validated env-auth provider/model-group/Relay endpoint and remote-daemon configuration into the account-scoped non-secret document",
+      "mainline_call_doc": "docs/mainline-calls/config.core.json",
+      "binding_status": "bound"
+    },
+    {
       "operation_id": "config.mutate_provider_config",
       "owner_feature_id": "config.core",
       "source_resource": "config",
@@ -1438,6 +1483,69 @@
       "target_resource": "acp_transport",
       "effect": "project runtime broadcast events (semantic, tool, tool-result) into ACP session/update notifications streamed to the ACP client; the app.acp-server adapter owns this projection operation because it owns the ACP wire and only consumes master_work's typed broadcast side-channel",
       "mainline_call_doc": "docs/mainline-calls/app.acp-server.json",
+      "binding_status": "bound"
+    },
+    {
+      "operation_id": "relay_update_artifact.serve",
+      "owner_feature_id": "relay.transport",
+      "source_resource": "relay_update_artifact",
+      "target_resource": "relay_update_artifact",
+      "effect": "serve deployment-staged update manifest and immutable artifact bytes without rewriting business payload semantics",
+      "mainline_call_doc": "docs/mainline-calls/relay.transport.json",
+      "binding_status": "bound"
+    },
+    {
+      "operation_id": "account_config_document.validate",
+      "owner_feature_id": "config.account-config-sync",
+      "source_resource": "account_config_document",
+      "target_resource": "account_config_document",
+      "effect": "validate schemaVersion, unique ids, non-secret field boundaries, and canonical content before any revision can be computed or persisted",
+      "mainline_call_doc": "docs/mainline-calls/config.account-config-sync.json",
+      "binding_status": "bound"
+    },
+    {
+      "operation_id": "account_config_document.get",
+      "owner_feature_id": "config.account-config-sync",
+      "source_resource": "account_config_document",
+      "target_resource": "account_config_document",
+      "effect": "read the latest account-scoped versioned document or an explicit not-found error without exposing another account's document",
+      "mainline_call_doc": "docs/mainline-calls/config.account-config-sync.json",
+      "binding_status": "bound"
+    },
+    {
+      "operation_id": "account_config_document.put",
+      "owner_feature_id": "config.account-config-sync",
+      "source_resource": "account_config_document",
+      "target_resource": "account_config_document",
+      "effect": "atomically persist a validated document revision guarded by If-Match; stale or conflicting revisions return 409 with the server current document and never overwrite newer truth",
+      "mainline_call_doc": "docs/mainline-calls/config.account-config-sync.json",
+      "binding_status": "bound"
+    },
+    {
+      "operation_id": "account_config_document.project_safe",
+      "owner_feature_id": "config.account-config-sync",
+      "source_resource": "account_config_document",
+      "target_resource": "account_config_document",
+      "effect": "project only schema-allowed non-secret fields so API keys, tokens, passwords, env values, and host-specific paths never leave the account config server",
+      "mainline_call_doc": "docs/mainline-calls/config.account-config-sync.json",
+      "binding_status": "bound"
+    },
+    {
+      "operation_id": "account_config_document.pull",
+      "owner_feature_id": "config.account-config-sync",
+      "source_resource": "account_config_document",
+      "target_resource": "account_config_document",
+      "effect": "pull the authenticated account document through the Relay client and validate the returned revisioned non-secret schema before local mirror publication",
+      "mainline_call_doc": "docs/mainline-calls/config.account-config-sync.json",
+      "binding_status": "bound"
+    },
+    {
+      "operation_id": "account_config_document.push",
+      "owner_feature_id": "config.account-config-sync",
+      "source_resource": "account_config_document",
+      "target_resource": "account_config_document",
+      "effect": "push one validated non-secret account document with the local mirror etag and return explicit success, conflict, or transport failure",
+      "mainline_call_doc": "docs/mainline-calls/config.account-config-sync.json",
       "binding_status": "bound"
     }
   ],
@@ -1971,6 +2079,17 @@
       "binding_status": "bound"
     },
     {
+      "edge_id": "config.core#06s",
+      "operation_id": "config.project_shared_account_config",
+      "source_resource": "config",
+      "target_resource": "account_config_document",
+      "mainline_call_doc": "docs/mainline-calls/config.core.json",
+      "call_table_step": "06s",
+      "file_path": "crates/freehand-config/src/lib.rs",
+      "symbol_path": "export_shared_account_config",
+      "binding_status": "bound"
+    },
+    {
       "edge_id": "config.core#15",
       "operation_id": "config.compile_remote_daemon_registry",
       "source_resource": "config",
@@ -2386,6 +2505,105 @@
       "call_table_step": "05",
       "file_path": "crates/freehand-acp/src/lib.rs",
       "symbol_path": "AcpBroadcaster::on_broadcast / project_broadcast",
+      "binding_status": "bound"
+    },
+    {
+      "edge_id": "relay-update-artifact-serve-direct",
+      "operation_id": "relay_update_artifact.serve",
+      "source_resource": "relay_update_artifact",
+      "target_resource": "relay_update_artifact",
+      "mainline_call_doc": "docs/mainline-calls/relay.transport.json",
+      "call_table_step": "16",
+      "file_path": "crates/freehand-relay/src/service.rs",
+      "symbol_path": "serve_updates_path / sanitize_updates_relative_path",
+      "binding_status": "bound"
+    },
+    {
+      "edge_id": "config.account-config-sync#01",
+      "operation_id": "account_config_document.validate",
+      "source_resource": "account_config_document",
+      "target_resource": "account_config_document",
+      "mainline_call_doc": "docs/mainline-calls/config.account-config-sync.json",
+      "call_table_step": "01",
+      "file_path": "crates/freehand-account-config/src/lib.rs",
+      "symbol_path": "validate_config_document",
+      "binding_status": "bound"
+    },
+    {
+      "edge_id": "config.account-config-sync#02",
+      "operation_id": "account_config_document.get",
+      "source_resource": "account_config_document",
+      "target_resource": "account_config_document",
+      "mainline_call_doc": "docs/mainline-calls/config.account-config-sync.json",
+      "call_table_step": "02",
+      "file_path": "crates/freehand-account-config/src/lib.rs",
+      "symbol_path": "AccountConfigStore::get",
+      "binding_status": "bound"
+    },
+    {
+      "edge_id": "config.account-config-sync#03",
+      "operation_id": "account_config_document.put",
+      "source_resource": "account_config_document",
+      "target_resource": "account_config_document",
+      "mainline_call_doc": "docs/mainline-calls/config.account-config-sync.json",
+      "call_table_step": "03",
+      "file_path": "crates/freehand-account-config/src/lib.rs",
+      "symbol_path": "AccountConfigStore::put",
+      "binding_status": "bound"
+    },
+    {
+      "edge_id": "config.account-config-sync#04",
+      "operation_id": "account_config_document.project_safe",
+      "source_resource": "account_config_document",
+      "target_resource": "account_config_document",
+      "mainline_call_doc": "docs/mainline-calls/config.account-config-sync.json",
+      "call_table_step": "04",
+      "file_path": "crates/freehand-account-config/src/lib.rs",
+      "symbol_path": "project_safe_document",
+      "binding_status": "bound"
+    },
+    {
+      "edge_id": "config.account-config-sync#05",
+      "operation_id": "account_config_document.pull",
+      "source_resource": "account_config_document",
+      "target_resource": "account_config_document",
+      "mainline_call_doc": "docs/mainline-calls/config.account-config-sync.json",
+      "call_table_step": "05",
+      "file_path": "crates/freehand-account-config/src/client.rs",
+      "symbol_path": "AccountConfigClient::pull",
+      "binding_status": "bound"
+    },
+    {
+      "edge_id": "config.account-config-sync#06",
+      "operation_id": "account_config_document.push",
+      "source_resource": "account_config_document",
+      "target_resource": "account_config_document",
+      "mainline_call_doc": "docs/mainline-calls/config.account-config-sync.json",
+      "call_table_step": "06",
+      "file_path": "crates/freehand-account-config/src/client.rs",
+      "symbol_path": "AccountConfigClient::push",
+      "binding_status": "bound"
+    },
+    {
+      "edge_id": "config.account-config-sync#07",
+      "operation_id": "account_config_document.pull",
+      "source_resource": "account_config_document",
+      "target_resource": "account_config_document",
+      "mainline_call_doc": "docs/mainline-calls/config.account-config-sync.json",
+      "call_table_step": "07",
+      "file_path": "crates/freehand-runtime/src/lib.rs",
+      "symbol_path": "dispatch_pull_account_config",
+      "binding_status": "bound"
+    },
+    {
+      "edge_id": "config.account-config-sync#08",
+      "operation_id": "account_config_document.push",
+      "source_resource": "account_config_document",
+      "target_resource": "account_config_document",
+      "mainline_call_doc": "docs/mainline-calls/config.account-config-sync.json",
+      "call_table_step": "08",
+      "file_path": "crates/freehand-runtime/src/lib.rs",
+      "symbol_path": "dispatch_push_account_config",
       "binding_status": "bound"
     }
   ],
@@ -2936,6 +3154,30 @@
       "allowed_direct": true,
       "via_resources": [],
       "reason": "Runtime master-work broadcast events are projected into ACP session/update notifications by the app.acp-server adapter; acp_transport owns the wire, not the runtime truth."
+    },
+    {
+      "rule_id": "relay-update-artifact-serves-direct",
+      "source_resource": "relay_update_artifact",
+      "target_resource": "relay_update_artifact",
+      "allowed_direct": true,
+      "via_resources": [],
+      "reason": "relay.transport is the single HTTP projection owner for deployment-staged update bytes; it does not build or mutate the release artifact"
+    },
+    {
+      "rule_id": "account-config-document-self-owned-direct",
+      "source_resource": "account_config_document",
+      "target_resource": "account_config_document",
+      "allowed_direct": true,
+      "via_resources": [],
+      "reason": "config.account-config-sync owns schema validation, revision/etag lifecycle, atomic persistence, and safe projection of the account-scoped versioned document; relay.transport provides only the authenticated account boundary"
+    },
+    {
+      "rule_id": "config-projects-account-document-direct",
+      "source_resource": "config",
+      "target_resource": "account_config_document",
+      "allowed_direct": true,
+      "via_resources": [],
+      "reason": "config.core owns the local-to-shared projection boundary and may call the account-config schema validator/export surface without moving credentials or whole config truth"
     }
   ],
   "forbidden_direct_relations": [

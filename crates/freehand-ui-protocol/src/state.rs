@@ -116,6 +116,10 @@ pub enum UiProtocolError {
     EmptyProviderApiKeyEnv,
     #[error("model group update requires non-empty group id")]
     EmptyModelGroupId,
+    #[error(
+        "model group context window and compaction thresholds must be positive with compaction less than context window"
+    )]
+    InvalidModelCompactionThreshold,
     #[error("model group route requires non-empty provider id")]
     EmptyModelRouteProvider,
     #[error("model group route requires non-empty model")]

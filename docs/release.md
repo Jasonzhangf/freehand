@@ -8,7 +8,7 @@ It runs:
 
 1. `make ci`
 2. `apps/freehand-android/gradlew testDebugUnitTest`
-3. `cargo build --release -p freehand-cli -p freehand-server -p freehand-daemon`
+3. `cargo build --release -p freehand-cli -p freehand-server -p freehand-daemon -p freehand-relay-server`
 4. `apps/freehand-android/gradlew assembleRelease`
 5. artifact staging under `dist/`
 

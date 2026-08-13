@@ -10,7 +10,8 @@
     "config.compile_agent_relay_connection",
     "config.mutate_provider_config",
     "config.mutate_model_group_config",
-    "config.compile_remote_daemon_registry"
+    "config.compile_remote_daemon_registry",
+    "config.project_shared_account_config"
   ],
   "request_mainline": [
     "config load begins from `~/.freehand/config.toml`",
@@ -137,6 +138,20 @@
       "output_semantic": "safe provider registry projection",
       "caller": "runtime.ui-command-dispatch / tests",
       "callee": "provider registry projector",
+      "binding_status": "bound"
+    },
+    {
+      "step": "06s",
+      "symbol_path": "export_shared_account_config",
+      "file_path": "crates/freehand-config/src/lib.rs",
+      "responsibility": "project env-auth providers, compatible model groups, Relay endpoint candidates, and remote daemon entries into the strict account-scoped non-secret document",
+      "input_semantic": "loaded local config",
+      "output_semantic": "validated account-scoped non-secret config content or explicit export error",
+      "caller": "dispatch_push_account_config",
+      "callee": "freehand-account-config::validate_config_document",
+      "source_resource": "config",
+      "target_resource": "account_config_document",
+      "resource_operation": "config.project_shared_account_config",
       "binding_status": "bound"
     },
     {

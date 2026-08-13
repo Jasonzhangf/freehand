@@ -1,0 +1,175 @@
+{
+  "feature_id": "config.account-config-sync",
+  "owner_crate": "crates/freehand-account-config",
+  "owner_module": "crates/freehand-account-config/src/lib.rs",
+  "function_map_doc": "docs/function-maps/config.account-config-sync.md",
+  "test_design_doc": "docs/testing/config.account-config-sync.md",
+  "mainline_call_doc": "docs/mainline-calls/config.account-config-sync.json",
+  "generated_wiki_doc": "docs/wiki/config.account-config-sync.md",
+  "resource_operations": [
+    "account_config_document.validate",
+    "account_config_document.get",
+    "account_config_document.put",
+    "account_config_document.project_safe",
+    "account_config_document.pull",
+    "account_config_document.push"
+  ],
+  "request_mainline": [
+    "Relay host authenticates one account id before invoking the account-config router; no token or cookie enters the account config document owner",
+    "GET resolves only the authenticated account document; PUT validates schemaVersion and typed non-secret content before mutation",
+    "PUT requires If-Match for an existing document and computes the next revision plus canonical content etag inside the account-config owner"
+    ,
+    "runtime pull enters AccountConfigClient::pull with the authenticated Relay token, revalidates the returned document, and publishes an account-scoped device mirror under the runtime home",
+    "runtime push exports the local non-secret surface through config.core::export_shared_account_config, sends the local mirror etag via AccountConfigClient::push, and maps 409 to an explicit conflict mirror carrying the server current document"
+  ],
+  "response_mainline": [
+    "successful GET/PUT returns the typed document, revision, updatedAt, and matching HTTP/content etag",
+    "safe projection returns only provider auth env names, model groups, relay URL plus token env names, and remote daemon entries without credentials",
+    "durable atomic persistence completes before the in-memory latest document is published"
+    ,
+    "pull and push return only validated revisioned non-secret documents; the device mirror stores status, account id, revision, etag, updatedAt, and the non-secret document without credentials"
+  ],
+  "error_mainline": [
+    "missing authentication, missing document, malformed schema, inline/secret values, unknown references, and I/O failures are explicit errors",
+    "stale If-Match returns 409 with the server current document and does not overwrite newer truth",
+    "account ids map to SHA-256 filenames so caller-controlled identities never become filesystem paths"
+    ,
+    "missing account documents are explicit not-configured client outcomes, stale pushes return explicit 409 conflict with the server document, and transport/validation failures never fall back to a fake synced mirror"
+  ],
+  "shared_functions": [
+    {
+      "symbol": "validate_config_document",
+      "owner": "crates/freehand-account-config/src/lib.rs",
+      "purpose": "enforce one non-secret schema admission boundary for PUT, disk restore, and safe projection",
+      "allowed_callers": [
+        "AccountConfigStore::get",
+        "AccountConfigStore::put",
+        "project_safe_document"
+      ],
+      "related_tests": [
+        "cargo test -p freehand-account-config -- --nocapture"
+      ],
+      "why_shared": "all account config ingress and egress must enforce exactly the same typed schema and secret boundary"
+    }
+  ],
+  "call_table": [
+    {
+      "step": "01",
+      "symbol_path": "validate_config_document",
+      "file_path": "crates/freehand-account-config/src/lib.rs",
+      "responsibility": "validate typed content, references, unique ids, env-name auth, and secret-free values",
+      "input_semantic": "typed account config content",
+      "output_semantic": "validated non-secret account config content or explicit error",
+      "caller": "AccountConfigStore::put / project_safe_document",
+      "callee": "validate_config_document",
+      "source_resource": "account_config_document",
+      "target_resource": "account_config_document",
+      "resource_operation": "account_config_document.validate",
+      "binding_status": "bound"
+    },
+    {
+      "step": "02",
+      "symbol_path": "AccountConfigStore::get",
+      "file_path": "crates/freehand-account-config/src/lib.rs",
+      "responsibility": "load and validate the latest document for one authenticated account",
+      "input_semantic": "authenticated account id",
+      "output_semantic": "stored account config or explicit not-found/corrupt/I/O error",
+      "caller": "get_config",
+      "callee": "AccountConfigStore::get",
+      "source_resource": "account_config_document",
+      "target_resource": "account_config_document",
+      "resource_operation": "account_config_document.get",
+      "binding_status": "bound"
+    },
+    {
+      "step": "03",
+      "symbol_path": "AccountConfigStore::put",
+      "file_path": "crates/freehand-account-config/src/lib.rs",
+      "responsibility": "validate, compare If-Match, compute revision/etag, atomically persist, then publish latest truth",
+      "input_semantic": "authenticated account id plus candidate content plus If-Match",
+      "output_semantic": "next stored revision or explicit conflict/validation/I/O error",
+      "caller": "put_config",
+      "callee": "AccountConfigStore::put",
+      "source_resource": "account_config_document",
+      "target_resource": "account_config_document",
+      "resource_operation": "account_config_document.put",
+      "binding_status": "bound"
+    },
+    {
+      "step": "04",
+      "symbol_path": "project_safe_document",
+      "file_path": "crates/freehand-account-config/src/lib.rs",
+      "responsibility": "project exactly the validated non-secret schema surface",
+      "input_semantic": "account config content",
+      "output_semantic": "credential-free config projection",
+      "caller": "config consumers",
+      "callee": "project_safe_document",
+      "source_resource": "account_config_document",
+      "target_resource": "account_config_document",
+      "resource_operation": "account_config_document.project_safe",
+      "binding_status": "bound"
+    },
+    {
+      "step": "05",
+      "symbol_path": "AccountConfigClient::pull",
+      "file_path": "crates/freehand-account-config/src/client.rs",
+      "responsibility": "resolve the authenticated Relay account and pull the latest account document with strict response revalidation",
+      "input_semantic": "Relay base URL plus bearer access token",
+      "output_semantic": "validated revisioned non-secret account document or explicit not-found/transport/validation error",
+      "caller": "dispatch_pull_account_config",
+      "callee": "AccountConfigClient::pull",
+      "source_resource": "account_config_document",
+      "target_resource": "account_config_document",
+      "resource_operation": "account_config_document.pull",
+      "binding_status": "bound"
+    },
+    {
+      "step": "06",
+      "symbol_path": "AccountConfigClient::push",
+      "file_path": "crates/freehand-account-config/src/client.rs",
+      "responsibility": "push one validated non-secret candidate with the local mirror etag and map stale revision responses to an explicit conflict carrying the server document",
+      "input_semantic": "optional If-Match etag plus validated non-secret config content",
+      "output_semantic": "validated next revision document or explicit conflict/transport/validation error",
+      "caller": "dispatch_push_account_config",
+      "callee": "AccountConfigClient::push",
+      "source_resource": "account_config_document",
+      "target_resource": "account_config_document",
+      "resource_operation": "account_config_document.push",
+      "binding_status": "bound"
+    },
+    {
+      "step": "07",
+      "symbol_path": "dispatch_pull_account_config",
+      "file_path": "crates/freehand-runtime/src/lib.rs",
+      "responsibility": "route PullAccountConfig through the Relay client and persist the synced or explicit not-configured device mirror before returning the runtime receipt",
+      "input_semantic": "PullAccountConfig command envelope plus live selected Relay connection",
+      "output_semantic": "account_config_pulled receipt or explicit unsupported/dispatch failure with persisted mirror status",
+      "caller": "RuntimeCommandDispatcher::dispatch",
+      "callee": "AccountConfigClient::pull / AccountConfigMirror::synced / AccountConfigMirror::not_configured",
+      "source_resource": "account_config_document",
+      "target_resource": "account_config_document",
+      "resource_operation": "account_config_document.pull",
+      "binding_status": "bound"
+    },
+    {
+      "step": "08",
+      "symbol_path": "dispatch_push_account_config",
+      "file_path": "crates/freehand-runtime/src/lib.rs",
+      "responsibility": "route PushAccountConfig through config.core export plus the Relay client and persist the synced or conflict device mirror before returning the runtime receipt",
+      "input_semantic": "PushAccountConfig command envelope plus live selected Relay connection and local config",
+      "output_semantic": "account_config_pushed receipt, explicit conflict with server document, or explicit dispatch failure without mirror mutation on local config rejection",
+      "caller": "RuntimeCommandDispatcher::dispatch",
+      "callee": "export_shared_account_config / AccountConfigClient::push / AccountConfigMirror::synced / AccountConfigMirror::conflict",
+      "source_resource": "account_config_document",
+      "target_resource": "account_config_document",
+      "resource_operation": "account_config_document.push",
+      "binding_status": "bound"
+    }
+  ],
+  "sync_status": [
+    "schema validation, account isolation, revision/etag, If-Match conflict, atomic persistence, and safe projection are code-bound",
+    "Relay authentication remains an injected host boundary; freehand-account-config has no dependency on relay, runtime, UI, provider, or config truth crates",
+    "device-side pull/push, mirror persistence, not-configured, conflict, and unsupported-without-Relay paths are code-bound",
+    "effective-config application into config.core remains a later client phase and is not claimed by this server owner"
+  ]
+}
