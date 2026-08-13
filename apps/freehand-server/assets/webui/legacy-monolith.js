@@ -48,6 +48,7 @@ const openMobileAgentSheetButton = document.getElementById("open-mobile-agent-sh
 const closeMobileAgentSheetButton = document.getElementById("close-mobile-agent-sheet-button");
 const mobileAgentSheet = document.getElementById("mobile-agent-sheet");
 const mobileAgentTaskList = document.getElementById("mobile-agent-task-list");
+const conversationBottomButton = document.getElementById("conversation-bottom-button");
 const sessionRelationHeader = document.getElementById("session-relation-header");
 const sessionRelationToggleButton = document.getElementById("session-relation-toggle-button");
 const sessionWorkerRail = document.getElementById("session-worker-rail");
@@ -255,6 +256,11 @@ const state = {
   selectedCwd: initialSelectedCwd,
   draftSessionId: null,
   sessionTurns: [],
+  sessionTranscriptCache: new Map(),
+  sessionTranscriptRequestSequence: new Map(),
+  sessionTranscriptPageDirection: new Map(),
+  sessionTranscriptOlderInFlight: new Set(),
+  sessionTranscriptHasOlder: new Map(),
   publicConversation: [],
   debug: null,
   checkpoints: [],
@@ -3806,6 +3812,8 @@ function setSelectedSessionId(sessionId) {
 
 function clearConversationForSessionSwitch(sessionId) {
   clearConversationForSessionSwitchInSurface(sessionDetailSurfaceContext(), sessionId);
+  state.sessionTranscriptOlderInFlight.delete(sessionId);
+  state.sessionTurns = sessionTranscriptCacheEntry(sessionId);
 }
 
 function switchConversationSession(sessionId, options = {}) {
@@ -4115,6 +4123,7 @@ function resetLocalConversationState(sessionId) {
   clearSessionRefreshRetryTimer();
   state.draftSessionId = sessionId;
   state.sessionTurns = [];
+  state.sessionTranscriptCache.delete(sessionId);
   state.turn = null;
   state.publicConversation = [];
   state.debug = null;
@@ -4363,9 +4372,20 @@ function setSessionTranscript(projection) {
   if (projection && projection.session_id) {
     clearSessionRefreshState(projection.session_id);
   }
-  state.sessionTurns = logicalSessionTurns(
-    guardedTranscriptTurns((projection && projection.turns) || []),
-  );
+  const incomingTurns = guardedTranscriptTurns((projection && projection.turns) || []);
+  const sessionId = projection && projection.session_id;
+  if (sessionId) {
+    const previous = state.sessionTranscriptCache.get(sessionId) || [];
+    const merged = logicalSessionTurns([...previous, ...incomingTurns]);
+    state.sessionTranscriptCache.set(sessionId, merged);
+    state.sessionTranscriptHasOlder.set(
+      sessionId,
+      projection.page ? projection.page.has_older : false,
+    );
+    state.sessionTurns = merged;
+  } else {
+    state.sessionTurns = logicalSessionTurns(incomingTurns);
+  }
   syncSelectedCwdFromProjection(projection);
   if (projection && projection.session_id) {
     setSelectedSessionId(projection.session_id);
@@ -4375,6 +4395,34 @@ function setSessionTranscript(projection) {
   }
   const latestTurn = state.sessionTurns[state.sessionTurns.length - 1] || null;
   setTurnProjection(latestTurn, { preserveSessionTurns: true });
+}
+
+function setSessionTranscriptPage(projection) {
+  if (!projection || !projection.session_id || projection.session_id !== state.selectedSessionId) {
+    return;
+  }
+  const sessionId = projection.session_id;
+  const incomingTurns = guardedTranscriptTurns(projection.turns || []);
+  const liveTurns = state.sessionTurns.filter((turn) =>
+    turn && turn.session_id === sessionId
+  );
+  const existing = logicalSessionTurns([
+    ...(state.sessionTranscriptCache.get(sessionId) || []),
+    ...liveTurns,
+  ]);
+  const direction = state.sessionTranscriptPageDirection.get(sessionId) || "Latest";
+  const merged = direction === "Older"
+    ? logicalSessionTurns([...incomingTurns, ...existing])
+    : logicalSessionTurns([...existing, ...incomingTurns]);
+  state.sessionTranscriptCache.set(sessionId, merged);
+  state.sessionTurns = merged;
+  state.sessionTranscriptHasOlder.set(sessionId, !!projection.page?.has_older);
+  state.sessionTranscriptPageDirection.delete(sessionId);
+  state.sessionTranscriptOlderInFlight.delete(sessionId);
+  syncSelectedCwdFromProjection(projection);
+  setTurnProjection(state.sessionTurns[state.sessionTurns.length - 1] || null, {
+    preserveSessionTurns: true,
+  });
 }
 
 function clearLocalConversationTruth(options = {}) {
@@ -4393,6 +4441,62 @@ function clearLocalConversationTruth(options = {}) {
   state.locallyCancelledTurnIds.clear();
   state.lifecycleClocks.clear();
   state.toolTimings.clear();
+}
+
+function sessionTranscriptCacheEntry(sessionId) {
+  return state.sessionTranscriptCache.get(sessionId) || [];
+}
+
+function latestSessionTranscriptPageRequest(sessionId) {
+  return adpQuery(
+    adpQueryOf("QuerySessionTurnsPage", {
+      session_id: sessionId,
+      page: { direction: "Latest", limit: 24 },
+    }),
+  );
+}
+
+async function loadOlderSessionTranscriptPage() {
+  const sessionId = state.selectedSessionId;
+  if (!sessionId || state.sessionTranscriptOlderInFlight.has(sessionId)) {
+    return;
+  }
+  const cached = sessionTranscriptCacheEntry(sessionId);
+  const oldest = cached[0];
+  if (!oldest || state.sessionTranscriptHasOlder.get(sessionId) !== true) {
+    return;
+  }
+  state.sessionTranscriptOlderInFlight.add(sessionId);
+  state.sessionTranscriptPageDirection.set(sessionId, "Older");
+  const requestSequence = (state.sessionTranscriptRequestSequence.get(sessionId) || 0) + 1;
+  state.sessionTranscriptRequestSequence.set(sessionId, requestSequence);
+  const host = scrollHostForConversation();
+  const previousHeight = host.scrollHeight;
+  try {
+    const result = await adpQuery(
+      adpQueryOf("QuerySessionTurnsPage", {
+        session_id: sessionId,
+        page: {
+          direction: "Older",
+          before_turn_id: oldest.turn_id,
+          limit: 24,
+        },
+      }),
+    );
+    if (
+      state.selectedSessionId !== sessionId ||
+      state.sessionTranscriptRequestSequence.get(sessionId) !== requestSequence
+    ) {
+      return;
+    }
+    applyAdpQueryResult(result);
+    window.requestAnimationFrame(() => {
+      host.scrollTop += host.scrollHeight - previousHeight;
+    });
+  } finally {
+    state.sessionTranscriptOlderInFlight.delete(sessionId);
+    renderConversationBottomButton();
+  }
 }
 
 function sessionTruthAllowsTurn(turn) {
@@ -4449,6 +4553,15 @@ function setTurnProjection(turn, options = {}) {
   if (shouldIgnoreCancelGuardedTurn(turn, options)) {
     return;
   }
+  if (
+    turn &&
+    previousTurn &&
+    previousTurn.session_id === turn.session_id &&
+    previousTurn.turn_id !== turn.turn_id &&
+    compareSessionTurnPosition(turn, previousTurn) < 0
+  ) {
+    return;
+  }
   clearCancelGuardForTerminalTruth(turn);
   if (turn && !sessionTruthAllowsTurn(turn)) {
     if (state.turn && state.turn.session_id === turn.session_id) {
@@ -4474,6 +4587,13 @@ function setTurnProjection(turn, options = {}) {
       state.sessionTurns.push(state.turn);
     }
     state.sessionTurns = logicalSessionTurns(state.sessionTurns);
+  }
+  if (state.turn && state.turn.session_id === state.selectedSessionId) {
+    const cached = state.sessionTranscriptCache.get(state.turn.session_id) || [];
+    state.sessionTranscriptCache.set(
+      state.turn.session_id,
+      logicalSessionTurns([...cached, state.turn]),
+    );
   }
   state.publicConversation = derivePublicConversation(state.turn);
   syncToolTimings(conversationTurnsForRender());
@@ -4615,6 +4735,12 @@ function applyAdpQueryResult(result) {
   const sessionTurns = variantPayload(result, "SessionTurns");
   if (sessionTurns !== undefined) {
     setSessionTranscript(sessionTurns);
+    renderAll();
+    return;
+  }
+  const sessionTurnsPage = variantPayload(result, "SessionTurnsPage");
+  if (sessionTurnsPage !== undefined) {
+    setSessionTranscriptPage(sessionTurnsPage);
     renderAll();
     return;
   }
@@ -4800,6 +4926,7 @@ function renderMessages() {
   if (shouldStickToBottom) {
     scrollMessagesToBottom();
   }
+  renderConversationBottomButton();
 }
 
 function renderConversationFragments(fragments, selectedSessionId) {
@@ -5228,6 +5355,32 @@ function scrollHostRemaining(host) {
 
 function syncUserScrollLock() {
   state.userScrollLocked = scrollHostRemaining(scrollHostForConversation()) >= 96;
+  renderConversationBottomButton();
+}
+
+function loadOlderSessionTranscriptPageAtTop() {
+  const host = scrollHostForConversation();
+  const atTop = host === document.scrollingElement || host === document.documentElement
+    ? window.scrollY <= 32
+    : host.scrollTop <= 32;
+  if (!atTop) {
+    return;
+  }
+  loadOlderSessionTranscriptPage().catch((error) => {
+    setCommandStatus(`加载历史失败：${error.message}`, { stickyMs: 8000 });
+  });
+}
+
+function renderConversationBottomButton() {
+  if (!conversationBottomButton) {
+    return;
+  }
+  const awayFromBottom = scrollHostRemaining(scrollHostForConversation()) >= 96;
+  const live = hasNonTerminalProtocolActivity();
+  conversationBottomButton.hidden = !awayFromBottom;
+  conversationBottomButton.dataset.live = live ? "true" : "false";
+  conversationBottomButton.textContent = live ? "..." : "↓";
+  conversationBottomButton.setAttribute("aria-label", live ? "推理进行中，回到底部" : "回到底部");
 }
 
 function updateComposerClearance() {
@@ -9067,9 +9220,39 @@ async function refreshSelectedSession() {
     return;
   }
   const requestedSessionId = state.selectedSessionId;
+  const requestSequence = (state.sessionTranscriptRequestSequence.get(requestedSessionId) || 0) + 1;
+  state.sessionTranscriptRequestSequence.set(requestedSessionId, requestSequence);
   state.sessionRefreshInFlight = requestedSessionId;
-  const result = await adpQuery(adpQueryOf("QuerySessionTurns", { session_id: requestedSessionId }));
-  if (state.selectedSessionId !== requestedSessionId) {
+  const cached = sessionTranscriptCacheEntry(requestedSessionId);
+  if (cached.length > 0) {
+    const liveTurns = state.sessionTurns.filter((turn) =>
+      turn && turn.session_id === requestedSessionId
+    );
+    const currentTurn = state.turn &&
+      state.turn.session_id === requestedSessionId
+      ? [state.turn]
+      : [];
+    const merged = logicalSessionTurns([
+      ...cached,
+      ...liveTurns,
+      ...currentTurn,
+    ]);
+    state.sessionTranscriptCache.set(requestedSessionId, merged);
+    state.sessionTurns = merged;
+    state.sessionRefreshInFlight = null;
+    setTurnProjection(merged[merged.length - 1] || null, { preserveSessionTurns: true });
+    renderAll();
+    return;
+  }
+  state.sessionTranscriptPageDirection.set(requestedSessionId, "Latest");
+  const result = await adpQuery(adpQueryOf("QuerySessionTurnsPage", {
+    session_id: requestedSessionId,
+    page: { direction: "Latest", limit: 24 },
+  }));
+  if (
+    state.selectedSessionId !== requestedSessionId ||
+    state.sessionTranscriptRequestSequence.get(requestedSessionId) !== requestSequence
+  ) {
     return;
   }
   clearSessionRefreshState(requestedSessionId);
@@ -10136,8 +10319,19 @@ if (window.visualViewport) {
 const streamStageForScrollLock = document.querySelector(".stream-stage");
 if (streamStageForScrollLock) {
   streamStageForScrollLock.addEventListener("scroll", syncUserScrollLock, { passive: true });
+  streamStageForScrollLock.addEventListener("scroll", () => {
+    loadOlderSessionTranscriptPageAtTop();
+  }, { passive: true });
 }
 window.addEventListener("scroll", syncUserScrollLock, { passive: true });
+window.addEventListener("scroll", loadOlderSessionTranscriptPageAtTop, { passive: true });
+if (conversationBottomButton) {
+  conversationBottomButton.addEventListener("click", () => {
+    state.forceScrollToBottom = true;
+    scrollMessagesToBottom();
+    renderConversationBottomButton();
+  });
+}
 window.addEventListener("pageshow", () => {
   refreshProtocolStateAfterForeground("页面恢复");
 });

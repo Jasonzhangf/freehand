@@ -134,6 +134,10 @@ pub enum UiProtocolError {
     QueryCommandKindMismatch,
     #[error("stream kind mismatch for requested projection")]
     StreamKindMismatch,
+    #[error("session turn page limit must be between 1 and 100")]
+    InvalidTurnPageLimit,
+    #[error("session turn page cursor is invalid")]
+    InvalidTurnPageCursor,
 }
 
 #[derive(Debug, Error, PartialEq, Eq)]
@@ -178,12 +182,12 @@ impl UiProtocolState {
     }
 
     pub fn apply_turn_projection(&mut self, projection: UiTurnProjection) {
-        self.latest_active_turn_id = Some(projection.turn_id.clone());
         if let Some(cwd) = projection.cwd.clone() {
             self.session_cwds.insert(projection.session_id.clone(), cwd);
         }
         self.turns
             .insert(projection.turn_id.clone(), projection.clone());
+        self.advance_latest_active_turn_id(&projection);
         self.publish_projection(UiProjection::Turn(projection));
     }
 
@@ -232,6 +236,26 @@ impl UiProtocolState {
                     .map(|projection| projection.turn_id.clone())
             });
         }
+    }
+
+    pub fn preserve_live_activity_on_page_refresh(
+        &self,
+        projections: impl IntoIterator<Item = UiTurnProjection>,
+    ) -> Vec<UiTurnProjection> {
+        let mut projections = projections.into_iter().collect::<Vec<_>>();
+        let Some(latest_turn_id) = projections
+            .last()
+            .map(|projection| projection.turn_id.clone())
+        else {
+            return projections;
+        };
+        let Some(previous) = self.turns.get(&latest_turn_id) else {
+            return projections;
+        };
+        if let Some(latest) = projections.last_mut() {
+            preserve_live_activity_on_nonterminal_refresh(latest, previous);
+        }
+        projections
     }
 
     pub fn merge_persisted_turn_projections_without_publish(
@@ -341,7 +365,7 @@ impl UiProtocolState {
             projection.model_request = None;
             projection.clone()
         };
-        self.latest_active_turn_id = Some(event.turn_id.clone());
+        self.advance_latest_active_turn_id(&projection);
         self.publish_projection(UiProjection::Turn(projection.clone()));
         projection
     }
@@ -378,7 +402,7 @@ impl UiProtocolState {
             projection.model_request = None;
             projection.clone()
         };
-        self.latest_active_turn_id = Some(event.turn_id.clone());
+        self.advance_latest_active_turn_id(&projection);
         self.publish_projection(UiProjection::Turn(projection.clone()));
         projection
     }
@@ -423,7 +447,7 @@ impl UiProtocolState {
             ));
             projection.clone()
         };
-        self.latest_active_turn_id = Some(waiting.turn_id.clone());
+        self.advance_latest_active_turn_id(&projection);
         self.publish_projection(UiProjection::Turn(projection.clone()));
         projection
     }
@@ -490,7 +514,7 @@ impl UiProtocolState {
             projection.model_request = None;
             projection.clone()
         };
-        self.latest_active_turn_id = Some(event.turn_id.clone());
+        self.advance_latest_active_turn_id(&projection);
         self.publish_projection(UiProjection::Turn(projection.clone()));
         projection
     }
@@ -534,7 +558,7 @@ impl UiProtocolState {
             projection.model_request = None;
             projection.clone()
         };
-        self.latest_active_turn_id = Some(event.turn_id.clone());
+        self.advance_latest_active_turn_id(&projection);
         self.publish_projection(UiProjection::Turn(projection.clone()));
         projection
     }
@@ -565,7 +589,7 @@ impl UiProtocolState {
             }
             projection.clone()
         };
-        self.latest_active_turn_id = Some(event.turn_id.clone());
+        self.advance_latest_active_turn_id(&projection);
         self.publish_projection(UiProjection::Turn(projection.clone()));
         projection
     }
@@ -597,9 +621,27 @@ impl UiProtocolState {
             projection.model_request = None;
             projection.clone()
         };
-        self.latest_active_turn_id = Some(turn_id);
+        self.advance_latest_active_turn_id(&projection);
         self.publish_projection(UiProjection::Turn(projection.clone()));
         projection
+    }
+
+    fn advance_latest_active_turn_id(&mut self, incoming: &UiTurnProjection) {
+        let Some(current_turn_id) = self.latest_active_turn_id.as_ref() else {
+            self.latest_active_turn_id = Some(incoming.turn_id.clone());
+            return;
+        };
+        let Some(current) = self.turns.get(current_turn_id) else {
+            self.latest_active_turn_id = Some(incoming.turn_id.clone());
+            return;
+        };
+        if current.turn_id != incoming.turn_id
+            && crate::projection::turn_order_key(&incoming.turn_id)
+                < crate::projection::turn_order_key(&current.turn_id)
+        {
+            return;
+        }
+        self.latest_active_turn_id = Some(incoming.turn_id.clone());
     }
 
     pub fn set_node_status(&mut self, snapshot: NodeStatusSnapshot) {
@@ -683,6 +725,7 @@ impl UiProtocolState {
                     &self.session_metadata,
                 )))
             }
+            UiCommand::QuerySessionTurnsPage { .. } => Err(UiProtocolError::StreamKindMismatch),
             UiCommand::QuerySessionSearch { .. }
             | UiCommand::QueryTaskList { .. }
             | UiCommand::QueryTaskBoard { .. }

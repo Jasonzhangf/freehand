@@ -148,8 +148,8 @@ use freehand_reason::{
     CompactionPolicyRequest, PersistedSessionIndexEntry, PersistedSessionMetadataEntry,
     ProviderRawLedgerWrite, ProviderRawScenePosition, ReasonPersistence, ReasonPersistenceError,
     ReasonResp04CompletionSchemaRejected, ReasonResp05ModelContinuationWaiting,
-    ReasonRewriteRuntime, ReasonTurnEngine, RewriteRuntimeState, SessionHistory,
-    SessionRollbackMarker, TurnRecord, TurnStartInput,
+    ReasonRewriteRuntime, ReasonTurnEngine, ReasonTurnPageDirection, ReasonTurnPageRequest,
+    RewriteRuntimeState, SessionHistory, SessionRollbackMarker, TurnRecord, TurnStartInput,
 };
 use freehand_task::{
     AgentCreateRequest, AgentLifecycleActivity, AgentLifecycleSnapshot, AgentLifecycleState,
@@ -184,6 +184,7 @@ use freehand_ui_protocol::{
     UiProviderConfigSummaryProjection, UiProviderConfigUpdate, UiQueryAccessScope, UiQueryResult,
     UiRuntimeQueryPort, UiSchedulerTickCommand, UiSessionMetadataProjection,
     UiSessionSearchChildProjection, UiSessionSearchProjection, UiSessionSearchResultProjection,
+    UiSessionTranscriptPageProjection, UiSessionTurnsPageDirection, UiSessionTurnsPageInfo,
     UiSubmitMetadata, UiTaskAgentCreateCommand, UiTaskAssignCommand, UiTaskBoardProjection,
     UiTaskClaimCommand, UiTaskCreateCommand, UiTaskDispatchCommand,
     UiTaskEventInboxEntryProjection, UiTaskEventInboxProjection, UiTaskHistoryProjection,
@@ -3743,6 +3744,60 @@ impl RuntimeCommandDispatcher {
                     .map(Some)
                     .map_err(|error| UiCommandDispatchPortError::DispatchFailed(error.to_string()))
             }
+            UiCommand::QuerySessionTurnsPage { session_id, page } => {
+                let Some(live) = state.config.live.as_ref() else {
+                    return Ok(None);
+                };
+                let request = ReasonTurnPageRequest {
+                    direction: match page.direction {
+                        UiSessionTurnsPageDirection::Latest => ReasonTurnPageDirection::Latest,
+                        UiSessionTurnsPageDirection::Older => ReasonTurnPageDirection::Older,
+                    },
+                    before_turn_id: page.before_turn_id.clone(),
+                    limit: page.limit,
+                };
+                let Some((source_agent_id, page)) = restore_session_turns_page_for_ui_query(
+                    &state.config,
+                    &live.runtime_home,
+                    session_id,
+                    &request,
+                )?
+                else {
+                    return Ok(None);
+                };
+                let source_node_id = node_id_for_query_agent(&state.config, &source_agent_id)?;
+                let projections = page
+                    .turns
+                    .iter()
+                    .map(|turn| {
+                        let cwd = state
+                            .session_cwds
+                            .get(session_id)
+                            .map(|path| path.to_string_lossy().into_owned())
+                            .or_else(|| turn.cwd.clone());
+                        project_runtime_turn(&source_agent_id, &source_node_id, turn, cwd)
+                    })
+                    .collect::<Vec<_>>();
+                let projections = self
+                    .ui_state
+                    .lock()
+                    .expect("lock ui state")
+                    .preserve_live_activity_on_page_refresh(projections);
+                Ok(Some(UiQueryResult::SessionTurnsPage(
+                    UiSessionTranscriptPageProjection {
+                        session_id: page.session_id,
+                        title: None,
+                        archived: false,
+                        cwd: projections.first().and_then(|turn| turn.cwd.clone()),
+                        turns: projections,
+                        page: UiSessionTurnsPageInfo {
+                            has_older: page.has_older,
+                            oldest_turn_id: page.oldest_turn_id,
+                            newest_turn_id: page.newest_turn_id,
+                        },
+                    },
+                )))
+            }
             UiCommand::QueryConfigStatus => {
                 let Some(live) = state.config.live.as_ref() else {
                     return Ok(None);
@@ -6808,6 +6863,27 @@ fn restore_session_turns_for_ui_query(
             Err(error) => {
                 return Err(UiCommandDispatchPortError::DispatchFailed(format!(
                     "failed to restore session turns from reason persistence: {error}"
+                )));
+            }
+        }
+    }
+    Ok(None)
+}
+
+fn restore_session_turns_page_for_ui_query(
+    config: &RuntimeCommandDispatcherConfig,
+    runtime_home: &Path,
+    session_id: &SessionId,
+    request: &ReasonTurnPageRequest,
+) -> Result<Option<(AgentId, freehand_reason::ReasonTurnPage)>, UiCommandDispatchPortError> {
+    for agent_id in queryable_reason_agent_ids(config) {
+        let persistence = ReasonPersistence::new(runtime_home.to_path_buf(), agent_id.clone());
+        match persistence.restore_turn_snapshots_page_for_ui(session_id, request) {
+            Ok(page) => return Ok(Some((agent_id, page))),
+            Err(ReasonPersistenceError::MissingRecoveryTruth(_)) => continue,
+            Err(error) => {
+                return Err(UiCommandDispatchPortError::DispatchFailed(format!(
+                    "failed to restore session turn page from reason persistence: {error}"
                 )));
             }
         }

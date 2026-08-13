@@ -9,6 +9,7 @@
   - `RuntimeCommandDispatcher::from_default_config`
   - `RuntimeCommandDispatcher::dispatch`
   - `RuntimeCommandDispatcher::query_runtime`
+  - `restore_session_turns_page_for_ui_query`
   - `RuntimeCommandDispatcher::ui_state`
   - `project_config_status_for_ui`
   - `run_live_reason_turn_with_hooks`
@@ -73,6 +74,8 @@
 - runtime dispatch routes the command into reason, node, or checkpoint owner adapters without letting the app own those semantics
 - ADP/read-only task query requests enter through `UiRuntimeQueryPort` and route to `TaskRuntime::list_tasks` or `TaskRuntime::task_history` without duplicating task filtering or ledger ordering in runtime; Worker-selected hosts preserve the Worker reason/session namespace while reading Task Center projections from the paired Master owner namespace
 - `QuerySessionTurns` enters through `RuntimeCommandDispatcher::query_runtime`, searches only the master and configured Worker reason-persistence namespaces, restores the requested effective logical-turn snapshots with their owning agent/node source, hides framework-owned `worker-task-*` input prompts from `user_text`, and replaces the derived session transcript so parent and Worker task conversations are visible without daemon restart while preserving live provider/model waiting and tool activity already published into `UiProtocolState` only for the latest nonterminal replacement turn; if the latest background lifecycle turn has no live hook projection yet, the runtime derives same-session/same-turn model-waiting state from ErrorCenter metadata truth before projection, while terminal turn snapshots and historical earlier rounds remain authoritative and cannot be re-lit as active
+- `QuerySessionTurnsPage` enters through the same runtime query owner, maps protocol page direction/cursor/limit to `reason.persistence`, and returns only the bounded owner-selected page plus page facts; invalid page requests remain explicit errors and never fall back to `QuerySessionTurns`
+- `QuerySessionTurnsPage` applies the protocol owner's page-refresh preservation helper to the returned page, so in-flight same-turn model/tool activity is not lost by refresh while terminal page truth remains authoritative
 - `QuerySessionList` and `QueryArchivedSessionList` refresh the selected Agent's persisted metadata and effective turn projections at query time before reading `UiProtocolState`; this makes background-created sessions visible without restart while the selected Agent's persistence namespace remains the only session-list source
 - ADP/read-only error-center query requests enter through `UiRuntimeQueryPort` and route to runtime-owned metadata ledger projection without exposing raw provider/tool/request text
 - ADP/read-only config status query requests enter through `UiRuntimeQueryPort` with a typed local/remote access scope, reload config-owner truth from the runtime home, and project the selected live agent/provider config plus complete safe provider/model-group registries; remote scope omits loopback Agent URLs, while neither scope exposes API keys, pair tokens, Relay tokens, or credential-bearing URLs

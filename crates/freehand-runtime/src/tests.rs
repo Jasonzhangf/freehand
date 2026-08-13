@@ -973,6 +973,83 @@ Injected timer prompt:\ninspect current Task Center truth";
 }
 
 #[test]
+fn runtime_query_session_turns_hides_master_framework_prompt_without_text_prefix() {
+    let runtime_home = temp_runtime_home();
+    let selected = live_selected_agent(
+        "http://127.0.0.1:1".to_owned(),
+        freehand_config::ProviderType::Anthropic,
+    );
+    let runtime = RuntimeCommandDispatcher::from_selected_agent_with_live(
+        &selected,
+        runtime_home.clone(),
+        false,
+    )
+    .expect("runtime bootstrap");
+    let session_id = SessionId::new("parent-session-long-framework-prompt");
+    let mut history = SessionHistory::new(session_id.clone(), Vec::new()).expect("session history");
+    let engine = ReasonTurnEngine::new();
+    let mut turn = engine
+        .start_turn(
+            &mut history,
+            TurnStartInput {
+                session_id: session_id.clone(),
+                turn_id: TurnId::new("runtime-turn-1"),
+                trace_id: TraceId::new("master-parent-evaluate-trace-long-prompt"),
+                feature_id: FeatureId::new("runtime.master-worker-loop"),
+                agent_id: AgentId::new("master"),
+                user_text: "Evaluate the current parent workset against every accepted child review, preserve the original objective, and decide whether more work is required before completion.".to_owned(),
+                planned_context_segments: Vec::new(),
+                tool_schema_fingerprint: None,
+                model: "master-model".to_owned(),
+            },
+        )
+        .expect("start framework turn");
+    let persistence =
+        ReasonPersistence::new(runtime_home.clone(), AgentId::new(selected.name.clone()));
+    persistence
+        .record_turn_started(&history, &turn, 0)
+        .expect("persist framework start");
+    turn.terminal_event = Some(freehand_contracts::ReasonResp03TerminalEvent {
+        session_id: session_id.clone(),
+        turn_id: turn.request.turn_id.clone(),
+        trace_id: turn.request.trace_id.clone(),
+        feature_id: FeatureId::new("runtime.master-worker-loop"),
+        agent_id: AgentId::new("master"),
+        status: TerminalStatus::Success,
+        summary: "framework decision completed".to_owned(),
+        user_options: None,
+    });
+    persistence
+        .record_turn_closed(&history, &turn, 0)
+        .expect("persist framework close");
+
+    match runtime
+        .query_runtime(&UiCommand::QuerySessionTurns {
+            session_id: session_id.clone(),
+        })
+        .expect("runtime query")
+        .expect("runtime-owned session query")
+    {
+        UiQueryResult::SessionTurns(transcript) => {
+            assert_eq!(transcript.turns.len(), 1);
+            assert_eq!(transcript.turns[0].user_text, None);
+            assert!(
+                transcript.turns[0]
+                    .terminal_text
+                    .as_deref()
+                    .is_some_and(|text| text.contains("framework decision completed"))
+            );
+            let wire = serde_json::to_string(&transcript).expect("transcript wire");
+            assert!(!wire.contains("Evaluate the current parent workset"));
+            assert!(!wire.contains("<freehand_parent_evaluation"));
+        }
+        other => panic!("unexpected session query result: {other:?}"),
+    }
+
+    fs::remove_dir_all(runtime_home).expect("cleanup");
+}
+
+#[test]
 fn runtime_query_session_search_returns_worker_hits_under_parent_session() {
     let runtime_home = temp_runtime_home();
     let selected = live_selected_agent(

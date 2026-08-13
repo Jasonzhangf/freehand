@@ -1246,6 +1246,64 @@ fn session_list_hides_internal_lifecycle_sessions_but_transcript_is_queryable() 
 }
 
 #[test]
+fn session_turn_page_command_validates_direction_cursor_and_limit() {
+    let session_id = SessionId::new("session-page");
+    let latest = UiCommand::QuerySessionTurnsPage {
+        session_id: session_id.clone(),
+        page: UiSessionTurnsPageRequest {
+            direction: UiSessionTurnsPageDirection::Latest,
+            before_turn_id: None,
+            limit: 24,
+        },
+    };
+    validate_command(&latest).expect("latest page");
+    let latest_wire = serde_json::to_string(&latest).expect("latest page wire");
+    let latest_roundtrip: UiCommand =
+        serde_json::from_str(&latest_wire).expect("latest page roundtrip");
+    assert_eq!(latest_roundtrip, latest);
+
+    let older = UiCommand::QuerySessionTurnsPage {
+        session_id: session_id.clone(),
+        page: UiSessionTurnsPageRequest {
+            direction: UiSessionTurnsPageDirection::Older,
+            before_turn_id: Some(TurnId::new("turn-24")),
+            limit: 24,
+        },
+    };
+    validate_command(&older).expect("older page");
+    let older_wire = serde_json::to_string(&older).expect("older page wire");
+    let older_roundtrip: UiCommand =
+        serde_json::from_str(&older_wire).expect("older page roundtrip");
+    assert_eq!(older_roundtrip, older);
+
+    let missing_cursor = UiCommand::QuerySessionTurnsPage {
+        session_id: session_id.clone(),
+        page: UiSessionTurnsPageRequest {
+            direction: UiSessionTurnsPageDirection::Older,
+            before_turn_id: None,
+            limit: 24,
+        },
+    };
+    assert_eq!(
+        validate_command(&missing_cursor).expect_err("older page cursor"),
+        UiProtocolError::InvalidTurnPageCursor
+    );
+
+    let oversized = UiCommand::QuerySessionTurnsPage {
+        session_id,
+        page: UiSessionTurnsPageRequest {
+            direction: UiSessionTurnsPageDirection::Latest,
+            before_turn_id: None,
+            limit: 101,
+        },
+    };
+    assert_eq!(
+        validate_command(&oversized).expect_err("page limit"),
+        UiProtocolError::InvalidTurnPageLimit
+    );
+}
+
+#[test]
 fn session_search_query_is_runtime_owned_and_validated() {
     let command = UiCommand::QuerySessionSearch {
         query: "roadmap".to_owned(),
@@ -2171,6 +2229,42 @@ fn terminal_session_refresh_drops_stale_live_activity() {
 }
 
 #[test]
+fn paged_session_refresh_preserves_nonterminal_live_activity() {
+    let mut state = UiProtocolState::default();
+    let session_id = SessionId::new("session-paged-refresh");
+    let turn_id = TurnId::new("runtime-turn-2");
+    state.apply_model_request_waiting_kind(UiModelRequestWaiting {
+        source_agent_id: AgentId::new("agent-1"),
+        source_node_id: "node-1".to_owned(),
+        session_id: session_id.clone(),
+        turn_id: turn_id.clone(),
+        kind: UiModelRequestKind::Thinking,
+        detail: Some("Waiting for model response.".to_owned()),
+        transport: None,
+        slave_substream_card: false,
+    });
+
+    let refreshed = state.preserve_live_activity_on_page_refresh(vec![active_refresh_projection(
+        &session_id,
+        &turn_id,
+    )]);
+    assert_eq!(
+        refreshed[0]
+            .model_request
+            .as_ref()
+            .map(|activity| activity.status),
+        Some(UiModelRequestStatus::Waiting)
+    );
+
+    let terminal = state.preserve_live_activity_on_page_refresh(vec![terminal_refresh_projection(
+        &session_id,
+        &turn_id,
+        TerminalStatus::Success,
+    )]);
+    assert!(terminal[0].model_request.is_none());
+}
+
+#[test]
 fn persisted_session_merge_is_silent_and_preserves_live_projection() {
     let mut state = UiProtocolState::default();
     let session_id = SessionId::new("session-background-refresh");
@@ -2599,6 +2693,127 @@ fn latest_active_turn_and_stream_kind_routing() {
         &UiProjection::Turn(projection),
         state.latest_active_turn_id.as_ref()
     ));
+}
+
+#[test]
+fn late_terminal_projection_does_not_regress_newer_active_subscription() {
+    let mut state = UiProtocolState::default();
+    let session_id = SessionId::new("session-latest-active-race");
+    let first_turn_id = TurnId::new("runtime-turn-1");
+    let second_turn_id = TurnId::new("runtime-turn-2");
+
+    state.apply_turn_projection(active_refresh_projection(&session_id, &first_turn_id));
+    state.apply_turn_projection(active_refresh_projection(&session_id, &second_turn_id));
+    state.apply_turn_projection(terminal_refresh_projection(
+        &session_id,
+        &first_turn_id,
+        TerminalStatus::Success,
+    ));
+
+    let latest = state
+        .query(&UiCommand::QueryLatestActiveTurn)
+        .expect("latest query");
+    match latest {
+        UiQueryResult::Turn(Some(turn)) => assert_eq!(turn.turn_id, second_turn_id),
+        other => panic!("unexpected latest projection: {other:?}"),
+    }
+
+    let selector = subscription_selector(&UiCommand::SubscribeLatestActiveTurn {
+        client: UiClientKind::WebUi,
+    })
+    .expect("latest subscription selector");
+    assert!(subscription_matches(
+        &selector,
+        &UiProjection::Turn(active_refresh_projection(&session_id, &second_turn_id)),
+        state.latest_active_turn_id.as_ref(),
+    ));
+}
+
+#[test]
+fn late_older_active_projection_does_not_regress_newer_active_subscription() {
+    let mut state = UiProtocolState::default();
+    let session_id = SessionId::new("session-latest-active-order");
+    let first_turn_id = TurnId::new("runtime-turn-1");
+    let second_turn_id = TurnId::new("runtime-turn-2");
+
+    state.apply_turn_projection(active_refresh_projection(&session_id, &second_turn_id));
+    state.apply_turn_projection(active_refresh_projection(&session_id, &first_turn_id));
+
+    let latest = state
+        .query(&UiCommand::QueryLatestActiveTurn)
+        .expect("latest query");
+    match latest {
+        UiQueryResult::Turn(Some(turn)) => assert_eq!(turn.turn_id, second_turn_id),
+        other => panic!("unexpected latest projection: {other:?}"),
+    }
+}
+
+#[test]
+fn late_older_terminal_projection_does_not_regress_newer_active_subscription() {
+    let mut state = UiProtocolState::default();
+    let session_id = SessionId::new("session-latest-terminal-order");
+    let first_turn_id = TurnId::new("runtime-turn-1");
+    let second_turn_id = TurnId::new("runtime-turn-2");
+
+    state.apply_turn_projection(active_refresh_projection(&session_id, &second_turn_id));
+    state.apply_turn_projection(terminal_refresh_projection(
+        &session_id,
+        &first_turn_id,
+        TerminalStatus::Success,
+    ));
+
+    let latest = state
+        .query(&UiCommand::QueryLatestActiveTurn)
+        .expect("latest query");
+    match latest {
+        UiQueryResult::Turn(Some(turn)) => assert_eq!(turn.turn_id, second_turn_id),
+        other => panic!("unexpected latest projection: {other:?}"),
+    }
+}
+
+#[test]
+fn same_turn_terminal_projection_closes_the_active_subscription() {
+    let mut state = UiProtocolState::default();
+    let session_id = SessionId::new("session-latest-same-turn");
+    let turn_id = TurnId::new("runtime-turn-1");
+
+    state.apply_turn_projection(active_refresh_projection(&session_id, &turn_id));
+    state.apply_turn_projection(terminal_refresh_projection(
+        &session_id,
+        &turn_id,
+        TerminalStatus::Success,
+    ));
+
+    let latest = state
+        .query(&UiCommand::QueryLatestActiveTurn)
+        .expect("latest query");
+    match latest {
+        UiQueryResult::Turn(Some(turn)) => {
+            assert_eq!(turn.turn_id, turn_id);
+            assert_eq!(turn.terminal_status, Some(TerminalStatus::Success));
+        }
+        other => panic!("unexpected latest projection: {other:?}"),
+    }
+}
+
+#[test]
+fn terminal_projection_remains_latest_without_newer_active_turn() {
+    let mut state = UiProtocolState::default();
+    let session_id = SessionId::new("session-latest-terminal");
+    let turn_id = TurnId::new("runtime-turn-terminal");
+    state.apply_turn_projection(terminal_refresh_projection(
+        &session_id,
+        &turn_id,
+        TerminalStatus::Success,
+    ));
+
+    let latest = state
+        .query(&UiCommand::QueryLatestActiveTurn)
+        .expect("latest query");
+    match latest {
+        UiQueryResult::Turn(Some(turn)) => assert_eq!(turn.turn_id, turn_id),
+        other => panic!("unexpected latest projection: {other:?}"),
+    }
 }
 
 #[test]

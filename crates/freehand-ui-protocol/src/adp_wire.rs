@@ -53,6 +53,7 @@ pub enum UiQueryResult {
     Turn(Option<UiTurnProjection>),
     SessionList(UiSessionListProjection),
     SessionTurns(UiSessionTranscriptProjection),
+    SessionTurnsPage(UiSessionTranscriptPageProjection),
     SessionSearch(UiSessionSearchProjection),
     NodeStatus(Option<NodeStatusSnapshot>),
     Progress(Option<TaskProgressSnapshot>),

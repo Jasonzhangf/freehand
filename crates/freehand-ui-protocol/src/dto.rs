@@ -98,6 +98,10 @@ pub enum UiCommand {
     QuerySessionTurns {
         session_id: SessionId,
     },
+    QuerySessionTurnsPage {
+        session_id: SessionId,
+        page: UiSessionTurnsPageRequest,
+    },
     QuerySessionSearch {
         query: String,
         #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -617,6 +621,42 @@ pub struct UiSessionTranscriptProjection {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub cwd: Option<String>,
     pub turns: Vec<UiTurnProjection>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum UiSessionTurnsPageDirection {
+    Latest,
+    Older,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct UiSessionTurnsPageRequest {
+    pub direction: UiSessionTurnsPageDirection,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub before_turn_id: Option<TurnId>,
+    pub limit: usize,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct UiSessionTurnsPageInfo {
+    pub has_older: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub oldest_turn_id: Option<TurnId>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub newest_turn_id: Option<TurnId>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct UiSessionTranscriptPageProjection {
+    pub session_id: SessionId,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub title: Option<String>,
+    #[serde(default)]
+    pub archived: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cwd: Option<String>,
+    pub turns: Vec<UiTurnProjection>,
+    pub page: UiSessionTurnsPageInfo,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

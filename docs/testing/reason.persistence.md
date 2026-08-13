@@ -57,6 +57,7 @@
   - UI restore test that leaves authoritative closed-turn truth with only the terminal continuation round, proving earlier provider/tool rounds are backfilled from reason-ledger snapshots
   - UI restore test that removes the reason ledger for an inactive legacy partial transcript, proving surviving authoritative snapshots are returned with `reason_persistence_partial_ui_restore`
   - UI restore negative test that removes the reason ledger for an active incomplete transcript, proving active work remains a hard cursor-coherence error
+  - UI page positive/reverse coverage: latest page followed by contiguous older pages reconstructs effective order; invalid or cross-session cursor fails without returning a full transcript
   - runtime bootstrap test that removes the first authoritative round and poisons the historical reason ledger, proving global startup consumes the remaining authoritative snapshot without parsing the ledger
   - runtime/bootstrap-adjacent restore test that writes a zero-byte atomic temp file next to a closed turn and proves both `restore` and `restore_authoritative_turn_snapshots_for_ui` return only the closed `*.json` turn
   - turn-start restore test for an original `runtime-turn-1` start plus a closed
@@ -131,3 +132,6 @@
     parent/evaluation snapshots are enough for background idempotency replay
     even when the session reason ledger is poisoned
   - migrated mainline-call source and generated wiki are kept in sync with this test design
+  - bounded selected-session latest/older paging is implemented through
+    `ReasonPersistence::restore_turn_snapshots_page_for_ui` and preserves
+    effective turn order without a full-page fallback

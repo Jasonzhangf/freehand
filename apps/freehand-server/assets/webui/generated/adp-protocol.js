@@ -132,6 +132,12 @@ export const ADP_PROTOCOL_MANIFEST = Object.freeze({
       "target_owner_feature": "ui.protocol"
     },
     {
+      "serde_name": "QuerySessionTurnsPage",
+      "semantic_kind": "query_session_turns_page",
+      "frame_class": "query",
+      "target_owner_feature": "ui.protocol"
+    },
+    {
       "serde_name": "QuerySessionSearch",
       "semantic_kind": "query_session_search",
       "frame_class": "query",

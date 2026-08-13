@@ -534,8 +534,8 @@ fn ui_user_text_projection_for_turn(turn: &TurnRecord) -> Option<String> {
         return None;
     }
     let user_text = ui_user_text_for_turn(turn);
-    if ui_should_hide_user_text(&turn.request.session_id, &turn.request.user_text)
-        || ui_should_hide_user_text(&turn.request.session_id, &user_text)
+    if ui_should_hide_turn_user_text(turn, &turn.request.user_text)
+        || ui_should_hide_turn_user_text(turn, &user_text)
     {
         None
     } else {
@@ -560,6 +560,31 @@ fn ui_should_hide_user_text(session_id: &SessionId, user_text: &str) -> bool {
             "You are the production Master starting a new follow-up turn injected by a due timer.",
         )
         || is_framework_worker_task_session(session_id)
+}
+
+fn ui_should_hide_turn_user_text(turn: &TurnRecord, user_text: &str) -> bool {
+    ui_should_hide_user_text(&turn.request.session_id, user_text)
+        || turn.request.feature_id.as_str() == "runtime.master-worker-loop"
+        || turn
+            .request
+            .trace_id
+            .as_str()
+            .starts_with("master-lifecycle-trace-")
+        || turn
+            .request
+            .trace_id
+            .as_str()
+            .starts_with("master-parent-evaluate-trace-")
+        || turn
+            .request
+            .trace_id
+            .as_str()
+            .starts_with("master-parent-blocked-trace-")
+        || turn
+            .request
+            .trace_id
+            .as_str()
+            .starts_with("master-timer-trace-")
 }
 
 fn is_runtime_continuation_round(turn_id: &TurnId) -> bool {
@@ -663,8 +688,8 @@ fn turn_context_segment(turn: &TurnRecord) -> Option<ContextSegment> {
 
 fn model_history_user_text_for_turn(turn: &TurnRecord) -> String {
     let user_text = ui_user_text_for_turn(turn);
-    if ui_should_hide_user_text(&turn.request.session_id, &turn.request.user_text)
-        || ui_should_hide_user_text(&turn.request.session_id, &user_text)
+    if ui_should_hide_turn_user_text(turn, &turn.request.user_text)
+        || ui_should_hide_turn_user_text(turn, &user_text)
     {
         String::new()
     } else {

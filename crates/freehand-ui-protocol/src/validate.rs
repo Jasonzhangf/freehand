@@ -229,6 +229,26 @@ pub fn validate_command(command: &UiCommand) -> Result<(), UiProtocolError> {
         UiCommand::QuerySessionSearch { query, .. } if query.trim().is_empty() => {
             Err(UiProtocolError::EmptyUserInput)
         }
+        UiCommand::QuerySessionTurnsPage { session_id, page }
+            if session_id.as_str().trim().is_empty() =>
+        {
+            Err(UiProtocolError::EmptySessionId)
+        }
+        UiCommand::QuerySessionTurnsPage { page, .. } if !(1..=100).contains(&page.limit) => {
+            Err(UiProtocolError::InvalidTurnPageLimit)
+        }
+        UiCommand::QuerySessionTurnsPage { page, .. }
+            if matches!(page.direction, UiSessionTurnsPageDirection::Latest)
+                && page.before_turn_id.is_some() =>
+        {
+            Err(UiProtocolError::InvalidTurnPageCursor)
+        }
+        UiCommand::QuerySessionTurnsPage { page, .. }
+            if matches!(page.direction, UiSessionTurnsPageDirection::Older)
+                && page.before_turn_id.is_none() =>
+        {
+            Err(UiProtocolError::InvalidTurnPageCursor)
+        }
         UiCommand::UpdateAgentProviderSelection { selection }
             if selection.agent_name.trim().is_empty() =>
         {
@@ -536,6 +556,8 @@ pub fn accept_command_ingress(command: &UiCommand) -> Result<UiCommandIngressAck
 pub fn protocol_rejection(err: UiProtocolError) -> UiProtocolRejection {
     let code = match err {
         UiProtocolError::EmptySessionId => "empty_session_id",
+        UiProtocolError::InvalidTurnPageLimit => "invalid_turn_page_limit",
+        UiProtocolError::InvalidTurnPageCursor => "invalid_turn_page_cursor",
         UiProtocolError::EmptySessionTitle => "empty_session_title",
         UiProtocolError::EmptyUserInput => "empty_user_input",
         UiProtocolError::InvalidInputAttachment => "invalid_input_attachment",

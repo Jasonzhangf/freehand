@@ -57,6 +57,7 @@
   - `terminal_text_projection`
   - `UiProtocolState::subscribe`
   - `UiProtocolState::query`
+  - `UiProtocolState::preserve_live_activity_on_page_refresh`
   - `UiRuntimeQueryPort::query_runtime`
   - `UiRuntimeQueryPort::query_runtime_with_scope`
   - `UiQueryAccessScope`
@@ -165,6 +166,7 @@
 - session list projections expose only owner-supplied persisted session metadata (`CreateSession` / session metadata truth) as top-level active or archived sessions, so WebUI, Android, CLI, and headless ADP clients share one CRUD truth instead of deriving global sessions from raw turns
 - `UiSessionSummary.active_turn_id` is a live/progress identity only: it may point only to the same-session latest turn when that turn is nonterminal with model/tool activity; terminal snapshots are authoritative and clear the session active identity even if an older round still has historical retry metadata
 - session list projections hide internal framework sessions such as `master-lifecycle-*`, `master-timer-*`, and `worker-task-*` from user-facing active and archived lists, while explicit `QuerySessionTurns { session_id }` remains queryable for debug/replay truth
+- bounded selected-session page projections preserve same-turn live activity only for nonterminal replacement truth; terminal page truth clears stale activity
 - task board projections carry `parent_session_id`, observing `attached_session_ids`, and canonical `worker_session_id` so WebUI can scope tasks to the selected parent/observer session and open the Worker transcript without synthesizing an id
 - rollback command ingress exposes append-only latest-turn rollback as a reason.persistence mutation intent; protocol does not remove turns or mutate local transcript truth
 - task list and task history query results expose UI-safe task snapshot and ledger-event projections supplied by runtime owner code through `UiRuntimeQueryPort`

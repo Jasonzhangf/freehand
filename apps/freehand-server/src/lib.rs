@@ -848,9 +848,21 @@ async fn handle_adp_query(
     })
     .await
     .map_err(|err| format!("运行时 query task failed: {err}"))?;
+    let runtime_owned_page_query = matches!(query, UiCommand::QuerySessionTurnsPage { .. });
     match runtime_result {
         Ok(Some(result)) => {
             let _ = outbound_tx.send(UiAdpResponse::QueryResult { request_id, result });
+            return Ok(());
+        }
+        Ok(None) if runtime_owned_page_query => {
+            let _ = outbound_tx.send(UiAdpResponse::Failure {
+                request_id,
+                failure: UiAdpFailure {
+                    code: "session_turn_page_not_found".to_owned(),
+                    message: "requested session transcript page is not available".to_owned(),
+                    retryable: false,
+                },
+            });
             return Ok(());
         }
         Ok(None) => {}

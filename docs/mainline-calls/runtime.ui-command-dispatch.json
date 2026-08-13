@@ -913,6 +913,28 @@
       "caller": "RuntimeCommandDispatcher::dispatch",
       "callee": "export_shared_account_config / AccountConfigClient::push / AccountConfigMirror::synced / AccountConfigMirror::conflict",
       "binding_status": "bound"
+    },
+    {
+      "step": "10r",
+      "symbol_path": "RuntimeCommandDispatcher::query_runtime",
+      "file_path": "crates/freehand-runtime/src/lib.rs",
+      "responsibility": "route QuerySessionTurnsPage through the runtime query owner into reason.persistence without widening the selected-session transcript to an unbounded restore",
+      "input_semantic": "validated session id plus latest/older page direction, limit, and owner cursor",
+      "output_semantic": "bounded UI turn page or explicit page validation/cursor/persistence failure",
+      "caller": "ADP query transport",
+      "callee": "restore_session_turns_page_for_ui_query",
+      "binding_status": "bound"
+    },
+    {
+      "step": "10s",
+      "symbol_path": "restore_session_turns_page_for_ui_query",
+      "file_path": "crates/freehand-runtime/src/lib.rs",
+      "responsibility": "map protocol page direction/cursor to ReasonTurnPageRequest, project only the owner-selected bounded turns, and preserve latest nonterminal live activity during page refresh",
+      "input_semantic": "runtime home plus validated bounded page request",
+      "output_semantic": "UiSessionTurnsPageProjection with ordered turns and page facts",
+      "caller": "RuntimeCommandDispatcher::query_runtime",
+      "callee": "ReasonPersistence::restore_turn_snapshots_page_for_ui plus UiProtocolState::preserve_live_activity_on_page_refresh",
+      "binding_status": "bound"
     }
   ],
   "sync_status": [

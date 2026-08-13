@@ -894,6 +894,28 @@
       "binding_status": "bound"
     },
     {
+      "step": "37",
+      "symbol_path": "UiCommand::QuerySessionTurnsPage / UiSessionTurnsPageRequest / UiSessionTurnsPageInfo / UiSessionTranscriptPageProjection",
+      "file_path": "crates/freehand-ui-protocol/src/dto.rs",
+      "responsibility": "define bounded selected-session transcript page query DTOs with explicit latest/older direction, owner-issued cursor, and page facts without making the browser a transcript truth writer",
+      "input_semantic": "session id plus latest/older transcript page request",
+      "output_semantic": "bounded ordered turn page plus has-older and cursor facts",
+      "caller": "WebUI/ADP query transport",
+      "callee": "runtime.ui-command-dispatch",
+      "binding_status": "bound"
+    },
+    {
+      "step": "37a",
+      "symbol_path": "validate_command",
+      "file_path": "crates/freehand-ui-protocol/src/validate.rs",
+      "responsibility": "validate transcript page session id, bounded limit, latest/older direction, and required older cursor before runtime dispatch",
+      "input_semantic": "QuerySessionTurnsPage command",
+      "output_semantic": "validated bounded page query or explicit protocol rejection",
+      "caller": "ADP query transport",
+      "callee": "runtime.ui-command-dispatch",
+      "binding_status": "bound"
+    },
+    {
       "step": "18a",
       "symbol_path": "UI_COMMAND_DESCRIPTORS / command_descriptor / adp_protocol_manifest / adp_protocol_webui_module",
       "file_path": "crates/freehand-ui-protocol/src/adp_wire.rs",

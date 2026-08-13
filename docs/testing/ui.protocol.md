@@ -265,6 +265,7 @@ The config-status projection also carries a Relay-backed Agent URL for non-loopb
   - ADP generated manifest and WebUI constructor module are landed; `xtask gates check` regenerates both artifacts and fails stale or missing committed outputs
   - session cwd summary/transcript projection is landed and regression-locked
   - session management command/query projection is implemented for `CreateSession`, `RenameSession`, `ArchiveSession`, `RestoreSession`, `DeleteSession`, and `RollbackLatestSessionTurn` routing through runtime to `reason.persistence`; `CreateSession.cwd` empty-string rejection and rollback empty-session rejection are regression-locked at the protocol boundary
+  - bounded selected-session transcript pages are protocol DTOs; page refresh preserves only same-turn nonterminal live activity through `UiProtocolState::preserve_live_activity_on_page_refresh`
   - task list/history query commands and DTOs are landed; runtime-backed ADP task query is regression-locked in daemon tests
   - Phase 1 TaskBoard/AgentBoard/AgentLifecycle query commands and DTOs are landed and are runtime-route-only
   - Phase 1 ApplyExecutionFact/RunSchedulerTick command DTOs are landed for internal runtime dispatch, route to `task.orchestration`, and are rejected on public ADP command ingress

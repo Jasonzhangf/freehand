@@ -37,7 +37,8 @@ pub use persistence::{
     ActiveTurnSnapshot, PersistedSessionIndexEntry, PersistedSessionMetadataEntry,
     PersistedSessionView, ProviderRawLedgerRow, ProviderRawLedgerWrite, ProviderRawScenePosition,
     ReasonLedgerPayload, ReasonLedgerRow, ReasonPersistence, ReasonPersistenceCursor,
-    ReasonPersistenceError, RestoredReasonSession, SessionRollbackMarker,
+    ReasonPersistenceError, ReasonTurnPage, ReasonTurnPageDirection, ReasonTurnPageRequest,
+    RestoredReasonSession, SessionRollbackMarker,
 };
 pub use rewrite_runtime::{
     CompactionPolicyOutcome, CompactionPolicyRequest, CompactionRewritePayload,

@@ -107,6 +107,31 @@ pub struct PersistedSessionMetadataEntry {
     pub updated_unix_seconds: u64,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ReasonTurnPageDirection {
+    Latest,
+    Older,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ReasonTurnPageRequest {
+    pub direction: ReasonTurnPageDirection,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub before_turn_id: Option<TurnId>,
+    pub limit: usize,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ReasonTurnPage {
+    pub session_id: SessionId,
+    pub turns: Vec<TurnRecord>,
+    pub has_older: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub oldest_turn_id: Option<TurnId>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub newest_turn_id: Option<TurnId>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct SessionRollbackMarker {
     pub rollback_id: String,
@@ -187,7 +212,13 @@ pub enum ReasonPersistenceError {
     SessionRollbackTargetNotFound(String),
     #[error("session rollback cannot run while an active turn exists: {0}")]
     SessionRollbackActiveTurn(String),
+    #[error("reason turn page limit must be between 1 and {max}, got {actual}")]
+    InvalidTurnPageLimit { max: usize, actual: usize },
+    #[error("reason turn page request has an invalid cursor: {0}")]
+    InvalidTurnPageCursor(String),
 }
+
+const MAX_REASON_TURN_PAGE_LIMIT: usize = 100;
 
 pub struct ReasonPersistence {
     runtime_home: PathBuf,
@@ -598,6 +629,189 @@ impl ReasonPersistence {
             turns = ui_turn_snapshots_from_restored(restored);
         }
         Ok(turns)
+    }
+
+    pub fn restore_turn_snapshots_page_for_ui(
+        &self,
+        session_id: &SessionId,
+        request: &ReasonTurnPageRequest,
+    ) -> Result<ReasonTurnPage, ReasonPersistenceError> {
+        if !(1..=MAX_REASON_TURN_PAGE_LIMIT).contains(&request.limit) {
+            return Err(ReasonPersistenceError::InvalidTurnPageLimit {
+                max: MAX_REASON_TURN_PAGE_LIMIT,
+                actual: request.limit,
+            });
+        }
+        match (&request.direction, &request.before_turn_id) {
+            (ReasonTurnPageDirection::Latest, Some(_)) => {
+                return Err(ReasonPersistenceError::InvalidTurnPageCursor(
+                    "latest page cannot carry before_turn_id".to_owned(),
+                ));
+            }
+            (ReasonTurnPageDirection::Older, None) => {
+                return Err(ReasonPersistenceError::InvalidTurnPageCursor(
+                    "older page requires before_turn_id".to_owned(),
+                ));
+            }
+            _ => {}
+        }
+
+        let candidates = match self.list_effective_ui_turn_snapshot_paths(session_id) {
+            Ok(candidates) => candidates,
+            Err(ReasonPersistenceError::MissingRecoveryTruth(_))
+                if self
+                    .load_session_metadata_entries()?
+                    .iter()
+                    .any(|entry| entry.session_id == *session_id) =>
+            {
+                return Ok(ReasonTurnPage {
+                    session_id: session_id.clone(),
+                    has_older: false,
+                    oldest_turn_id: None,
+                    newest_turn_id: None,
+                    turns: Vec::new(),
+                });
+            }
+            Err(error) => return Err(error),
+        };
+        let active_path = self.active_turn_path(session_id);
+        let mut turn_positions = candidates
+            .iter()
+            .enumerate()
+            .map(|(index, (turn_id, _))| (turn_id.clone(), index))
+            .collect::<BTreeMap<_, _>>();
+        let (start, end) = match request.direction {
+            ReasonTurnPageDirection::Latest => {
+                let start = candidates.len().saturating_sub(request.limit);
+                (start, candidates.len())
+            }
+            ReasonTurnPageDirection::Older => {
+                let cursor = request.before_turn_id.as_ref().expect("validated cursor");
+                let end = turn_positions.remove(cursor).ok_or_else(|| {
+                    ReasonPersistenceError::InvalidTurnPageCursor(format!(
+                        "cursor `{}` is not an effective turn in session `{}`",
+                        cursor.as_str(),
+                        session_id.as_str()
+                    ))
+                })?;
+                (end.saturating_sub(request.limit), end)
+            }
+        };
+        let mut page_turns = Vec::with_capacity(end.saturating_sub(start));
+        for (_, path) in &candidates[start..end] {
+            let mut turn = if path == &active_path {
+                read_json_file::<ActiveTurnSnapshot>(path)?.turn
+            } else {
+                read_json_file::<TurnRecord>(path)?
+            };
+            ensure_turn_created_at(&mut turn, file_modified_unix_seconds(path)?);
+            page_turns.push(turn);
+        }
+        Ok(ReasonTurnPage {
+            session_id: session_id.clone(),
+            has_older: start > 0,
+            oldest_turn_id: page_turns.first().map(|turn| turn.request.turn_id.clone()),
+            newest_turn_id: page_turns.last().map(|turn| turn.request.turn_id.clone()),
+            turns: page_turns,
+        })
+    }
+
+    fn list_effective_ui_turn_snapshot_paths(
+        &self,
+        session_id: &SessionId,
+    ) -> Result<Vec<(TurnId, PathBuf)>, ReasonPersistenceError> {
+        let history_exists = self.session_history_path(session_id).is_file();
+        let cursor_exists = self.cursor_path(session_id).is_file();
+        let active_path = self.active_turn_path(session_id);
+        let turns_dir = self.turns_dir(session_id);
+        let turns_exist = turns_dir.is_dir();
+        if !history_exists && !cursor_exists && !active_path.is_file() && !turns_exist {
+            return Err(ReasonPersistenceError::MissingRecoveryTruth(
+                session_id.as_str().to_owned(),
+            ));
+        }
+        if !history_exists || !cursor_exists {
+            return Err(ReasonPersistenceError::InvalidCursorCoherence(
+                "authoritative snapshots require both session-history and cursor files".to_owned(),
+            ));
+        }
+
+        let cursor: ReasonPersistenceCursor = read_json_file(&self.cursor_path(session_id))?;
+        if cursor.schema_version != PERSISTENCE_SCHEMA_VERSION {
+            return Err(ReasonPersistenceError::InvalidCursorCoherence(
+                "unsupported cursor schema version".to_owned(),
+            ));
+        }
+        let rollback_markers = self.load_session_rollback_markers(session_id)?;
+        let mut candidates = Vec::new();
+        if turns_exist {
+            let mut entries = fs::read_dir(&turns_dir)
+                .map_err(|err| ReasonPersistenceError::FileIoFailed(err.to_string()))?
+                .collect::<Result<Vec<_>, _>>()
+                .map_err(|err| ReasonPersistenceError::FileIoFailed(err.to_string()))?;
+            entries.sort_by_key(|entry| entry.file_name());
+            for entry in entries {
+                let path = entry.path();
+                if !entry
+                    .file_type()
+                    .map_err(|err| ReasonPersistenceError::FileIoFailed(err.to_string()))?
+                    .is_file()
+                    || !is_closed_turn_snapshot_path(&path)
+                {
+                    continue;
+                }
+                let Some(turn_id) = path
+                    .file_stem()
+                    .and_then(|stem| stem.to_str())
+                    .map(TurnId::new)
+                else {
+                    continue;
+                };
+                if rollback_markers
+                    .iter()
+                    .any(|marker| logical_turn_key(&turn_id) == marker.target_logical_turn_key)
+                {
+                    continue;
+                }
+                candidates.push((turn_id, path));
+            }
+        }
+        if active_path.is_file() {
+            let snapshot: ActiveTurnSnapshot = read_json_file(&active_path)?;
+            let turn_id = snapshot.turn.request.turn_id;
+            if cursor.active_turn_id.as_ref() != Some(&turn_id) {
+                return Err(ReasonPersistenceError::InvalidCursorCoherence(
+                    "active-turn snapshot does not match cursor active_turn_id".to_owned(),
+                ));
+            }
+            if !rollback_markers
+                .iter()
+                .any(|marker| logical_turn_key(&turn_id) == marker.target_logical_turn_key)
+            {
+                candidates.retain(|(known_turn_id, _)| known_turn_id != &turn_id);
+                candidates.push((turn_id, active_path));
+            }
+        } else if cursor.active_turn_id.is_some() {
+            return Err(ReasonPersistenceError::InvalidCursorCoherence(
+                "cursor references active turn but active-turn snapshot is missing".to_owned(),
+            ));
+        }
+        if let Some(latest_turn_id) = cursor.latest_turn_id
+            && !candidates
+                .iter()
+                .any(|(turn_id, _)| turn_id == &latest_turn_id)
+        {
+            return Err(ReasonPersistenceError::InvalidCursorCoherence(
+                "cursor latest_turn_id does not exist in persisted turn truth".to_owned(),
+            ));
+        }
+        candidates.sort_by(|(left, _), (right, _)| {
+            logical_turn_key(left)
+                .cmp(&logical_turn_key(right))
+                .then_with(|| logical_turn_round(left).cmp(&logical_turn_round(right)))
+                .then_with(|| left.as_str().cmp(right.as_str()))
+        });
+        Ok(candidates)
     }
 
     pub fn raw_authoritative_turn_snapshots(
@@ -1801,6 +2015,7 @@ fn remove_if_exists(path: &Path) -> Result<(), ReasonPersistenceError> {
 mod tests {
     use super::*;
     use crate::{AgentId, FeatureId, ReasonTurnEngine, SessionId, TraceId, TurnId, TurnStartInput};
+    use freehand_contracts::ReasonResp03TerminalEvent;
     use freehand_contracts::{
         ContextCachePolicy, ContextProvenance, ContextRole, ContextSegment, ContextSegmentId,
         ContextSegmentKind, ContextStability, ReasonResp01SemanticEvent, SemanticEventKind,
@@ -1907,6 +2122,180 @@ mod tests {
                 },
             )
             .expect("turn")
+    }
+
+    #[test]
+    fn ui_turn_page_returns_latest_then_contiguous_older_pages() {
+        let runtime_home = temp_runtime_home();
+        let coordinator = ReasonPersistence::new(&runtime_home, AgentId::new("agent-1"));
+        let mut history = session_history();
+
+        for index in 1..=5 {
+            let turn_id = format!("runtime-turn-{index}");
+            let trace_id = format!("trace-{index}");
+            let mut turn = started_turn_with_id(&mut history, &turn_id, &trace_id);
+            coordinator
+                .record_turn_started(&history, &turn, 0)
+                .expect("persist turn start");
+            turn.terminal_event = Some(ReasonResp03TerminalEvent {
+                session_id: history.session_id().clone(),
+                turn_id: turn.request.turn_id.clone(),
+                trace_id: turn.request.trace_id.clone(),
+                feature_id: FeatureId::new("reason.persistence"),
+                agent_id: AgentId::new("agent-1"),
+                status: TerminalStatus::Success,
+                summary: format!("turn {index}"),
+                user_options: None,
+            });
+            coordinator
+                .record_turn_closed(&history, &turn, 0)
+                .expect("persist turn close");
+        }
+
+        let latest = coordinator
+            .restore_turn_snapshots_page_for_ui(
+                history.session_id(),
+                &ReasonTurnPageRequest {
+                    direction: ReasonTurnPageDirection::Latest,
+                    before_turn_id: None,
+                    limit: 2,
+                },
+            )
+            .expect("latest page");
+        assert_eq!(
+            latest
+                .turns
+                .iter()
+                .map(|turn| turn.request.turn_id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["runtime-turn-4", "runtime-turn-5"]
+        );
+        assert!(latest.has_older);
+        assert_eq!(latest.oldest_turn_id, Some(TurnId::new("runtime-turn-4")));
+
+        let older = coordinator
+            .restore_turn_snapshots_page_for_ui(
+                history.session_id(),
+                &ReasonTurnPageRequest {
+                    direction: ReasonTurnPageDirection::Older,
+                    before_turn_id: latest.oldest_turn_id.clone(),
+                    limit: 2,
+                },
+            )
+            .expect("older page");
+        assert_eq!(
+            older
+                .turns
+                .iter()
+                .map(|turn| turn.request.turn_id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["runtime-turn-2", "runtime-turn-3"]
+        );
+        assert!(older.has_older);
+
+        let oldest = coordinator
+            .restore_turn_snapshots_page_for_ui(
+                history.session_id(),
+                &ReasonTurnPageRequest {
+                    direction: ReasonTurnPageDirection::Older,
+                    before_turn_id: older.oldest_turn_id.clone(),
+                    limit: 2,
+                },
+            )
+            .expect("oldest page");
+        assert_eq!(
+            oldest
+                .turns
+                .iter()
+                .map(|turn| turn.request.turn_id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["runtime-turn-1"]
+        );
+        assert!(!oldest.has_older);
+
+        let active_turn = started_turn_with_id(&mut history, "runtime-turn-6", "trace-6");
+        coordinator
+            .record_turn_started(&history, &active_turn, 0)
+            .expect("persist active turn");
+        let active_latest = coordinator
+            .restore_turn_snapshots_page_for_ui(
+                history.session_id(),
+                &ReasonTurnPageRequest {
+                    direction: ReasonTurnPageDirection::Latest,
+                    before_turn_id: None,
+                    limit: 1,
+                },
+            )
+            .expect("active latest page");
+        assert_eq!(
+            active_latest
+                .turns
+                .iter()
+                .map(|turn| turn.request.turn_id.as_str())
+                .collect::<Vec<_>>(),
+            vec!["runtime-turn-6"]
+        );
+        assert!(active_latest.has_older);
+
+        let invalid_cursor = coordinator
+            .restore_turn_snapshots_page_for_ui(
+                history.session_id(),
+                &ReasonTurnPageRequest {
+                    direction: ReasonTurnPageDirection::Older,
+                    before_turn_id: Some(TurnId::new("runtime-turn-999")),
+                    limit: 2,
+                },
+            )
+            .expect_err("unknown cursor must fail");
+        assert!(matches!(
+            invalid_cursor,
+            ReasonPersistenceError::InvalidTurnPageCursor(_)
+        ));
+
+        fs::remove_dir_all(runtime_home).expect("cleanup");
+    }
+
+    #[test]
+    fn ui_turn_page_returns_empty_for_metadata_only_session_and_rejects_unknown_session() {
+        let runtime_home = temp_runtime_home();
+        let coordinator = ReasonPersistence::new(&runtime_home, AgentId::new("agent-1"));
+        let metadata_only = SessionId::new("metadata-only-page-session");
+        coordinator
+            .create_session_metadata(metadata_only.clone(), Some("Empty".to_owned()), None)
+            .expect("create metadata-only session");
+
+        let page = coordinator
+            .restore_turn_snapshots_page_for_ui(
+                &metadata_only,
+                &ReasonTurnPageRequest {
+                    direction: ReasonTurnPageDirection::Latest,
+                    before_turn_id: None,
+                    limit: 24,
+                },
+            )
+            .expect("metadata-only session should have an empty page");
+        assert_eq!(page.session_id, metadata_only);
+        assert!(!page.has_older);
+        assert!(page.turns.is_empty());
+        assert_eq!(page.oldest_turn_id, None);
+        assert_eq!(page.newest_turn_id, None);
+
+        let unknown = coordinator
+            .restore_turn_snapshots_page_for_ui(
+                &SessionId::new("unknown-page-session"),
+                &ReasonTurnPageRequest {
+                    direction: ReasonTurnPageDirection::Latest,
+                    before_turn_id: None,
+                    limit: 24,
+                },
+            )
+            .expect_err("unknown session must remain an explicit missing-truth error");
+        assert_eq!(
+            unknown,
+            ReasonPersistenceError::MissingRecoveryTruth("unknown-page-session".to_owned())
+        );
+
+        fs::remove_dir_all(runtime_home).expect("cleanup");
     }
 
     #[test]

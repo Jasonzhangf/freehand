@@ -119,6 +119,7 @@ pub fn render_webui_smoke_for_client(client: Option<&str>) -> String {
             "<div class=\"message-list autonomous\" id=\"message-list\">",
             "<div class=\"chat-empty-state\"><div class=\"chat-empty-title\">新会话</div><div class=\"chat-empty-copy\">发送消息开始当前会话。</div></div>",
             "</div>",
+            "<button class=\"conversation-bottom-button\" id=\"conversation-bottom-button\" type=\"button\" aria-label=\"回到底部\" hidden><span aria-hidden=\"true\">↓</span></button>",
             "</div>",
             "<section class=\"composer-card\">",
             "<form class=\"composer-grid\" id=\"composer-form\">",
