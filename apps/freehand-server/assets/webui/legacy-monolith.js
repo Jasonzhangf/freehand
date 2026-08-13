@@ -2135,16 +2135,233 @@ function assistantSectionHeadingLabel(row) {
 
 function renderTextLines(container, lines) {
   const text = Array.isArray(lines) ? lines.join("\n") : `${lines || ""}`;
-  const chunks = text.split(/\n{2,}/).map((chunk) => chunk.trim()).filter(Boolean);
-  if (chunks.length === 0) {
-    container.textContent = "";
+  renderMarkdownInto(container, text);
+}
+
+function renderMarkdownInto(container, text) {
+  container.replaceChildren();
+  const blocks = parseMarkdownBlocks(`${text || ""}`);
+  blocks.forEach((block) => {
+    container.appendChild(renderMarkdownBlock(block));
+  });
+}
+
+function parseMarkdownBlocks(source) {
+  const lines = `${source || ""}`.replace(/\r\n/g, "\n").split("\n");
+  const blocks = [];
+  let index = 0;
+  while (index < lines.length) {
+    const line = lines[index];
+    const trimmed = line.trim();
+    const fence = /^(`{3,}|~{3,})/.exec(trimmed);
+    if (fence) {
+      const marker = fence[1];
+      const lang = trimmed.slice(marker.length).trim();
+      const codeLines = [];
+      index += 1;
+      const closePattern = new RegExp(`^${marker[0]}{${marker.length},}\\s*$`);
+      while (index < lines.length && !closePattern.test(lines[index].trim())) {
+        codeLines.push(lines[index]);
+        index += 1;
+      }
+      index += 1;
+      blocks.push({ type: "code", lang, text: codeLines.join("\n") });
+      continue;
+    }
+    if (/^(-{3,}|\*{3,}|_{3,})$/.test(trimmed)) {
+      blocks.push({ type: "hr" });
+      index += 1;
+      continue;
+    }
+    const heading = /^(#{1,6})\s+(.*)$/.exec(trimmed);
+    if (heading) {
+      blocks.push({ type: "heading", level: heading[1].length, text: heading[2] });
+      index += 1;
+      continue;
+    }
+    if (trimmed.startsWith(">")) {
+      const quoteLines = [];
+      while (index < lines.length && lines[index].trim().startsWith(">")) {
+        quoteLines.push(lines[index].replace(/^\s*>\s?/, ""));
+        index += 1;
+      }
+      blocks.push({ type: "blockquote", lines: quoteLines });
+      continue;
+    }
+    const unorderedMatch = /^[-*+]\s+(.*)$/.exec(trimmed);
+    if (unorderedMatch) {
+      const items = [];
+      while (index < lines.length) {
+        const itemLine = /^[-*+]\s+(.*)$/.exec(lines[index].trim());
+        if (!itemLine) {
+          break;
+        }
+        items.push(itemLine[1]);
+        index += 1;
+      }
+      blocks.push({ type: "list", ordered: false, items });
+      continue;
+    }
+    const orderedMatch = /^\d+[.)]\s+(.*)$/.exec(trimmed);
+    if (orderedMatch) {
+      const items = [];
+      while (index < lines.length) {
+        const itemLine = /^\d+[.)]\s+(.*)$/.exec(lines[index].trim());
+        if (!itemLine) {
+          break;
+        }
+        items.push(itemLine[1]);
+        index += 1;
+      }
+      blocks.push({ type: "list", ordered: true, items });
+      continue;
+    }
+    if (trimmed === "") {
+      index += 1;
+      continue;
+    }
+    const paraLines = [];
+    while (index < lines.length && lines[index].trim() !== "") {
+      paraLines.push(lines[index]);
+      index += 1;
+    }
+    blocks.push({ type: "paragraph", text: paraLines.join("\n") });
+  }
+  return blocks;
+}
+
+function renderMarkdownBlock(block) {
+  switch (block.type) {
+    case "code": {
+      const pre = document.createElement("pre");
+      pre.className = "md-code-block";
+      if (block.lang) {
+        pre.dataset.lang = block.lang;
+      }
+      const code = document.createElement("code");
+      code.textContent = block.text;
+      pre.appendChild(code);
+      return pre;
+    }
+    case "hr":
+      return document.createElement("hr");
+    case "heading": {
+      const level = Math.min(6, Math.max(1, block.level));
+      const el = document.createElement(`h${level}`);
+      el.className = `md-heading md-heading-${level}`;
+      appendMarkdownInline(el, block.text);
+      return el;
+    }
+    case "blockquote": {
+      const el = document.createElement("blockquote");
+      el.className = "md-blockquote";
+      const inner = document.createElement("div");
+      renderMarkdownInto(inner, block.lines.join("\n"));
+      el.appendChild(inner);
+      return el;
+    }
+    case "list": {
+      const el = document.createElement(block.ordered ? "ol" : "ul");
+      el.className = "md-list";
+      block.items.forEach((itemText) => {
+        const li = document.createElement("li");
+        appendMarkdownInline(li, itemText);
+        el.appendChild(li);
+      });
+      return el;
+    }
+    case "paragraph":
+    default: {
+      const el = document.createElement("p");
+      el.className = "md-paragraph";
+      appendMarkdownInline(el, block.text);
+      return el;
+    }
+  }
+}
+
+function appendMarkdownInline(parent, text) {
+  const source = `${text || ""}`;
+  const tokenPattern =
+    /(\*\*[^*]+\*\*|__[^_]+__|\*[^*\n]+\*|_[^_\n]+_|`[^`\n]+`|\[[^\]\n]+\]\([^()\n]*\)|~~[^~\n]+~~)/g;
+  let lastIndex = 0;
+  let match;
+  while ((match = tokenPattern.exec(source)) !== null) {
+    if (match.index > lastIndex) {
+      parent.appendChild(document.createTextNode(source.slice(lastIndex, match.index)));
+    }
+    renderMarkdownInlineToken(parent, match[0]);
+    lastIndex = match.index + match[0].length;
+  }
+  if (lastIndex < source.length) {
+    parent.appendChild(document.createTextNode(source.slice(lastIndex)));
+  }
+}
+
+function renderMarkdownInlineToken(parent, token) {
+  if (/^\*\*/.test(token) && /\*\*$/.test(token) && token.length >= 4) {
+    const el = document.createElement("strong");
+    appendMarkdownInline(el, token.slice(2, -2));
+    parent.appendChild(el);
     return;
   }
-  chunks.forEach((chunk) => {
-    const paragraph = document.createElement("p");
-    paragraph.textContent = chunk;
-    container.appendChild(paragraph);
-  });
+  if (/^__/.test(token) && /__$/.test(token) && token.length >= 4) {
+    const el = document.createElement("strong");
+    appendMarkdownInline(el, token.slice(2, -2));
+    parent.appendChild(el);
+    return;
+  }
+  if (/^~~/.test(token) && /~~$/.test(token) && token.length >= 4) {
+    const el = document.createElement("s");
+    appendMarkdownInline(el, token.slice(2, -2));
+    parent.appendChild(el);
+    return;
+  }
+  if (/^`/.test(token) && /`$/.test(token) && token.length >= 2) {
+    const el = document.createElement("code");
+    el.className = "md-inline-code";
+    el.textContent = token.slice(1, -1);
+    parent.appendChild(el);
+    return;
+  }
+  if (/^\*/.test(token) && /\*$/.test(token) && token.length >= 2) {
+    const el = document.createElement("em");
+    appendMarkdownInline(el, token.slice(1, -1));
+    parent.appendChild(el);
+    return;
+  }
+  if (/^_/.test(token) && /_$/.test(token) && token.length >= 2) {
+    const el = document.createElement("em");
+    appendMarkdownInline(el, token.slice(1, -1));
+    parent.appendChild(el);
+    return;
+  }
+  const linkMatch = /^\[([^\]]+)\]\(([^()\n]*)\)$/.exec(token);
+  if (linkMatch) {
+    const el = document.createElement("a");
+    el.className = "md-link";
+    const href = sanitizeMarkdownHref(linkMatch[2]);
+    if (href) {
+      el.href = href;
+      el.target = "_blank";
+      el.rel = "noopener noreferrer";
+    }
+    appendMarkdownInline(el, linkMatch[1]);
+    parent.appendChild(el);
+    return;
+  }
+  parent.appendChild(document.createTextNode(token));
+}
+
+function sanitizeMarkdownHref(url) {
+  const value = `${url || ""}`.trim();
+  if (/^(https?:\/\/|mailto:)/i.test(value)) {
+    return value;
+  }
+  if (value.startsWith("#")) {
+    return value;
+  }
+  return "";
 }
 
 function renderFinalSummary(container, lines) {

@@ -1968,6 +1968,139 @@ body.theme-dark .conversation-region {
   margin-top: 9px;
 }
 
+.chat-message-body .md-heading,
+.chat-reasoning-body .md-heading {
+  margin: 14px 0 6px;
+  line-height: 1.35;
+  font-weight: 700;
+  white-space: normal;
+}
+
+.chat-message-body .md-heading:first-child,
+.chat-reasoning-body .md-heading:first-child {
+  margin-top: 0;
+}
+
+.chat-message-body .md-heading-1,
+.chat-reasoning-body .md-heading-1 {
+  font-size: 20px;
+}
+
+.chat-message-body .md-heading-2,
+.chat-reasoning-body .md-heading-2 {
+  font-size: 17px;
+}
+
+.chat-message-body .md-heading-3,
+.chat-reasoning-body .md-heading-3 {
+  font-size: 15px;
+}
+
+.chat-message-body .md-heading-4,
+.chat-message-body .md-heading-5,
+.chat-message-body .md-heading-6,
+.chat-reasoning-body .md-heading-4,
+.chat-reasoning-body .md-heading-5,
+.chat-reasoning-body .md-heading-6 {
+  font-size: 14px;
+}
+
+.chat-message-body .md-paragraph,
+.chat-reasoning-body .md-paragraph {
+  white-space: pre-wrap;
+}
+
+.chat-message-body .md-list,
+.chat-reasoning-body .md-list {
+  margin: 6px 0;
+  padding-left: 22px;
+  white-space: normal;
+}
+
+.chat-message-body .md-list li,
+.chat-reasoning-body .md-list li {
+  margin: 2px 0;
+}
+
+.chat-message-body .md-blockquote,
+.chat-reasoning-body .md-blockquote {
+  margin: 8px 0;
+  padding: 2px 12px;
+  border-left: 3px solid rgba(47, 116, 95, 0.28);
+  color: rgba(38, 49, 44, 0.82);
+  white-space: normal;
+}
+
+.chat-message-body .md-code-block,
+.chat-reasoning-body .md-code-block {
+  margin: 8px 0;
+  padding: 9px 12px;
+  overflow-x: auto;
+  border: 1px solid rgba(43, 66, 58, 0.10);
+  border-radius: 7px;
+  background: rgba(23, 37, 32, 0.055);
+  font-family: "JetBrains Mono", "SFMono-Regular", Menlo, Monaco, Consolas, monospace;
+  font-size: 12.5px;
+  line-height: 1.5;
+  white-space: pre;
+}
+
+.chat-message-body .md-code-block code,
+.chat-reasoning-body .md-code-block code {
+  font-family: inherit;
+  white-space: pre;
+}
+
+.chat-message-body .md-inline-code,
+.chat-reasoning-body .md-inline-code {
+  padding: 1px 5px;
+  border-radius: 4px;
+  background: rgba(23, 37, 32, 0.07);
+  font-family: "JetBrains Mono", "SFMono-Regular", Menlo, Monaco, Consolas, monospace;
+  font-size: 0.88em;
+  white-space: pre-wrap;
+}
+
+.chat-message-body .md-link,
+.chat-reasoning-body .md-link {
+  color: #1f6fb2;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.chat-message-body hr,
+.chat-reasoning-body hr {
+  margin: 10px 0;
+  border: 0;
+  border-top: 1px solid rgba(43, 66, 58, 0.14);
+}
+
+body.theme-dark .chat-message-body,
+body.theme-dark .chat-reasoning-body {
+  color: #dfe7e2;
+}
+
+body.theme-dark .chat-message-body .md-blockquote,
+body.theme-dark .chat-reasoning-body .md-blockquote {
+  color: rgba(223, 231, 226, 0.82);
+}
+
+body.theme-dark .chat-message-body .md-code-block,
+body.theme-dark .chat-reasoning-body .md-code-block {
+  border-color: rgba(223, 231, 226, 0.12);
+  background: rgba(223, 231, 226, 0.06);
+}
+
+body.theme-dark .chat-message-body .md-inline-code,
+body.theme-dark .chat-reasoning-body .md-inline-code {
+  background: rgba(223, 231, 226, 0.09);
+}
+
+body.theme-dark .chat-message-body .md-link,
+body.theme-dark .chat-reasoning-body .md-link {
+  color: #7ab3e8;
+}
+
 .turn-action-bar {
   display: flex;
   flex-wrap: wrap;
