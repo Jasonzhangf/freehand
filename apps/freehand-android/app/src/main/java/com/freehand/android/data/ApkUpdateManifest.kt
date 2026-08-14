@@ -40,6 +40,21 @@ data class ApkUpdateManifest(
         if (resolved.scheme != "http" && resolved.scheme != "https") {
             throw ApkUpdateManifestException("resolved apkUrl scheme must be http(s)")
         }
+        val manifestUri = URI(manifestUrl)
+        val relayRoot = manifestUri.rawPath
+            ?.takeIf { it.endsWith("/updates/latest.json") }
+            ?.substringBefore("/updates/latest.json")
+            .orEmpty()
+        val fileName = resolved.rawPath?.substringAfterLast('/').orEmpty()
+        if (apkUrl.startsWith("/") && relayRoot.isNotEmpty() && fileName.isNotEmpty()) {
+            return URI(
+                resolved.scheme,
+                resolved.rawAuthority,
+                "$relayRoot/updates/$fileName",
+                resolved.rawQuery,
+                resolved.rawFragment,
+            ).toString()
+        }
         return resolved.toString()
     }
 

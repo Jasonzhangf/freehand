@@ -17,12 +17,15 @@ import java.net.HttpURLConnection
 import java.net.URL
 import java.security.MessageDigest
 import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicLong
 
 class AndroidApkUpdater(
     private val context: Context,
     private val hostConfig: HostConfig,
     private val currentVersionCode: Long = BuildConfig.VERSION_CODE.toLong(),
 ) {
+    private val instanceGeneration = nextGeneration()
+
     val updateManifestUrl: String
         get() = hostConfig.updateManifestUrl
 
@@ -33,19 +36,23 @@ class AndroidApkUpdater(
             onStatus(ApkUpdateStatus.alreadyChecking())
             return
         }
+        val checkGeneration = instanceGeneration
+        fun emit(status: ApkUpdateStatus) {
+            if (isGenerationCurrent(checkGeneration)) onStatus(status)
+        }
         Thread {
             try {
-                onStatus(ApkUpdateStatus.checking(updateManifestUrl))
+                emit(ApkUpdateStatus.checking(updateManifestUrl))
                 val manifestJson = httpGetText(updateManifestUrl)
                 val plan = ApkUpdateManifest.parse(manifestJson).updatePlan(currentVersionCode, updateManifestUrl)
                 if (plan == null) {
                     Log.i(LOG_TAG, "apk_update_current versionCode=$currentVersionCode")
-                    onStatus(ApkUpdateStatus.current(currentVersionCode))
+                    emit(ApkUpdateStatus.current(currentVersionCode))
                     return@Thread
                 }
                 Log.i(LOG_TAG, "apk_update_available versionCode=${plan.versionCode} url=${plan.apkUrl}")
-                onStatus(ApkUpdateStatus.available(plan.versionCode, plan.versionName, plan.apkUrl))
-                onStatus(ApkUpdateStatus.downloading(plan.versionCode, plan.apkUrl))
+                emit(ApkUpdateStatus.available(plan.versionCode, plan.versionName, plan.apkUrl))
+                emit(ApkUpdateStatus.downloading(plan.versionCode, plan.apkUrl))
                 val apkFile = downloadApk(
                     plan.apkUrl,
                     plan.versionCode,
@@ -53,14 +60,16 @@ class AndroidApkUpdater(
                     plan.size,
                     plan.signerSha256,
                 )
-                onStatus(ApkUpdateStatus.downloaded(plan.versionCode, apkFile.length()))
+                emit(ApkUpdateStatus.downloaded(plan.versionCode, apkFile.length()))
                 val installIntent = buildInstallIntent(apkFile)
-                context.startActivity(installIntent)
-                Log.i(LOG_TAG, "apk_update_install_intent_started versionCode=${plan.versionCode}")
-                onStatus(ApkUpdateStatus.installerStarted(plan.versionCode, plan.versionName))
+                if (isGenerationCurrent(checkGeneration)) {
+                    context.startActivity(installIntent)
+                    Log.i(LOG_TAG, "apk_update_install_intent_started versionCode=${plan.versionCode}")
+                }
+                emit(ApkUpdateStatus.installerStarted(plan.versionCode, plan.versionName))
             } catch (error: Exception) {
                 Log.e(LOG_TAG, "apk_update_failed", error)
-                onStatus(ApkUpdateStatus.failed(error))
+                emit(ApkUpdateStatus.failed(error))
             } finally {
                 checking.set(false)
             }
@@ -232,6 +241,10 @@ class AndroidApkUpdater(
     }
 
     companion object {
+        private val GENERATION = AtomicLong(0)
+        internal fun nextGeneration(): Long = GENERATION.incrementAndGet()
+        internal fun isGenerationCurrent(generation: Long): Boolean =
+            GENERATION.get() == generation
         private const val LOG_TAG = "FreehandApkUpdate"
         private const val HTTP_TIMEOUT_MS = 60000
         private const val APK_MIME_TYPE = "application/vnd.android.package-archive"
