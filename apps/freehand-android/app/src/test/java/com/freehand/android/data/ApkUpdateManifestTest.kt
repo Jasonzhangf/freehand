@@ -162,6 +162,31 @@ class ApkUpdateManifestTest {
     }
 
     @Test
+    fun `relay manifest absolute apk url is preserved unchanged`() {
+        val manifest = ApkUpdateManifest.parse(
+            """
+            {
+              "versionCode": 3,
+              "apkUrl": "https://cdn.example/relay/updates/app.apk",
+              "sha256": "979906f579118625c1f57e6db1eef8f055475ed884abb93934e180d0b8f14611",
+              "size": 45000000,
+              "signerSha256": "ecd63a2c2070970735cc079b0bb090427ca0b59200da0ebc07c80b50a1dfffda"
+            }
+            """.trimIndent(),
+        )
+
+        val plan = manifest.updatePlan(
+            currentVersionCode = 1,
+            manifestUrl = "http://relay.example/company/relay/updates/latest.json",
+        )
+
+        assertEquals(
+            "https://cdn.example/relay/updates/app.apk",
+            plan?.apkUrl,
+        )
+    }
+
+    @Test
     fun `manifest rejects unknown fields`() {
         val error = try {
             ApkUpdateManifest.parse(
