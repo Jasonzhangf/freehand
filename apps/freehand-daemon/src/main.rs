@@ -468,11 +468,15 @@ fn parse_worker_bind_arg(
         let explicit = parse_bind_arg(args.into_iter())?;
         if let Some(configured_url) = configured_url {
             let configured = parse_configured_worker_bind(configured_url)?;
-            if configured == explicit {
+            // The configured local_web_url stays a loopback advertisement for
+            // local clients, while the explicit bind may widen the listening
+            // interface (e.g. 0.0.0.0 on a Mac) so phones and remote hosts can
+            // reach the worker WebUI directly. Only the port must agree.
+            if configured.port() == explicit.port() {
                 return Ok(explicit);
             }
             return Err(format!(
-                "explicit Worker bind `{explicit}` conflicts with configured local_web_url `{configured_url}`"
+                "explicit Worker bind `{explicit}` conflicts with configured local_web_url `{configured_url}` (port must match)"
             ));
         }
         return Ok(explicit);
@@ -801,6 +805,14 @@ mod tests {
         )
         .expect("matching explicit bind");
         assert_eq!(matching.to_string(), "127.0.0.1:4143");
+
+        let wildcard = parse_worker_bind_arg(
+            vec!["--bind".to_owned(), "0.0.0.0:4143".to_owned()].into_iter(),
+            "worker-alpha",
+            Some("http://127.0.0.1:4143"),
+        )
+        .expect("wildcard explicit bind keeps loopback local_web_url");
+        assert_eq!(wildcard.to_string(), "0.0.0.0:4143");
     }
 
     #[test]
