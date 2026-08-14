@@ -280,7 +280,7 @@
       "file_path": "apps/freehand-android/app/src/main/java/com/freehand/android/ui/AndroidApkUpdater.kt",
       "responsibility": "check the explicitly selected daemon or Relay update manifest against installed version without blocking canonical WebUI startup, rejecting non-positive versions and non-http absolute APK URLs, requiring SHA-256, byte size, and signer certificate identity for higher versions, rebasing a root-relative relay apkUrl under the manifest relay root for prefixed deployments, and discarding stale results when the active host changed mid-check via the updater generation fence",
       "input_semantic": "HostConfig.updateManifestUrl plus BuildConfig.VERSION_CODE",
-      "output_semantic": "generation-guarded status callbacks plus current-version no-op log or valid higher-version update plan with prefix-correct resolved apkUrl",
+      "output_semantic": "generation-guarded status callbacks (checking/available/downloading/downloaded, installer_started emitted inside the atomic guard after startActivity) plus current-version no-op log or valid higher-version update plan with prefix-correct resolved apkUrl",
       "caller": "MainActivity::startAndroidApkUpdateCheck",
       "callee": "ApkUpdateManifest::parse, ApkUpdateManifest::updatePlan",
       "resource_operation": "android_apk_update.check_manifest",

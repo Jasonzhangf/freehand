@@ -64,6 +64,7 @@ class AndroidApkUpdater(
                 runIfCurrent(checkGeneration) {
                     context.startActivity(installIntent)
                     Log.i(LOG_TAG, "apk_update_install_intent_started versionCode=${plan.versionCode}")
+                    onStatus(ApkUpdateStatus.installerStarted(plan.versionCode, plan.versionName))
                 }
             } catch (error: Exception) {
                 Log.e(LOG_TAG, "apk_update_failed", error)
