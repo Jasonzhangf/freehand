@@ -654,6 +654,17 @@
       "binding_status": "bound"
     },
     {
+      "step": "11p",
+      "symbol_path": "setSessionTranscriptPage / loadOlderSessionTranscriptPage / renderConversationBottomButton / refreshSelectedSession / sessionTranscriptCacheEntry",
+      "file_path": "apps/freehand-server/assets/webui/legacy-monolith.js",
+      "responsibility": "own selected-session transcript paging, transient per-session cache, older-page incremental loading, and the bottom-to-latest control; merge incoming page turns ahead of existing cache for both Latest and Older, cache-hit refresh only after the Latest page has loaded, and switch the bottom button between live reasoning animation and terminal return-to-bottom arrow",
+      "input_semantic": "UiSessionTurnsPage projections plus selected-session refresh intent plus scroll position",
+      "output_semantic": "ordered selected-session transcript cache, one-page boundary queries, anchored older history, and bottom button live/terminal state",
+      "caller": "WebUI shell query/subscription callbacks and scroll listeners",
+      "callee": "QuerySessionTurnsPage through ADP plus browser DOM scroll",
+      "binding_status": "bound"
+    },
+    {
       "step": "11i-module-timer-view",
       "symbol_path": "renderTimerDashboardSurface",
       "file_path": "apps/freehand-server/assets/webui/surfaces/timer-dashboard/view.js",

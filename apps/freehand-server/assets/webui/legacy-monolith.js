@@ -4376,7 +4376,7 @@ function setSessionTranscript(projection) {
   const sessionId = projection && projection.session_id;
   if (sessionId) {
     const previous = state.sessionTranscriptCache.get(sessionId) || [];
-    const merged = logicalSessionTurns([...previous, ...incomingTurns]);
+    const merged = logicalSessionTurns([...incomingTurns, ...previous]);
     state.sessionTranscriptCache.set(sessionId, merged);
     state.sessionTranscriptHasOlder.set(
       sessionId,
@@ -4411,9 +4411,7 @@ function setSessionTranscriptPage(projection) {
     ...liveTurns,
   ]);
   const direction = state.sessionTranscriptPageDirection.get(sessionId) || "Latest";
-  const merged = direction === "Older"
-    ? logicalSessionTurns([...incomingTurns, ...existing])
-    : logicalSessionTurns([...existing, ...incomingTurns]);
+  const merged = logicalSessionTurns([...incomingTurns, ...existing]);
   state.sessionTranscriptCache.set(sessionId, merged);
   state.sessionTurns = merged;
   state.sessionTranscriptHasOlder.set(sessionId, !!projection.page?.has_older);
@@ -5376,7 +5374,7 @@ function renderConversationBottomButton() {
     return;
   }
   const awayFromBottom = scrollHostRemaining(scrollHostForConversation()) >= 96;
-  const live = hasNonTerminalProtocolActivity();
+  const live = renderModelHasLiveLifecycle();
   conversationBottomButton.hidden = !awayFromBottom;
   conversationBottomButton.dataset.live = live ? "true" : "false";
   conversationBottomButton.textContent = live ? "..." : "↓";
@@ -9224,7 +9222,8 @@ async function refreshSelectedSession() {
   state.sessionTranscriptRequestSequence.set(requestedSessionId, requestSequence);
   state.sessionRefreshInFlight = requestedSessionId;
   const cached = sessionTranscriptCacheEntry(requestedSessionId);
-  if (cached.length > 0) {
+  const pageLoaded = state.sessionTranscriptHasOlder.has(requestedSessionId);
+  if (pageLoaded && cached.length > 0) {
     const liveTurns = state.sessionTurns.filter((turn) =>
       turn && turn.session_id === requestedSessionId
     );
