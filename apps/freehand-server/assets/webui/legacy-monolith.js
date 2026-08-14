@@ -8166,7 +8166,7 @@ function renderAccountConfigSync() {
   const disabled = state.accountConfigSyncInFlight || !state.configStatus;
   if (settingsAccountConfigPullButton) {
     settingsAccountConfigPullButton.disabled = disabled;
-    settingsAccountConfigPullButton.textContent = state.accountConfigSyncInFlight ? "同步中..." : "拉取账号配置";
+    settingsAccountConfigPullButton.textContent = state.accountConfigSyncInFlight ? "同步中..." : "拉取并应用账号配置";
   }
   if (settingsAccountConfigPushButton) {
     settingsAccountConfigPushButton.disabled = disabled;

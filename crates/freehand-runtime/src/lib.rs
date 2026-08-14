@@ -102,12 +102,13 @@ use freehand_config::{
     AgentResourceConfigUpdate, LoadedConfig, MAX_AGENT_RESOURCE_COUNT, ModelGroupConfigUpdate,
     ModelRouteConfig, ModelWeightedRouteConfig, ProviderConfigUpdate,
     ProviderProtocol as ConfigProviderProtocol, ProviderType, ProviderWebSearchMode,
-    ProviderWebSearchWire, SelectedAgentConfig, SelectedProviderConfig, default_config_path,
-    export_shared_account_config, load_config_from_path, load_default_config,
-    provider_base_url_host_for_projection, safe_provider_base_url_for_projection,
-    switch_agent_model_group_in_path, switch_agent_provider_in_path,
-    update_agent_resource_config_in_path, update_provider_config_in_path,
-    upsert_model_group_config_in_path, upsert_provider_config_in_path,
+    ProviderWebSearchWire, SelectedAgentConfig, SelectedProviderConfig,
+    apply_shared_account_config, default_config_path, export_shared_account_config,
+    load_config_from_path, load_default_config, provider_base_url_host_for_projection,
+    safe_provider_base_url_for_projection, switch_agent_model_group_in_path,
+    switch_agent_provider_in_path, update_agent_resource_config_in_path,
+    update_provider_config_in_path, upsert_model_group_config_in_path,
+    upsert_provider_config_in_path,
 };
 use freehand_contracts::{
     AgentId, ContextCachePolicy, ContextProvenance, ContextRole, ContextSegment, ContextSegmentId,
@@ -2993,6 +2994,8 @@ pub enum RuntimeAgentBootstrapError {
     ConfigLoad(String),
     #[error("agent selection failed: {0}")]
     AgentSelection(String),
+    #[error("account config apply failed: {0}")]
+    AccountConfigApply(String),
     #[error("paired agent `{paired_agent_name}` environment variable `{env_var}` is not set")]
     MissingPairedTokenEnv {
         paired_agent_name: String,
@@ -3082,6 +3085,8 @@ pub enum RuntimeCommandDispatcherError {
     ConfigLoad(String),
     #[error("agent selection failed: {0}")]
     AgentSelection(String),
+    #[error("account config apply failed: {0}")]
+    AccountConfigApply(String),
     #[error("paired agent `{paired_agent_name}` environment variable `{env_var}` is not set")]
     MissingPairedTokenEnv {
         paired_agent_name: String,
@@ -3121,6 +3126,9 @@ fn runtime_dispatcher_bootstrap_error(
         }
         RuntimeAgentBootstrapError::AgentSelection(message) => {
             RuntimeCommandDispatcherError::AgentSelection(message)
+        }
+        RuntimeAgentBootstrapError::AccountConfigApply(message) => {
+            RuntimeCommandDispatcherError::AccountConfigApply(message)
         }
         RuntimeAgentBootstrapError::MissingPairedTokenEnv {
             paired_agent_name,
@@ -3379,10 +3387,48 @@ impl RuntimeCommandDispatcher {
 
     fn from_selected_agent_inner(
         selected: &SelectedAgentConfig,
-        live: Option<RuntimeLiveDispatcherConfig>,
+        mut live: Option<RuntimeLiveDispatcherConfig>,
     ) -> Result<Self, RuntimeCommandDispatcherError> {
         if selected.name.trim().is_empty() {
             return Err(RuntimeCommandDispatcherError::EmptyAgentName);
+        }
+        let mut selected = selected.clone();
+        let mut account_config_mirror = None;
+        let mut account_config_mirror_error = None;
+        if let Some(live) = live.as_mut() {
+            match AccountConfigMirror::load_from_runtime_home(&live.runtime_home) {
+                Ok(mirror) => account_config_mirror = mirror,
+                Err(error) => {
+                    account_config_mirror_error = Some(match error {
+                        freehand_account_config::AccountConfigMirrorError::Io(message) => message,
+                        freehand_account_config::AccountConfigMirrorError::Invalid(message) => {
+                            message
+                        }
+                        freehand_account_config::AccountConfigMirrorError::Corrupt(message) => {
+                            message
+                        }
+                    })
+                }
+            }
+            if let Some(mirror) = account_config_mirror
+                .as_ref()
+                .filter(|mirror| mirror.status == AccountConfigSyncStatus::Synced)
+                .filter(|mirror| mirror.revision.is_some())
+            {
+                let loaded = load_config_from_path(live.runtime_home.join("config.toml")).map_err(
+                    |error| RuntimeCommandDispatcherError::ConfigLoad(error.to_string()),
+                )?;
+                let effective =
+                    apply_shared_account_config(&loaded, &mirror.document).map_err(|error| {
+                        RuntimeCommandDispatcherError::AccountConfigApply(error.to_string())
+                    })?;
+                let effective_selected =
+                    effective.select_agent(&selected.name).map_err(|error| {
+                        RuntimeCommandDispatcherError::AgentSelection(error.to_string())
+                    })?;
+                live.selected_agent = effective_selected.clone();
+                selected = effective_selected;
+            }
         }
         let (
             execution_role,
@@ -3439,6 +3485,8 @@ impl RuntimeCommandDispatcher {
             },
             execution_role,
             selected.node_id.clone(),
+            account_config_mirror,
+            account_config_mirror_error,
         )
     }
 
@@ -3446,13 +3494,21 @@ impl RuntimeCommandDispatcher {
         config: RuntimeCommandDispatcherConfig,
     ) -> Result<Self, RuntimeCommandDispatcherError> {
         let reason_node_id = config.master_node_id.clone();
-        Self::new_for_selected_role(config, LiveReasonExecutionRole::Master, reason_node_id)
+        Self::new_for_selected_role(
+            config,
+            LiveReasonExecutionRole::Master,
+            reason_node_id,
+            None,
+            None,
+        )
     }
 
     fn new_for_selected_role(
         config: RuntimeCommandDispatcherConfig,
         execution_role: LiveReasonExecutionRole,
         reason_node_id: String,
+        account_config_mirror: Option<AccountConfigMirror>,
+        account_config_mirror_error: Option<String>,
     ) -> Result<Self, RuntimeCommandDispatcherError> {
         if config.master_node_id.trim().is_empty() {
             return Err(RuntimeCommandDispatcherError::EmptyMasterNodeId);
@@ -3575,24 +3631,6 @@ impl RuntimeCommandDispatcher {
                     && let Ok(path) = fs::canonicalize(cwd)
                 {
                     session_cwds.insert(metadata.session_id, path);
-                }
-            }
-        }
-        let mut account_config_mirror = None;
-        let mut account_config_mirror_error = None;
-        if let Some(live) = &config.live {
-            match AccountConfigMirror::load_from_runtime_home(&live.runtime_home) {
-                Ok(mirror) => account_config_mirror = mirror,
-                Err(error) => {
-                    account_config_mirror_error = Some(match error {
-                        freehand_account_config::AccountConfigMirrorError::Io(message) => message,
-                        freehand_account_config::AccountConfigMirrorError::Invalid(message) => {
-                            message
-                        }
-                        freehand_account_config::AccountConfigMirrorError::Corrupt(message) => {
-                            message
-                        }
-                    })
                 }
             }
         }
@@ -3806,15 +3844,13 @@ impl RuntimeCommandDispatcher {
                     .pending_config_agent_name
                     .as_deref()
                     .unwrap_or(&live.selected_agent.name);
-                let mut status = project_config_status_from_path_for_ui(
+                let status = project_config_status_from_path_for_ui(
                     &live.runtime_home.join("config.toml"),
                     agent_name,
                     scope,
-                )?;
-                status.account_config_sync = project_account_config_sync(
                     state.account_config_mirror.as_ref(),
                     state.account_config_mirror_error.as_deref(),
-                );
+                )?;
                 Ok(Some(UiQueryResult::ConfigStatus(status)))
             }
             UiCommand::QueryTaskList { status, agent_id } => {
@@ -5036,17 +5072,28 @@ fn project_config_status_from_path_for_ui(
     config_path: &Path,
     agent_name: &str,
     scope: UiQueryAccessScope,
+    account_config_mirror: Option<&AccountConfigMirror>,
+    account_config_mirror_error: Option<&str>,
 ) -> Result<UiConfigStatusProjection, UiCommandDispatchPortError> {
-    let loaded = load_config_from_path(config_path)
+    let local = load_config_from_path(config_path)
         .map_err(|err| UiCommandDispatchPortError::DispatchFailed(err.to_string()))?;
+    let loaded = if let Some(mirror) = account_config_mirror
+        .filter(|mirror| mirror.status == AccountConfigSyncStatus::Synced)
+        .filter(|mirror| mirror.revision.is_some())
+    {
+        apply_shared_account_config(&local, &mirror.document).map_err(|err| {
+            UiCommandDispatchPortError::DispatchFailed(format!("apply account config: {err}"))
+        })?
+    } else {
+        local
+    };
     let selected = loaded
         .select_agent(agent_name)
         .map_err(|err| UiCommandDispatchPortError::DispatchFailed(err.to_string()))?;
-    Ok(project_config_status_for_ui(
-        &selected,
-        Some(&loaded),
-        scope,
-    ))
+    let mut status = project_config_status_for_ui(&selected, Some(&loaded), scope);
+    status.account_config_sync =
+        project_account_config_sync(account_config_mirror, account_config_mirror_error);
+    Ok(status)
 }
 
 fn project_config_status_for_ui(
@@ -5248,6 +5295,11 @@ fn dispatch_pull_account_config(
                 })?;
             state.account_config_mirror = Some(mirror);
             state.account_config_mirror_error = None;
+            refresh_selected_agent_from_account_config(state, &runtime_home).inspect_err(
+                |error| {
+                    state.account_config_mirror_error = Some(error.to_string());
+                },
+            )?;
             Ok(UiCommandDispatchReceipt {
                 ingress: envelope.ingress,
                 target_feature_id: envelope.target_feature_id,
@@ -5267,6 +5319,11 @@ fn dispatch_pull_account_config(
                 })?;
             state.account_config_mirror = Some(mirror);
             state.account_config_mirror_error = None;
+            refresh_selected_agent_from_account_config(state, &runtime_home).inspect_err(
+                |error| {
+                    state.account_config_mirror_error = Some(error.to_string());
+                },
+            )?;
             Ok(UiCommandDispatchReceipt {
                 ingress: envelope.ingress,
                 target_feature_id: envelope.target_feature_id,
@@ -5319,6 +5376,11 @@ fn dispatch_push_account_config(
                 })?;
             state.account_config_mirror = Some(mirror);
             state.account_config_mirror_error = None;
+            refresh_selected_agent_from_account_config(state, &runtime_home).inspect_err(
+                |error| {
+                    state.account_config_mirror_error = Some(error.to_string());
+                },
+            )?;
             Ok(UiCommandDispatchReceipt {
                 ingress: envelope.ingress,
                 target_feature_id: envelope.target_feature_id,
@@ -5393,6 +5455,49 @@ fn relay_session_for_account_config(
         ))
     })?;
     Ok((live, client, account_id))
+}
+
+fn refresh_selected_agent_from_account_config(
+    state: &mut RuntimeCommandDispatcherState,
+    runtime_home: &Path,
+) -> Result<(), UiCommandDispatchPortError> {
+    let agent_name = state
+        .config
+        .live
+        .as_ref()
+        .ok_or_else(|| {
+            UiCommandDispatchPortError::Unsupported(
+                "account config apply requires a live runtime home".to_owned(),
+            )
+        })?
+        .selected_agent
+        .name
+        .clone();
+    let local = load_config_from_path(runtime_home.join("config.toml"))
+        .map_err(|error| UiCommandDispatchPortError::DispatchFailed(error.to_string()))?;
+    let loaded = if let Some(mirror) = state
+        .account_config_mirror
+        .as_ref()
+        .filter(|mirror| mirror.status == AccountConfigSyncStatus::Synced)
+        .filter(|mirror| mirror.revision.is_some())
+    {
+        apply_shared_account_config(&local, &mirror.document).map_err(|error| {
+            UiCommandDispatchPortError::DispatchFailed(format!("apply account config: {error}"))
+        })?
+    } else {
+        local
+    };
+    let selected = loaded.select_agent(&agent_name).map_err(|error| {
+        UiCommandDispatchPortError::DispatchFailed(format!(
+            "select effective agent after account config: {error}"
+        ))
+    })?;
+    let model = selected.provider.default_model.clone();
+    if let Some(live) = state.config.live.as_mut() {
+        live.selected_agent = selected;
+    }
+    state.config.model = model;
+    Ok(())
 }
 
 fn project_account_config_sync(

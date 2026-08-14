@@ -1082,6 +1082,156 @@ pub fn export_shared_account_config(
     Ok(content)
 }
 
+/// Compile one validated account-scoped document into an in-memory effective
+/// `LoadedConfig`. Shared provider and model-group definitions override local
+/// definitions with the same id; local secret references remain untouched in
+/// the canonical `config.toml` and are resolved only through the effective
+/// selection. Shared Relay endpoints and daemon entries are merged under
+/// owner-prefixed ids so they never collide with local remote-daemon truth.
+pub fn apply_shared_account_config(
+    loaded: &LoadedConfig,
+    shared: &ConfigDocumentContent,
+) -> Result<LoadedConfig, ConfigError> {
+    let mut providers = loaded.providers.clone();
+    for provider in &shared.provider_registry {
+        validate_provider_id(&provider.id)?;
+        validate_provider_base_url(&provider.id, &provider.base_url)?;
+        if provider.model.trim().is_empty() {
+            return Err(ConfigError::EmptyProviderDefaultModel {
+                provider_id: provider.id.clone(),
+            });
+        }
+        if provider.auth.auth_type != "env" {
+            return Err(ConfigError::InvalidProviderAuthSource {
+                provider_id: provider.id.clone(),
+            });
+        }
+        if provider.auth.auth_source.trim().is_empty() {
+            return Err(ConfigError::EmptyProviderApiKeyEnv {
+                provider_id: provider.id.clone(),
+            });
+        }
+        let provider_type = parse_provider_type(&provider.id, &provider.provider_type)?;
+        let protocol = parse_provider_protocol(&provider.id, &provider.protocol)?;
+        resolve_provider_protocol(&provider.id, provider_type, Some(protocol))?;
+        providers.insert(
+            provider.id.clone(),
+            ProviderConfig {
+                id: provider.id.clone(),
+                enabled: true,
+                provider_type,
+                protocol,
+                base_url: provider.base_url.clone(),
+                default_model: provider.model.clone(),
+                web_search: ProviderWebSearchMode::Auto,
+                web_search_wire: ProviderWebSearchWire::WebSearch,
+                auth_type: ProviderAuthType::ApiKey,
+                auth: ProviderAuthConfig::ApiKeyEnv {
+                    env_var: provider.auth.auth_source.clone(),
+                },
+            },
+        );
+    }
+
+    let mut model_groups = loaded.model_groups.clone();
+    for group in &shared.model_groups {
+        validate_model_group_id(&group.id)?;
+        let raw_group = RawModelGroupConfig {
+            id: group.id.clone(),
+            enabled: true,
+            label: Some(group.label.clone()),
+            primary: RawModelRouteConfig {
+                provider: group.primary.provider_id.clone(),
+                model: group.primary.model.clone(),
+            },
+            sub: None,
+            search: None,
+            title: None,
+            fallback: group.fallback.as_ref().map(|route| RawModelRouteConfig {
+                provider: route.provider_id.clone(),
+                model: route.model.clone(),
+            }),
+            load_balance: group
+                .load_balance
+                .iter()
+                .map(|route| RawModelWeightedRouteConfig {
+                    provider: route.provider_id.clone(),
+                    model: route.model.clone(),
+                    weight: route.weight.unwrap_or(1),
+                })
+                .collect(),
+            context_window_tokens: DEFAULT_CONTEXT_WINDOW_TOKENS,
+            compaction_threshold_tokens: DEFAULT_COMPACTION_THRESHOLD_TOKENS,
+        };
+        model_groups.insert(
+            group.id.clone(),
+            validate_model_group_config(raw_group, &group.id, &providers)?,
+        );
+    }
+
+    let remote_daemon_registry =
+        merge_shared_remote_daemon_registry(loaded.remote_daemon_registry.clone(), shared);
+    Ok(LoadedConfig {
+        agents: loaded.agents.clone(),
+        providers,
+        model_groups,
+        remote_daemon_registry,
+    })
+}
+
+fn merge_shared_remote_daemon_registry(
+    mut local: RemoteDaemonRegistryConfig,
+    shared: &ConfigDocumentContent,
+) -> RemoteDaemonRegistryConfig {
+    let mut endpoint_accounts = BTreeMap::new();
+    for endpoint in &shared.relay_endpoint_candidates {
+        let account_id = format!("shared:{}", endpoint.id);
+        endpoint_accounts.insert(endpoint.id.clone(), account_id.clone());
+        local.accounts.insert(
+            account_id.clone(),
+            RemoteDaemonAccountConfig {
+                id: account_id,
+                label: format!("Shared {}", endpoint.id),
+                relay_url: Some(endpoint.url.clone()),
+                auth_token_env: Some(endpoint.token_env_name.clone()),
+            },
+        );
+    }
+    for daemon in &shared.remote_daemon_registry {
+        let Some(account_id) = endpoint_accounts.get(&daemon.relay_endpoint_id) else {
+            continue;
+        };
+        let daemon_id = format!("shared:{}", daemon.daemon_id);
+        let endpoint_id = format!("{daemon_id}:relay");
+        let relay_url = shared
+            .relay_endpoint_candidates
+            .iter()
+            .find(|endpoint| endpoint.id == daemon.relay_endpoint_id)
+            .map(|endpoint| endpoint.url.clone());
+        local.daemons.insert(
+            daemon_id.clone(),
+            RemoteDaemonConfig {
+                id: daemon_id,
+                account_id: account_id.clone(),
+                label: daemon.display_name.clone(),
+                node_id: daemon.daemon_id.clone(),
+                active_endpoint_id: endpoint_id.clone(),
+                endpoints: vec![RemoteDaemonEndpointConfig {
+                    id: endpoint_id,
+                    kind: RemoteDaemonEndpointKind::Relay,
+                    host: None,
+                    port: None,
+                    web_url: relay_url,
+                    adp_url: None,
+                    relay_host_id: None,
+                    auth_required: true,
+                }],
+            },
+        );
+    }
+    local
+}
+
 fn shared_model_route(route: &ModelRouteConfig) -> ModelRoute {
     ModelRoute {
         provider_id: route.provider_id.clone(),
@@ -6917,6 +7067,165 @@ provider = "primary"
         let error = export_shared_account_config(&loaded)
             .expect_err("secret-shaped model must be rejected at the shared boundary");
         assert!(error.to_string().contains("secret-shaped"), "{error}");
+        fs::remove_file(path).expect("cleanup");
+    }
+
+    #[test]
+    fn apply_shared_account_config_compiles_effective_provider_model_and_remote_daemon_surface() {
+        let path = write_temp_config(
+            r#"
+[providers.primary]
+id = "primary"
+enabled = true
+type = "openai"
+protocol = "responses"
+base_url = "https://local.invalid"
+default_model = "local-model"
+
+[providers.primary.auth]
+type = "apikey"
+api_key_env = "APPLY_SHARED_KEY"
+
+[agents.master]
+name = "master"
+mode = "master"
+node_id = "master-node"
+paired_agents = ["worker"]
+pair_token = "APPLY_MASTER_TOKEN"
+provider = "primary"
+
+[agents.worker]
+name = "worker"
+mode = "slave"
+node_id = "worker-node"
+paired_agents = ["master"]
+pair_token = "APPLY_WORKER_TOKEN"
+provider = "primary"
+"#,
+        );
+        unsafe {
+            std::env::set_var("APPLY_SHARED_KEY", "shared-key");
+            std::env::set_var("APPLY_MASTER_TOKEN", "pair-token");
+            std::env::set_var("APPLY_WORKER_TOKEN", "pair-token");
+        }
+        let loaded = load_config_from_path(&path).expect("load config");
+        let shared = freehand_account_config::ConfigDocumentContent {
+            provider_registry: vec![freehand_account_config::SharedProviderDefinition {
+                id: "primary".to_owned(),
+                label: "Shared Primary".to_owned(),
+                provider_type: "openai".to_owned(),
+                protocol: "responses".to_owned(),
+                base_url: "https://shared.invalid/v1".to_owned(),
+                auth: freehand_account_config::ProviderAuthReference {
+                    auth_type: "env".to_owned(),
+                    auth_source: "APPLY_SHARED_KEY".to_owned(),
+                },
+                model: "shared-model".to_owned(),
+            }],
+            model_groups: vec![freehand_account_config::SharedModelGroup {
+                id: "group-a".to_owned(),
+                label: "Group A".to_owned(),
+                primary: freehand_account_config::ModelRoute {
+                    provider_id: "primary".to_owned(),
+                    model: "shared-model".to_owned(),
+                    weight: None,
+                },
+                fallback: None,
+                load_balance: Vec::new(),
+            }],
+            relay_endpoint_candidates: vec![freehand_account_config::RelayEndpointCandidate {
+                id: "relay-1".to_owned(),
+                url: "http://relay.example.invalid".to_owned(),
+                token_env_name: "SHARED_RELAY_TOKEN_ENV".to_owned(),
+            }],
+            remote_daemon_registry: vec![freehand_account_config::RemoteDaemonEntry {
+                daemon_id: "daemon-1".to_owned(),
+                display_name: "Shared Daemon".to_owned(),
+                relay_endpoint_id: "relay-1".to_owned(),
+            }],
+        };
+        let effective =
+            apply_shared_account_config(&loaded, &shared).expect("apply shared account config");
+        let provider = effective
+            .providers()
+            .get("primary")
+            .expect("shared provider");
+        assert_eq!(provider.base_url, "https://shared.invalid/v1");
+        assert_eq!(provider.default_model, "shared-model");
+        assert!(effective.model_groups().contains_key("group-a"));
+        assert!(
+            effective
+                .remote_daemon_registry()
+                .daemons()
+                .contains_key("shared:daemon-1")
+        );
+        let selected = effective
+            .select_agent("master")
+            .expect("select effective agent");
+        assert_eq!(selected.provider.base_url, "https://shared.invalid/v1");
+        assert_eq!(selected.provider.default_model, "shared-model");
+        assert_eq!(selected.provider.api_key, "shared-key");
+        unsafe {
+            std::env::remove_var("APPLY_SHARED_KEY");
+            std::env::remove_var("APPLY_MASTER_TOKEN");
+            std::env::remove_var("APPLY_WORKER_TOKEN");
+        }
+        fs::remove_file(path).expect("cleanup");
+    }
+
+    #[test]
+    fn apply_shared_account_config_rejects_model_route_without_shared_provider() {
+        let path = write_temp_config(
+            r#"
+[providers.primary]
+id = "primary"
+enabled = true
+type = "openai"
+protocol = "responses"
+base_url = "https://local.invalid"
+default_model = "local-model"
+
+[providers.primary.auth]
+type = "apikey"
+api_key_env = "APPLY_MISSING_KEY"
+
+[agents.master]
+name = "master"
+mode = "master"
+node_id = "master-node"
+paired_agents = ["worker"]
+pair_token = "APPLY_MISSING_MASTER_TOKEN"
+provider = "primary"
+
+[agents.worker]
+name = "worker"
+mode = "slave"
+node_id = "worker-node"
+paired_agents = ["master"]
+pair_token = "APPLY_MISSING_WORKER_TOKEN"
+provider = "primary"
+"#,
+        );
+        let loaded = load_config_from_path(&path).expect("load config");
+        let shared = freehand_account_config::ConfigDocumentContent {
+            provider_registry: Vec::new(),
+            model_groups: vec![freehand_account_config::SharedModelGroup {
+                id: "broken-group".to_owned(),
+                label: "Broken".to_owned(),
+                primary: freehand_account_config::ModelRoute {
+                    provider_id: "missing-provider".to_owned(),
+                    model: "missing-model".to_owned(),
+                    weight: None,
+                },
+                fallback: None,
+                load_balance: Vec::new(),
+            }],
+            relay_endpoint_candidates: Vec::new(),
+            remote_daemon_registry: Vec::new(),
+        };
+        let error = apply_shared_account_config(&loaded, &shared)
+            .expect_err("missing route provider must fail");
+        assert!(error.to_string().contains("missing provider"), "{error}");
         fs::remove_file(path).expect("cleanup");
     }
 }

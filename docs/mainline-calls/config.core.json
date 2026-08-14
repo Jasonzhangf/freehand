@@ -11,7 +11,8 @@
     "config.mutate_provider_config",
     "config.mutate_model_group_config",
     "config.compile_remote_daemon_registry",
-    "config.project_shared_account_config"
+    "config.project_shared_account_config",
+    "account_config_document.apply_shared_account_config"
   ],
   "request_mainline": [
     "config load begins from `~/.freehand/config.toml`",
@@ -24,6 +25,7 @@
     "optional `[remote_daemon_accounts.<id>]` and `[remote_daemons.<id>]` tables compile into one account-scoped remote daemon registry with explicit endpoint candidates",
     "remote daemon route selection is config-owned: direct Tailscale/IPv6/IPv4 candidates score below relay candidates, health failures make a candidate non-selectable, and relay is selected only through explicit candidate truth",
     "QR/deep-link bootstrap requests enter through versioned remote daemon bootstrap bundles with expiry, nonce, selected route endpoint, and one-time credential metadata",
+    "account-shared document apply requests enter only through config.core::apply_shared_account_config; the config owner validates shared provider/model-group/relay/daemon ids and references, compiles an in-memory effective LoadedConfig, and never rewrites the local canonical config",
     "provider definition upsert requests enter only through ProviderConfigUpdate and upsert_provider_config_in_path; the config owner validates provider id, provider type, protocol, base URL, model, and env-var auth before persistence without changing the selected agent binding",
     "provider selection requests enter only through AgentProviderSelectionConfigUpdate and switch_agent_provider_in_path; the config owner validates existing enabled primary/fallback provider ids before atomically rewriting only the selected agent binding and clears active model_group to avoid hidden route conflicts",
     "model group definition upsert requests enter only through ModelGroupConfigUpdate and upsert_model_group_config_in_path; the config owner validates route providers/models, enabled-provider constraints, and load-balance weights before persistence without changing provider definitions",
@@ -42,6 +44,7 @@
     "safe model group registry projection returns every configured group id, enabled flag, label, primary/sub/search/title/fallback routes, and load-balance routes without exposing credential values",
     "remote daemon registry projection carries accounts, daemon endpoint candidates, selected active endpoint, route diagnostics, and restart-required semantics without leaking credential values",
     "bootstrap link builders emit `freehand://daemon/import?payload=...` or `https://freehand.local/daemon/import?payload=...` payloads with canonical daemon `activeEndpoint` field; safe summaries redact one-time credential values",
+    "validated account-shared apply returns an in-memory effective LoadedConfig with shared providers/model groups overriding same-id local definitions only when auth remains env-only, shared relay endpoints and daemon entries merged under `shared:` owner-prefixed ids, and local canonical config untouched",
     "provider definition upserts persist one provider table to the canonical config path with env-var auth only, preserve active primary/fallback selection, return a selected-agent safe projection, and mark restart-required semantics for runtime/UI consumers",
     "provider selection updates persist only the selected agent primary/fallback provider binding, preserve all provider definitions, return a selected-agent safe projection, and mark restart-required semantics for runtime/UI consumers",
     "model group definition upserts persist one model group table to the canonical config path, preserve provider definitions and active selection, return a selected-agent safe projection, and mark restart-required semantics for runtime/UI consumers",
@@ -54,6 +57,7 @@
     "missing config, invalid agent selection, empty/duplicate/self peer, missing peer, same-mode peer, non-reciprocal relation, Master without a Worker, Slave with zero or multiple Masters, invalid primary/fallback provider binding, invalid auth source, incomplete or invalid Agent Relay connection, missing or empty Relay token env, unknown provider fields, disabled provider selection, or permission mismatch return explicit errors",
     "legacy singular `paired_agent` is rejected by the typed parser; only `paired_agents` is valid",
     "invalid remote daemon account ids, missing daemon account bindings, invalid direct endpoint host/port, relay endpoints without account relay URL, undeclared active endpoint, unknown route health endpoint, duplicate health records, no selectable route, expired bootstrap, malformed bootstrap, or empty bootstrap credential return explicit errors",
+    "invalid account-shared apply (unknown or disabled route provider, non-env auth, missing env source, invalid model group route, duplicate id, or invalid shared endpoint/daemon reference) returns explicit config errors and must not mutate local canonical config or effective runtime state",
     "invalid provider definition updates, missing env-var auth, missing selected agent, invalid provider selections, disabled providers, and same-primary fallback selection fail before overwrite; failed updates must leave previous config bytes intact",
     "invalid model group definitions, missing route providers/models, unknown or disabled route providers, zero load-balance weights, missing selected agent, unknown selected group, and disabled selected group fail before overwrite; failed updates must leave previous config bytes intact",
     "invalid Agent resource-count updates, non-Master targets, and missing targets fail before overwrite; failed updates must leave previous config bytes intact",
@@ -152,6 +156,20 @@
       "source_resource": "config",
       "target_resource": "account_config_document",
       "resource_operation": "config.project_shared_account_config",
+      "binding_status": "bound"
+    },
+    {
+      "step": "06t",
+      "symbol_path": "apply_shared_account_config",
+      "file_path": "crates/freehand-config/src/lib.rs",
+      "responsibility": "compile one validated account-scoped non-secret document into an in-memory effective LoadedConfig by overriding same-id env-auth providers and compatible model groups and merging shared Relay/daemon entries under owner-prefixed ids",
+      "input_semantic": "loaded local config plus validated account-scoped shared document",
+      "output_semantic": "effective LoadedConfig or explicit config error without local canonical mutation",
+      "caller": "runtime.ui-command-dispatch / tests",
+      "callee": "config owner validator/compiler",
+      "source_resource": "account_config_document",
+      "target_resource": "config",
+      "resource_operation": "account_config_document.apply_shared_account_config",
       "binding_status": "bound"
     },
     {
@@ -416,6 +434,7 @@
     "provider/model update is bound through ProviderConfigUpdate and update_provider_config_in_path; invalid updates do not overwrite config and saved env-var auth never writes resolved secret values",
     "model group definition and selection updates are bound through ModelGroupConfigUpdate, AgentModelGroupSelectionConfigUpdate, upsert_model_group_config_in_path, and switch_agent_model_group_in_path; invalid route/group selection updates do not overwrite config",
     "remote daemon registry validation, direct-first route selection, route-selected bootstrap bundle generation, app/web bootstrap link encoding, parsing, expiry rejection, and secret-redacted safe summaries are code-bound",
+    "account-shared effective apply is code-bound through apply_shared_account_config with env-auth-only provider override, compatible model group compilation, owner-prefixed shared relay/daemon merge, and no local canonical config mutation",
     "generated wiki must be regenerated from `docs/mainline-calls/config.core.json` when this function-map truth changes"
   ]
 }

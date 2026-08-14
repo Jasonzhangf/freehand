@@ -29,6 +29,7 @@
   - `timer`
   - `tool_call`
   - `debug_trace`
+  - `account_config_document`
 - resource operations:
   - `input_attachment.prepare_provider_input` (`input_attachment` -> `provider_request`)
   - `input_attachment.project_to_ui` (`input_attachment` -> `ui_projection`)
@@ -38,6 +39,7 @@
   - timer bridge references `runtime.master-worker-loop` owner operations `timer.schedule`, `timer.cancel`, and `timer.list`
   - tool registry bridge references `tool.registry` owner operation `tool_call.project_registry_to_ui`
   - search bridge references `reason.persistence` owner operation `session.list_persisted` and `task.orchestration` parent-session truth for Worker child nesting
+  - account-config pull/push applies synced mirror truth through `config.core` owner operation `account_config_document.apply_shared_account_config` into the live selected agent/effective config
 - forbidden shortcuts:
   - Runtime must not persist image base64 in reason/session history or project it to UI history.
   - Runtime activity is a typed control-side projection only; it must not be copied into ADP or UI business payloads.
@@ -79,6 +81,8 @@
 - `QuerySessionList` and `QueryArchivedSessionList` refresh the selected Agent's persisted metadata and effective turn projections at query time before reading `UiProtocolState`; this makes background-created sessions visible without restart while the selected Agent's persistence namespace remains the only session-list source
 - ADP/read-only error-center query requests enter through `UiRuntimeQueryPort` and route to runtime-owned metadata ledger projection without exposing raw provider/tool/request text
 - ADP/read-only config status query requests enter through `UiRuntimeQueryPort` with a typed local/remote access scope, reload config-owner truth from the runtime home, and project the selected live agent/provider config plus complete safe provider/model-group registries; remote scope omits loopback Agent URLs, while neither scope exposes API keys, pair tokens, Relay tokens, or credential-bearing URLs
+- `PullAccountConfig` enters through `RuntimeCommandDispatcher::dispatch`, resolves the authenticated Relay account through the account-config client, persists the synced or explicit not-configured device mirror, applies a synced mirror through `config.core::apply_shared_account_config` to refresh the live selected agent and effective config model, and returns an `account_config_pulled` receipt
+- `PushAccountConfig` enters through `RuntimeCommandDispatcher::dispatch`, exports local non-secret config through `config.core::export_shared_account_config`, sends the mirror etag through the account-config client, persists the synced or conflict device mirror, applies a synced mirror through `config.core::apply_shared_account_config` to refresh the live selected agent and effective config model, and returns an `account_config_pushed` receipt
 - provider web_search live-test commands enter through a protocol dispatch envelope, reload config-owner provider truth from runtime home, resolve the requested enabled provider via `LoadedConfig::select_provider_for_test`, and execute one provider-hosted-search test through `provider.reason-live-bridge` outside the runtime mutex
 - provider definition upsert commands enter through a protocol dispatch envelope, route to `config.core::upsert_provider_config_in_path`, and must not duplicate config validation or persistence logic in runtime
 - provider selection commands enter through a protocol dispatch envelope, route to `config.core::switch_agent_provider_in_path`, and must not duplicate config validation or persistence logic in runtime
@@ -166,6 +170,8 @@
   `config.core` selected agent truth and include the ordered peer
   name/mode/node-id list, auth source type, provider web_search effective
   status/reason, active model group id, complete safe model group registry, and route summary only
+- account-config pull returns `account_config_pulled` with the account id and server revision when the server document is accepted, and `status=not_configured` when the server reports no document; a synced mirror refreshes `live.selected_agent` and the effective config model through `config.core::apply_shared_account_config`
+- account-config push returns `account_config_pushed` only after the server accepts the exported non-secret content and a synced mirror refreshes `live.selected_agent` and the effective config model; conflict is an explicit dispatch failure with the server document persisted in the mirror and is never applied
 - runtime-backed provider web_search tests return explicit owner receipts:
   success requires a provider-hosted search observation; provider rejection or
   missing hosted observation is returned as a visible dispatch failure
@@ -237,6 +243,8 @@
   not fall back to a hardcoded browser/runtime tool list
 - persisted session search failures map to explicit query failure; runtime must
   not fall back to browser-local session filtering or id-prefix guessing
+- account-config pull/push without a live runtime home or without an authenticated Relay agent returns an explicit unsupported dispatch failure and never contacts the server or writes a mirror
+- account-config apply failure after a synced pull/push returns an explicit dispatch failure, records the apply error in the mirror projection, and never publishes a half-applied effective selected agent
 
 ## Shared Multi-Reference Functions
 
@@ -347,6 +355,9 @@
 | 28 | `RuntimeCommandDispatcher::query_runtime` / `project_tool_registry_for_ui` | `crates/freehand-runtime/src/lib.rs` | route QueryToolRegistry into tool.registry owner projection and convert rows into UI-safe protocol DTOs without executing tools | tool registry query | `UiToolRegistryProjection` or explicit query failure | ADP query transport | `BuiltinToolRegistry::registry_projection` | bound |
 | 29 | `RuntimeCommandDispatcher::query_runtime` / `query_session_search_for_ui` / `worker_parent_session_map` | `crates/freehand-runtime/src/lib.rs` | route QuerySessionSearch into reason.persistence persisted session index/metadata truth, join Worker matches through TaskBoard parent-session truth, and return only persisted Master/user sessions as top-level results | search query plus optional limit | `UiSessionSearchProjection` or explicit search/query failure | ADP query transport | `ReasonPersistence::list_persisted_sessions` / `ReasonPersistence::load_session_metadata` / `TaskRuntime::query_task_board` | bound |
 | 30 | `project_diagnostics_for_ui` | `crates/freehand-runtime/src/lib.rs` | route QueryDiagnostics into runtime-home diagnostics log projection, include only .log metadata plus bounded redacted tail lines, and keep raw payloads, secrets, and absolute user paths out of UI DTOs | diagnostics query plus live runtime home | `UiDiagnosticsProjection` or explicit query failure | ADP query transport | runtime logs under `~/.freehand/logs` | bound |
+| 31 | `RuntimeCommandDispatcher::dispatch_compact_session_context` | `crates/freehand-runtime/src/lib.rs` | route CompactSessionContext through reason.rewrite-policy truth by restoring the persisted session history and running `ReasonRewriteRuntime::apply_compaction_policy`, returning an explicit hold/soft-notice/stale-prune/staged receipt without fabricating a rewrite result | CompactSessionContext command plus request reason | compaction policy receipt or explicit dispatch failure | `RuntimeCommandDispatcher::dispatch` | `ReasonPersistence::restore` / `ReasonRewriteRuntime::apply_compaction_policy` | bound |
+| 32 | `RuntimeCommandDispatcher::dispatch_pull_account_config` | `crates/freehand-runtime/src/lib.rs` | route PullAccountConfig through the authenticated Relay account-config client, persist the synced or not-configured device mirror, apply a synced mirror through `config.core::apply_shared_account_config` to refresh the live selected agent, and return the runtime receipt | PullAccountConfig command envelope plus live selected Relay connection | `account_config_pulled` receipt with refreshed effective selected agent or explicit failure | `RuntimeCommandDispatcher::dispatch` | `AccountConfigClient::pull` / `AccountConfigMirror::synced` / `AccountConfigMirror::not_configured` / `config.core::apply_shared_account_config` / `refresh_selected_agent_from_account_config` | bound |
+| 33 | `RuntimeCommandDispatcher::dispatch_push_account_config` | `crates/freehand-runtime/src/lib.rs` | route PushAccountConfig through config.core export plus the account-config client, persist the synced or conflict device mirror, apply a synced mirror through `config.core::apply_shared_account_config` to refresh the live selected agent, and return the runtime receipt | PushAccountConfig command envelope plus live selected Relay connection and local config | `account_config_pushed` receipt with refreshed effective selected agent or explicit conflict/apply/dispatch failure | `RuntimeCommandDispatcher::dispatch` | `export_shared_account_config` / `AccountConfigClient::push` / `AccountConfigMirror::synced` / `AccountConfigMirror::conflict` / `config.core::apply_shared_account_config` / `refresh_selected_agent_from_account_config` | bound |
 
 ## Sync Status Against Code
 
@@ -383,7 +394,7 @@
 - runtime Phase 1 execution fact and scheduler tick dispatch is bound as a thin mutation route into `task.orchestration`; scheduler ticks emit facts/recommendations only
 - runtime error-center query dispatch is bound as a thin read-only route to `metadata.core` rows written by `error.center`
 - runtime config status query dispatch is bound as a thin read-only route from selected `config.core` truth to `UiConfigStatusProjection`, including complete provider registry and current fallback id
-- runtime PullAccountConfig/PushAccountConfig dispatch is bound as a thin route to `config.account-config-sync`; Relay authentication remains runtime-selected connection truth, while client validation/mirror persistence stays in the account-config owner
+- runtime PullAccountConfig/PushAccountConfig dispatch is bound as a thin route to `config.account-config-sync`; synced mirror content is applied through `config.core::apply_shared_account_config` into the live selected agent/effective config model and is covered by `runtime_account_config_sync_pull_applies_shared_provider_to_effective_config` plus `runtime_account_config_sync_bootstrap_applies_existing_synced_mirror`, while Relay authentication remains runtime-selected connection truth and client validation/mirror persistence stays in the account-config owner
 - runtime provider definition upsert and active provider selection dispatch are bound as thin mutation routes into `config.core`; successful saves project restart-required pending status and active runtime config remains unchanged until restart
 - runtime legacy provider/model update dispatch remains bound as a thin mutation route into `config.core` for existing callers
 - runtime Agent resource-count update dispatch is bound as a thin mutation route into `config.core`; successful saves project restart-required pending status and active AgentBoard truth remains unchanged until restart/process startup

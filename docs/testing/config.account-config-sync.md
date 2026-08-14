@@ -47,11 +47,12 @@
 
 - Standalone `freehand-relay-server` composes Relay authentication plus account config router.
 - Restart preserves Relay account store and account config document revision independently.
+- Client runtime pull/push refreshes the live selected agent and effective config through `config.core::apply_shared_account_config` without rewriting `config.toml`.
 - Claw online validation is required before claiming deployed same-account sharing.
 
 ## Known Gaps And Non-Goals
 
-- This server owner does not apply config into `config.core`, runtime, WebUI, or Android.
+- This server owner does not apply config into `config.core`, runtime, WebUI, or Android; client runtime applies validated synced content through `config.core`.
 - API keys, tokens, passwords, pair credentials, environment values, absolute local paths, and whole `config.toml` files are never accepted.
 - No last-write-wins, merge fallback, endpoint fallback, or silent conflict resolution is implemented.
-- Pull/push does not apply server content into `config.toml`; effective-config import is a separate explicit client phase.
+- Pull/push never writes server content into `config.toml`; synced content is applied in memory through `config.core::apply_shared_account_config`, and conflict or not-configured documents are never applied.

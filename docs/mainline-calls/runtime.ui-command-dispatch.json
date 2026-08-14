@@ -51,8 +51,8 @@
     "Diagnostics QueryDiagnostics routes through runtime into runtime-home log truth under ~/.freehand/logs; runtime projects file metadata and bounded redacted tail lines only, without exposing absolute user paths, provider raw payloads, secrets, or non-log files.",
     "runtime passes Phase 2B replay_from_start and maps omitted limit to the owner full-drain sentinel so closeout samples can ignore stale persisted cursors and consume all pending events instead of only the first page",
     "CompactSessionContext enters through RuntimeCommandDispatcher::dispatch, restores the persisted session history from reason.persistence, runs ReasonRewriteRuntime::apply_compaction_policy with the request reason (or a manual-compaction default) through reason.rewrite-policy truth, and returns an explicit compaction_hold/soft_notice/stale_prune/staged receipt without fabricating a rewrite result; missing persisted recovery truth fails dispatch explicitly instead of falling back to an empty history",
-    "PullAccountConfig enters through RuntimeCommandDispatcher::dispatch, resolves the authenticated Relay account through the account-config client, persists the synced or explicit not-configured device mirror, and returns an account_config_pulled receipt",
-    "PushAccountConfig enters through RuntimeCommandDispatcher::dispatch, exports the local non-secret config through config.core::export_shared_account_config, sends the mirror etag through the account-config client, and persists the synced or conflict device mirror before returning an account_config_pushed receipt"
+    "PullAccountConfig enters through RuntimeCommandDispatcher::dispatch, resolves the authenticated Relay account through the account-config client, persists the synced or explicit not-configured device mirror, applies a synced mirror through config.core::apply_shared_account_config to refresh the live selected agent and effective config model, and returns an account_config_pulled receipt",
+    "PushAccountConfig enters through RuntimeCommandDispatcher::dispatch, exports the local non-secret config through config.core::export_shared_account_config, sends the mirror etag through the account-config client, persists the synced or conflict device mirror, applies a synced mirror through config.core::apply_shared_account_config to refresh the live selected agent and effective config model, and returns an account_config_pushed receipt"
   ],
   "response_mainline": [
     "reason-backed submit/cancel commands return dispatch receipts and update derived UI turn projections, including the original user prompt and explicit cancelled terminal status for public conversation projection",
@@ -96,8 +96,8 @@
     "runtime-backed Search dashboard query returns UI-safe persisted session results from ReasonPersistence::list_persisted_sessions plus metadata sidecars and nests Worker hits via TaskBoard worker_session_id / parent_session_id truth instead of exposing Worker sessions at top level",
     "runtime-backed Diagnostics query returns UI-safe log file metadata and bounded redacted tail lines from runtime-home logs, sorted newest-first, without raw provider payloads, secrets, absolute user paths, or browser-local guesses.",
     "runtime-backed EventInbox/MasterPoll closeout proof uses replay_from_start=true plus omitted limit; explicit finite limits are pagination and cannot prove no events remain after cursor persistence",
-    "account-config pull returns account_config_pulled with the account id and server revision when the server document is accepted, and account_config_pulled status=not_configured when the server reports no document",
-    "account-config push returns account_config_pushed only after the server accepts the exported non-secret content; conflict is returned as an explicit dispatch failure with the server document persisted in the mirror"
+    "account-config pull returns account_config_pulled with the account id and server revision when the server document is accepted, and account_config_pulled status=not_configured when the server reports no document; a synced mirror refreshes live.selected_agent and the effective config model through config.core::apply_shared_account_config",
+    "account-config push returns account_config_pushed only after the server accepts the exported non-secret content and a synced mirror refreshes live.selected_agent and the effective config model; conflict is returned as an explicit dispatch failure with the server document persisted in the mirror and is never applied"
   ],
   "error_mainline": [
     "unsupported runtime command paths return explicit dispatch-port failures",
@@ -130,7 +130,8 @@
     "persisted session search failures map to explicit query failure; runtime must not fall back to browser-local session filtering or id-prefix guessing",
     "diagnostics log directory/metadata/tail read failures map to explicit query failure; runtime must not fall back to unredacted absolute paths, raw log dumps, or browser-local diagnostics rows.",
     "account-config pull/push without a live runtime home or without an authenticated Relay agent returns an explicit unsupported dispatch failure and never contacts the server or writes a mirror",
-    "account-config push with a missing local config or secret-shaped export candidate fails explicitly before any mirror write and never uploads credentials"
+    "account-config push with a missing local config or secret-shaped export candidate fails explicitly before any mirror write and never uploads credentials",
+    "account-config apply failure after a synced pull/push returns an explicit dispatch failure, records the apply error in the mirror projection, and never publishes a half-applied effective selected agent"
   ],
   "shared_functions": [
     {
@@ -159,6 +160,24 @@
         "runtime bootstrap smoke"
       ],
       "why_shared": "keeps config loading and selection in the config owner"
+    },
+    {
+      "symbol": "apply_shared_account_config",
+      "owner": "crates/freehand-config/src/lib.rs",
+      "purpose": "compile a validated account-scoped non-secret document into an in-memory effective LoadedConfig before runtime refreshes the selected live agent",
+      "allowed_callers": [
+        "RuntimeCommandDispatcher::from_selected_agent_with_live",
+        "RuntimeCommandDispatcher::query_runtime_with_scope",
+        "RuntimeCommandDispatcher::dispatch_pull_account_config",
+        "RuntimeCommandDispatcher::dispatch_push_account_config"
+      ],
+      "related_tests": [
+        "apply_shared_account_config_compiles_effective_provider_model_and_remote_daemon_surface",
+        "apply_shared_account_config_rejects_model_route_without_shared_provider",
+        "runtime_account_config_sync_pull_applies_shared_provider_to_effective_config",
+        "runtime_account_config_sync_bootstrap_applies_existing_synced_mirror"
+      ],
+      "why_shared": "keeps account-shared-to-effective config compilation and validation in config.core instead of duplicating provider/model/registry merge logic in runtime"
     },
     {
       "symbol": "TaskRuntime::list_tasks",
@@ -896,22 +915,22 @@
       "step": "32",
       "symbol_path": "RuntimeCommandDispatcher::dispatch_pull_account_config",
       "file_path": "crates/freehand-runtime/src/lib.rs",
-      "responsibility": "route PullAccountConfig through the authenticated Relay account-config client and persist the synced or not-configured device mirror before returning the runtime receipt",
+      "responsibility": "route PullAccountConfig through the authenticated Relay account-config client, persist the synced or not-configured device mirror, apply a synced mirror through config.core to refresh the live selected agent, and return the runtime receipt",
       "input_semantic": "PullAccountConfig command envelope plus live selected Relay connection",
-      "output_semantic": "account_config_pulled receipt or explicit unsupported/dispatch failure with persisted mirror status",
+      "output_semantic": "account_config_pulled receipt with refreshed effective selected agent or explicit unsupported/apply/dispatch failure with persisted mirror status",
       "caller": "RuntimeCommandDispatcher::dispatch",
-      "callee": "AccountConfigClient::pull / AccountConfigMirror::synced / AccountConfigMirror::not_configured",
+      "callee": "AccountConfigClient::pull / AccountConfigMirror::synced / AccountConfigMirror::not_configured / config.core::apply_shared_account_config / refresh_selected_agent_from_account_config",
       "binding_status": "bound"
     },
     {
       "step": "33",
       "symbol_path": "RuntimeCommandDispatcher::dispatch_push_account_config",
       "file_path": "crates/freehand-runtime/src/lib.rs",
-      "responsibility": "route PushAccountConfig through config.core export plus the account-config client and persist the synced or conflict device mirror before returning the runtime receipt",
+      "responsibility": "route PushAccountConfig through config.core export plus the account-config client, persist the synced or conflict device mirror, apply a synced mirror through config.core to refresh the live selected agent, and return the runtime receipt",
       "input_semantic": "PushAccountConfig command envelope plus live selected Relay connection and local config",
-      "output_semantic": "account_config_pushed receipt or explicit conflict/dispatch failure",
+      "output_semantic": "account_config_pushed receipt with refreshed effective selected agent or explicit conflict/apply/dispatch failure",
       "caller": "RuntimeCommandDispatcher::dispatch",
-      "callee": "export_shared_account_config / AccountConfigClient::push / AccountConfigMirror::synced / AccountConfigMirror::conflict",
+      "callee": "export_shared_account_config / AccountConfigClient::push / AccountConfigMirror::synced / AccountConfigMirror::conflict / config.core::apply_shared_account_config / refresh_selected_agent_from_account_config",
       "binding_status": "bound"
     },
     {
@@ -978,6 +997,7 @@
     "runtime Diagnostics query bridge is implemented as a thin projection route to runtime log metadata/redacted tail truth and is covered by runtime_query_projects_diagnostics_without_raw_secrets_or_absolute_home.",
     "runtime CompactSessionContext dispatch bridge routes the protocol-owned mutation command to reason.rewrite-policy truth via session.restore plus apply_compaction_policy and returns an explicit hold/stale/soft/staged receipt, never fabricating a rewrite result; missing recovery truth fails dispatch explicitly; covered by runtime_compact_session_context_hold_when_no_provider_summary_payload and runtime_compact_session_context_rejects_missing_recovery_truth_explicitly"
     ,
-    "runtime PullAccountConfig/PushAccountConfig dispatch bridges route through config.account-config-sync client and mirror owners and are covered by runtime_account_config_sync_pull_projects_synced_mirror, runtime_account_config_sync_pull_not_found_marks_not_configured, runtime_account_config_sync_push_conflict_persists_server_document, runtime_account_config_sync_without_relay_connection_is_unsupported, and runtime_account_config_push_without_local_config_fails_without_writing_mirror"
+    "runtime PullAccountConfig/PushAccountConfig dispatch bridges route through config.account-config-sync client and mirror owners and are covered by runtime_account_config_sync_pull_projects_synced_mirror, runtime_account_config_sync_pull_not_found_marks_not_configured, runtime_account_config_sync_push_conflict_persists_server_document, runtime_account_config_sync_without_relay_connection_is_unsupported, and runtime_account_config_push_without_local_config_fails_without_writing_mirror",
+    "synced account-config pull/push now applies the server document through config.core::apply_shared_account_config into the live selected agent and effective model, covered by runtime_account_config_sync_pull_applies_shared_provider_to_effective_config and runtime_account_config_sync_bootstrap_applies_existing_synced_mirror; conflict and not-configured mirrors remain non-apply"
   ]
 }

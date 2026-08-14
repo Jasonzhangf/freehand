@@ -732,14 +732,15 @@
       "owner_crate": "crates/freehand-account-config",
       "identity": "relay account id plus schemaVersion plus revision plus content etag",
       "truth_store": "account-scoped versioned JSON documents under deployment-owned FREEHAND_RELAY_ACCOUNT_CONFIG_DIR, one file per account id, written atomically before publication",
-      "operations": [
-        "validate",
-        "get",
-        "put",
-        "project_safe",
-        "pull",
-        "push"
-      ],
+  "operations": [
+    "validate",
+    "get",
+    "put",
+    "project_safe",
+    "pull",
+    "push",
+    "apply_shared_account_config"
+  ],
       "projections": [
         "GET /relay/api/config document with revision and etag",
         "PUT /relay/api/config response with next revision and etag",
@@ -1149,6 +1150,15 @@
       "source_resource": "config",
       "target_resource": "account_config_document",
       "effect": "project only validated env-auth provider/model-group/Relay endpoint and remote-daemon configuration into the account-scoped non-secret document",
+      "mainline_call_doc": "docs/mainline-calls/config.core.json",
+      "binding_status": "bound"
+    },
+    {
+      "operation_id": "account_config_document.apply_shared_account_config",
+      "owner_feature_id": "config.core",
+      "source_resource": "account_config_document",
+      "target_resource": "config",
+      "effect": "compile a validated account-scoped non-secret document into an in-memory effective LoadedConfig without uploading or rewriting local canonical config",
       "mainline_call_doc": "docs/mainline-calls/config.core.json",
       "binding_status": "bound"
     },
@@ -2087,6 +2097,17 @@
       "call_table_step": "06s",
       "file_path": "crates/freehand-config/src/lib.rs",
       "symbol_path": "export_shared_account_config",
+      "binding_status": "bound"
+    },
+    {
+      "edge_id": "config.core#06t",
+      "operation_id": "account_config_document.apply_shared_account_config",
+      "source_resource": "account_config_document",
+      "target_resource": "config",
+      "mainline_call_doc": "docs/mainline-calls/config.core.json",
+      "call_table_step": "06t",
+      "file_path": "crates/freehand-config/src/lib.rs",
+      "symbol_path": "apply_shared_account_config",
       "binding_status": "bound"
     },
     {
@@ -3178,6 +3199,14 @@
       "allowed_direct": true,
       "via_resources": [],
       "reason": "config.core owns the local-to-shared projection boundary and may call the account-config schema validator/export surface without moving credentials or whole config truth"
+    },
+    {
+      "rule_id": "config-applies-account-document-direct",
+      "source_resource": "account_config_document",
+      "target_resource": "config",
+      "allowed_direct": true,
+      "via_resources": [],
+      "reason": "config.core owns the account-shared to effective local config compilation boundary; runtime only refreshes the selected agent from the resulting effective LoadedConfig"
     }
   ],
   "forbidden_direct_relations": [

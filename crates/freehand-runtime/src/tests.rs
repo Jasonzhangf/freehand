@@ -2891,6 +2891,231 @@ provider = "provider-live"
 }
 
 #[test]
+fn runtime_account_config_sync_pull_applies_shared_provider_to_effective_config() {
+    let runtime_home = temp_runtime_home();
+    fs::create_dir_all(&runtime_home).expect("create runtime home");
+    fs::write(
+        runtime_home.join("config.toml"),
+        r#"
+[providers.provider-live]
+id = "provider-live"
+enabled = true
+type = "openai"
+protocol = "responses"
+base_url = "https://local.invalid"
+default_model = "local-model"
+
+[providers.provider-live.auth]
+type = "apikey"
+api_key_env = "ACCOUNT_APPLY_API_KEY"
+
+[agents.agent-live]
+name = "agent-live"
+mode = "master"
+node_id = "agent-live-node"
+paired_agents = ["agent-live-worker"]
+pair_token = "ACCOUNT_APPLY_MASTER_TOKEN"
+provider = "provider-live"
+
+[agents.agent-live-worker]
+name = "agent-live-worker"
+mode = "slave"
+node_id = "agent-live-worker-node"
+paired_agents = ["agent-live"]
+pair_token = "ACCOUNT_APPLY_WORKER_TOKEN"
+provider = "provider-live"
+"#,
+    )
+    .expect("write runtime config");
+    unsafe {
+        std::env::set_var("ACCOUNT_APPLY_API_KEY", "shared-key");
+        std::env::set_var("ACCOUNT_APPLY_MASTER_TOKEN", "pair-token");
+        std::env::set_var("ACCOUNT_APPLY_WORKER_TOKEN", "pair-token");
+    }
+    let content = freehand_account_config::ConfigDocumentContent {
+        provider_registry: vec![freehand_account_config::SharedProviderDefinition {
+            id: "provider-live".to_owned(),
+            label: "Shared Provider".to_owned(),
+            provider_type: "openai".to_owned(),
+            protocol: "responses".to_owned(),
+            base_url: "https://shared.invalid/v1".to_owned(),
+            auth: freehand_account_config::ProviderAuthReference {
+                auth_type: "env".to_owned(),
+                auth_source: "ACCOUNT_APPLY_API_KEY".to_owned(),
+            },
+            model: "shared-model".to_owned(),
+        }],
+        ..Default::default()
+    };
+    let document = freehand_account_config::AccountConfigDocument {
+        schema_version: freehand_account_config::ACCOUNT_CONFIG_SCHEMA_VERSION,
+        revision: Some(9),
+        etag: Some("\"etag-9\"".to_owned()),
+        updated_at: Some("1780000000".to_owned()),
+        document: content,
+    };
+    let response = serde_json::to_string(&document).expect("serialize config");
+    let (base_url, requests, handle) = spawn_status_sequence_server(vec![
+        (
+            200,
+            "application/json",
+            r#"{"accountId":"jason"}"#.to_owned(),
+        ),
+        (200, "application/json", response),
+    ]);
+    let mut selected = live_selected_agent_with_protocol(
+        "https://local.invalid".to_owned(),
+        freehand_config::ProviderType::OpenAi,
+        ConfigProviderProtocol::Responses,
+    );
+    selected.relay_connection = Some(freehand_config::SelectedAgentRelayConnection {
+        relay_url: base_url,
+        access_token: "relay-access-token".to_owned(),
+    });
+    let runtime = RuntimeCommandDispatcher::from_selected_agent_with_live(
+        &selected,
+        runtime_home.clone(),
+        false,
+    )
+    .expect("runtime bootstrap");
+
+    runtime
+        .dispatch(build_command_dispatch_envelope(&UiCommand::PullAccountConfig).expect("envelope"))
+        .expect("pull account config");
+    handle.join().expect("join server");
+    let first_request = requests.recv().expect("auth request");
+    let second_request = requests.recv().expect("config request");
+    assert!(first_request.starts_with("GET /relay/api/auth/me "));
+    assert!(second_request.starts_with("GET /relay/api/config "));
+
+    match runtime
+        .query_runtime(&UiCommand::QueryConfigStatus)
+        .expect("config query")
+        .expect("config result")
+    {
+        UiQueryResult::ConfigStatus(status) => {
+            assert_eq!(status.account_config_sync.status, "synced");
+            assert_eq!(status.account_config_sync.revision, Some(9));
+            assert_eq!(status.provider_base_url, "https://shared.invalid/v1");
+            assert_eq!(status.default_model, "shared-model");
+            assert_eq!(status.provider_auth_source, "env");
+            assert_eq!(status.provider_id, "provider-live");
+        }
+        other => panic!("unexpected query result: {other:?}"),
+    }
+    unsafe {
+        std::env::remove_var("ACCOUNT_APPLY_API_KEY");
+        std::env::remove_var("ACCOUNT_APPLY_MASTER_TOKEN");
+        std::env::remove_var("ACCOUNT_APPLY_WORKER_TOKEN");
+    }
+    fs::remove_dir_all(runtime_home).expect("cleanup runtime home");
+}
+
+#[test]
+fn runtime_account_config_sync_bootstrap_applies_existing_synced_mirror() {
+    let runtime_home = temp_runtime_home();
+    fs::create_dir_all(&runtime_home).expect("create runtime home");
+    fs::write(
+        runtime_home.join("config.toml"),
+        r#"
+[providers.provider-live]
+id = "provider-live"
+enabled = true
+type = "openai"
+protocol = "responses"
+base_url = "https://local.invalid"
+default_model = "local-model"
+
+[providers.provider-live.auth]
+type = "apikey"
+api_key_env = "ACCOUNT_BOOTSTRAP_API_KEY"
+
+[agents.agent-live]
+name = "agent-live"
+mode = "master"
+node_id = "agent-live-node"
+paired_agents = ["agent-live-worker"]
+pair_token = "ACCOUNT_BOOTSTRAP_MASTER_TOKEN"
+provider = "provider-live"
+
+[agents.agent-live-worker]
+name = "agent-live-worker"
+mode = "slave"
+node_id = "agent-live-worker-node"
+paired_agents = ["agent-live"]
+pair_token = "ACCOUNT_BOOTSTRAP_WORKER_TOKEN"
+provider = "provider-live"
+"#,
+    )
+    .expect("write runtime config");
+    unsafe {
+        std::env::set_var("ACCOUNT_BOOTSTRAP_API_KEY", "shared-key");
+        std::env::set_var("ACCOUNT_BOOTSTRAP_MASTER_TOKEN", "pair-token");
+        std::env::set_var("ACCOUNT_BOOTSTRAP_WORKER_TOKEN", "pair-token");
+    }
+    let document = freehand_account_config::AccountConfigDocument {
+        schema_version: freehand_account_config::ACCOUNT_CONFIG_SCHEMA_VERSION,
+        revision: Some(11),
+        etag: Some("\"etag-11\"".to_owned()),
+        updated_at: Some("1780000000".to_owned()),
+        document: freehand_account_config::ConfigDocumentContent {
+            provider_registry: vec![freehand_account_config::SharedProviderDefinition {
+                id: "provider-live".to_owned(),
+                label: "Shared Bootstrap Provider".to_owned(),
+                provider_type: "openai".to_owned(),
+                protocol: "responses".to_owned(),
+                base_url: "https://shared-bootstrap.invalid/v1".to_owned(),
+                auth: freehand_account_config::ProviderAuthReference {
+                    auth_type: "env".to_owned(),
+                    auth_source: "ACCOUNT_BOOTSTRAP_API_KEY".to_owned(),
+                },
+                model: "shared-bootstrap-model".to_owned(),
+            }],
+            ..Default::default()
+        },
+    };
+    let mirror = freehand_account_config::AccountConfigMirror::synced("jason", document)
+        .expect("build synced mirror");
+    mirror
+        .save_to_runtime_home(&runtime_home)
+        .expect("persist mirror");
+    let selected = live_selected_agent_with_protocol(
+        "https://local.invalid".to_owned(),
+        freehand_config::ProviderType::OpenAi,
+        ConfigProviderProtocol::Responses,
+    );
+    let runtime = RuntimeCommandDispatcher::from_selected_agent_with_live(
+        &selected,
+        runtime_home.clone(),
+        false,
+    )
+    .expect("runtime bootstrap with existing mirror");
+
+    match runtime
+        .query_runtime(&UiCommand::QueryConfigStatus)
+        .expect("config query")
+        .expect("config result")
+    {
+        UiQueryResult::ConfigStatus(status) => {
+            assert_eq!(status.account_config_sync.status, "synced");
+            assert_eq!(status.account_config_sync.revision, Some(11));
+            assert_eq!(
+                status.provider_base_url,
+                "https://shared-bootstrap.invalid/v1"
+            );
+            assert_eq!(status.default_model, "shared-bootstrap-model");
+        }
+        other => panic!("unexpected query result: {other:?}"),
+    }
+    unsafe {
+        std::env::remove_var("ACCOUNT_BOOTSTRAP_API_KEY");
+        std::env::remove_var("ACCOUNT_BOOTSTRAP_MASTER_TOKEN");
+        std::env::remove_var("ACCOUNT_BOOTSTRAP_WORKER_TOKEN");
+    }
+    fs::remove_dir_all(runtime_home).expect("cleanup runtime home");
+}
+
+#[test]
 fn runtime_account_config_sync_push_conflict_persists_server_document() {
     let runtime_home = temp_runtime_home();
     fs::create_dir_all(&runtime_home).expect("create runtime home");

@@ -67,7 +67,7 @@
     provider payloads, secrets, absolute paths, or browser-local fallback rows
   - runtime-backed read-only error-center queries route to metadata ledger projection and return UI-safe rows without becoming error truth writers
   - runtime-backed read-only config status queries reload config-owner truth and project the complete safe provider registry plus current primary/fallback selection without becoming config truth writers
-  - runtime account-config pull/push commands route through the authenticated Relay connection and account-config client/mirror owners without putting credentials into UI projections or local mirror state
+  - runtime account-config pull/push commands route through the authenticated Relay connection and account-config client/mirror owners, apply a synced mirror through `config.core::apply_shared_account_config` into the live selected agent/effective config model, and never put credentials into UI projections or local mirror state
   - runtime-backed ConfigStatus projection consumes a typed query access scope: local scope may include loopback `web_url`, while remote scope physically omits every loopback URL and exposes only declared Relay URLs
   - runtime-backed provider definition upsert commands route to `config.core` persistence without changing the active provider binding, then expose pending restart-required projection without hot-reloading active runtime config
   - runtime-backed provider selection commands route to `config.core` persistence without rewriting provider definitions, then expose pending restart-required projection without hot-reloading active runtime config
@@ -121,7 +121,7 @@
     assistant decision visibility plus Worker task prompt hiding with Worker
     assistant/tool/final truth and source-agent attribution still visible
   - ConfigStatus positive/reverse coverage proving local scope receives configured loopback Agent URLs, remote scope receives no `web_url` or peer `local_web_url`, and neither scope receives Relay credentials
-  - account-config pull/push positive/reverse coverage: synced pull, not-configured 404, conflict 409 with server document, unsupported without Relay connection, and missing local config failure without mirror write
+  - account-config pull/push positive/reverse coverage: synced pull applies shared provider/model truth to effective config, bootstrap with an existing synced mirror applies before first query, not-configured 404, conflict 409 with server document is not applied, unsupported without Relay connection, and missing local config failure without mirror write
   - runtime query-session-turns coverage for background lifecycle retry observability: a latest nonterminal persisted parent/Master turn with same-session ErrorCenter `retry_same_step` metadata projects `model_request.transport.kind=ProviderRetry`, updates the session list to `waiting_model`, and exposes the owning turn id; a terminal persisted turn with the same metadata remains terminal and has no `model_request`; an earlier historical retry turn followed by a later terminal round remains historical and is not reactivated
   - runtime/project online coverage for inactive partial authoritative restore: production ADP `QuerySessionTurns` on a legacy partial session must return surviving snapshots and the integrity warning rather than `command_dispatch_port_failure`
   - session metadata negative coverage for unknown session id and empty title rejection before runtime dispatch
@@ -303,6 +303,7 @@
   - daemon ADP task query bridge is covered by `daemon_adp_queries_runtime_task_truth`
   - runtime error-center query bridge is covered by `runtime_query_reads_error_center_metadata_without_raw_text`
   - runtime config status query bridge is covered by `runtime_query_projects_config_status_without_secrets`
+  - account-config synced pull effective-apply is covered by `runtime_account_config_sync_pull_applies_shared_provider_to_effective_config`; startup apply is covered by `runtime_account_config_sync_bootstrap_applies_existing_synced_mirror`; the same pull/push bridge coverage still covers not-configured, conflict, unsupported, and missing-local-config paths
   - runtime provider web_search test dispatch is covered by `provider_web_search_test_declares_hosted_tool_and_requires_observation` and `provider_web_search_test_fails_when_provider_does_not_observe_hosted_search`
   - runtime provider/model update dispatch is covered by `runtime_dispatch_updates_provider_config_without_hot_reloading_active_model` and `runtime_dispatch_rejects_invalid_provider_config_without_overwrite`
   - runtime model group dispatch is covered by `runtime_dispatch_upserts_and_selects_model_group_without_hot_reload`
