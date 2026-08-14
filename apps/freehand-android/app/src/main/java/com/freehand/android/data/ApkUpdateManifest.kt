@@ -47,7 +47,7 @@ data class ApkUpdateManifest(
             .orEmpty()
         val resolvedPath = resolved.rawPath.orEmpty()
         val nestedPath = resolvedPath.removePrefix("/relay")
-        if (apkUrl.startsWith("/") && relayRoot.isNotEmpty() && nestedPath.isNotEmpty()) {
+        if (resolvedPath.startsWith("/relay/") && relayRoot.isNotEmpty() && nestedPath.isNotEmpty()) {
             return URI(
                 resolved.scheme,
                 resolved.rawAuthority,
