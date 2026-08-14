@@ -598,8 +598,14 @@ class MainActivity : AppCompatActivity() {
             )
             return
         }
-        apkUpdater.checkForUpdateAsync { status ->
-            runOnUiThread { recordAndroidApkUpdateStatus(status) }
+        checkApkUpdateFor(apkUpdater)
+    }
+
+    private fun checkApkUpdateFor(updater: AndroidApkUpdater) {
+        updater.checkForUpdateAsync { status ->
+            runOnUiThread {
+                if (updater.isCurrent()) recordAndroidApkUpdateStatus(status)
+            }
         }
     }
 
@@ -748,6 +754,21 @@ class MainActivity : AppCompatActivity() {
                 "stylesheetCount:(document.styleSheets||[]).length," +
                 "webuiCssApplied:!!(shellStyle&&shellStyle.display==='grid')," +
                 "webuiJsReady:document.body.dataset.webuiJsReady==='true'," +
+                "webuiRoute:document.body.dataset.webuiRoute||''," +
+                "composerVisible:(function(){" +
+                "var composer=document.getElementById('composer-card')||document.querySelector('.composer-card');" +
+                "if(!composer){return false;}" +
+                "var style=window.getComputedStyle(composer);" +
+                "if(style.display==='none'||style.visibility==='hidden'){return false;}" +
+                "var rect=composer.getBoundingClientRect();" +
+                "return rect.width>0&&rect.height>0;" +
+                "})()," +
+                "focusedEditable:(function(){" +
+                "var active=document.activeElement;" +
+                "if(!active){return false;}" +
+                "var tag=(active.tagName||'').toLowerCase();" +
+                "return tag==='input'||tag==='textarea'||!!active.isContentEditable;" +
+                "})()," +
                 "stylesheetHrefs:Array.from(document.styleSheets||[]).map(function(sheet){return sheet.href||'inline';}).slice(0,4)" +
                 "};" +
                 "}" +
@@ -758,6 +779,7 @@ class MainActivity : AppCompatActivity() {
             if (verdict.ready) {
                 mainHandler.removeCallbacks(webUiLayoutRetry)
                 dismissStartupOverlay()
+                requestAndroidComposerEntry(targetView)
             } else if (webUiLayoutRetriesRemaining > 0 && !isFinishing) {
                 webUiLayoutRetriesRemaining -= 1
                 mainHandler.postDelayed(webUiLayoutRetry, WEBUI_LAYOUT_PROBE_RETRY_MS)
@@ -765,6 +787,22 @@ class MainActivity : AppCompatActivity() {
                 mainHandler.removeCallbacks(webUiLayoutRetry)
                 showStartupError(verdict.status)
             }
+        }
+    }
+
+    private fun requestAndroidComposerEntry(targetView: WebView) {
+        targetView.evaluateJavascript(
+            "(" +
+                "function(){" +
+                "try{" +
+                "const bridge=window.__freehandOpenAndroidComposerForReadyHost;" +
+                "if(typeof bridge==='function'){bridge();return true;}" +
+                "return false;" +
+                "}catch(error){return false;}" +
+                "}" +
+                ")()",
+        ) { requested ->
+            Log.i(WEBUI_LAYOUT_TAG, "android_composer_entry_requested=$requested")
         }
     }
 
@@ -958,8 +996,11 @@ class MainActivity : AppCompatActivity() {
 
     private fun applyActiveHost(host: HostConfig) {
         currentHostConfig = host
-        apkUpdater = AndroidApkUpdater(applicationContext, host)
+        lastApkUpdateStatus = null
+        val updater = AndroidApkUpdater(applicationContext, host)
+        apkUpdater = updater
         reloadWebUi(host)
+        checkApkUpdateFor(updater)
     }
 
     private fun isRemoteRegistryConfig(): Boolean =
