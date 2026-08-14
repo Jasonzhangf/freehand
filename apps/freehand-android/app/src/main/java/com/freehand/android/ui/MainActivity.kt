@@ -940,7 +940,6 @@ class MainActivity : AppCompatActivity() {
 
     private fun showOpenConnectionsButtonIfNeeded() {
         if (!::startupOverlay.isInitialized || startupOverlay.parent == null) return
-        if (isRemoteRegistryConfig()) return
         if (startupOverlay.findViewById<View>(R.id.open_connections_button) != null) return
         val button = Button(this).apply {
             id = R.id.open_connections_button
@@ -1091,7 +1090,7 @@ class MainActivity : AppCompatActivity() {
         private const val TURN_FINISHED_CHANNEL_ID = "freehand_turn_finished"
         private const val WEBUI_LAYOUT_PROBE_RETRY_MS = 500L
         private const val WEBUI_LAYOUT_PROBE_RETRIES = 20
-        private const val ANDROID_COMPOSER_IME_RETRY_ATTEMPTS = 10
+        private const val ANDROID_COMPOSER_IME_RETRY_ATTEMPTS = 30
         private const val ANDROID_COMPOSER_IME_RETRY_DELAY_MS = 200L
     }
 }
