@@ -30,6 +30,8 @@ class AndroidApkUpdater(
 
     private val checking = AtomicBoolean(false)
 
+    fun isCurrent(): Boolean = isGenerationCurrent(instanceGeneration)
+
     fun checkForUpdateAsync(onStatus: (ApkUpdateStatus) -> Unit = {}) {
         if (!checking.compareAndSet(false, true)) {
             onStatus(ApkUpdateStatus.alreadyChecking())
