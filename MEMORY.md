@@ -883,6 +883,25 @@ Tags: #architecture #gap5 #node #ui-protocol #dependency-edge
 - The same source/build version passed fmt, workspace build, workspace clippy `-D warnings`, `cargo test --workspace` (all executed tests passed; one intentional ignore), WebUI foundation contracts, mainlines, and gates. The installed daemon SHA-512 is `027c0bca4872458340664cc614e0ffa029d7b60d5b172d138da1af332e824dcafa178175ce1f5fb25f73d8baa56528941190433bb6c520056ac78d76d860c3a1`.
 - Four local hosts are online and role-correct at 4042/4043/4044/4046 with isolated persistence SessionList truth and `cc/gpt-5.6-sol`; stock Chrome artifact `artifacts/webui-online/mobile-ui-tree-phase1-20260807T143011-8206` proves exact-origin Dashboard clicks, foreign-marker rejection, no selected session, no horizontal overflow, and all WebUI checks true. Cross-Agent protocol, Relay version synchronization/deployment, and Android real-device evidence remain unclaimed.
 
+## 2026-08-13 - Selected-session transcript paging validation boundary
+
+- The approved paging slice is source- and test-verified: runtime 273/273
+  focused unit tests plus workspace build, clippy, workspace tests, fmt,
+  WebUI foundation contracts, mainlines, and architecture gates pass. The
+  full workspace run also passed runtime 274/274, UI protocol 89/89, reason
+  78/78, server 18/18, and all remaining executed suites.
+- Runtime ownership remains split as designed: reason persistence owns bounded
+  page selection, runtime owns the query bridge and public prompt projection,
+  UI protocol owns typed page DTOs/state, and WebUI owns the transient
+  per-session cache and bottom-follow projection.
+- Online closeout is blocked by pre-existing S-profile launch configuration:
+  `scripts/install-launchd.sh restartS` cannot start Master because
+  `~/.freehand/daemonS.env` lacks the configured
+  `FREEHAND_RELAY_AGENT_TOKEN`; launchd emits the explicit agent-selection
+  error. Do not copy a Worker token or add a fallback. Until the profile is
+  repaired through the Relay/config owner, no online replay, health evidence,
+  or codex-review PASS may be claimed.
+
 ## 2026-08-08 - Local multi-agent v2 committed (relay on claw)
 
 - Committed the verified local multi-Agent independent conversation slice as `916b898 feat(runtime): add local multi-agent session hosts` (61 files, 2214 insertions / 278 deletions). Pre-commit hook ran `fmt + gates check` and passed. Staging excluded all `.agent-collab/`, `output/`, backups, `.DS_Store`, and `__pycache__` noise; `git diff --cached --check` passed.
@@ -906,3 +925,121 @@ Tags: #architecture #gap5 #node #ui-protocol #dependency-edge
   - Android real-device in-place upgrade through both Tailscale and Relay manifests with `versionCode`/signer/SHA-256 evidence (needs explicit upgrade window).
   - Workspace clippy: `apps/freehand-cli/tests/config_startup.rs` has 3 `UiTurnProjection` initializations missing `usage_projection`/`user_options` from an unrelated worker; not addressed in this round.
 - codex-review not run yet; requires the three blockers above plus an explicit `codex-review` PASS before delivery per AGENTS rule 36.
+
+## 2026-08-14 - WebUI transcript paging online closeout
+
+- The approved selected-session paging slice is now online closed on the S
+  daemon. WebUI merge/cache/live fixes landed only in the WebUI owner:
+  incoming page turns merge ahead of the transient cache for `Latest` and
+  `Older`, cache hit is allowed only after the selected session's `Latest` page
+  has loaded, and the bottom button follows live model lifecycle so a stopped
+  session never shows the reasoning `...` state from historical nonterminal
+  activity. Asset version is `20260814-session-transcript-paging-fix`.
+- Real online replay proof is
+  `artifacts/webui-online/trace-paging-2026-08-14T05-39-49-287Z`: one `Latest`
+  page on first open, cache-hit refresh with no second page query, real second
+  user turn rendering, `...` during reasoning and `↓` after stop, one `Older`
+  request (`before_turn_id=runtime-turn-585`) with top anchoring, and
+  bottom-click return to `scroll.remaining=0`. Public transcript contains no
+  long internal/system prompt markers.
+- Full local gates are green for the fixed source: workspace build/clippy/tests,
+  server 18/18, WebUI foundation contracts, fmt, mainlines, and architecture
+  gates. The previous blocked-entry remains true for that earlier state, not
+  for this round.
+- MCP codex-review was not exposed in this session, so AGENTS rule 36 cannot be
+  claimed for this change.
+- Committed as `104078d fix(webui): correct transcript page merge/cache and
+  bottom button live state`; `app.webui-smoke` function map, mainline JSON, and
+  generated wiki now register the paging/cache/bottom-button helper symbols.
+
+## 2026-08-14 - Relay account config live-apply closeout verified
+
+- `freehand-config::apply_shared_account_config` now applies the synced
+  account-config mirror to the effective selected agent: same-id env-auth
+  providers, compiled shared model groups, and `shared:` relay/daemon entries
+  are used without writing `config.toml`.
+- `freehand-runtime` applies the mirror on live bootstrap, ConfigStatus query,
+  and pull/push success, then refreshes `live.selected_agent`; WebUI copy now
+  reads “拉取并应用账号配置”.
+- Full workspace tests pass including `reason_smoke_bin_runs_persist_smoke`;
+  workspace build/clippy/fmt, mainlines generate/check, gates check, and
+  `git diff --check` are green.
+- Relay account-config smoke and relay deployment smoke pass locally:
+  `relay_account_config_smoke_ok revision=1 etag="a0c0...37bb"` and
+  `relay_deployment_smoke_ok`.
+- Dual-path update verifier passes against a temporary Tailscale WebUI server
+  (`http://100.66.1.82:64120/android/update.json`) and Claw Relay
+  (`http://100.124.49.106:19091/relay/updates/latest.json`):
+  `versionCode=20260731`, SHA-256 `979906f5...611`, size `2741777`, signer
+  `ecd63a2c...`.
+- Claw online account-config proof is in `output/relay-account-config/claw-online.txt`
+  and covers cross-account isolation, stale 409, secret 400, and restart
+  revision/ETag stability.
+- `scripts/verify-remote-relay-local-online.sh` passes
+  (`remote_relay_local_online_ok`), and the Claw deployed binary SHA-256 is
+  `e299cb48d160dec3c14d1ad3ec5122d1293b2d6e2125a121c256d582732ca4eb` with
+  systemd active and `/relay/health` `ok`.
+- `scripts/install-launchd.sh restartS` installs a binary whose SHA-256 matches
+  `target/debug/freehand-daemon`
+  (`0157f58b0e234bc03c736d481d8b385ae8e95d6c93f48c9c0bd08725b59f7126`), but the
+  S-profile Master still refuses HTTP on `100.66.1.82:4042` and
+  `127.0.0.1:4042` while stderr repeats Relay WebSocket resets. This remains an
+  independent launch blocker and prevents an installed-runtime account-config
+  online replay in this round.
+- Committed locally as `9ff1bfb` with maps/docs/tests; not pushed because
+  codex-review MCP is not exposed in this session and AGENTS rule 36 has not
+  been satisfied.
+
+## 2026-08-14 - Relay/Claw release 0.2.11 and dual-path device upgrade verified
+
+- `make ci` passed for the relay-claw goal: workspace build/fmt/clippy/tests,
+  mainlines check, gates check, relay deployment smoke, remote relay local
+  online, and relay account config smoke.
+- `scripts/release.sh` produced `dist/` with one signed APK and matched
+  manifests: versionCode `20260815`, versionName `0.2.11`, APK SHA-256
+  `035d16098073a7101151e898edceca8ff3cd6a620bd4ce178da5da917739bf08`, size
+  `2753781`, signer SHA-256
+  `ecd63a2c2070970735cc079b0bb090427ca0b59200da0ebc07c80b50a1dfffda`.
+- Claw deploy passed (`claw_relay_deploy_ok`), manifest SHA-256
+  `b37a75ac712b5306864c5f5340c4874962c3ea79831aa1a9b0d65346e88ca618`, relay
+  health `ok`, zero `No space left on device` journal entries, and 7.0G free.
+- Android Relay endpoint uses the account Relay root manifest
+  `/relay/updates/latest.json`; the legacy Relay agent-namespace update path is
+  no longer used. Dual-path verifier passed over Tailscale daemon
+  `100.66.1.82:4042` and Claw Relay `100.124.49.106:19091`.
+- Real device `100.104.163.65:5555` upgraded in place to `0.2.11`; installed
+  base.apk SHA-256 matches the release artifact, and both Tailscale and Relay
+  bootstrap starts logged `FreehandApkUpdate: apk_update_current
+  versionCode=20260815`. Evidence is in
+  `output/android-relay-path-device-20260815/evidence.txt`.
+- Android logd `flowctrl` can drop high-frequency `FreehandWebUiLayout` logcat
+  rows, so layout logcat must be corroborated with APK hash/version, foreground
+  activity, and screenshot evidence rather than treated as sole proof.
+
+## 2026-08-14 - Native daemon connection config page + ready-host composer entry
+
+- Committed the Android native connection-config page slice
+  `d6d57bd` (ConnectionsActivity + DaemonConnectionConfig addOrReplaceProfile/
+  switchActiveProfile/removeProfile + MainActivity wiring + AndroidManifest +
+  res + module registry), then four fix commits from codex-review P1/P2:
+  `f3421cb`/`b02c067`/`0e541b2` (relay prefix apkUrl rebase + APK update
+  generation fence + atomic installer guard), `31acfb3` (restrict rebase to
+  /relay/ paths), `9e537d6`/`08b92ce` (generation-aware update status delivery
+  + host-switch fresh check), `d0eec0c` (never rebase absolute http(s) apkUrl).
+- Committed the ready-host composer entry slice `2cd8a14`: WebUI
+  `window.__freehandOpenAndroidComposerForReadyHost` opens the valid persisted
+  selected session or a protocol-owned new conversation, then retries composer
+  focus; Android MainActivity dismisses the startup overlay through a callback,
+  focuses the WebView, invokes the bridge, and retries InputMethodManager.
+  `b24de9b` gated IME show on editable focus; `6c38e92` kept the connection
+  repair button reachable for remote_registry failures and raised the IME retry
+  window to ~6s.
+- codex-review oauth reached a clear semantic PASS on the full
+  `093854a..HEAD` slice: no definite, actionable correctness defects; relay
+  update URL handling, generation-aware APK lifecycle, Android connection
+  repair, and ready-host composer/IME recovery are internally consistent.
+  Workspace build/fmt/clippy/test + mainlines + gates all pass.
+- Key decision: the native connection config page (daemon unreachable) is the
+  single allowed native surface; Android never renders a second conversation/
+  settings UI. remote_registry startup failure keeps the open-connections
+  button (only the legacy Tailscale host/port dialog is suppressed).
