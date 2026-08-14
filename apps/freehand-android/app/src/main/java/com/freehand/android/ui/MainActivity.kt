@@ -811,18 +811,32 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun showAndroidImeAfterComposerEntry(targetView: WebView, attempt: Int = 0) {
-        val inputMethodManager =
-            getSystemService(Context.INPUT_METHOD_SERVICE) as? InputMethodManager ?: return
-        if (inputMethodManager.showSoftInput(targetView, InputMethodManager.SHOW_IMPLICIT)) {
-            return
-        }
-        if (attempt < 10) {
-            mainHandler.postDelayed(
-                {
-                    showAndroidImeAfterComposerEntry(targetView, attempt + 1)
-                },
-                200L,
-            )
+        targetView.evaluateJavascript(
+            "(" +
+                "function(){" +
+                "var active=document.activeElement;" +
+                "if(!active){return false;}" +
+                "var tag=(active.tagName||'').toLowerCase();" +
+                "return tag==='input'||tag==='textarea'||!!active.isContentEditable;" +
+                "}" +
+                ")()",
+        ) { focused ->
+            val focusedEditable = focused == "true"
+            val inputMethodManager =
+                getSystemService(Context.INPUT_METHOD_SERVICE) as? InputMethodManager
+            if (focusedEditable && inputMethodManager != null &&
+                inputMethodManager.showSoftInput(targetView, InputMethodManager.SHOW_IMPLICIT)
+            ) {
+                return@evaluateJavascript
+            }
+            if (attempt < ANDROID_COMPOSER_IME_RETRY_ATTEMPTS) {
+                mainHandler.postDelayed(
+                    {
+                        showAndroidImeAfterComposerEntry(targetView, attempt + 1)
+                    },
+                    ANDROID_COMPOSER_IME_RETRY_DELAY_MS,
+                )
+            }
         }
     }
 
@@ -1077,5 +1091,7 @@ class MainActivity : AppCompatActivity() {
         private const val TURN_FINISHED_CHANNEL_ID = "freehand_turn_finished"
         private const val WEBUI_LAYOUT_PROBE_RETRY_MS = 500L
         private const val WEBUI_LAYOUT_PROBE_RETRIES = 20
+        private const val ANDROID_COMPOSER_IME_RETRY_ATTEMPTS = 10
+        private const val ANDROID_COMPOSER_IME_RETRY_DELAY_MS = 200L
     }
 }
