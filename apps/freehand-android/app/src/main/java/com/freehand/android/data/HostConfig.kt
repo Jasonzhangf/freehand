@@ -6,10 +6,12 @@ data class HostConfig(
     val host: String,
     val port: Int,
     val webUrlOverride: String? = null,
+    val relayUpdateManifestUrl: String? = null,
 ) {
     val baseUrl: String get() = webUrlOverride ?: "http://$host:$port"
     val webUiUrl: String get() = appendWebUiParams(baseUrl)
-    val updateManifestUrl: String get() = resolveDaemonUrl("android/update.json")
+    val updateManifestUrl: String
+        get() = relayUpdateManifestUrl ?: resolveDaemonUrl("android/update.json")
 
     fun resolveDaemonUrl(pathOrUrl: String): String {
         val trimmed = pathOrUrl.trim()

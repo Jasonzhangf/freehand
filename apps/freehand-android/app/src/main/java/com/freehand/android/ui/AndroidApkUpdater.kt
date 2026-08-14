@@ -23,6 +23,9 @@ class AndroidApkUpdater(
     private val hostConfig: HostConfig,
     private val currentVersionCode: Long = BuildConfig.VERSION_CODE.toLong(),
 ) {
+    val updateManifestUrl: String
+        get() = hostConfig.updateManifestUrl
+
     private val checking = AtomicBoolean(false)
 
     fun checkForUpdateAsync(onStatus: (ApkUpdateStatus) -> Unit = {}) {
@@ -32,9 +35,9 @@ class AndroidApkUpdater(
         }
         Thread {
             try {
-                onStatus(ApkUpdateStatus.checking(hostConfig.updateManifestUrl))
-                val manifestJson = httpGetText(hostConfig.updateManifestUrl)
-                val plan = ApkUpdateManifest.parse(manifestJson).updatePlan(currentVersionCode, hostConfig)
+                onStatus(ApkUpdateStatus.checking(updateManifestUrl))
+                val manifestJson = httpGetText(updateManifestUrl)
+                val plan = ApkUpdateManifest.parse(manifestJson).updatePlan(currentVersionCode, updateManifestUrl)
                 if (plan == null) {
                     Log.i(LOG_TAG, "apk_update_current versionCode=$currentVersionCode")
                     onStatus(ApkUpdateStatus.current(currentVersionCode))

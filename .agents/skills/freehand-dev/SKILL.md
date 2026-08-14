@@ -692,10 +692,9 @@ prompt after that returns `end_turn` (cancel-token reset invariant).
 
 Use this checklist for both new features and bug fixes:
 
-- opencode-go/deepseek-v4-flash review: run with `--auto --format json --model opencode-go/deepseek-v4-flash` and a long-lived session (background `&` may be killed by the sandbox when the shell exits; run it as the sole foreground `exec_command` and poll). After the run, the jsonl MUST contain a real `VERDICT: PASS/FAIL` conclusion; a run that ends without a verdict text (e.g. last step `reason: unknown`) is NOT a valid review and must be rerun. Verify with `grep '"type":"text"' review.jsonl | ... | tail`.
+- Codex review gate uses the MCP server at `/Users/fanzhang/.agents/skills/codex-review/scripts/codex-review-mcp` with `review_start` / `review_status` / `review_progress` / `review_result`. Fixed profile order is `oauth` -> `cc` -> `tcm`; never use foreground `codex review`, `asxs`, or `opencode` as the review channel. A PASS is valid only when `review.exit` exists and the final message contains an explicit PASS verdict with no FAIL, P0, P1, or fix-before-review requirement.
 - For e2e gates that drive a real live-provider turn, budget the timeout from measured latency, not a guess. A 60s `timeout` on a 150-300s provider turn makes the gate non-hermetic and fails under load; raise to the measured budget (300s) and re-verify, then re-review because the run-config change invalidates the prior verdict.
 - Commit hygiene: stage only the feature files by explicit path. Never let `.agent-collab/`, `output/`, `err*.log`, `__pycache__`, `.DS_Store`, or scratch notes into the commit; `git diff --cached --check` before commit.
-- Codex review gate uses `codex --profile cc review` by default. If that route returns HTTP 402 / insufficient quota before a final verdict, rerun the identical review prompt with `codex --profile tcm review`. This is an external reviewer transport switch only; do not weaken tests, skip review, or treat it as product-runtime fallback.
 - information sufficient
 - logic closed-loop
 - lifecycle management complete
@@ -706,6 +705,26 @@ Use this checklist for both new features and bug fixes:
 - runtime/debug evidence path still valid
 
 If any line is not true, do not claim completion.
+
+## Android Release/Deploy Verification Rules
+
+- After a Claw disk-full or deploy failure, do not restart the service until
+  `journalctl --since "-15 minutes" | grep -c "No space left on device"` is 0
+  and free space can hold the complete new binary. Build into a separate
+  writable target outside a bind-mounted production mount, verify the new
+  binary SHA-256 before install, and never let an in-place install truncate the
+  active binary.
+- Android logd `flowctrl` can drop high-frequency `FreehandWebUiLayout` rows, so
+  logcat layout evidence is not sufficient or necessary alone. True-device
+  closure must combine installed APK hash/version/signer, foreground/dumpsys
+  activity truth, screenshot, and any available canonical WebUI/probe logcat;
+  do not declare failure or success solely from layout-log presence.
+- Android Relay APK update manifests are account-level:
+  `GET <account relay base>/relay/updates/latest.json`, not
+  `/relay/daemon/<host>/android/update.json`. `HostConfig.updateManifestUrl`
+  selects Relay only when the active endpoint is a remote_registry Relay
+  endpoint and the account relayUrl is present; direct endpoints keep daemon
+  `/android/update.json`. There is no automatic switch between paths.
 
 ## Task Phase 1 Lifecycle Closeout Rule
 

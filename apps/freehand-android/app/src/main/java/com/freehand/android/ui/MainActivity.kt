@@ -39,6 +39,7 @@ import android.widget.ImageView
 import android.widget.LinearLayout
 import android.widget.EditText
 import android.widget.ProgressBar
+import android.widget.Button
 import android.widget.TextView
 import androidx.activity.OnBackPressedCallback
 import androidx.activity.result.ActivityResultLauncher
@@ -50,6 +51,7 @@ import androidx.core.content.ContextCompat
 import androidx.core.view.ViewCompat
 import androidx.core.view.WindowInsetsCompat
 import com.freehand.android.BuildConfig
+import com.freehand.android.R
 import com.freehand.android.data.ClientConfig
 import com.freehand.android.data.DaemonConnectionConfig
 import com.freehand.android.data.DaemonConnectionConfigStore
@@ -77,6 +79,7 @@ class MainActivity : AppCompatActivity() {
     private lateinit var fileAccessPermissionLauncher: ActivityResultLauncher<Array<String>>
     private lateinit var allFilesAccessSettingsLauncher: ActivityResultLauncher<Intent>
     private lateinit var notificationPermissionLauncher: ActivityResultLauncher<String>
+    private lateinit var connectionsLauncher: ActivityResultLauncher<Intent>
     private lateinit var apkUpdater: AndroidApkUpdater
     private var lastApkUpdateStatus: ApkUpdateStatus? = null
     private var currentHostConfig: HostConfig? = null
@@ -126,6 +129,18 @@ class MainActivity : AppCompatActivity() {
             callback.onReceiveValue(
                 WebChromeClient.FileChooserParams.parseResult(result.resultCode, result.data),
             )
+        }
+        connectionsLauncher = registerForActivityResult(
+            ActivityResultContracts.StartActivityForResult(),
+        ) { result ->
+            if (result.resultCode != RESULT_OK) return@registerForActivityResult
+            try {
+                val newHost = ClientConfig.load(applicationContext).activeHostConfig()
+                currentHostConfig = newHost
+                reloadWebUi(newHost)
+            } catch (error: DaemonConnectionConfigException) {
+                Log.e(LOG_TAG, "failed to reload config after connections page", error)
+            }
         }
 
         val root = FrameLayout(this).apply {
@@ -300,6 +315,9 @@ class MainActivity : AppCompatActivity() {
         fun check() {
             runOnUiThread { startAndroidApkUpdateCheck() }
         }
+
+        @JavascriptInterface
+        fun manifestUrl(): String = apkUpdater.updateManifestUrl
     }
 
     private inner class AndroidNotificationsBridge {
@@ -841,6 +859,29 @@ class MainActivity : AppCompatActivity() {
         startupStatus.text = message
         startupStatus.setTextColor(Color.rgb(203, 213, 225))
         promptEndpointConfigIfNeeded()
+        showOpenConnectionsButtonIfNeeded()
+    }
+
+    private fun showOpenConnectionsButtonIfNeeded() {
+        if (!::startupOverlay.isInitialized || startupOverlay.parent == null) return
+        if (startupOverlay.findViewById<View>(R.id.open_connections_button) != null) return
+        val button = Button(this).apply {
+            id = R.id.open_connections_button
+            text = "打开连接配置"
+            setOnClickListener { openConnectionsPage() }
+        }
+        val params = FrameLayout.LayoutParams(
+            FrameLayout.LayoutParams.WRAP_CONTENT,
+            FrameLayout.LayoutParams.WRAP_CONTENT,
+        ).apply {
+            gravity = Gravity.CENTER_HORIZONTAL or Gravity.BOTTOM
+            bottomMargin = dp(48)
+        }
+        startupOverlay.addView(button, params)
+    }
+
+    private fun openConnectionsPage() {
+        connectionsLauncher.launch(ConnectionsActivity.changedIntent(this))
     }
 
     private fun promptEndpointConfigIfNeeded() {

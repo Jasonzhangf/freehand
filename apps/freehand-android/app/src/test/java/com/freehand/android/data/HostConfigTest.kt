@@ -49,13 +49,14 @@ class HostConfigTest {
     }
 
     @Test
-    fun `relay updateManifestUrl stays under selected relay namespace`() {
+    fun `relay updateManifestUrl uses account relay root`() {
         assertEquals(
-            "http://100.66.1.82:44042/relay/daemon/studio-host/android/update.json",
+            "http://100.66.1.82:44042/relay/updates/latest.json",
             HostConfig(
                 host = "100.66.1.82",
                 port = 44042,
                 webUrlOverride = "http://100.66.1.82:44042/relay/daemon/studio-host/",
+                relayUpdateManifestUrl = "http://100.66.1.82:44042/relay/updates/latest.json",
             ).updateManifestUrl,
         )
     }

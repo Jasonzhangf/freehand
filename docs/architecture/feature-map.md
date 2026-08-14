@@ -103,7 +103,7 @@ This table is the feature-map backlink for `docs/resource-maps/core.json`. The r
 | `runtime.checkpoint-rewind` | `checkpoint` | `docs/resource-maps/core.json` |
 | `node.master-slave` | `node_pairing`, `remote_daemon_directory` | `docs/resource-maps/core.json` |
 | `relay.transport` | `relay_account`, `agent_presence`, `relay_control_tunnel`, `relay_data_tunnel`, `relay_error_tunnel`, `relay_update_artifact` | `docs/resource-maps/core.json` |
-| `app.android-client` | `android_apk_update`, `android_file_access`, `android_notification` | `docs/resource-maps/core.json` |
+| `app.android-client` | `android_connection_config`, `android_apk_update`, `android_file_access`, `android_notification` | `docs/resource-maps/core.json` |
 | `instruction.capability-loader` | `instruction_capability` | `docs/resource-maps/core.json` |
 
 ## Architecture Gap Registry
@@ -862,7 +862,7 @@ Non-violation pending items live in `docs/architecture/architecture-gaps.md`. Ea
 ### `app.android-client`
 
 - owner: `apps/freehand-android`
-- allowed_paths: `apps/freehand-android/**`, `apps/freehand-server/src/assets.rs`, `apps/freehand-server/src/lib.rs`, `docs/resource-maps/core.json`, `docs/function-maps/app.android-client.md`, `docs/testing/app.android-client.md`, `docs/mainline-calls/app.android-client.json`, `docs/wiki/app.android-client.md`, `docs/design/multi-platform-ui-architecture.md`, `MEMORY.md`, `note.md`
+- allowed_paths: `apps/freehand-android/**`, `apps/freehand-server/src/assets.rs`, `apps/freehand-server/src/lib.rs`, `docs/resource-maps/core.json`, `docs/module-registry/app.android-client.json`, `docs/function-maps/app.android-client.md`, `docs/testing/app.android-client.md`, `docs/mainline-calls/app.android-client.json`, `docs/wiki/app.android-client.md`, `docs/design/multi-platform-ui-architecture.md`, `MEMORY.md`, `note.md`
 - forbidden_paths: `crates/freehand-reason/**`, `crates/freehand-provider-*/**`, `crates/freehand-node/**`, `crates/freehand-config/**`, `crates/freehand-runtime/**` except through `freehand-ui-protocol` projections
 - required_checks:
   - `cd apps/freehand-android && ./gradlew testDebugUnitTest assembleDebug`

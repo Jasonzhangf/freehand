@@ -54,13 +54,59 @@ data class DaemonConnectionConfig(
         return updated.normalizedAndValidated()
     }
 
+    fun addOrReplaceProfile(profile: DaemonConnectionProfile): DaemonConnectionConfig {
+        if (connectionMode == "remote_registry") {
+            throw DaemonConnectionConfigException(
+                "remote registry connection cannot add a legacy profile",
+            )
+        }
+        profile.validate()
+        val updatedProfiles = if (profiles.any { it.id == profile.id }) {
+            profiles.map { existing -> if (existing.id == profile.id) profile else existing }
+        } else {
+            profiles + profile
+        }
+        return copy(profiles = updatedProfiles).normalizedAndValidated()
+    }
+
+    fun removeProfile(id: String): DaemonConnectionConfig {
+        if (connectionMode == "remote_registry") {
+            throw DaemonConnectionConfigException(
+                "remote registry connection cannot remove a legacy profile",
+            )
+        }
+        val remaining = profiles.filterNot { it.id == id }
+        if (remaining.isEmpty()) {
+            throw DaemonConnectionConfigException(
+                "cannot remove the last daemon profile '$id'",
+            )
+        }
+        val nextActive = if (activeProfile == id) remaining.first().id else activeProfile
+        return copy(
+            profiles = remaining,
+            activeProfile = nextActive,
+        ).normalizedAndValidated()
+    }
+
+    fun switchActiveProfile(id: String): DaemonConnectionConfig {
+        if (connectionMode == "remote_registry") {
+            throw DaemonConnectionConfigException(
+                "remote registry connection cannot switch a legacy profile",
+            )
+        }
+        if (profiles.none { it.id == id }) {
+            throw DaemonConnectionConfigException("profile '$id' is not defined")
+        }
+        return copy(activeProfile = id).normalizedAndValidated()
+    }
+
     private fun activeRemoteHostConfig(): HostConfig {
         val daemonId = activeDaemon?.takeIf { it.isNotBlank() }
             ?: throw DaemonConnectionConfigException("activeDaemon is required")
         val daemon = daemons.firstOrNull { it.id == daemonId }
             ?: throw DaemonConnectionConfigException("active daemon '$daemonId' is not defined")
         val accountId = activeAccount?.takeIf { it.isNotBlank() } ?: daemon.accountId
-        accounts.firstOrNull { it.id == accountId }
+        val account = accounts.firstOrNull { it.id == accountId }
             ?: throw DaemonConnectionConfigException("active account '$accountId' is not defined")
         if (daemon.accountId != accountId) {
             throw DaemonConnectionConfigException(
@@ -71,7 +117,7 @@ data class DaemonConnectionConfig(
             ?: throw DaemonConnectionConfigException(
                 "active endpoint '${daemon.activeEndpoint}' is not defined for daemon '${daemon.id}'",
             )
-        return endpoint.toHostConfig(daemon.id)
+        return endpoint.toHostConfig(daemon.id, account.relayUrl)
     }
 
     fun toLegacyCompatibilityConfig(): DaemonConnectionConfig {
@@ -564,21 +610,35 @@ data class DaemonEndpoint(
         }
     }
 
-    fun toHostConfig(daemonId: String): HostConfig {
+    fun toHostConfig(daemonId: String, relayUrl: String? = null): HostConfig {
         validate(daemonId)
         if (kind == "relay") {
             val relayWebUrl = webUrl ?: throw DaemonConnectionConfigException("daemon '$daemonId' relay endpoint '$id' webUrl is required")
+            val relayBaseUrl = relayUrl
+                ?: throw DaemonConnectionConfigException("daemon '$daemonId' relay endpoint '$id' requires account relayUrl")
             val uri = URI(relayWebUrl)
             return HostConfig(
                 host = uri.host ?: "relay",
                 port = if (uri.port > 0) uri.port else if (uri.scheme == "https") 443 else 80,
                 webUrlOverride = relayWebUrl,
+                relayUpdateManifestUrl = relayRootUpdateManifestUrl(relayBaseUrl),
             )
         }
         return HostConfig(
             host = host ?: throw DaemonConnectionConfigException("daemon '$daemonId' endpoint '$id' host is required"),
             port = port ?: throw DaemonConnectionConfigException("daemon '$daemonId' endpoint '$id' port is invalid"),
         )
+    }
+
+    private fun relayRootUpdateManifestUrl(relayUrl: String): String {
+        val uri = URI(relayUrl)
+        return URI(
+            uri.scheme,
+            uri.rawAuthority,
+            "/relay/updates/latest.json",
+            null,
+            null,
+        ).toString()
     }
 }
 

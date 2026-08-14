@@ -1,0 +1,91 @@
+{
+  "schema_version": 1,
+  "registry_id": "app.android-client.modules",
+  "feature_id": "app.android-client",
+  "status": "active",
+  "coverage_roots": [
+    "apps/freehand-android"
+  ],
+  "modules": [
+    {
+      "module_id": "app.android-client.webview-host",
+      "owner_feature_id": "app.android-client",
+      "status": "active",
+      "owned_paths": [
+        "apps/freehand-android/app/src/main/java/com/freehand/android/ui/MainActivity.kt",
+        "apps/freehand-android/app/src/main/java/com/freehand/android/ui/WebUiStartupGate.kt",
+        "apps/freehand-android/app/src/main/AndroidManifest.xml"
+      ],
+      "allowed_dependencies": [
+        "app.android-client.connection-config",
+        "app.android-client.apk-update",
+        "app.android-client.notification",
+        "app.android-client.file-access"
+      ],
+      "forbidden_dependencies": []
+    },
+    {
+      "module_id": "app.android-client.connection-config",
+      "owner_feature_id": "app.android-client",
+      "status": "active",
+      "owned_paths": [
+        "apps/freehand-android/app/src/main/java/com/freehand/android/ui/ConnectionsActivity.kt",
+        "apps/freehand-android/app/src/main/java/com/freehand/android/data/DaemonConnectionConfig.kt",
+        "apps/freehand-android/app/src/main/java/com/freehand/android/data/HostConfig.kt",
+        "apps/freehand-android/app/src/main/java/com/freehand/android/data/ClientConfig.kt",
+        "apps/freehand-android/app/src/main/assets/config/client.json"
+      ],
+      "allowed_dependencies": [
+        "third_party.gson"
+      ],
+      "forbidden_dependencies": []
+    },
+    {
+      "module_id": "app.android-client.apk-update",
+      "owner_feature_id": "app.android-client",
+      "status": "active",
+      "owned_paths": [
+        "apps/freehand-android/app/src/main/java/com/freehand/android/ui/AndroidApkUpdater.kt",
+        "apps/freehand-android/app/src/main/java/com/freehand/android/data/ApkUpdateManifest.kt"
+      ],
+      "allowed_dependencies": [
+        "app.android-client.connection-config"
+      ],
+      "forbidden_dependencies": []
+    },
+    {
+      "module_id": "app.android-client.notification",
+      "owner_feature_id": "app.android-client",
+      "status": "active",
+      "owned_paths": [
+        "apps/freehand-android/app/src/main/java/com/freehand/android/ui/NotificationPermissionPolicy.kt"
+      ],
+      "allowed_dependencies": [],
+      "forbidden_dependencies": []
+    },
+    {
+      "module_id": "app.android-client.file-access",
+      "owner_feature_id": "app.android-client",
+      "status": "active",
+      "owned_paths": [
+        "apps/freehand-android/app/src/main/java/com/freehand/android/ui/FileAccessPermissionPolicy.kt"
+      ],
+      "allowed_dependencies": [],
+      "forbidden_dependencies": []
+    }
+  ],
+  "declared_edges": [
+    {
+      "edge_id": "app.android-client.webview-host_to_connection-config",
+      "from_module_id": "app.android-client.webview-host",
+      "to_module_id": "app.android-client.connection-config",
+      "import_name": "com.freehand.android.data.ClientConfig"
+    },
+    {
+      "edge_id": "app.android-client.webview-host_to_apk-update",
+      "from_module_id": "app.android-client.webview-host",
+      "to_module_id": "app.android-client.apk-update",
+      "import_name": "com.freehand.android.ui.AndroidApkUpdater"
+    }
+  ]
+}

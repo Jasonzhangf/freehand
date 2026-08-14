@@ -445,7 +445,7 @@
       "step": "11f",
       "symbol_path": "androidApkUpdateManifestUrlForDisplay / androidApkUpdateBridge / androidApkUpdateBridgeAvailable / androidApkUpdatePhaseInFlight / optionalAndroidApkUpdateNumber / normalizeAndroidApkUpdateStatus / receiveAndroidApkUpdateStatus / renderAndroidApkUpdateSettings / requestAndroidApkUpdateCheck",
       "file_path": "apps/freehand-server/assets/webui/legacy-monolith.js",
-      "responsibility": "render the Android-only APK update settings card, call only the native WebView bridge for manual checks, normalize native status payloads, and keep desktop or browser sessions explicitly 不可用",
+      "responsibility": "render the Android-only APK update settings card, display the native bridge-selected manifest URL, call only the native WebView bridge for manual checks, normalize native status payloads, and keep desktop or browser sessions explicitly 不可用",
       "input_semantic": "设置 button click plus native ApkUpdateStatus payload",
       "output_semantic": "visible APK update source, status, phase, and enabled or disabled check button",
       "caller": "WebUI settings shell",

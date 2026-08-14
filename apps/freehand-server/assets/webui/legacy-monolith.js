@@ -8223,6 +8223,15 @@ function settingsSurfaceContext() {
 }
 
 function androidApkUpdateManifestUrlForDisplay() {
+  const bridge = androidApkUpdateBridge();
+  if (bridge && typeof bridge.manifestUrl === "function") {
+    try {
+      return bridge.manifestUrl();
+    } catch (_) {
+      // fall through to the daemon-origin display only if the native bridge
+      // cannot answer; the Android updater itself still uses its selected URL.
+    }
+  }
   try {
     return new URL("android/update.json", window.location.href).toString();
   } catch (_) {

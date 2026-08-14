@@ -265,6 +265,10 @@ class DaemonConnectionConfigTest {
             "https://relay.freehand.local/daemon/studio/web?client=android-webview",
             host.webUiUrl,
         )
+        assertEquals(
+            "https://relay.freehand.local/relay/updates/latest.json",
+            host.updateManifestUrl,
+        )
     }
 
     @Test
@@ -510,6 +514,117 @@ class DaemonConnectionConfigTest {
             fail("expected DaemonConnectionConfigException for invalid port")
         } catch (expected: DaemonConnectionConfigException) {
             assertTrue(expected.message!!.contains("invalid port"))
+        }
+    }
+
+    @Test
+    fun `addOrReplaceProfile adds a new profile and keeps active unchanged`() {
+        val config = DaemonConnectionConfig.parse(readBundledConfig())
+        val added = config.addOrReplaceProfile(
+            DaemonConnectionProfile(
+                id = "tailscale-lab",
+                mode = "tailscale",
+                host = "100.95.178.76",
+                port = 4042,
+            ),
+        )
+
+        assertEquals(2, added.profiles.size)
+        assertEquals("tailscale-main", added.activeProfile)
+        assertTrue(added.profiles.any { it.id == "tailscale-lab" && it.host == "100.95.178.76" })
+    }
+
+    @Test
+    fun `addOrReplaceProfile replaces an existing profile with the same id`() {
+        val config = DaemonConnectionConfig.parse(readBundledConfig())
+        val replaced = config.addOrReplaceProfile(
+            DaemonConnectionProfile(
+                id = "tailscale-main",
+                mode = "tailscale",
+                host = "100.66.1.82",
+                port = 4046,
+            ),
+        )
+
+        assertEquals(1, replaced.profiles.size)
+        assertEquals(4046, replaced.profiles.first { it.id == "tailscale-main" }.port)
+    }
+
+    @Test
+    fun `switchActiveProfile changes the active profile and round trips`() {
+        val config = DaemonConnectionConfig.parse(readBundledConfig())
+            .addOrReplaceProfile(
+                DaemonConnectionProfile(
+                    id = "tailscale-lab",
+                    mode = "tailscale",
+                    host = "100.95.178.76",
+                    port = 4042,
+                ),
+            )
+
+        val switched = config.switchActiveProfile("tailscale-lab")
+
+        assertEquals("tailscale-lab", switched.activeProfile)
+        assertEquals("100.95.178.76", switched.activeHostConfig().host)
+        assertEquals(4042, switched.activeHostConfig().port)
+    }
+
+    @Test
+    fun `switchActiveProfile rejects unknown profile`() {
+        val config = DaemonConnectionConfig.parse(readBundledConfig())
+        try {
+            config.switchActiveProfile("missing-profile")
+            fail("expected DaemonConnectionConfigException for unknown profile")
+        } catch (expected: DaemonConnectionConfigException) {
+            assertTrue(expected.message!!.contains("is not defined"))
+        }
+    }
+
+    @Test
+    fun `removeProfile removes a non active profile and keeps active`() {
+        val config = DaemonConnectionConfig.parse(readBundledConfig())
+            .addOrReplaceProfile(
+                DaemonConnectionProfile(
+                    id = "tailscale-lab",
+                    mode = "tailscale",
+                    host = "100.95.178.76",
+                    port = 4042,
+                ),
+            )
+
+        val removed = config.removeProfile("tailscale-lab")
+
+        assertEquals(1, removed.profiles.size)
+        assertEquals("tailscale-main", removed.activeProfile)
+    }
+
+    @Test
+    fun `removeProfile reassigns active when removing the active profile`() {
+        val config = DaemonConnectionConfig.parse(readBundledConfig())
+            .addOrReplaceProfile(
+                DaemonConnectionProfile(
+                    id = "tailscale-lab",
+                    mode = "tailscale",
+                    host = "100.95.178.76",
+                    port = 4042,
+                ),
+            )
+            .switchActiveProfile("tailscale-lab")
+
+        val removed = config.removeProfile("tailscale-lab")
+
+        assertEquals("tailscale-main", removed.activeProfile)
+        assertEquals(1, removed.profiles.size)
+    }
+
+    @Test
+    fun `removeProfile rejects removing the last profile`() {
+        val config = DaemonConnectionConfig.parse(readBundledConfig())
+        try {
+            config.removeProfile("tailscale-main")
+            fail("expected DaemonConnectionConfigException for removing the last profile")
+        } catch (expected: DaemonConnectionConfigException) {
+            assertTrue(expected.message!!.contains("last daemon profile"))
         }
     }
 }

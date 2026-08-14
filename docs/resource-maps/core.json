@@ -248,6 +248,23 @@
       ]
     },
     {
+      "resource_type": "android_connection_config",
+      "owner_feature_id": "app.android-client",
+      "owner_crate": "apps/freehand-android",
+      "identity": "app-owned daemon connection profile id plus selected active profile",
+      "truth_store": "app files daemon-connection.json plus scanned remote_registry sidecar",
+      "operations": [
+        "list_profiles",
+        "save_profile",
+        "switch_active_profile",
+        "remove_profile"
+      ],
+      "projections": [
+        "ConnectionsActivity saved daemon profile rows",
+        "active daemon HostConfig WebUI and APK update manifest URLs"
+      ]
+    },
+    {
       "resource_type": "android_file_access",
       "owner_feature_id": "app.android-client",
       "owner_crate": "apps/freehand-android",
@@ -1397,6 +1414,42 @@
       "binding_status": "bound"
     },
     {
+      "operation_id": "android_connection_config.list_profiles",
+      "owner_feature_id": "app.android-client",
+      "source_resource": "android_connection_config",
+      "target_resource": "android_connection_config",
+      "effect": "list saved daemon profiles from the app-owned daemon connection config for the native bootstrap repair surface",
+      "mainline_call_doc": "docs/mainline-calls/app.android-client.json",
+      "binding_status": "bound"
+    },
+    {
+      "operation_id": "android_connection_config.save_profile",
+      "owner_feature_id": "app.android-client",
+      "source_resource": "android_connection_config",
+      "target_resource": "android_connection_config",
+      "effect": "add or replace a legacy Tailscale daemon profile and persist it through the app-owned daemon connection store",
+      "mainline_call_doc": "docs/mainline-calls/app.android-client.json",
+      "binding_status": "bound"
+    },
+    {
+      "operation_id": "android_connection_config.switch_active_profile",
+      "owner_feature_id": "app.android-client",
+      "source_resource": "android_connection_config",
+      "target_resource": "android_connection_config",
+      "effect": "switch the selected active daemon profile and persist it through the app-owned daemon connection store",
+      "mainline_call_doc": "docs/mainline-calls/app.android-client.json",
+      "binding_status": "bound"
+    },
+    {
+      "operation_id": "android_connection_config.remove_profile",
+      "owner_feature_id": "app.android-client",
+      "source_resource": "android_connection_config",
+      "target_resource": "android_connection_config",
+      "effect": "remove a saved daemon profile, reject removing the last profile, and persist the next active selection through the app-owned store",
+      "mainline_call_doc": "docs/mainline-calls/app.android-client.json",
+      "binding_status": "bound"
+    },
+    {
       "operation_id": "android_file_access.request_startup_permissions",
       "owner_feature_id": "app.android-client",
       "source_resource": "android_file_access",
@@ -2386,6 +2439,50 @@
       "binding_status": "bound"
     },
     {
+      "edge_id": "app.android-client#01a",
+      "operation_id": "android_connection_config.list_profiles",
+      "source_resource": "android_connection_config",
+      "target_resource": "android_connection_config",
+      "mainline_call_doc": "docs/mainline-calls/app.android-client.json",
+      "call_table_step": "01a",
+      "file_path": "apps/freehand-android/app/src/main/java/com/freehand/android/ui/ConnectionsActivity.kt",
+      "symbol_path": "com.freehand.android.ui.ConnectionsActivity::onCreate / reloadProfiles",
+      "binding_status": "bound"
+    },
+    {
+      "edge_id": "app.android-client#01a1",
+      "operation_id": "android_connection_config.save_profile",
+      "source_resource": "android_connection_config",
+      "target_resource": "android_connection_config",
+      "mainline_call_doc": "docs/mainline-calls/app.android-client.json",
+      "call_table_step": "01a1",
+      "file_path": "apps/freehand-android/app/src/main/java/com/freehand/android/ui/ConnectionsActivity.kt",
+      "symbol_path": "com.freehand.android.ui.ConnectionsActivity::showHostForm / saveProfile",
+      "binding_status": "bound"
+    },
+    {
+      "edge_id": "app.android-client#01a2",
+      "operation_id": "android_connection_config.switch_active_profile",
+      "source_resource": "android_connection_config",
+      "target_resource": "android_connection_config",
+      "mainline_call_doc": "docs/mainline-calls/app.android-client.json",
+      "call_table_step": "01a2",
+      "file_path": "apps/freehand-android/app/src/main/java/com/freehand/android/ui/ConnectionsActivity.kt",
+      "symbol_path": "com.freehand.android.ui.ConnectionsActivity::switchProfile",
+      "binding_status": "bound"
+    },
+    {
+      "edge_id": "app.android-client#01a3",
+      "operation_id": "android_connection_config.remove_profile",
+      "source_resource": "android_connection_config",
+      "target_resource": "android_connection_config",
+      "mainline_call_doc": "docs/mainline-calls/app.android-client.json",
+      "call_table_step": "01a3",
+      "file_path": "apps/freehand-android/app/src/main/java/com/freehand/android/ui/ConnectionsActivity.kt",
+      "symbol_path": "com.freehand.android.ui.ConnectionsActivity::removeProfile",
+      "binding_status": "bound"
+    },
+    {
       "edge_id": "app.android-client#15",
       "operation_id": "android_file_access.request_startup_permissions",
       "source_resource": "android_file_access",
@@ -3010,6 +3107,14 @@
       "allowed_direct": true,
       "via_resources": [],
       "reason": "Android owns only package update checking, APK cache download, and system-installer handoff for its installed package; daemon release distribution remains served by the selected endpoint."
+    },
+    {
+      "rule_id": "android-connection-config-self-owned-direct",
+      "source_resource": "android_connection_config",
+      "target_resource": "android_connection_config",
+      "allowed_direct": true,
+      "via_resources": [],
+      "reason": "Android owns only the app-owned daemon endpoint bootstrap repair surface: listing, saving, switching, and removing saved daemon profiles; it must not own account directory truth, route scoring, or relay protocol/tunnel semantics."
     },
     {
       "rule_id": "android-file-access-self-owned-direct",

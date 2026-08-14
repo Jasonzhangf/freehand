@@ -15,7 +15,7 @@ data class ApkUpdateManifest(
     val size: Long? = null,
     val signerSha256: String? = null,
 ) {
-    fun updatePlan(currentVersionCode: Long, hostConfig: HostConfig): ApkUpdatePlan? {
+    fun updatePlan(currentVersionCode: Long, manifestUrl: String): ApkUpdatePlan? {
         if (versionCode <= currentVersionCode) return null
         val verifiedSha256 = sha256
             ?: throw ApkUpdateManifestException("sha256 is required for a higher-version APK")
@@ -26,13 +26,21 @@ data class ApkUpdateManifest(
         return ApkUpdatePlan(
             versionCode = versionCode,
             versionName = versionName,
-            apkUrl = hostConfig.resolveDaemonUrl(apkUrl),
+            apkUrl = resolveManifestUrl(manifestUrl, apkUrl),
             required = required,
             releaseNotes = releaseNotes,
             sha256 = verifiedSha256,
             size = verifiedSize,
             signerSha256 = verifiedSignerSha256,
         )
+    }
+
+    private fun resolveManifestUrl(manifestUrl: String, apkUrl: String): String {
+        val resolved = URI(manifestUrl).resolve(apkUrl)
+        if (resolved.scheme != "http" && resolved.scheme != "https") {
+            throw ApkUpdateManifestException("resolved apkUrl scheme must be http(s)")
+        }
+        return resolved.toString()
     }
 
     companion object {

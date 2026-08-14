@@ -25,7 +25,7 @@ class ApkUpdateManifestTest {
 
         val plan = manifest.updatePlan(
             currentVersionCode = 1,
-            hostConfig = HostConfig("100.66.1.82", 4042),
+            manifestUrl = "http://100.66.1.82:4042/android/update.json",
         )
 
         assertEquals(2L, plan?.versionCode)
@@ -56,18 +56,18 @@ class ApkUpdateManifestTest {
         assertNull(
             manifest.updatePlan(
                 currentVersionCode = 1,
-                hostConfig = HostConfig("100.66.1.82", 4042),
+                manifestUrl = "http://100.66.1.82:4042/android/update.json",
             ),
         )
     }
 
     @Test
-    fun `relay manifest relative apk url stays under relay daemon namespace`() {
+    fun `relay manifest relative apk url resolves against relay update manifest origin`() {
         val manifest = ApkUpdateManifest.parse(
             """
             {
               "versionCode": 3,
-              "apkUrl": "/android/freehand-android.apk",
+              "apkUrl": "/relay/updates/freehand-android.apk",
               "sha256": "979906f579118625c1f57e6db1eef8f055475ed884abb93934e180d0b8f14611",
               "size": 45000000,
               "signerSha256": "ecd63a2c2070970735cc079b0bb090427ca0b59200da0ebc07c80b50a1dfffda"
@@ -77,15 +77,11 @@ class ApkUpdateManifestTest {
 
         val plan = manifest.updatePlan(
             currentVersionCode = 1,
-            hostConfig = HostConfig(
-                host = "100.66.1.82",
-                port = 44042,
-                webUrlOverride = "http://100.66.1.82:44042/relay/daemon/studio-host/",
-            ),
+            manifestUrl = "http://100.66.1.82:44042/relay/updates/latest.json",
         )
 
         assertEquals(
-            "http://100.66.1.82:44042/relay/daemon/studio-host/android/freehand-android.apk",
+            "http://100.66.1.82:44042/relay/updates/freehand-android.apk",
             plan?.apkUrl,
         )
     }
@@ -152,7 +148,7 @@ class ApkUpdateManifestTest {
 
         val plan = manifest.updatePlan(
             currentVersionCode = 1,
-            hostConfig = HostConfig("100.66.1.82", 4042),
+            manifestUrl = "http://100.66.1.82:4042/android/update.json",
         )
 
         assertEquals(5L, plan?.versionCode)
@@ -180,7 +176,7 @@ class ApkUpdateManifestTest {
 
         val plan = manifest.updatePlan(
             currentVersionCode = 1,
-            hostConfig = HostConfig("100.66.1.82", 4042),
+            manifestUrl = "http://100.66.1.82:4042/android/update.json",
         )
 
         // must be normalized to lowercase
@@ -237,7 +233,7 @@ class ApkUpdateManifestTest {
         val missingSha256 = try {
             ApkUpdateManifest.parse("""{"versionCode":2,"apkUrl":"/a.apk","size":1,"signerSha256":"ecd63a2c2070970735cc079b0bb090427ca0b59200da0ebc07c80b50a1dfffda"}""").updatePlan(
                 currentVersionCode = 1,
-                hostConfig = HostConfig("100.66.1.82", 4042),
+                manifestUrl = "http://100.66.1.82:4042/android/update.json",
             )
             null
         } catch (caught: ApkUpdateManifestException) {
@@ -248,7 +244,7 @@ class ApkUpdateManifestTest {
                 """{"versionCode":2,"apkUrl":"/a.apk","sha256":"979906f579118625c1f57e6db1eef8f055475ed884abb93934e180d0b8f14611","signerSha256":"ecd63a2c2070970735cc079b0bb090427ca0b59200da0ebc07c80b50a1dfffda"}""",
             ).updatePlan(
                 currentVersionCode = 1,
-                hostConfig = HostConfig("100.66.1.82", 4042),
+                manifestUrl = "http://100.66.1.82:4042/android/update.json",
             )
             null
         } catch (caught: ApkUpdateManifestException) {
@@ -266,7 +262,7 @@ class ApkUpdateManifestTest {
                 """{"versionCode":2,"apkUrl":"/a.apk","sha256":"979906f579118625c1f57e6db1eef8f055475ed884abb93934e180d0b8f14611","size":1}""",
             ).updatePlan(
                 currentVersionCode = 1,
-                hostConfig = HostConfig("100.66.1.82", 4042),
+                manifestUrl = "http://100.66.1.82:4042/android/update.json",
             )
             null
         } catch (caught: ApkUpdateManifestException) {
@@ -299,7 +295,7 @@ class ApkUpdateManifestTest {
         assertNull(
             manifest.updatePlan(
                 currentVersionCode = 1,
-                hostConfig = HostConfig("100.66.1.82", 4042),
+                manifestUrl = "http://100.66.1.82:4042/android/update.json",
             ),
         )
     }
