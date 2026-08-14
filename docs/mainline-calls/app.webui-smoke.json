@@ -38,6 +38,7 @@
     "front-end global session drawer renders only persisted user sessions, with task/global labels derived from protocol cwd and CRUD still routed by protocol session id; Worker/subagent temporary sessions stay out of the global list and are shown only inside the owning 主控会话 Header/session tree from 任务面板 parent truth",
     "front-end attachment drafts are scoped by selected session, persist metadata only in browser storage, submit image payloads through SubmitUserInput.metadata.attachments, clear on command receipt, and remain available for retry after dispatch failure",
     "Android WebView turn-finished notifications are triggered only from observed live protocol turn projection transitions from nonterminal to terminal, not from restored historical terminal turns",
+    "front-end Android ready-host composer entry waits for canonical ADP protocol refresh, opens the valid persisted selected session or protocol-owned new conversation, and focuses the composer only in SessionDetail; the bridge is Android-only and never auto-sends input or creates Home composer truth",
     "front-end submit timeout or transport failure first refreshes 权威真源 for sessions, selected transcript, latest turn, and lifecycle projections before deciding whether the submit receipt is still unverified",
     "transport-facing app routes expose HTTP query for 最新活跃轮次 and per-turn debug snapshot",
     "transport-facing app routes expose HTTP query for 运行时-owned checkpoint summary projection",
@@ -475,6 +476,17 @@
       "source_resource": "ui_projection",
       "target_resource": "android_notification",
       "resource_operation": "ui_projection.post_android_turn_finished_notification",
+      "binding_status": "bound"
+    },
+    {
+      "step": "11q",
+      "symbol_path": "androidComposerHostReady / composerCanReceiveAndroidInput / focusAndroidComposerAfterReadyLayout / openAndroidComposerForReadyHost / window.__freehandOpenAndroidComposerForReadyHost",
+      "file_path": "apps/freehand-server/assets/webui/legacy-monolith.js",
+      "responsibility": "expose the Android-only ready-host composer entry; wait for canonical ADP protocol state, open the valid persisted selected session or protocol-owned new conversation, and focus the composer only when route and composer geometry are visible",
+      "input_semantic": "Android WebView ready-host bridge call after refreshAllProtocolState",
+      "output_semantic": "route session_detail with focused visible composer, or explicit Android input-prep failure status",
+      "caller": "Android MainActivity startup readiness",
+      "callee": "home.open_session route dispatch / startNewConversation / browser DOM focus",
       "binding_status": "bound"
     },
     {

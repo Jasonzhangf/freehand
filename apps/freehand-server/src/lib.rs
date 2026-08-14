@@ -2475,6 +2475,9 @@ mod tests {
         assert!(legacy_body.contains("adpCommandOf"));
         assert!(legacy_body.contains("generated/adp-protocol.js"));
         assert!(legacy_body.contains("dispatchWebUiEdge"));
+        assert!(legacy_body.contains("__freehandOpenAndroidComposerForReadyHost"));
+        assert!(legacy_body.contains("openAndroidComposerForReadyHost"));
+        assert!(legacy_body.contains("scheduleAndroidComposerFocus"));
 
         let layout_shape = client
             .get(format!(

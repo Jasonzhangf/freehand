@@ -211,6 +211,11 @@ const selectedCwdStorageKey = "freehand-webui-selected-cwd";
 const attachmentDraftStorageKey = "freehand-webui-attachment-drafts-v1";
 const androidNotificationStorageKey = "freehand-android-notified-turns-v1";
 const layoutWidthsStorageKey = "freehand-webui-layout-widths-v1";
+let androidComposerBridgeStarted = false;
+let resolveAndroidComposerBridgeReady;
+const androidComposerBridgeReady = new Promise((resolve) => {
+  resolveAndroidComposerBridgeReady = resolve;
+});
 const adpRequestTimeoutMs = 45000;
 const foregroundRefreshMinIntervalMs = 1500;
 const adpReconnectBaseDelayMs = 1000;
@@ -590,6 +595,82 @@ function handleBackNavigationIntent() {
 
 window.__freehandHandleAndroidBack = handleBackNavigationIntent;
 
+function androidComposerHostReady() {
+  return layoutClient() === "android-webview";
+}
+
+function composerCanReceiveAndroidInput(target = composerInput) {
+  if (!target) {
+    return false;
+  }
+  const style = window.getComputedStyle(target);
+  if (style.display === "none" || style.visibility === "hidden") {
+    return false;
+  }
+  const rect = target.getBoundingClientRect();
+  return rect.width > 0 && rect.height > 0;
+}
+
+function focusAndroidComposerAfterReadyLayout() {
+  if (!composerCanReceiveAndroidInput()) {
+    return false;
+  }
+  composerInput.focus({ preventScroll: true });
+  composerInput.setSelectionRange(composerInput.value.length, composerInput.value.length);
+  if (messageList) {
+    messageList.scrollTop = messageList.scrollHeight;
+  }
+  return document.activeElement === composerInput && state.composerFocused === true;
+}
+
+function scheduleAndroidComposerFocus() {
+  let attempts = 30;
+  const retry = () => {
+    if (focusAndroidComposerAfterReadyLayout()) {
+      return;
+    }
+    attempts -= 1;
+    if (attempts > 0) {
+      window.setTimeout(retry, 150);
+    }
+  };
+  retry();
+}
+
+function openAndroidComposerForReadyHost() {
+  if (!androidComposerHostReady()) {
+    return;
+  }
+  if (selectedSessionDetailRouteActive() && composerCanReceiveAndroidInput()) {
+    scheduleAndroidComposerFocus();
+    return;
+  }
+  if (androidComposerBridgeStarted) {
+    scheduleAndroidComposerFocus();
+    return;
+  }
+  androidComposerBridgeStarted = true;
+  const sessionId = state.selectedSessionId;
+  if (sessionId && !isDraftSessionId(sessionId)) {
+    dispatchWebUiEdge("home.open_session", { session_id: sessionId });
+    renderAll();
+    scheduleAndroidComposerFocus();
+    return;
+  }
+  startNewConversation()
+    .then(() => {
+      scheduleAndroidComposerFocus();
+    })
+    .catch((error) => {
+      androidComposerBridgeStarted = false;
+      setCommandStatus(`Android 输入框准备失败：${error.message}`, { stickyMs: 9000 });
+      renderAll();
+    });
+}
+
+window.__freehandOpenAndroidComposerForReadyHost = () =>
+  androidComposerBridgeReady.then(openAndroidComposerForReadyHost);
+
 function syncMobileDrawerForLayout() {
   if (!isMobileDrawerLayout(document.body.dataset.layoutShape || applyLayoutShape())) {
     state.mobileDrawer = null;
@@ -874,6 +955,7 @@ async function refreshAllProtocolStateAfterReconnect(reason) {
   clearPendingUserInputIfMaterialized();
   renderAll();
   setBackgroundCommandStatus(`${reason} 后已刷新服务真源`);
+  openAndroidComposerForReadyHost();
 }
 
 function ensureAdpSocket() {
@@ -10668,4 +10750,8 @@ ensureAdpSocket()
     setCommandStatus(`启动连接失败: ${error.message}`);
     renderAll();
     scheduleAdpReconnect("startup failure");
+  })
+  .then(() => {
+    resolveAndroidComposerBridgeReady();
+    openAndroidComposerForReadyHost();
   });

@@ -212,6 +212,7 @@
   ],
   "edges": [
     { "from": "root", "to": "home", "trigger": "app_launch_or_home" },
+    { "from": "root", "to": "session_detail", "trigger": "android_ready_host_composer_entry" },
     { "from": "home", "to": "session_detail", "trigger": "tap_session" },
     { "from": "session_detail", "to": "home", "trigger": "back_or_home" },
     { "from": "session_detail", "to": "current_session_agent_sheet", "trigger": "open_agent_sheet" },

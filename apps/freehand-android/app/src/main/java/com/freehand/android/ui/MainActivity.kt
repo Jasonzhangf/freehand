@@ -25,6 +25,7 @@ import android.util.Base64
 import android.util.Log
 import android.view.Gravity
 import android.view.View
+import android.view.inputmethod.InputMethodManager
 import android.webkit.JavascriptInterface
 import android.webkit.ValueCallback
 import android.webkit.WebResourceResponse
@@ -778,8 +779,9 @@ class MainActivity : AppCompatActivity() {
             val verdict = WebUiStartupGate.evaluate(value)
             if (verdict.ready) {
                 mainHandler.removeCallbacks(webUiLayoutRetry)
-                dismissStartupOverlay()
-                requestAndroidComposerEntry(targetView)
+                dismissStartupOverlay {
+                    requestAndroidComposerEntry(targetView)
+                }
             } else if (webUiLayoutRetriesRemaining > 0 && !isFinishing) {
                 webUiLayoutRetriesRemaining -= 1
                 mainHandler.postDelayed(webUiLayoutRetry, WEBUI_LAYOUT_PROBE_RETRY_MS)
@@ -791,6 +793,7 @@ class MainActivity : AppCompatActivity() {
     }
 
     private fun requestAndroidComposerEntry(targetView: WebView) {
+        targetView.requestFocus()
         targetView.evaluateJavascript(
             "(" +
                 "function(){" +
@@ -803,6 +806,23 @@ class MainActivity : AppCompatActivity() {
                 ")()",
         ) { requested ->
             Log.i(WEBUI_LAYOUT_TAG, "android_composer_entry_requested=$requested")
+            showAndroidImeAfterComposerEntry(targetView)
+        }
+    }
+
+    private fun showAndroidImeAfterComposerEntry(targetView: WebView, attempt: Int = 0) {
+        val inputMethodManager =
+            getSystemService(Context.INPUT_METHOD_SERVICE) as? InputMethodManager ?: return
+        if (inputMethodManager.showSoftInput(targetView, InputMethodManager.SHOW_IMPLICIT)) {
+            return
+        }
+        if (attempt < 10) {
+            mainHandler.postDelayed(
+                {
+                    showAndroidImeAfterComposerEntry(targetView, attempt + 1)
+                },
+                200L,
+            )
         }
     }
 
@@ -877,8 +897,11 @@ class MainActivity : AppCompatActivity() {
         return overlay
     }
 
-    private fun dismissStartupOverlay() {
-        if (!::startupOverlay.isInitialized || startupOverlay.parent == null) return
+    private fun dismissStartupOverlay(onDismissed: (() -> Unit)? = null) {
+        if (!::startupOverlay.isInitialized || startupOverlay.parent == null) {
+            onDismissed?.invoke()
+            return
+        }
         startupStatus.text = "Workspace ready"
         startupOverlay.animate()
             .alpha(0f)
@@ -887,6 +910,8 @@ class MainActivity : AppCompatActivity() {
                 startupAnimator?.cancel()
                 startupAnimator = null
                 (startupOverlay.parent as? FrameLayout)?.removeView(startupOverlay)
+                webView.requestFocus()
+                onDismissed?.invoke()
             }
             .start()
     }

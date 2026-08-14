@@ -70,7 +70,7 @@ flowchart TD
 | Route | Body owns | Body must not contain | Valid entry |
 | --- | --- | --- | --- |
 | `Home` | session dashboard | selected transcript as primary content | app launch, Home/Back from selected session, refresh-error exit |
-| `SessionDetail(session_id)` | selected transcript and composer | global home `正在运行` / `历史会话` sections | tapping a session, creating a session, selecting search result, Worker child navigation |
+| `SessionDetail(session_id)` | selected transcript and composer | global home `正在运行` / `历史会话` sections | tapping a session, creating a session, Android ready-host composer entry, selecting search result, Worker child navigation |
 | `Settings(page_id)` | settings stack page | transcript/home dashboard | settings corner entry |
 | `TimerDashboard` | timer owner projection | session transcript/home dashboard | timer corner entry |
 | `ToolsRegistry` | tool registry projection | session transcript/home dashboard | tools corner entry |
@@ -79,6 +79,26 @@ flowchart TD
 
 Route state is UI state only. It must not mutate session, reason, task, timer,
 tool, config, or debug truth.
+
+## Android Ready-Host Composer Entry
+
+Android app launch must reach a real input surface so the platform IME can be
+served. `Home` keeps the dashboard as its only body, so the Android host asks
+the canonical WebUI to enter `SessionDetail(session_id)` after the startup
+protocol refresh:
+
+1. If a valid persisted selected session exists in session-list truth, dispatch
+   `home.open_session` with that session id.
+2. If no valid persisted session exists, use the protocol-owned
+   `CreateSession` path through `startNewConversation()` and land on the created
+   session.
+3. Focus the composer only after route state and the composer geometry are
+   visible.
+
+This is a ready-host navigation entry only. It must not create a native
+Android composer, show a composer on `Home`, auto-send input, or replace manual
+session selection. The bridge is Android-only
+(`window.__freehandOpenAndroidComposerForReadyHost`).
 
 ## Adaptive Layout Contract
 
