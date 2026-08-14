@@ -112,7 +112,7 @@ remote_evidence="$(
     service_exec_start=\$(systemctl show -p ExecStart --value freehand-relay.service)
     service_environment_files=\$(systemctl show -p EnvironmentFiles --value freehand-relay.service)
     health_body=\$(curl --fail --silent http://127.0.0.1:19091/relay/health)
-    manifest_body=\$(curl --fail --silent http://127.0.0.1:19091/relay/updates/latest.json)
+    manifest_body=\$(curl --fail --silent http://127.0.0.1:19091/relay/updates/latest.json | jq -c .)
     curl --fail --silent http://127.0.0.1:19091/relay/updates/freehand-android.apk -o \"\$served_apk_path\"
     served_apk_sha256=\$(sha256sum \"\$served_apk_path\" | cut -d ' ' -f 1)
     served_apk_size=\$(wc -c < \"\$served_apk_path\" | tr -d ' ')
@@ -181,12 +181,12 @@ remote_health_body="$(sed -n 's/^health_body=//p' "$evidence_dir/remote.txt")"
   echo "remote Relay health failed: $remote_health_body" >&2
   exit 1
 }
-jq -e '
-  (.versionCode == input.versionCode) and
-  (.sha256 == input.sha256) and
-  (.size == input.size) and
-  (.signerSha256 == input.signerSha256)
-' "$updates_dir/latest.json" <(printf '%s\n' "$remote_manifest_body") >/dev/null
+jq -e --slurpfile remote <(printf '%s\n' "$remote_manifest_body") '
+  (.versionCode == $remote[0].versionCode) and
+  (.sha256 == $remote[0].sha256) and
+  (.size == $remote[0].size) and
+  (.signerSha256 == $remote[0].signerSha256)
+' "$updates_dir/latest.json" >/dev/null
 
 printf 'claw_relay_deploy_ok target=%s binary_sha256=%s manifest_sha256=%s apk_sha256=%s evidence=%s\n' \
   "$ssh_target" "$local_binary_sha256" "$local_manifest_sha256" "$local_apk_sha256" \
