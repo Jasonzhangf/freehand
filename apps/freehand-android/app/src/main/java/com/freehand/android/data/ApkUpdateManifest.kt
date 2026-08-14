@@ -45,12 +45,13 @@ data class ApkUpdateManifest(
             ?.takeIf { it.endsWith("/updates/latest.json") }
             ?.substringBefore("/updates/latest.json")
             .orEmpty()
-        val fileName = resolved.rawPath?.substringAfterLast('/').orEmpty()
-        if (apkUrl.startsWith("/") && relayRoot.isNotEmpty() && fileName.isNotEmpty()) {
+        val resolvedPath = resolved.rawPath.orEmpty()
+        val nestedPath = resolvedPath.removePrefix("/relay")
+        if (apkUrl.startsWith("/") && relayRoot.isNotEmpty() && nestedPath.isNotEmpty()) {
             return URI(
                 resolved.scheme,
                 resolved.rawAuthority,
-                "$relayRoot/updates/$fileName",
+                "$relayRoot$nestedPath",
                 resolved.rawQuery,
                 resolved.rawFragment,
             ).toString()

@@ -17,7 +17,6 @@ import java.net.HttpURLConnection
 import java.net.URL
 import java.security.MessageDigest
 import java.util.concurrent.atomic.AtomicBoolean
-import java.util.concurrent.atomic.AtomicLong
 
 class AndroidApkUpdater(
     private val context: Context,
@@ -62,11 +61,10 @@ class AndroidApkUpdater(
                 )
                 emit(ApkUpdateStatus.downloaded(plan.versionCode, apkFile.length()))
                 val installIntent = buildInstallIntent(apkFile)
-                if (isGenerationCurrent(checkGeneration)) {
+                runIfCurrent(checkGeneration) {
                     context.startActivity(installIntent)
                     Log.i(LOG_TAG, "apk_update_install_intent_started versionCode=${plan.versionCode}")
                 }
-                emit(ApkUpdateStatus.installerStarted(plan.versionCode, plan.versionName))
             } catch (error: Exception) {
                 Log.e(LOG_TAG, "apk_update_failed", error)
                 emit(ApkUpdateStatus.failed(error))
@@ -241,10 +239,16 @@ class AndroidApkUpdater(
     }
 
     companion object {
-        private val GENERATION = AtomicLong(0)
-        internal fun nextGeneration(): Long = GENERATION.incrementAndGet()
-        internal fun isGenerationCurrent(generation: Long): Boolean =
-            GENERATION.get() == generation
+        private val GENERATION_LOCK = Any()
+        private var generation = 0L
+        internal fun nextGeneration(): Long = synchronized(GENERATION_LOCK) { ++generation }
+        internal fun isGenerationCurrent(checkGeneration: Long): Boolean =
+            synchronized(GENERATION_LOCK) { generation == checkGeneration }
+        internal fun runIfCurrent(checkGeneration: Long, action: () -> Unit) {
+            synchronized(GENERATION_LOCK) {
+                if (generation == checkGeneration) action()
+            }
+        }
         private const val LOG_TAG = "FreehandApkUpdate"
         private const val HTTP_TIMEOUT_MS = 60000
         private const val APK_MIME_TYPE = "application/vnd.android.package-archive"
