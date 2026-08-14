@@ -632,10 +632,12 @@ data class DaemonEndpoint(
 
     private fun relayRootUpdateManifestUrl(relayUrl: String): String {
         val uri = URI(relayUrl)
+        val basePath = uri.rawPath?.trimEnd('/').orEmpty()
+        val relayPath = if (basePath.endsWith("/relay", ignoreCase = true)) basePath else "$basePath/relay"
         return URI(
             uri.scheme,
             uri.rawAuthority,
-            "/relay/updates/latest.json",
+            "$relayPath/updates/latest.json",
             null,
             null,
         ).toString()

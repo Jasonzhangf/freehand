@@ -272,6 +272,47 @@ class DaemonConnectionConfigTest {
     }
 
     @Test
+    fun `remote registry relay update url preserves deployment path prefix`() {
+        val config = DaemonConnectionConfig.parse(
+            """
+            {
+              "connectionMode": "remote_registry",
+              "activeAccount": "jason",
+              "activeDaemon": "studio",
+              "accounts": [
+                {
+                  "id": "jason",
+                  "relayUrl": "https://relay.freehand.local/company/relay/"
+                }
+              ],
+              "daemons": [
+                {
+                  "id": "studio",
+                  "accountId": "jason",
+                  "nodeId": "studio-node",
+                  "activeEndpoint": "relay-web",
+                  "endpoints": [
+                    {
+                      "id": "relay-web",
+                      "kind": "relay",
+                      "webUrl": "https://relay.freehand.local/company/daemon/studio/web"
+                    }
+                  ]
+                }
+              ]
+            }
+            """.trimIndent(),
+        )
+
+        val host = config.activeHostConfig()
+
+        assertEquals(
+            "https://relay.freehand.local/company/relay/updates/latest.json",
+            host.updateManifestUrl,
+        )
+    }
+
+    @Test
     fun `remote registry missing active endpoint fails explicitly`() {
         val json = """
             {

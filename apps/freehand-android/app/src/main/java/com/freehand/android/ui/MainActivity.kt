@@ -136,8 +136,7 @@ class MainActivity : AppCompatActivity() {
             if (result.resultCode != RESULT_OK) return@registerForActivityResult
             try {
                 val newHost = ClientConfig.load(applicationContext).activeHostConfig()
-                currentHostConfig = newHost
-                reloadWebUi(newHost)
+                applyActiveHost(newHost)
             } catch (error: DaemonConnectionConfigException) {
                 Log.e(LOG_TAG, "failed to reload config after connections page", error)
             }
@@ -864,6 +863,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun showOpenConnectionsButtonIfNeeded() {
         if (!::startupOverlay.isInitialized || startupOverlay.parent == null) return
+        if (isRemoteRegistryConfig()) return
         if (startupOverlay.findViewById<View>(R.id.open_connections_button) != null) return
         val button = Button(this).apply {
             id = R.id.open_connections_button
@@ -886,6 +886,7 @@ class MainActivity : AppCompatActivity() {
 
     private fun promptEndpointConfigIfNeeded() {
         if (endpointConfigAutoPrompted || !::startupOverlay.isInitialized || startupOverlay.parent == null) return
+        if (isRemoteRegistryConfig()) return
         endpointConfigAutoPrompted = true
         val current = currentHostConfig
         showEndpointConfigDialog(
@@ -947,14 +948,26 @@ class MainActivity : AppCompatActivity() {
             val updated = config.updateActiveProfile(host, port)
             store.write(updated)
             val newHost = updated.activeHostConfig()
-            currentHostConfig = newHost
             endpointConfigAutoPrompted = false
-            reloadWebUi(newHost)
+            applyActiveHost(newHost)
         } catch (error: DaemonConnectionConfigException) {
             Log.e(LOG_TAG, "endpoint config save failed", error)
             showStartupError("配置保存失败：${error.message}")
         }
     }
+
+    private fun applyActiveHost(host: HostConfig) {
+        currentHostConfig = host
+        apkUpdater = AndroidApkUpdater(applicationContext, host)
+        reloadWebUi(host)
+    }
+
+    private fun isRemoteRegistryConfig(): Boolean =
+        try {
+            ClientConfig.store(applicationContext).load().connectionMode == "remote_registry"
+        } catch (_: DaemonConnectionConfigException) {
+            false
+        }
 
     private fun reloadWebUi(host: HostConfig) {
         if (::startupStatus.isInitialized && startupOverlay.parent != null) {
