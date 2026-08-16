@@ -13,6 +13,7 @@
     "android_notification.request_startup_permission",
     "android_notification.post_turn_finished",
     "android_notification.project_status",
+    "android_apk_update.configure_auto_check",
     "android_apk_update.check_manifest",
     "android_apk_update.download_apk",
     "android_apk_update.request_install",
@@ -286,6 +287,21 @@
       "caller": "operator",
       "callee": "adb install/start/dumpsys/logcat/screencap",
       "binding_status": "bound"
+    },
+    {
+      "step": "12c",
+      "symbol_path": "com.freehand.android.ui.MainActivity::isApkAutoCheckEnabled / com.freehand.android.ui.MainActivity::setApkAutoCheckEnabled",
+      "file_path": "apps/freehand-android/app/src/main/java/com/freehand/android/ui/MainActivity.kt",
+      "responsibility": "persist and read the user's APK auto-check-on-launch preference in app SharedPreferences and surface it to the WebUI Settings Android APK update status card through the same updater owner",
+      "input_semantic": "boolean auto-check-on-launch preference",
+      "output_semantic": "persisted auto-check flag plus UI-safe projection of current auto-check state",
+      "caller": "MainActivity::startAndroidApkUpdateCheck / WebUI Settings bridge",
+      "callee": "MainActivity::isApkAutoCheckEnabled / MainActivity::setApkAutoCheckEnabled",
+      "resource_operation": "android_apk_update.configure_auto_check",
+      "source_resource": "android_apk_update",
+      "target_resource": "android_apk_update",
+      "binding_status": "bound",
+      "notes": "auto-check-on-launch is a user preference, distinct from a manual check; both flows share the same updater owner and generation fence"
     },
     {
       "step": "12",

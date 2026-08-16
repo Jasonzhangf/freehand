@@ -14,6 +14,7 @@ Generated from `docs/mainline-calls/foundation.workspace.json`. Do not edit by h
 - repo root may invoke `xtask mainlines generate`
 - repo root may invoke `xtask mainlines check`
 - gate runner verifies required files, workspace members, policy doc snippets, and generated wiki freshness
+- gate runner executes the repository-owned search-evidence corpus through production parser and validator owners and rejects fixture or scenario drift
 - gate runner verifies feature-map seed entries stay unique per feature_id
 - gate runner verifies resource-map ownership, operation binding, direct/indirect/forbidden relation, source-edge registry, function-map backlink, and test-design coverage consistency before code refactor
 - gate runner loads the OpenMinis non-browser UI migration manifest, enforces lifecycle-specific fields and manifest phase, and opens the deterministic external/OpenMinis checkout at the exact manifest/CI commit to resolve every non-browser source path/symbol

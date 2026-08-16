@@ -5,12 +5,14 @@
 - resource map: `docs/resource-maps/core.json`
 - resource operation coverage:
   - `provider_response.apply_to_turn`
+  - `search_evidence.apply_final_delivery`
 
 ## Resource Operation Test Coverage
 
 | resource operation | status | white-box | module black-box | project black-box |
 | --- | --- | --- | --- | --- |
 | `provider_response.apply_to_turn` | bound | `cargo test -p freehand-reason -- --nocapture` covers provider-output apply, tool-result apply, terminalization, cancellation, metadata, and debug producer tests | `cargo test -p freehand-reason -- --nocapture` covers turn engine start/apply/tool/terminal smokes at the reason boundary | `cargo test -p freehand-runtime live_bridge -- --nocapture` covers runtime live bridge and UI projection smokes that prove normalized provider output becomes turn truth without provider DTO leakage |
+| `search_evidence.apply_final_delivery` | pending | `cargo test -p freehand-reason search_evidence -- --nocapture` covers typed `SearchEvidenceTurnDelivery` final gate that resolves claim sources only against persisted camo-verified deliveries; non-sourced hosted discovery streams observation-only and `submit_completion` does not block; sourced final gate rejects unverified, failed, and non-camo sources | `cargo test -p freehand-reason non_sourced -- --nocapture` covers non-sourced discovery → observation-only evidence and verification/final rejection for un-sourced turn | `cargo test -p freehand-runtime live_bridge -- --nocapture` covers runtime live bridge and UI projection smokes that prove search evidence flows from provider output into turn truth without provider DTO leakage |
 
 - lifecycle path under test:
   - per-turn truth is written

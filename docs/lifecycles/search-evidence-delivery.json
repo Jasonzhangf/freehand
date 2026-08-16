@@ -1,0 +1,46 @@
+{
+  "schema_version": 1,
+  "lifecycle_id": "freehand.search-evidence-delivery.v1",
+  "owner_features": [
+    "contracts.core",
+    "provider.semantic",
+    "tool.registry",
+    "reason.turn",
+    "runtime.master-worker-loop",
+    "ui.protocol",
+    "app.webui-smoke"
+  ],
+  "canonical_docs": [
+    "docs/design/search-evidence-pipeline.md",
+    "docs/function-maps/contracts.core.md",
+    "docs/function-maps/provider.semantic.md",
+    "docs/function-maps/tool.registry.md",
+    "docs/function-maps/reason.turn.md",
+    "docs/function-maps/runtime.master-worker-loop.md",
+    "docs/function-maps/ui.protocol.md",
+    "docs/function-maps/app.webui-smoke.md"
+  ],
+  "initial_node": "search.domain_plan_validated",
+  "nodes": [
+    {"node_id":"search.domain_plan_validated","owner_feature":"reason.turn","truth":"validated SearchDomainPlanDelivery"},
+    {"node_id":"search.hosted_discovery_validated","owner_feature":"provider.semantic","truth":"validated hosted SearchDiscoveryDelivery with original URL admission"},
+    {"node_id":"search.camo_verification_required","owner_feature":"runtime.master-worker-loop","truth":"each usable candidate is queued for camo verification"},
+    {"node_id":"search.camo_verification_validated","owner_feature":"tool.registry","truth":"typed SearchVerificationDelivery produced by camo execution"},
+    {"node_id":"search.supplement_decision_validated","owner_feature":"reason.turn","truth":"validated SocialSupplementDecisionDelivery"},
+    {"node_id":"search.social_discovery_validated","owner_feature":"tool.registry","truth":"validated camo social SearchDiscoveryDelivery"},
+    {"node_id":"search.final_delivery_validated","owner_feature":"reason.turn","truth":"SearchFinalDelivery source ids resolve only to persisted verified camo sources"},
+    {"node_id":"search.turn_terminal_success","owner_feature":"reason.turn","truth":"persisted SearchEvidenceTurnDelivery with summary_ready=true"},
+    {"node_id":"search.turn_terminal_blocked","owner_feature":"reason.turn","truth":"persisted blocked SearchEvidenceTurnDelivery with explicit reason"}
+  ],
+  "edges": [
+    {"edge_id":"search.edge.hosted_discovery","from":"search.domain_plan_validated","to":"search.hosted_discovery_validated","binding_status":"pending","positive_test":"search_state_accepts_hosted_discovery_after_domain_plan","negative_test":"search_state_rejects_final_after_domain_plan"},
+    {"edge_id":"search.edge.require_camo","from":"search.hosted_discovery_validated","to":"search.camo_verification_required","binding_status":"pending","positive_test":"search_state_requires_camo_for_usable_hosted_candidates","negative_test":"search_state_rejects_final_before_camo_verification"},
+    {"edge_id":"search.edge.verify_camo","from":"search.camo_verification_required","to":"search.camo_verification_validated","binding_status":"pending","positive_test":"search_state_accepts_camo_verification","negative_test":"search_verification_rejects_non_camo_verified_source"},
+    {"edge_id":"search.edge.decide_supplement","from":"search.camo_verification_validated","to":"search.supplement_decision_validated","binding_status":"pending","positive_test":"search_state_accepts_supplement_decision_after_verification","negative_test":"search_state_rejects_social_discovery_before_decision"},
+    {"edge_id":"search.edge.social_discovery","from":"search.supplement_decision_validated","to":"search.social_discovery_validated","binding_status":"pending","positive_test":"search_state_accepts_required_social_discovery","negative_test":"search_state_rejects_social_discovery_when_supplement_not_required"},
+    {"edge_id":"search.edge.social_verify","from":"search.social_discovery_validated","to":"search.camo_verification_validated","binding_status":"pending","positive_test":"search_state_returns_social_candidates_to_camo_verification","negative_test":"search_state_rejects_final_with_unverified_social_candidate"},
+    {"edge_id":"search.edge.final","from":"search.supplement_decision_validated","to":"search.final_delivery_validated","binding_status":"pending","positive_test":"search_state_accepts_final_with_verified_source_refs","negative_test":"search_final_rejects_unknown_or_unverified_source_refs"},
+    {"edge_id":"search.edge.success","from":"search.final_delivery_validated","to":"search.turn_terminal_success","binding_status":"pending","positive_test":"search_turn_delivery_terminalizes_valid_complete","negative_test":"search_turn_delivery_rejects_success_without_summary_ready"},
+    {"edge_id":"search.edge.blocked","from":"search.supplement_decision_validated","to":"search.turn_terminal_blocked","binding_status":"pending","positive_test":"search_turn_delivery_allows_explicit_no_source_block","negative_test":"search_final_rejects_complete_without_verified_sources"}
+  ]
+}

@@ -8,6 +8,7 @@
 - resource map: `docs/resource-maps/core.json`
 - resource operations:
   - `provider_response.apply_to_turn`
+  - `search_evidence.apply_final_delivery`
 - owner entry symbols:
   - `ReasonTurnEngine::start_turn`
   - `ReasonTurnEngine::apply_provider_output`
@@ -19,10 +20,12 @@
 - resource map: `docs/resource-maps/core.json`
 - owned resources:
   - `turn`
+  - `search_evidence`
 - touched resources:
   - `provider_response`
 - resource operations:
   - `provider_response.apply_to_turn`
+  - `search_evidence.apply_final_delivery`
 - forbidden shortcuts:
   - Provider responses must not mutate session or UI projection truth without turn-owner application.
   - Completion/schema state must not be treated as provider finish-reason truth alone.

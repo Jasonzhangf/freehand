@@ -101,7 +101,7 @@
     },
     {
       "step": "02a",
-      "symbol_path": "provider_hosted_web_search_observation",
+      "symbol_path": "openai_hosted_search_discovery",
       "file_path": "crates/freehand-provider-openai/src/lib.rs",
       "responsibility": "map OpenAI Responses `web_search_call` items into provider-neutral reasoning observations",
       "input_semantic": "raw OpenAI response item",

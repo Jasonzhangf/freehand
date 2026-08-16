@@ -5,12 +5,14 @@
 - resource map: `docs/resource-maps/core.json`
 - resource operations:
   - `provider_hosted_search.declare`
+  - `provider_hosted_search.project_candidate`
 
 ## Resource Operation Test Coverage
 
 | resource operation | status | white-box | module black-box | project black-box |
 | --- | --- | --- | --- | --- |
 | `provider_hosted_search.declare` | bound | `cargo test -p freehand-provider-core hosted_tool_metadata -- --nocapture` covers provider-neutral hosted tool metadata on `ProviderSemanticRequest`; `cargo test -p freehand-runtime live_bridge_derives_hosted_web_search_for_configured_provider_native_protocols -- --nocapture --test-threads=1` covers capability-driven declaration for OpenAI Responses and Anthropic Messages | `cargo test -p freehand-provider-openai web_search -- --nocapture` and `cargo test -p freehand-provider-anthropic web_search -- --nocapture` prove adapters consume the provider-neutral declaration without a core-owned wire DTO | `node scripts/verify-provider-hosted-web-search-online.mjs` proves S-profile OpenAI Responses request truth declares hosted `web_search` and does not expose a local function tool named `web_search`; `freehand-cliS adp-provider-web-search-test --url ws://127.0.0.1:4042/adp --provider minimax --query "Use web_search to find the current UTC date and one current news headline from openai.com today. Do not answer from memory."` live-tests Anthropic-compatible Messages acceptance or exact provider rejection |
+| `provider_hosted_search.project_candidate` | pending | `cargo test -p freehand-provider-core` covers projection of provider-hosted search observations into `SearchDiscoveryCandidate` without local tool execution; `cargo test -p freehand-reason non_sourced` covers non-sourced hosted discovery observation-only evidence projection | `cargo test -p freehand-provider-openai web_search -- --nocapture` and `cargo test -p freehand-provider-anthropic web_search -- --nocapture` prove adapters project hosted search output into shared discovery candidates | `node scripts/verify-provider-hosted-web-search-online.mjs` proves S-profile OpenAI Responses request truth projects hosted `web_search` output into typed discovery evidence without a local function tool named `web_search` |
 
 - lifecycle path under test:
   - provider request enters semantic adapter

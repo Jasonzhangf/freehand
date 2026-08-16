@@ -13,6 +13,8 @@ Generated from `docs/mainline-calls/tool.registry.json`. Do not edit by hand.
 - tool_call.execute_workspace_path
 - tool_call.execute_external_http
 - tool_call.project_registry_to_ui
+- tool_call.discover_social_candidate
+- tool_call.verify_search_url
 
 ## Request Mainline
 

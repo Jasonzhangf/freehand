@@ -11,6 +11,7 @@ Generated from `docs/mainline-calls/provider.semantic.json`. Do not edit by hand
 ## Resource Operation Backlinks
 
 - provider_hosted_search.declare
+- provider_hosted_search.project_candidate
 
 ## Request Mainline
 

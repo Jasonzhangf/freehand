@@ -1,0 +1,12 @@
+{
+  "scenario_id": "openai.tutorial",
+  "provider_family": "openai_responses",
+  "domain": "tutorial",
+  "prompt": "Find current, reproducible instructions for completing this operation and support every important step with sources.",
+  "repetitions": 5,
+  "cases": [
+    {"case_id":"one_shot_valid","stage":"supplement_decision","response_paths":["valid/supplement-none.json"],"expected":"accepted","expected_rejections":0},
+    {"case_id":"wrong_stage_then_valid","stage":"supplement_decision","response_paths":["valid/domain-plan-news.json","valid/supplement-none.json"],"expected":"accepted","expected_rejections":1},
+    {"case_id":"three_invalid_exhausted","stage":"supplement_decision","response_paths":["valid/domain-plan-news.json","valid/domain-plan-news.json","valid/domain-plan-news.json"],"expected":"blocked","expected_rejections":3}
+  ]
+}

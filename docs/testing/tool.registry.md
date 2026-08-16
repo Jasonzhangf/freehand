@@ -7,6 +7,8 @@
   - `tool_call.execute_workspace_path`
   - `tool_call.execute_external_http`
   - `tool_call.project_registry_to_ui`
+  - `tool_call.discover_social_candidate`
+  - `tool_call.verify_search_url`
 
 ## Resource Operation Test Coverage
 
@@ -15,6 +17,8 @@
 | `tool_call.execute_workspace_path` | bound | `cargo test -p freehand-tools -- --nocapture` covers built-in schema, locked workspace path, absolute/symlink path, external absolute rejection, read/search/write, preview, and tool display tests | `cargo test -p freehand-tools -- --nocapture` covers registry execution smokes for read_file/glob/grep/ls/write_file/edit_file/multi_edit and failure guidance | `cargo test -p freehand-runtime live_bridge -- --nocapture` covers runtime live tool-loop smokes and Worker online evidence that tool calls execute only through the locked workspace owner |
 | `tool_call.execute_external_http` | bound | `cargo test -p freehand-tools web_fetch_executes_against_local_http_url -- --nocapture` covers bounded HTTP fetch execution and argument validation tests cover invalid URL/limit/timeout handling | `cargo test -p freehand-tools web_fetch_executes_against_local_http_url -- --nocapture` covers registry execution through the owner `BuiltinToolRegistry::execute` path | `cargo test -p freehand-runtime live_bridge_admits_long_operator_task_without_semantic_truncation -- --nocapture --test-threads=1` proves Master/Worker provider request context advertises `web_fetch`; online proof must inspect provider request/tool-call evidence before claiming model behavior |
 | `tool_call.project_registry_to_ui` | bound | `cargo test -p freehand-tools registry_projection -- --nocapture` covers UI-safe registry projection, Master/Worker exposure, scope, examples, path guidance, and no local `web_search` row | `cargo test -p freehand-runtime tool_registry -- --nocapture` covers runtime `QueryToolRegistry` bridge from owner projection into UI DTOs | `node scripts/verify-webui-tools-registry-online.mjs` proves browser Tools dashboard renders ADP owner projection, not local tool truth, and does not create top-level sessions |
+| `tool_call.discover_social_candidate` | pending | `cargo test -p freehand-tools camo -- --nocapture` covers typed camo social discovery producing `SearchDiscoveryCandidate` and `SearchDiscoveryDelivery`; unsupported Weibo/X platform is explicit failure | `cargo test -p freehand-reason non_sourced` covers non-sourced turn accepting typed hosted and social discovery observations | `node scripts/verify-provider-hosted-web-search-online.mjs` proves S-profile hosted and social search output projects into typed discovery evidence |
+| `tool_call.verify_search_url` | pending | `cargo test -p freehand-tools camo -- --nocapture` covers typed camo URL verification producing `SearchVerificationDelivery` with access status, timestamp, page title, and access attempt truth; non-camo verified sources are rejected at final delivery | `cargo test -p freehand-reason search_evidence -- --nocapture` covers sourced-search final gate rejecting unverified, failed, and non-camo sources | `node scripts/verify-provider-hosted-web-search-online.mjs` proves S-profile camo URL verification produces typed access status with attempt truth |
 
 - lifecycle path under test:
   - registry is created per run

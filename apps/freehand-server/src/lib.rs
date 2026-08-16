@@ -3068,6 +3068,7 @@ mod tests {
                         tool_call_id: ToolCallId::new("tool-sse-1"),
                         status: freehand_contracts::ToolResultStatus::Success,
                         output: "visible result body".to_owned(),
+                        search_evidence: None,
                     },
                 },
                 false,

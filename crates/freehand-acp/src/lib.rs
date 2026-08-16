@@ -311,8 +311,10 @@ fn project_broadcast(
         // projection; Error is recorded by AcpBroadcaster (error_seen) for
         // diagnostics and is not projected into a business notification.
         ReasonBroadcastEvent::CompletionSchemaRejected(_)
+        | ReasonBroadcastEvent::SearchEvidenceSchemaRejected(_)
         | ReasonBroadcastEvent::ModelContinuationWaiting(_)
         | ReasonBroadcastEvent::Terminal(_)
+        | ReasonBroadcastEvent::SearchEvidence(_)
         | ReasonBroadcastEvent::Error(_) => Vec::new(),
     }
 }

@@ -1,0 +1,12 @@
+{
+  "scenario_id": "anthropic.news",
+  "provider_family": "anthropic_messages",
+  "domain": "news",
+  "prompt": "Research a current news event and deliver only conclusions that are supported by sources you have actually checked.",
+  "repetitions": 5,
+  "cases": [
+    {"case_id":"one_shot_valid","stage":"domain_plan","response_paths":["valid/domain-plan-news.json"],"expected":"accepted","expected_rejections":0},
+    {"case_id":"decode_then_valid","stage":"domain_plan","response_paths":["invalid/domain-plan-missing-policy-version.json","valid/domain-plan-news.json"],"expected":"accepted","expected_rejections":1},
+    {"case_id":"three_invalid_exhausted","stage":"domain_plan","response_paths":["invalid/wrong-schema-version.json","invalid/domain-plan-unknown-field.json","invalid/domain-plan-news-wrong-priority.json"],"expected":"blocked","expected_rejections":3}
+  ]
+}

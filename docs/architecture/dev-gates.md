@@ -272,3 +272,22 @@ This prevents artifacts, generated wiki, build output, or MemoryPalace corpora f
 - metadata owner structs must not introduce control execution payloads such as routing policy, checkpoint payload, cancel token, retry policy, or gate decision
 
 This gate is intentionally narrow. It exists to fail obvious boundary regressions early without inventing fallback or runtime heuristics. Control state must stay in owner modules, ledgers, metadata, or debug channels; it must not be represented by ad hoc request/prompt/provider-payload rewrites.
+
+## Search Evidence Schema Conformance Gate
+
+`xtask gates check` runs the repository-owned `fixtures/search-evidence/manifest.json`
+through the production `freehand-blocks` parser and validators:
+
+- every fixture id and path is unique
+- every JSON fixture is referenced exactly once
+- accepted fixtures must pass the declared parse/build/stage operation
+- rejected fixtures must match the declared error category and exact field path
+- unknown fields, missing fields, wrong types, schema versions, wrong model stage,
+  invalid URL/evidence/access attempts, source references, and minimum-source
+  rules fail closed
+- no fixture runner may coerce, repair, strip, or maintain a second copy of schema
+  semantics
+
+The standalone diagnostic entrance is
+`cargo run -p xtask -- search-schema check`; the same runner is called directly
+from `xtask gates check`, so `make ci`, CI, and release cannot omit it.

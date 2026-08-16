@@ -1,0 +1,15 @@
+{
+  "schema": "search_evidence.discovery.v1",
+  "delivery_id": "discovery-hosted-1",
+  "discovery_channel": "hosted_web_search",
+  "hosted_search_attempt": {"query": "news", "provider": "openai_responses"},
+  "candidates": [{
+    "candidate_id": "source-1",
+    "status": "usable",
+    "original_url": "https://example.com/news",
+    "title": "Release news",
+    "snippet": "Discovery-only snippet",
+    "discovered_by": "hosted_web_search",
+    "routing_retry": 2
+  }]
+}

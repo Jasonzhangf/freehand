@@ -304,6 +304,12 @@ impl ProductionWorkerRunner {
                 }
                 None
             }
+            TaskExecutionProfile::SourcedSearch => {
+                if let Err(reason) = selected_provider_supports_clean_search(&self.selected) {
+                    return self.report_blocked(&task_runtime, &task, &execution_id, None, reason);
+                }
+                None
+            }
         };
 
         let pause_token = Arc::new(AtomicBool::new(false));
@@ -938,6 +944,9 @@ fn worker_task_prompt(
     if task.execution_profile == TaskExecutionProfile::CleanSearch {
         return worker_clean_search_task_prompt(task, retry_kind);
     }
+    if task.execution_profile == TaskExecutionProfile::SourcedSearch {
+        return worker_sourced_search_task_prompt(task, retry_kind);
+    }
     let canonical_workspace =
         canonical_workspace.expect("workspace execution profile must pass canonical workspace");
     let retry_context = match retry_kind {
@@ -1008,6 +1017,45 @@ Rules:\n\
 - Use provider-hosted web_search to discover current/broad source evidence.\n\
 - Return one compact conclusion for the Master with query terms, source/evidence summary, gaps, and recommended next action.\n\
 - If hosted search is unavailable or evidence is insufficient, return blocked with the exact provider/capability reason.{}",
+        task.task_id.as_str(),
+        task.title,
+        task.goal,
+        task.content,
+        render_lines(&task.deliverables),
+        render_lines(&task.acceptance),
+        retry_context,
+    )
+}
+
+fn worker_sourced_search_task_prompt(
+    task: &TaskSnapshot,
+    retry_kind: Option<WorkerRetryKind>,
+) -> String {
+    let retry_context = match retry_kind {
+        Some(WorkerRetryKind::ReviewRejected) => format!(
+            "\nReview rejection:\nReason: {}\nRequired changes:\n{}",
+            task.review
+                .reject_reason
+                .as_deref()
+                .unwrap_or("not provided"),
+            render_lines(&task.review.next_requirements),
+        ),
+        None => String::new(),
+    };
+    format!(
+        "Execute the assigned sourced_search Task Center task using provider-hosted web_search with domain-plan and source-verification lifecycle only.\n\
+Task ID: {}\n\
+Title: {}\n\
+Goal: {}\n\
+Content: {}\n\
+Execution profile: sourced_search\n\
+Deliverables:\n{}\n\
+Acceptance criteria:\n{}\n\
+Rules:\n\
+- Do not inspect or mutate files. No target_cwd is needed for this task.\n\
+- Use provider-hosted web_search to discover source evidence, then verify key sources through the camo verification tool before the final delivery.\n\
+- Return one compact conclusion for the Master with query terms, source/evidence summary with verification status, gaps, and recommended next action.\n\
+- If hosted search is unavailable, camo verification is unavailable, or evidence is insufficient, return blocked with the exact provider/capability reason.{}",
         task.task_id.as_str(),
         task.title,
         task.goal,

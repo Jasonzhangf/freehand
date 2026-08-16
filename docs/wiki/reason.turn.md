@@ -11,6 +11,7 @@ Generated from `docs/mainline-calls/reason.turn.json`. Do not edit by hand.
 ## Resource Operation Backlinks
 
 - provider_response.apply_to_turn
+- search_evidence.apply_final_delivery
 
 ## Request Mainline
 

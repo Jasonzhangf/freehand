@@ -234,8 +234,9 @@
       "owner_feature_id": "app.android-client",
       "owner_crate": "apps/freehand-android",
       "identity": "installed Android package versionCode plus daemon update manifest URL and release signer certificate identity",
-      "truth_store": "daemon-hosted /android/update.json plus Android app cache apk-updates/ for downloaded installer artifacts",
+      "truth_store": "Android app SharedPreferences freehand_apk_update/auto_check_on_launch plus daemon-hosted /android/update.json and Android app cache apk-updates/ for downloaded installer artifacts",
       "operations": [
+        "configure_auto_check",
         "check_manifest",
         "download_apk",
         "request_install"
@@ -419,12 +420,33 @@
       "identity": "provider id plus protocol plus model plus hosted search mode",
       "truth_store": "provider semantic request hosted-tool declaration plus provider response web_search_call observations; not Freehand local tool execution truth",
       "operations": [
-        "declare"
+        "declare",
+        "project_candidate"
       ],
       "projections": [
         "provider request hosted tool declaration",
         "reasoning event observation for provider-hosted web_search_call",
         "online verifier provider request capture"
+      ]
+    },
+    {
+      "resource_type": "search_evidence",
+      "owner_feature_id": "reason.turn",
+      "owner_crate": "crates/freehand-reason",
+      "identity": "session_id plus turn_id plus search delivery_id",
+      "truth_store": "typed SearchEvidenceTurnDelivery persisted with reason turn truth",
+      "operations": [
+        "project_hosted_candidate",
+        "discover_social_candidate",
+        "verify_url_with_camo",
+        "apply_final_delivery",
+        "project_to_ui"
+      ],
+      "projections": [
+        "typed hosted and social discovery deliveries",
+        "typed camo verification deliveries",
+        "claim-to-source evidence bindings",
+        "UI-safe search evidence projection"
       ]
     },
     {
@@ -439,6 +461,8 @@
         "execute",
         "execute_workspace_path",
         "execute_external_http",
+        "discover_social_candidate",
+        "verify_search_url",
         "project_registry_to_ui"
       ],
       "projections": [
@@ -892,6 +916,66 @@
       "effect": "map Anthropic Messages server_tool_use and web_search_tool_result blocks into provider-neutral reasoning observations without entering local tool execution",
       "mainline_call_doc": "docs/mainline-calls/provider.anthropic-adapter.json",
       "binding_status": "bound"
+    },
+    {
+      "operation_id": "provider_hosted_search.project_candidate",
+      "owner_feature_id": "provider.semantic",
+      "source_resource": "provider_hosted_search",
+      "target_resource": "search_evidence",
+      "effect": "project provider-hosted result items into typed discovery candidates while preserving original URL usability truth",
+      "mainline_call_doc": "docs/mainline-calls/provider.semantic.json",
+      "binding_status": "pending",
+      "pending_reason": "source symbol exists but the operation/mainline/source-edge binding has not completed the required provider conformance and online verification gates",
+      "pending_closure_doc": "docs/testing/search-evidence-delivery.md",
+      "pending_verification": "cargo test -p freehand-provider-core -p freehand-provider-openai -p freehand-provider-anthropic"
+    },
+    {
+      "operation_id": "tool_call.discover_social_candidate",
+      "owner_feature_id": "tool.registry",
+      "source_resource": "tool_call",
+      "target_resource": "search_evidence",
+      "effect": "execute supported camo social search and produce typed discovery delivery without exposing cookies",
+      "mainline_call_doc": "docs/mainline-calls/tool.registry.json",
+      "binding_status": "pending",
+      "pending_reason": "typed camo social delivery exists but the operation/mainline/source-edge binding and real profile capability matrix are not closed",
+      "pending_closure_doc": "docs/testing/search-evidence-delivery.md",
+      "pending_verification": "cargo test -p freehand-tools camo"
+    },
+    {
+      "operation_id": "tool_call.verify_search_url",
+      "owner_feature_id": "tool.registry",
+      "source_resource": "tool_call",
+      "target_resource": "search_evidence",
+      "effect": "visit one candidate URL with camo and produce typed access status, timestamp, title, evidence excerpt, and attempt truth",
+      "mainline_call_doc": "docs/mainline-calls/tool.registry.json",
+      "binding_status": "pending",
+      "pending_reason": "typed camo verification exists but operation/mainline/source-edge binding and online URL verification are not closed",
+      "pending_closure_doc": "docs/testing/search-evidence-delivery.md",
+      "pending_verification": "cargo test -p freehand-tools camo"
+    },
+    {
+      "operation_id": "search_evidence.apply_final_delivery",
+      "owner_feature_id": "reason.turn",
+      "source_resource": "search_evidence",
+      "target_resource": "turn",
+      "effect": "resolve final claim source ids only against persisted verified camo deliveries before terminal acceptance",
+      "mainline_call_doc": "docs/mainline-calls/reason.turn.json",
+      "binding_status": "pending",
+      "pending_reason": "reason source symbol exists but operation/mainline/source-edge binding and persisted online source-id resolution are not closed",
+      "pending_closure_doc": "docs/testing/search-evidence-delivery.md",
+      "pending_verification": "cargo test -p freehand-reason search_evidence"
+    },
+    {
+      "operation_id": "search_evidence.project_to_ui",
+      "owner_feature_id": "ui.protocol",
+      "source_resource": "search_evidence",
+      "target_resource": "ui_projection",
+      "effect": "project typed source, access-attempt, claim, and unconfirmed evidence truth without parsing provider or camo raw text",
+      "mainline_call_doc": "docs/mainline-calls/ui.protocol.json",
+      "binding_status": "pending",
+      "pending_reason": "typed projection exists but operation/mainline/source-edge binding and browser owner-truth comparison are not closed",
+      "pending_closure_doc": "docs/testing/search-evidence-delivery.md",
+      "pending_verification": "cargo test -p freehand-ui-protocol search_evidence"
     },
     {
       "operation_id": "tool_call.execute_workspace_path",
@@ -1387,6 +1471,15 @@
       "binding_status": "bound"
     },
     {
+      "operation_id": "android_apk_update.configure_auto_check",
+      "owner_feature_id": "app.android-client",
+      "source_resource": "android_apk_update",
+      "target_resource": "android_apk_update",
+      "effect": "persist whether the Android package updater checks the selected manifest on app launch and project the same preference into connected About and disconnected startup surfaces",
+      "mainline_call_doc": "docs/mainline-calls/app.android-client.json",
+      "binding_status": "bound"
+    },
+    {
       "operation_id": "android_apk_update.check_manifest",
       "owner_feature_id": "app.android-client",
       "source_resource": "android_apk_update",
@@ -1753,7 +1846,7 @@
       "mainline_call_doc": "docs/mainline-calls/provider.openai-adapter.json",
       "call_table_step": "02a",
       "file_path": "crates/freehand-provider-openai/src/lib.rs",
-      "symbol_path": "provider_hosted_web_search_observation",
+      "symbol_path": "openai_hosted_search_discovery",
       "binding_status": "bound"
     },
     {
@@ -1764,7 +1857,7 @@
       "mainline_call_doc": "docs/mainline-calls/provider.anthropic-adapter.json",
       "call_table_step": "02a",
       "file_path": "crates/freehand-provider-anthropic/src/lib.rs",
-      "symbol_path": "anthropic_hosted_web_search_observation / anthropic_hosted_web_search_result_observation",
+      "symbol_path": "anthropic_hosted_search_discovery",
       "binding_status": "bound"
     },
     {
@@ -2406,6 +2499,17 @@
       "binding_status": "bound"
     },
     {
+      "edge_id": "app.android-client#12c",
+      "operation_id": "android_apk_update.configure_auto_check",
+      "source_resource": "android_apk_update",
+      "target_resource": "android_apk_update",
+      "mainline_call_doc": "docs/mainline-calls/app.android-client.json",
+      "call_table_step": "12c",
+      "file_path": "apps/freehand-android/app/src/main/java/com/freehand/android/ui/MainActivity.kt",
+      "symbol_path": "com.freehand.android.ui.MainActivity::isApkAutoCheckEnabled / com.freehand.android.ui.MainActivity::setApkAutoCheckEnabled",
+      "binding_status": "bound"
+    },
+    {
       "edge_id": "app.android-client#12",
       "operation_id": "android_apk_update.check_manifest",
       "source_resource": "android_apk_update",
@@ -2789,6 +2893,48 @@
       "allowed_direct": true,
       "via_resources": [],
       "reason": "Provider adapters may map hosted search response items into provider-neutral observations without routing through local tool execution."
+    },
+    {
+      "rule_id": "provider-hosted-search-projects-search-evidence-direct",
+      "source_resource": "provider_hosted_search",
+      "target_resource": "search_evidence",
+      "allowed_direct": true,
+      "via_resources": [],
+      "reason": "Provider semantic may project hosted result candidates into typed discovery evidence, but cannot mark them verified."
+    },
+    {
+      "rule_id": "tool-call-produces-search-evidence-direct",
+      "source_resource": "tool_call",
+      "target_resource": "search_evidence",
+      "allowed_direct": true,
+      "via_resources": [],
+      "reason": "Tool registry may produce typed camo social discovery and URL verification deliveries from actual tool execution."
+    },
+    {
+      "rule_id": "search-evidence-applies-to-turn-direct",
+      "source_resource": "search_evidence",
+      "target_resource": "turn",
+      "allowed_direct": true,
+      "via_resources": [],
+      "reason": "Reason turn owner persists validated search evidence and resolves final source references before terminalization."
+    },
+    {
+      "rule_id": "search-evidence-projects-ui-direct",
+      "source_resource": "search_evidence",
+      "target_resource": "ui_projection",
+      "allowed_direct": true,
+      "via_resources": [],
+      "reason": "UI protocol may project persisted typed search evidence without owning, parsing, or reconstructing source truth."
+    },
+    {
+      "rule_id": "provider-hosted-search-cannot-verify-direct",
+      "source_resource": "provider_hosted_search",
+      "target_resource": "turn",
+      "allowed_direct": false,
+      "via_resources": [
+        "search_evidence"
+      ],
+      "reason": "Hosted snippets and observations cannot become verified turn evidence without typed camo verification and reason-turn validation."
     },
     {
       "rule_id": "input-attachment-validates-self-direct",
@@ -3411,6 +3557,16 @@
       "source_gate_status": "checked",
       "source_gate_reason": "source_shortcut_gates blocks freehand-ui-protocol from depending on or importing freehand-node",
       "reason": "UI code must not mutate or synthesize node pairing truth directly."
+    },
+    {
+      "source_resource": "provider_hosted_search",
+      "target_resource": "turn",
+      "required_via": [
+        "search_evidence"
+      ],
+      "source_gate_status": "checked",
+      "source_gate_reason": "source_shortcut_gates blocks provider adapter crates from depending on or importing freehand-reason turn truth; hosted discovery enters turn truth only through typed SearchEvidenceDelivery stage validation",
+      "reason": "Hosted snippets and observations cannot become verified turn evidence without typed camo verification and reason-turn validation."
     }
   ],
   "source_shortcut_gates": [
@@ -3485,6 +3641,17 @@
         "freehand_node"
       ],
       "reason": "UI protocol must not depend on or import node pairing truth directly."
+    },
+    {
+      "source_resource": "provider_hosted_search",
+      "target_resource": "turn",
+      "forbidden_packages": [
+        "freehand-reason"
+      ],
+      "forbidden_import_tokens": [
+        "freehand_reason"
+      ],
+      "reason": "Provider adapter crates must not depend on or import reason turn search-evidence truth directly; hosted discovery enters turn truth only through typed SearchEvidenceDelivery stage validation."
     }
   ],
   "precise_source_edge_gates": [

@@ -846,6 +846,7 @@ pub fn turn_projection_from_events(input: TurnProjectionInput) -> UiTurnProjecti
             .iter()
             .map(|error| error.error.message.clone())
             .collect(),
+        search_evidence: None,
         slave_substream_card: input.slave_substream_card,
     }
 }

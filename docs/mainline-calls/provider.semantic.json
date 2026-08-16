@@ -7,7 +7,8 @@
   "mainline_call_doc": "docs/mainline-calls/provider.semantic.json",
   "generated_wiki_doc": "docs/wiki/provider.semantic.md",
   "resource_operations": [
-    "provider_hosted_search.declare"
+    "provider_hosted_search.declare",
+    "provider_hosted_search.project_candidate"
   ],
   "request_mainline": [
     "normalized provider request enters provider semantic boundary",

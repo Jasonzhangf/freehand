@@ -11632,20 +11632,20 @@ fn live_bridge_derives_hosted_web_search_for_configured_provider_native_protocol
     );
     assert_eq!(
         LiveReasonExecutionRole::Master
-            .hosted_tool_definitions(&responses, LiveReasonExecutionProfile::Workspace)
+            .hosted_tool_definitions(&responses, LiveReasonExecutionProfile::Workspace, None)
             .len(),
         1
     );
     assert_eq!(
         LiveReasonExecutionRole::Worker
-            .hosted_tool_definitions(&responses, LiveReasonExecutionProfile::Workspace)
+            .hosted_tool_definitions(&responses, LiveReasonExecutionProfile::Workspace, None)
             .len(),
         1,
         "worker Workspace profile must expose hosted web search when provider supports function-tool mixing"
     );
     assert_eq!(
         LiveReasonExecutionRole::Worker
-            .hosted_tool_definitions(&responses, LiveReasonExecutionProfile::CleanSearch)
+            .hosted_tool_definitions(&responses, LiveReasonExecutionProfile::CleanSearch, None)
             .len(),
         1
     );
@@ -11658,7 +11658,7 @@ fn live_bridge_derives_hosted_web_search_for_configured_provider_native_protocol
     );
     assert!(
         LiveReasonExecutionRole::Master
-            .hosted_tool_definitions(&disabled, LiveReasonExecutionProfile::Workspace)
+            .hosted_tool_definitions(&disabled, LiveReasonExecutionProfile::Workspace, None)
             .is_empty()
     );
 
@@ -11687,7 +11687,7 @@ fn live_bridge_derives_hosted_web_search_for_configured_provider_native_protocol
     );
     assert_eq!(
         LiveReasonExecutionRole::Master
-            .hosted_tool_definitions(&messages, LiveReasonExecutionProfile::Workspace)
+            .hosted_tool_definitions(&messages, LiveReasonExecutionProfile::Workspace, None)
             .len(),
         1
     );
@@ -11708,12 +11708,12 @@ fn live_bridge_does_not_mix_search_only_hosted_tool_with_master_functions() {
 
     assert!(
         LiveReasonExecutionRole::Master
-            .hosted_tool_definitions(&descriptor, LiveReasonExecutionProfile::Workspace)
+            .hosted_tool_definitions(&descriptor, LiveReasonExecutionProfile::Workspace, None)
             .is_empty()
     );
     assert_eq!(
         LiveReasonExecutionRole::Worker
-            .hosted_tool_definitions(&descriptor, LiveReasonExecutionProfile::CleanSearch)
+            .hosted_tool_definitions(&descriptor, LiveReasonExecutionProfile::CleanSearch, None)
             .len(),
         1
     );
@@ -11874,30 +11874,33 @@ fn clean_search_worker_profile_exposes_hosted_search_without_function_tools() {
 
     assert!(
         LiveReasonExecutionRole::Worker
-            .tool_definitions(&registry, LiveReasonExecutionProfile::CleanSearch)
+            .tool_definitions(&registry, LiveReasonExecutionProfile::CleanSearch, None)
             .is_empty()
     );
     assert_eq!(
-        LiveReasonExecutionRole::Worker
-            .tool_schema_fingerprint(&registry, LiveReasonExecutionProfile::CleanSearch),
+        LiveReasonExecutionRole::Worker.tool_schema_fingerprint(
+            &registry,
+            LiveReasonExecutionProfile::CleanSearch,
+            None
+        ),
         "clean-search:no-function-tools"
     );
     assert_eq!(
         LiveReasonExecutionRole::Worker
-            .hosted_tool_definitions(&descriptor, LiveReasonExecutionProfile::CleanSearch)
+            .hosted_tool_definitions(&descriptor, LiveReasonExecutionProfile::CleanSearch, None)
             .len(),
         1
     );
 
     assert!(
         LiveReasonExecutionRole::Worker
-            .tool_definitions(&registry, LiveReasonExecutionProfile::Workspace)
+            .tool_definitions(&registry, LiveReasonExecutionProfile::Workspace, None)
             .iter()
             .any(|tool| tool.name == "read_file")
     );
     assert_eq!(
         LiveReasonExecutionRole::Worker
-            .hosted_tool_definitions(&descriptor, LiveReasonExecutionProfile::Workspace)
+            .hosted_tool_definitions(&descriptor, LiveReasonExecutionProfile::Workspace, None)
             .len(),
         1,
         "worker Workspace profile must expose hosted web search when provider supports function-tool mixing"

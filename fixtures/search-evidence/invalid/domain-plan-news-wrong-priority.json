@@ -1,0 +1,9 @@
+{
+  "schema": "search_evidence.domain_plan.v1",
+  "delivery_id": "domain-news-1",
+  "domain": "news",
+  "preferred_source_kinds": ["official_publication"],
+  "social_platform_priority": ["xhs"],
+  "minimum_verified_sources": 1,
+  "policy_version": "2026-08-15"
+}

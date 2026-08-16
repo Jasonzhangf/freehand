@@ -1,0 +1,12 @@
+{
+  "schema": "search_evidence.turn.v1",
+  "session_id": "session-1",
+  "turn_id": "turn-1",
+  "deliveries": [],
+  "verified_sources": [],
+  "unconfirmed": [],
+  "claims": [],
+  "status": "turn_terminal_success",
+  "summary_ready": false,
+  "terminal": "success"
+}

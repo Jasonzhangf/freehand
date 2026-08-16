@@ -1,0 +1,8 @@
+{
+  "schema": "search_evidence.supplement_decision.v1",
+  "delivery_id": "supplement-required-1",
+  "domain_plan_ref": "domain-news-1",
+  "required": true,
+  "reasons": ["missing_original_urls"],
+  "platforms": ["weibo"]
+}

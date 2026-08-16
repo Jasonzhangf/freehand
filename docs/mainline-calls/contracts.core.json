@@ -221,6 +221,17 @@
       "caller": "Relay Agent bridge and WebUI server",
       "callee": "contract module",
       "binding_status": "bound"
+    },
+    {
+      "step": "15",
+      "symbol_path": "SearchEvidenceDelivery / SearchEvidenceTurnDelivery",
+      "file_path": "crates/freehand-contracts/src/lib.rs",
+      "responsibility": "define strict versioned search-evidence stage and turn contracts with unknown-field rejection",
+      "input_semantic": "search delivery schema",
+      "output_semantic": "replayable typed business delivery",
+      "caller": "provider/tool/reason/runtime owners",
+      "callee": "contract module",
+      "binding_status": "bound"
     }
   ],
   "sync_status": [

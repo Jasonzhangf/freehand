@@ -86,6 +86,7 @@ pub enum TaskExecutionProfile {
     #[default]
     Workspace,
     CleanSearch,
+    SourcedSearch,
 }
 
 impl TaskExecutionProfile {
@@ -93,6 +94,7 @@ impl TaskExecutionProfile {
         match self {
             Self::Workspace => "workspace",
             Self::CleanSearch => "clean_search",
+            Self::SourcedSearch => "sourced_search",
         }
     }
 }

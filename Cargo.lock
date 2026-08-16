@@ -660,6 +660,7 @@ dependencies = [
  "freehand-contracts",
  "serde",
  "serde_json",
+ "serde_path_to_error",
  "thiserror",
 ]
 
@@ -953,6 +954,7 @@ dependencies = [
  "glob",
  "regex",
  "reqwest",
+ "serde",
  "serde_json",
  "thiserror",
  "walkdir",
@@ -3276,6 +3278,8 @@ name = "xtask"
 version = "0.1.0"
 dependencies = [
  "ed25519-dalek",
+ "freehand-blocks",
+ "freehand-testkit",
  "hex",
  "proc-macro2",
  "serde",

@@ -321,6 +321,58 @@ fn production_worker_runner_clean_search_blocks_when_provider_has_no_hosted_sear
 }
 
 #[test]
+fn production_worker_runner_sourced_search_runs_without_target_cwd_on_hosted_provider() {
+    let runtime_home = temp_path("sourced-search-success");
+    let executor = Arc::new(StubExecutor::new(Ok(WorkerTurnExecution {
+        status: TerminalStatus::Success,
+        summary: "verified search evidence returned".to_owned(),
+        turn_id: TurnId::new("worker-turn-sourced-search"),
+    })));
+    let runner = ProductionWorkerRunner::from_selected_agent_with_executor(
+        selected_worker_openai_responses_search(),
+        runtime_home.clone(),
+        executor.clone(),
+    )
+    .expect("worker runner");
+    let expected_task_id = seed_assigned_sourced_search_task(&runtime_home);
+
+    let outcome = runner.run_once().expect("worker tick");
+    assert!(matches!(
+        outcome,
+        ProductionWorkerTickOutcome::ReviewReady { ref task_id, .. }
+            if task_id == &expected_task_id
+    ));
+    let requests = executor.requests();
+    assert_eq!(requests.len(), 1);
+    assert_eq!(
+        requests[0].execution_profile,
+        LiveReasonExecutionProfile::SourcedSearch
+    );
+    assert!(
+        requests[0].cwd.is_none(),
+        "sourced_search must not bind or scan a local workspace cwd"
+    );
+    assert!(
+        requests[0]
+            .prompt
+            .contains("Execution profile: sourced_search")
+    );
+    assert!(requests[0].prompt.contains("provider-hosted web_search"));
+    assert!(requests[0].prompt.contains("camo verification"));
+    assert!(requests[0].prompt.contains("No target_cwd is needed"));
+    let task_runtime =
+        TaskRuntime::boot(&runtime_home, AgentId::new("master")).expect("task runtime");
+    let task = task_runtime
+        .query_task(&expected_task_id)
+        .expect("query sourced search task");
+    assert_eq!(task.status, TaskStatus::ReviewSubmitted);
+    assert_eq!(task.execution_profile, TaskExecutionProfile::SourcedSearch);
+    assert!(task.target_cwd.is_none());
+
+    fs::remove_dir_all(runtime_home).expect("cleanup runtime");
+}
+
+#[test]
 fn production_worker_runner_rejects_result_after_external_cancel_without_terminal_overwrite() {
     let runtime_home = temp_path("external-cancel-during-execution");
     let workspace = temp_path("external-cancel-during-execution-workspace");
@@ -1614,6 +1666,36 @@ fn seed_assigned_clean_search_task(runtime_home: &Path) -> TaskId {
             watermark: worker_watermark("seed-clean-search", "create"),
         })
         .expect("create clean search task");
+    task_id
+}
+
+fn seed_assigned_sourced_search_task(runtime_home: &Path) -> TaskId {
+    let task_runtime =
+        TaskRuntime::boot(runtime_home, AgentId::new("master")).expect("task runtime");
+    let task_id = TaskId::new(format!("task-sourced-search-{}", now_unix_seconds()));
+    task_runtime
+        .create_task(TaskCreateRequest {
+            task_id: Some(task_id.clone()),
+            title: "sourced search task".to_owned(),
+            content: "search and verify current web evidence".to_owned(),
+            goal: "return verified sourced conclusion".to_owned(),
+            deliverables: vec!["verified sources summary".to_owned()],
+            acceptance: vec!["sources verified through camo".to_owned()],
+            priority: 80,
+            target_cwd: None,
+            execution_profile: TaskExecutionProfile::SourcedSearch,
+            dispatch: TaskDispatchRequest::Agent {
+                agent_id: AgentId::new("worker"),
+            },
+            parent: TaskParentRef {
+                session_id: None,
+                turn_id: None,
+                trace_id: None,
+            },
+            actor: worker_actor(&AgentId::new("master"), None),
+            watermark: worker_watermark("seed-sourced-search", "create"),
+        })
+        .expect("create sourced search task");
     task_id
 }
 

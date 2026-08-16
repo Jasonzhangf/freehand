@@ -67,6 +67,7 @@ Generated from `docs/mainline-calls/contracts.core.json`. Do not edit by hand.
 | 12 | `validate_reason_req02` | `crates/freehand-contracts/src/lib.rs` | validate typed context-composed request | composed request contract | validated request contract | reason/planner | shared validator |  |  |  | bound |
 | 13 | `validate_reason_req03` | `crates/freehand-contracts/src/lib.rs` | validate provider payload contract | provider payload contract | validated provider payload | provider semantic boundary | shared validator |  |  |  | bound |
 | 14 | `FREEHAND_REMOTE_ACCESS_SCOPE_HEADER / FREEHAND_REMOTE_ACCESS_SCOPE_VALUE` | `crates/freehand-contracts/src/lib.rs` | define one shared Relay-to-WebUI remote access-scope header contract without adding the marker to business payload DTOs | typed transport boundary | stable header name and value | Relay Agent bridge and WebUI server | contract module |  |  |  | bound |
+| 15 | `SearchEvidenceDelivery / SearchEvidenceTurnDelivery` | `crates/freehand-contracts/src/lib.rs` | define strict versioned search-evidence stage and turn contracts with unknown-field rejection | search delivery schema | replayable typed business delivery | provider/tool/reason/runtime owners | contract module |  |  |  | bound |
 
 ## Sync Status Against Mainline Call
 

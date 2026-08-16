@@ -114,6 +114,7 @@ fn tool_guidance_segment(
         LiveReasonExecutionRole::Worker => match execution_profile {
             LiveReasonExecutionProfile::Workspace => worker_execution_guidance(),
             LiveReasonExecutionProfile::CleanSearch => worker_clean_search_guidance(),
+            LiveReasonExecutionProfile::SourcedSearch => worker_sourced_search_guidance(),
         },
     };
     ContextSegment {
@@ -407,6 +408,17 @@ fn worker_clean_search_guidance() -> String {
         "- Unavailable tools: all workspace tools, `web_fetch`, `task`, `timer`, shell/bash, browser, readlink, pwd, cat, find, python, and any unlisted function tool.\n",
         "- No target_cwd is required for this profile. Do not infer repository access or claim workspace inspection.\n",
         "- Search workflow: issue concise search queries through hosted web search, read returned source evidence in the provider response, then synthesize one compact conclusion for the Master.\n",
+        "- Output contract: final summary must include query terms, source/evidence summary, confidence or gaps, and next-step recommendation. If hosted search is unavailable or returns no usable evidence, finish blocked with the exact capability/provider reason.\n",
+    )
+    .to_owned()
+}
+
+fn worker_sourced_search_guidance() -> String {
+    concat!(
+        "Worker sourced_search execution profile. This turn is isolated for provider-hosted broad web search with domain-plan and source-verification lifecycle and must not use Freehand function tools.\n",
+        "- Available capability: provider-hosted `web_search` only when the selected provider/protocol declares hosted web search.\n",
+        "- Unavailable tools: all workspace tools, `web_fetch`, `task`, `timer`, shell/bash, browser, readlink, pwd, cat, find, python, and any unlisted function tool.\n",
+        "- Search workflow: issue concise search queries through hosted web search, read returned source evidence, verify key sources, then synthesize one compact conclusion for the Master.\n",
         "- Output contract: final summary must include query terms, source/evidence summary, confidence or gaps, and next-step recommendation. If hosted search is unavailable or returns no usable evidence, finish blocked with the exact capability/provider reason.\n",
     )
     .to_owned()

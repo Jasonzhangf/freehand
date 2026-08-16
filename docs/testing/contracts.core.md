@@ -21,6 +21,7 @@
   - context-composed request validation
   - provider payload segment validation
   - remote access-scope header constants remain stable and outside request/response payload structs
+  - six search-evidence delivery contracts reject unknown fields and preserve explicit schema versions
 - module black-box plan:
   - replay fixture decode and encode compatibility through public contract boundary
 - project black-box impact:
@@ -29,6 +30,7 @@
   - machine-readable mainline truth remains the only source for generated wiki artifacts
 - fixtures / replay inputs / runtime evidence paths:
   - replay fixtures under contract fixtures
+  - search evidence conformance fixtures under `fixtures/search-evidence`
   - `~/.freehand/replays/contracts`
 - known gaps:
   - versioning policy tests not yet defined

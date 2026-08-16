@@ -1,0 +1,17 @@
+{
+  "schema": "search_evidence.verification.v1",
+  "delivery_id": "verification-1",
+  "source_id": "source-1",
+  "original_url": "https://example.com/news",
+  "camo_profile": "news",
+  "accessed_at": "2026-08-15T12:00:00Z",
+  "access_status": "verified",
+  "evidence_excerpt": "Evidence",
+  "verified_by": "web_fetch",
+  "access_attempts": [{
+    "attempt_id": "attempt-1",
+    "channel": "camo",
+    "status": "verified",
+    "accessed_at": "2026-08-15T12:00:00Z"
+  }]
+}

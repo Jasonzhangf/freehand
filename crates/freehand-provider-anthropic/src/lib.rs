@@ -9,15 +9,17 @@ use freehand_blocks::{
     render_tool_arguments_json,
 };
 use freehand_contracts::{
-    ErrorClass, TerminalStatus, TokenUsage, ToolCallContract, ToolCallId, ToolResultStatus,
+    ErrorClass, SearchSocialPlatform, TerminalStatus, TokenUsage, ToolCallContract, ToolCallId,
+    ToolResultStatus,
 };
 use freehand_provider_core::{
     ProviderAdapterEvent, ProviderErrorHint, ProviderEventContext, ProviderExecutorConfig,
     ProviderExecutorErrorInfo, ProviderExecutorFactory, ProviderExecutorFactoryError,
-    ProviderFamily, ProviderHostedToolDefinition, ProviderInputAttachment,
-    ProviderInputAttachmentKind, ProviderLiveExecutor, ProviderLiveExecutorError, ProviderProtocol,
-    ProviderRawCapture, ProviderSemanticOutput, ProviderSemanticRequest, ProviderToolChoice,
-    ProviderToolExchange, map_adapter_events,
+    ProviderFamily, ProviderHostedSearchCandidate, ProviderHostedSearchDiscovery,
+    ProviderHostedToolDefinition, ProviderInputAttachment, ProviderInputAttachmentKind,
+    ProviderLiveExecutor, ProviderLiveExecutorError, ProviderProtocol, ProviderRawCapture,
+    ProviderSemanticOutput, ProviderSemanticRequest, ProviderToolChoice, ProviderToolExchange,
+    map_adapter_events, project_hosted_search_discovery,
 };
 use serde_json::{Value, json};
 use thiserror::Error;
@@ -49,6 +51,9 @@ pub struct AnthropicAdapter {
     config: AnthropicAdapterConfig,
     partial_tool_calls: BTreeMap<String, PartialToolUseState>,
     partial_tool_call_indexes: BTreeMap<u64, String>,
+    hosted_search_queries: BTreeMap<String, String>,
+    hosted_search_query_json: BTreeMap<String, String>,
+    hosted_search_indexes: BTreeMap<u64, String>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -412,6 +417,9 @@ impl AnthropicAdapter {
             config,
             partial_tool_calls: BTreeMap::new(),
             partial_tool_call_indexes: BTreeMap::new(),
+            hosted_search_queries: BTreeMap::new(),
+            hosted_search_query_json: BTreeMap::new(),
+            hosted_search_indexes: BTreeMap::new(),
         })
     }
 
@@ -459,7 +467,7 @@ impl AnthropicAdapter {
         }
         let value: Value = serde_json::from_str(body)
             .map_err(|err| AnthropicAdapterError::InvalidJson(err.to_string()))?;
-        let events = self.parse_messages_body(&value)?;
+        let events = self.parse_messages_body(ctx, &value)?;
         Ok(map_adapter_events(ctx, events))
     }
 
@@ -474,12 +482,13 @@ impl AnthropicAdapter {
         }
         let value: Value = serde_json::from_str(event_body)
             .map_err(|err| AnthropicAdapterError::InvalidJson(err.to_string()))?;
-        let events = self.parse_messages_stream_event(&value)?;
+        let events = self.parse_messages_stream_event(ctx, &value)?;
         Ok(map_adapter_events(ctx, events))
     }
 
     fn parse_messages_body(
         &mut self,
+        ctx: &ProviderEventContext,
         value: &Value,
     ) -> Result<Vec<ProviderAdapterEvent>, AnthropicAdapterError> {
         let mut events = Vec::new();
@@ -500,10 +509,12 @@ impl AnthropicAdapter {
                         events.push(self.parse_tool_use_block(block, true)?);
                     }
                     "server_tool_use" => {
-                        events.push(anthropic_hosted_web_search_observation(block));
+                        self.track_hosted_search_start(None, block);
                     }
                     "web_search_tool_result" => {
-                        events.push(anthropic_hosted_web_search_result_observation(block));
+                        if let Some(discovery) = self.hosted_search_discovery(ctx, block) {
+                            events.push(ProviderAdapterEvent::SearchDiscovery(discovery));
+                        }
                     }
                     "thinking" | "redacted_thinking" => {
                         if let Some(text) = block.get("thinking").and_then(Value::as_str)
@@ -534,6 +545,7 @@ impl AnthropicAdapter {
 
     fn parse_messages_stream_event(
         &mut self,
+        ctx: &ProviderEventContext,
         value: &Value,
     ) -> Result<Vec<ProviderAdapterEvent>, AnthropicAdapterError> {
         let mut events = Vec::new();
@@ -558,10 +570,15 @@ impl AnthropicAdapter {
                     match kind {
                         "tool_use" => events.push(self.parse_indexed_tool_use_block(value, block)?),
                         "server_tool_use" => {
-                            events.push(anthropic_hosted_web_search_observation(block));
+                            self.track_hosted_search_start(
+                                value.get("index").and_then(Value::as_u64),
+                                block,
+                            );
                         }
                         "web_search_tool_result" => {
-                            events.push(anthropic_hosted_web_search_result_observation(block));
+                            if let Some(discovery) = self.hosted_search_discovery(ctx, block) {
+                                events.push(ProviderAdapterEvent::SearchDiscovery(discovery));
+                            }
                         }
                         "text" => {
                             if let Some(text) = block.get("text").and_then(Value::as_str)
@@ -607,12 +624,20 @@ impl AnthropicAdapter {
                                 .get("partial_json")
                                 .and_then(Value::as_str)
                                 .unwrap_or("");
-                            events.push(self.apply_partial_tool_delta(
-                                id.as_str(),
-                                name.as_str(),
-                                partial,
-                                false,
-                            )?);
+                            if self
+                                .hosted_search_indexes
+                                .values()
+                                .any(|hosted_id| hosted_id == &id)
+                            {
+                                self.apply_hosted_search_query_delta(&id, partial);
+                            } else {
+                                events.push(self.apply_partial_tool_delta(
+                                    id.as_str(),
+                                    name.as_str(),
+                                    partial,
+                                    false,
+                                )?);
+                            }
                         }
                         _ => {}
                     }
@@ -620,6 +645,19 @@ impl AnthropicAdapter {
             }
             "content_block_stop" => {
                 if let Some(id) = self.stream_tool_use_id(value).map(ToOwned::to_owned) {
+                    if self
+                        .hosted_search_indexes
+                        .values()
+                        .any(|hosted_id| hosted_id == &id)
+                    {
+                        if let Some(input) = value
+                            .get("content_block")
+                            .and_then(|block| block.get("input"))
+                        {
+                            self.apply_hosted_search_query_delta(&id, &input.to_string());
+                        }
+                        return Ok(events);
+                    }
                     let name = value
                         .get("content_block")
                         .and_then(|block| block.get("name"))
@@ -687,6 +725,71 @@ impl AnthropicAdapter {
                     .and_then(|index| self.partial_tool_call_indexes.get(&index))
                     .map(String::as_str)
             })
+            .or_else(|| {
+                value
+                    .get("index")
+                    .and_then(Value::as_u64)
+                    .and_then(|index| self.hosted_search_indexes.get(&index))
+                    .map(String::as_str)
+            })
+    }
+
+    fn track_hosted_search_start(&mut self, index: Option<u64>, block: &Value) {
+        if block.get("name").and_then(Value::as_str) != Some("web_search") {
+            return;
+        }
+        let Some(id) = block.get("id").and_then(Value::as_str) else {
+            return;
+        };
+        if let Some(index) = index {
+            self.hosted_search_indexes.insert(index, id.to_owned());
+        }
+        if let Some(query) = block
+            .get("input")
+            .and_then(|input| input.get("query"))
+            .and_then(Value::as_str)
+            .filter(|query| !query.trim().is_empty())
+        {
+            self.hosted_search_queries
+                .insert(id.to_owned(), query.to_owned());
+        }
+    }
+
+    fn apply_hosted_search_query_delta(&mut self, id: &str, delta: &str) {
+        let buffer = self
+            .hosted_search_query_json
+            .entry(id.to_owned())
+            .or_default();
+        buffer.push_str(delta);
+        if let Ok(value) = serde_json::from_str::<Value>(buffer)
+            && let Some(query) = value
+                .get("query")
+                .and_then(Value::as_str)
+                .filter(|query| !query.trim().is_empty())
+        {
+            self.hosted_search_queries
+                .insert(id.to_owned(), query.to_owned());
+        }
+    }
+
+    fn hosted_search_discovery(
+        &mut self,
+        ctx: &ProviderEventContext,
+        block: &Value,
+    ) -> Option<freehand_contracts::SearchDiscoveryDelivery> {
+        let domain_plan_ref = ctx.search_domain_plan_ref.clone();
+        let tool_use_id = block.get("tool_use_id").and_then(Value::as_str)?;
+        // A web_search tool result must never be silently dropped. If the query
+        // was not correlated (unexpected ordering), fall back to a generic query
+        // so the UI still projects the hosted search activity.
+        let query = self
+            .hosted_search_queries
+            .remove(tool_use_id)
+            .unwrap_or_else(|| "hosted web search".to_owned());
+        self.hosted_search_query_json.remove(tool_use_id);
+        self.hosted_search_indexes
+            .retain(|_, hosted_id| hosted_id != tool_use_id);
+        anthropic_hosted_search_discovery(domain_plan_ref, query, block)
     }
 
     fn parse_tool_use_block(
@@ -881,47 +984,63 @@ fn anthropic_messages_hosted_tool(tool: &ProviderHostedToolDefinition) -> Value 
     }
 }
 
-fn anthropic_hosted_web_search_observation(block: &Value) -> ProviderAdapterEvent {
-    ProviderAdapterEvent::ReasoningDelta(format!(
-        "provider-hosted web_search {}",
-        anthropic_hosted_web_search_summary(block)
-    ))
-}
-
-fn anthropic_hosted_web_search_result_observation(block: &Value) -> ProviderAdapterEvent {
-    ProviderAdapterEvent::ReasoningDelta(format!(
-        "provider-hosted web_search_result {}",
-        anthropic_hosted_web_search_summary(block)
-    ))
-}
-
-fn anthropic_hosted_web_search_summary(block: &Value) -> String {
-    let id = block
-        .get("id")
-        .or_else(|| block.get("tool_use_id"))
+fn anthropic_hosted_search_discovery(
+    domain_plan_ref: Option<String>,
+    query: String,
+    block: &Value,
+) -> Option<freehand_contracts::SearchDiscoveryDelivery> {
+    let tool_use_id = block
+        .get("tool_use_id")
         .and_then(Value::as_str)
         .unwrap_or("unknown");
+    let items = block
+        .get("content")
+        .and_then(Value::as_array)
+        .cloned()
+        .unwrap_or_default();
     let status = block
         .get("status")
         .and_then(Value::as_str)
-        .unwrap_or("unknown");
-    let query = block
-        .get("input")
-        .and_then(|input| input.get("query"))
-        .and_then(Value::as_str)
-        .or_else(|| block.get("query").and_then(Value::as_str));
-    let content_count = block
-        .get("content")
-        .and_then(Value::as_array)
-        .map(Vec::len)
-        .unwrap_or(0);
-    match query {
-        Some(query) => format!("id={id} status={status} query={query}"),
-        None if content_count > 0 => {
-            format!("id={id} status={status} result_items={content_count}")
-        }
-        None => format!("id={id} status={status}"),
-    }
+        .unwrap_or("unknown")
+        .to_owned();
+    let result_count = items.len();
+    let candidates = items
+        .iter()
+        .enumerate()
+        .map(|(index, item)| ProviderHostedSearchCandidate {
+            candidate_id: item
+                .get("id")
+                .and_then(Value::as_str)
+                .map(str::to_owned)
+                .unwrap_or_else(|| format!("{tool_use_id}-candidate-{}", index + 1)),
+            title: item
+                .get("title")
+                .and_then(Value::as_str)
+                .unwrap_or("")
+                .to_owned(),
+            original_url: item.get("url").and_then(Value::as_str).map(str::to_owned),
+            snippet: item
+                .get("snippet")
+                .or_else(|| item.get("page_age"))
+                .and_then(Value::as_str)
+                .unwrap_or("")
+                .to_owned(),
+            platform: Some(SearchSocialPlatform::Web),
+            source_weight: None,
+        })
+        .collect();
+    Some(project_hosted_search_discovery(
+        domain_plan_ref,
+        format!("anthropic-{tool_use_id}"),
+        ProviderHostedSearchDiscovery {
+            tool_call_id: Some(tool_use_id.to_owned()),
+            status: Some(status),
+            result_count: Some(result_count),
+            query,
+            provider: "anthropic_messages".to_owned(),
+            candidates,
+        },
+    ))
 }
 
 #[derive(Debug, Default)]
@@ -1058,6 +1177,14 @@ mod tests {
             turn_id: TurnId::new("turn-1"),
             trace_id: TraceId::new("trace-1"),
             feature_id: FeatureId::new("provider.anthropic-adapter"),
+            search_domain_plan_ref: None,
+        }
+    }
+
+    fn sourced_search_ctx() -> ProviderEventContext {
+        ProviderEventContext {
+            search_domain_plan_ref: Some("domain-1".to_owned()),
+            ..ctx()
         }
     }
 
@@ -1309,6 +1436,7 @@ mod tests {
                     tool_call_id: ToolCallId::new("toolu_1"),
                     status: freehand_contracts::ToolResultStatus::Success,
                     output: r#"{"status":"ok"}"#.to_owned(),
+                    search_evidence: None,
                 },
             },
         }];
@@ -1357,41 +1485,131 @@ mod tests {
         let mut adapter = adapter();
         let outputs = adapter
             .parse_response(
-                &ctx(),
+                &sourced_search_ctx(),
                 ProviderProtocol::AnthropicMessages,
                 r#"{
                     "content":[
                         {"type":"server_tool_use","id":"srv_1","name":"web_search","input":{"query":"Freehand hosted search"}},
-                        {"type":"web_search_tool_result","tool_use_id":"srv_1","content":[{"title":"Freehand","url":"https://example.test"}]}
+                        {"type":"web_search_tool_result","tool_use_id":"srv_1","status":"completed","content":[{"title":"Freehand","url":"https://example.test"}]}
                     ],
                     "stop_reason":"end_turn"
                 }"#,
             )
             .expect("parsed");
 
-        assert!(outputs.iter().any(|output| {
-            matches!(
-                output,
-                ProviderSemanticOutput::SemanticEvent(event)
-                    if event.kind == freehand_contracts::SemanticEventKind::Reasoning
-                        && event.content.contains("provider-hosted web_search")
-                        && event.content.contains("query=Freehand hosted search")
-            )
-        }));
-        assert!(outputs.iter().any(|output| {
-            matches!(
-                output,
-                ProviderSemanticOutput::SemanticEvent(event)
-                    if event.kind == freehand_contracts::SemanticEventKind::Reasoning
-                        && event.content.contains("provider-hosted web_search_result")
-                        && event.content.contains("result_items=1")
-            )
-        }));
+        let discovery = outputs
+            .iter()
+            .find_map(|output| match output {
+                ProviderSemanticOutput::SearchDiscovery(delivery) => Some(delivery),
+                _ => None,
+            })
+            .expect("typed hosted-search discovery");
+        let attempt = discovery
+            .hosted_search_attempt
+            .as_ref()
+            .expect("hosted search attempt");
+        assert_eq!(attempt.query, "Freehand hosted search");
+        assert_eq!(attempt.provider, "anthropic_messages");
+        assert_eq!(attempt.tool_call_id.as_deref(), Some("srv_1"));
+        assert_eq!(attempt.status.as_deref(), Some("completed"));
+        assert_eq!(attempt.result_count, Some(1));
         assert!(
             !outputs
                 .iter()
                 .any(|output| matches!(output, ProviderSemanticOutput::ToolCall(_)))
         );
+        assert!(
+            !outputs.iter().any(
+                |output| matches!(output, ProviderSemanticOutput::SemanticEvent(event)
+                    if event.kind == freehand_contracts::SemanticEventKind::Reasoning
+                        && event.content.contains("provider-hosted web_search"))
+            ),
+            "hosted search must be a typed observation, not reasoning text"
+        );
+    }
+
+    #[test]
+    fn projects_messages_hosted_results_with_typed_query_and_domain_plan() {
+        let mut adapter = adapter();
+        let outputs = adapter
+            .parse_response(
+                &sourced_search_ctx(),
+                ProviderProtocol::AnthropicMessages,
+                r#"{
+                    "content":[
+                        {"type":"server_tool_use","id":"srv_1","name":"web_search","input":{"query":"Freehand evidence pipeline"}},
+                        {"type":"web_search_tool_result","tool_use_id":"srv_1","content":[
+                            {"title":"Freehand","url":"https://example.test/source","snippet":"verified later"},
+                            {"title":"Missing URL","snippet":"unusable"}
+                        ]}
+                    ],
+                    "stop_reason":"end_turn"
+                }"#,
+            )
+            .expect("parsed");
+
+        let discovery = outputs
+            .iter()
+            .find_map(|output| match output {
+                ProviderSemanticOutput::SearchDiscovery(delivery) => Some(delivery),
+                _ => None,
+            })
+            .expect("typed discovery");
+        assert_eq!(discovery.domain_plan_ref.as_deref(), Some("domain-1"));
+        assert_eq!(
+            discovery
+                .hosted_search_attempt
+                .as_ref()
+                .map(|attempt| attempt.query.as_str()),
+            Some("Freehand evidence pipeline")
+        );
+        let attempt = discovery.hosted_search_attempt.as_ref().expect("attempt");
+        assert_eq!(attempt.tool_call_id.as_deref(), Some("srv_1"));
+        assert_eq!(attempt.status.as_deref(), Some("unknown"));
+        assert_eq!(attempt.result_count, Some(2));
+        assert_eq!(
+            discovery.candidates[0].status,
+            freehand_contracts::SearchCandidateStatus::Usable
+        );
+        assert_eq!(
+            discovery.candidates[1].status,
+            freehand_contracts::SearchCandidateStatus::UnusableMissingUrl
+        );
+    }
+
+    #[test]
+    fn projects_streamed_messages_hosted_results_only_after_query_correlation() {
+        let mut adapter = adapter();
+        for event in [
+            r#"{"type":"content_block_start","index":0,"content_block":{"type":"server_tool_use","id":"srv_stream","name":"web_search","input":{}}}"#,
+            r#"{"type":"content_block_delta","index":0,"delta":{"type":"input_json_delta","partial_json":"{\"query\":\"streamed query\"}"}}"#,
+        ] {
+            let outputs = adapter
+                .parse_stream_event(
+                    &sourced_search_ctx(),
+                    ProviderProtocol::AnthropicMessages,
+                    event,
+                )
+                .expect("stream event");
+            assert!(
+                !outputs
+                    .iter()
+                    .any(|output| matches!(output, ProviderSemanticOutput::SearchDiscovery(_)))
+            );
+        }
+
+        let outputs = adapter
+            .parse_stream_event(
+                &sourced_search_ctx(),
+                ProviderProtocol::AnthropicMessages,
+                r#"{"type":"content_block_start","index":1,"content_block":{"type":"web_search_tool_result","tool_use_id":"srv_stream","content":[{"title":"Source","url":"https://example.test/stream"}]}}"#,
+            )
+            .expect("result event");
+        assert!(outputs.iter().any(|output| matches!(
+            output,
+            ProviderSemanticOutput::SearchDiscovery(delivery)
+                if delivery.hosted_search_attempt.as_ref().is_some_and(|attempt| attempt.query == "streamed query")
+        )));
     }
 
     #[test]

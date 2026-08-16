@@ -7,7 +7,8 @@
   "mainline_call_doc": "docs/mainline-calls/reason.turn.json",
   "generated_wiki_doc": "docs/wiki/reason.turn.md",
   "resource_operations": [
-    "provider_response.apply_to_turn"
+    "provider_response.apply_to_turn",
+    "search_evidence.apply_final_delivery"
   ],
   "request_mainline": [
     "user input and context material enter the turn orchestration path",

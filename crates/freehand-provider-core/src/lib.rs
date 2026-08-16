@@ -4,7 +4,9 @@ use freehand_contracts::{
     AgentId, ErrorClass, ErrorContract, ErrorErr01RuntimeClassified, FeatureId,
     ReasonReq03ProviderPayload, ReasonReq04ToolCall, ReasonReq05ToolResultReentry,
     ReasonResp01SemanticEvent, ReasonResp02UsageEvent, ReasonResp03TerminalEvent, RecoveryPolicy,
-    SemanticEventKind, SessionId, TerminalStatus, TokenUsage, ToolCallContract, TraceId, TurnId,
+    SearchCandidateStatus, SearchDiscoveryCandidate, SearchDiscoveryChannel,
+    SearchDiscoveryDelivery, SearchHostedAttempt, SearchSocialPlatform, SemanticEventKind,
+    SessionId, TerminalStatus, TokenUsage, ToolCallContract, TraceId, TurnId,
     validate_reason_req03,
 };
 use serde::{Deserialize, Serialize};
@@ -280,9 +282,11 @@ pub trait ProviderExecutorFactory: Send + Sync {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[allow(clippy::large_enum_variant)]
 pub enum ProviderAdapterEvent {
     TextDelta(String),
     ReasoningDelta(String),
+    SearchDiscovery(SearchDiscoveryDelivery),
     ToolCall(ToolCallContract),
     ToolResultReentry(ReasonReq05ToolResultReentry),
     Usage(TokenUsage),
@@ -302,13 +306,96 @@ pub struct ProviderErrorHint {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[allow(clippy::large_enum_variant)]
 pub enum ProviderSemanticOutput {
     SemanticEvent(ReasonResp01SemanticEvent),
+    SearchDiscovery(SearchDiscoveryDelivery),
     ToolCall(ReasonReq04ToolCall),
     ToolResultReentry(ReasonReq05ToolResultReentry),
     Usage(ReasonResp02UsageEvent),
     Terminal(ReasonResp03TerminalEvent),
     Error(ErrorErr01RuntimeClassified),
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ProviderHostedSearchDiscovery {
+    pub query: String,
+    pub provider: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tool_call_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub status: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub result_count: Option<usize>,
+    pub candidates: Vec<ProviderHostedSearchCandidate>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ProviderHostedSearchCandidate {
+    pub candidate_id: String,
+    pub title: String,
+    pub original_url: Option<String>,
+    pub snippet: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub platform: Option<SearchSocialPlatform>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source_weight: Option<u32>,
+}
+
+pub fn project_hosted_search_discovery(
+    domain_plan_ref: Option<String>,
+    delivery_id: String,
+    discovery: ProviderHostedSearchDiscovery,
+) -> SearchDiscoveryDelivery {
+    let hosted_search_attempt = SearchHostedAttempt {
+        tool_call_id: discovery.tool_call_id,
+        status: discovery.status,
+        result_count: discovery.result_count,
+        query: discovery.query,
+        provider: discovery.provider,
+    };
+    let candidates = discovery
+        .candidates
+        .into_iter()
+        .map(|candidate| {
+            let (status, reason) = match candidate.original_url.as_deref() {
+                Some(url) if is_http_url(url) => (SearchCandidateStatus::Usable, None),
+                Some(_) => (
+                    SearchCandidateStatus::UnusableOther,
+                    Some("hosted_search_returned_non_http_url".to_owned()),
+                ),
+                None => (
+                    SearchCandidateStatus::UnusableMissingUrl,
+                    Some("hosted_search_did_not_return_original_url".to_owned()),
+                ),
+            };
+            SearchDiscoveryCandidate {
+                candidate_id: candidate.candidate_id,
+                status,
+                original_url: candidate.original_url,
+                title: candidate.title,
+                snippet: candidate.snippet,
+                discovered_by: Some(SearchDiscoveryChannel::HostedWebSearch),
+                platform: candidate.platform,
+                source_weight: candidate.source_weight,
+                reason,
+            }
+        })
+        .collect();
+    SearchDiscoveryDelivery {
+        schema: "search_evidence.discovery.v1".to_owned(),
+        delivery_id,
+        discovery_channel: SearchDiscoveryChannel::HostedWebSearch,
+        domain_plan_ref,
+        hosted_search_attempt: Some(hosted_search_attempt),
+        candidates,
+    }
+}
+
+fn is_http_url(value: &str) -> bool {
+    value.starts_with("https://") || value.starts_with("http://")
 }
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -318,6 +405,7 @@ pub struct ProviderEventContext {
     pub turn_id: TurnId,
     pub trace_id: TraceId,
     pub feature_id: FeatureId,
+    pub search_domain_plan_ref: Option<String>,
 }
 
 #[derive(Debug, Error)]
@@ -422,6 +510,9 @@ pub fn map_adapter_event(
                 content,
             })
         }
+        ProviderAdapterEvent::SearchDiscovery(delivery) => {
+            ProviderSemanticOutput::SearchDiscovery(delivery)
+        }
         ProviderAdapterEvent::ToolCall(tool_call) => {
             ProviderSemanticOutput::ToolCall(ReasonReq04ToolCall {
                 session_id: ctx.session_id.clone(),
@@ -523,6 +614,7 @@ mod tests {
             turn_id: TurnId::new("turn-1"),
             trace_id: TraceId::new("trace-1"),
             feature_id: FeatureId::new("provider.semantic"),
+            search_domain_plan_ref: None,
         }
     }
 
@@ -659,5 +751,63 @@ mod tests {
             }
             other => panic!("unexpected output: {other:?}"),
         }
+    }
+
+    #[test]
+    fn projects_hosted_search_discovery_with_original_url_gates() {
+        let delivery = project_hosted_search_discovery(
+            Some("domain-1".to_owned()),
+            "discovery-1".to_owned(),
+            ProviderHostedSearchDiscovery {
+                query: "rust".to_owned(),
+                provider: "openai_responses".to_owned(),
+                tool_call_id: None,
+                status: None,
+                result_count: None,
+                candidates: vec![
+                    ProviderHostedSearchCandidate {
+                        candidate_id: "c1".to_owned(),
+                        title: "ok".to_owned(),
+                        original_url: Some("https://example.com/doc".to_owned()),
+                        snippet: "snippet".to_owned(),
+                        platform: Some(SearchSocialPlatform::Web),
+                        source_weight: Some(80),
+                    },
+                    ProviderHostedSearchCandidate {
+                        candidate_id: "c2".to_owned(),
+                        title: "no url".to_owned(),
+                        original_url: None,
+                        snippet: "snippet".to_owned(),
+                        platform: None,
+                        source_weight: None,
+                    },
+                    ProviderHostedSearchCandidate {
+                        candidate_id: "c3".to_owned(),
+                        title: "bad scheme".to_owned(),
+                        original_url: Some("ftp://example.com/file".to_owned()),
+                        snippet: "snippet".to_owned(),
+                        platform: None,
+                        source_weight: None,
+                    },
+                ],
+            },
+        );
+
+        assert_eq!(delivery.candidates[0].status, SearchCandidateStatus::Usable);
+        assert_eq!(
+            delivery.candidates[1].status,
+            SearchCandidateStatus::UnusableMissingUrl
+        );
+        assert_eq!(
+            delivery.candidates[2].status,
+            SearchCandidateStatus::UnusableOther
+        );
+        assert!(
+            delivery
+                .candidates
+                .iter()
+                .all(|candidate| candidate.discovered_by
+                    == Some(SearchDiscoveryChannel::HostedWebSearch))
+        );
     }
 }

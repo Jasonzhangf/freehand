@@ -1,12 +1,13 @@
 use crate::adp_wire::{UiProjection, UiQueryResult, UiSubscriptionEvent};
 use crate::dto::*;
 use crate::projection::{
-    empty_checkpoint_snapshot, fail_waiting_tool_activities,
+    empty_checkpoint_snapshot, fail_waiting_tool_activities, merge_hosted_search_activities,
     preserve_live_activity_on_nonterminal_refresh, session_list_projection,
     session_transcript_projection, terminal_text_projection, tool_activity_detail_from_result,
     tool_activity_status_from_result, turn_is_nonterminal, turn_is_terminal, upsert_tool_activity,
 };
 use freehand_blocks::{project_tool_call_display, project_tool_result_display};
+use freehand_contracts::SearchEvidenceTurnDelivery;
 use freehand_contracts::{
     AgentId, ErrorErr01RuntimeClassified, ReasonReq04ToolCall, ReasonReq05ToolResultReentry,
     ReasonResp01SemanticEvent, ReasonResp02UsageEvent, ReasonResp03TerminalEvent,
@@ -363,6 +364,33 @@ impl UiProtocolState {
                 _ => {}
             }
             projection.model_request = None;
+            projection.clone()
+        };
+        self.advance_latest_active_turn_id(&projection);
+        self.publish_projection(UiProjection::Turn(projection.clone()));
+        projection
+    }
+
+    pub fn apply_search_evidence(
+        &mut self,
+        source_agent_id: AgentId,
+        source_node_id: String,
+        delivery: &SearchEvidenceTurnDelivery,
+        slave_substream_card: bool,
+    ) -> UiTurnProjection {
+        let projection = {
+            let projection = self.ensure_turn_projection(
+                source_agent_id,
+                source_node_id,
+                &delivery.session_id,
+                &delivery.turn_id,
+                slave_substream_card,
+            );
+            projection.search_evidence = Some(UiSearchEvidenceProjection::from(delivery));
+            merge_hosted_search_activities(
+                &mut projection.tool_activities,
+                projection.search_evidence.as_ref(),
+            );
             projection.clone()
         };
         self.advance_latest_active_turn_id(&projection);
@@ -798,6 +826,7 @@ impl UiProtocolState {
                 terminal_text: None,
                 user_options: None,
                 errors: Vec::new(),
+                search_evidence: None,
                 slave_substream_card,
             })
     }

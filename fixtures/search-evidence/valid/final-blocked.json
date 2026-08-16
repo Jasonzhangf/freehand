@@ -1,0 +1,12 @@
+{
+  "schema": "search_evidence.final.v1",
+  "delivery_id": "final-blocked-1",
+  "domain_plan_ref": "domain-news-1",
+  "claim": "blocked",
+  "claims": [],
+  "unconfirmed": [{
+    "source_id": "source-1",
+    "reason": "source could not be verified"
+  }],
+  "blocked_reason": "no verified source is available"
+}

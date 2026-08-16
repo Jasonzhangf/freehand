@@ -55,6 +55,7 @@
 - repo root may invoke `xtask mainlines generate`
 - repo root may invoke `xtask mainlines check`
 - gate runner verifies required files, workspace members, and policy doc snippets
+- gate runner executes the repository-owned search-evidence corpus through production parser/validator owners and rejects fixture or scenario drift
 - gate runner verifies migrated mainline JSON cross-links back to feature map, function map, test design, and generated wiki path
 - gate runner verifies feature-map seed entries stay unique per `feature_id`
 - gate runner verifies resource-map ownership, operation bindings, direct/indirect/forbidden relation consistency, source-edge registry backlinks, function-map backlinks, and test-design resource-operation coverage

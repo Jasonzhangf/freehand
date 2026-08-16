@@ -119,7 +119,7 @@
     },
     {
       "step": "02a",
-      "symbol_path": "anthropic_hosted_web_search_observation / anthropic_hosted_web_search_result_observation",
+      "symbol_path": "anthropic_hosted_search_discovery",
       "file_path": "crates/freehand-provider-anthropic/src/lib.rs",
       "responsibility": "map Anthropic Messages hosted web_search blocks into provider-neutral reasoning observations",
       "input_semantic": "raw Anthropic server_tool_use or web_search_tool_result block",

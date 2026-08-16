@@ -168,12 +168,270 @@ pub struct ReasonReq04ToolCall {
     pub tool_call: ToolCallContract,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SearchDomain {
+    News,
+    Tutorial,
+    Operations,
+    Technical,
+    Policy,
+    LocalReview,
+    General,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SearchSocialPlatform {
+    Web,
+    Xhs,
+    Weibo,
+    X,
+    Other,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SearchDomainPlanDelivery {
+    pub schema: String,
+    pub delivery_id: String,
+    pub domain: SearchDomain,
+    pub preferred_source_kinds: Vec<String>,
+    pub social_platform_priority: Vec<SearchSocialPlatform>,
+    pub minimum_verified_sources: u32,
+    pub policy_version: String,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SearchDiscoveryChannel {
+    HostedWebSearch,
+    CamoSocialSearch,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SearchCandidateStatus {
+    Usable,
+    UnusableMissingUrl,
+    UnusableOther,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SearchHostedAttempt {
+    pub query: String,
+    pub provider: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tool_call_id: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub status: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub result_count: Option<usize>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SearchDiscoveryCandidate {
+    pub candidate_id: String,
+    pub status: SearchCandidateStatus,
+    pub original_url: Option<String>,
+    pub title: String,
+    pub snippet: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub discovered_by: Option<SearchDiscoveryChannel>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub platform: Option<SearchSocialPlatform>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub source_weight: Option<u32>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SearchDiscoveryDelivery {
+    pub schema: String,
+    pub delivery_id: String,
+    pub discovery_channel: SearchDiscoveryChannel,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub domain_plan_ref: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub hosted_search_attempt: Option<SearchHostedAttempt>,
+    pub candidates: Vec<SearchDiscoveryCandidate>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SearchAccessStatus {
+    Verified,
+    HttpError,
+    Timeout,
+    Blocked,
+    NotAccessed,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SearchEvidenceError {
+    pub code: String,
+    pub message: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SearchAccessAttempt {
+    pub attempt_id: String,
+    pub channel: String,
+    pub status: SearchAccessStatus,
+    pub accessed_at: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error: Option<SearchEvidenceError>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SearchVerificationDelivery {
+    pub schema: String,
+    pub delivery_id: String,
+    pub source_id: String,
+    pub original_url: String,
+    pub camo_profile: String,
+    pub accessed_at: String,
+    pub access_status: SearchAccessStatus,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub page_title: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub evidence_excerpt: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub verified_by: Option<String>,
+    pub access_attempts: Vec<SearchAccessAttempt>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub error: Option<SearchEvidenceError>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SearchSupplementReason {
+    MissingOriginalUrls,
+    InsufficientVerifiedSources,
+    LowWeightCoverage,
+    SingleSourceOnly,
+    SourceConflict,
+    InsufficientEvidence,
+    UserRequestedMoreSources,
+    UserRequestedSocialSource,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SocialSupplementDecisionDelivery {
+    pub schema: String,
+    pub delivery_id: String,
+    pub domain_plan_ref: String,
+    pub required: bool,
+    pub reasons: Vec<SearchSupplementReason>,
+    pub platforms: Vec<SearchSocialPlatform>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SearchFinalClaimStatus {
+    Complete,
+    Blocked,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SearchClaimDelivery {
+    pub claim_id: String,
+    pub text: String,
+    pub source_ids: Vec<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SearchUnconfirmedDelivery {
+    pub source_id: String,
+    pub reason: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SearchFinalDelivery {
+    pub schema: String,
+    pub delivery_id: String,
+    pub domain_plan_ref: String,
+    pub claim: SearchFinalClaimStatus,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub summary: Option<String>,
+    pub claims: Vec<SearchClaimDelivery>,
+    pub unconfirmed: Vec<SearchUnconfirmedDelivery>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub blocked_reason: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(tag = "delivery_type", content = "delivery", rename_all = "snake_case")]
+pub enum SearchEvidenceDelivery {
+    DomainPlan(SearchDomainPlanDelivery),
+    Discovery(SearchDiscoveryDelivery),
+    Verification(SearchVerificationDelivery),
+    SupplementDecision(SocialSupplementDecisionDelivery),
+    Final(SearchFinalDelivery),
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SearchEvidenceTurnStatus {
+    DomainPlanValidated,
+    HostedDiscoveryValidated,
+    CamoVerificationRequired,
+    CamoVerificationValidated,
+    SupplementDecisionValidated,
+    SocialDiscoveryValidated,
+    FinalValidated,
+    TurnTerminalSuccess,
+    Blocked,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum SearchEvidenceTerminal {
+    Success,
+    Blocked,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct SearchEvidenceTurnDelivery {
+    pub schema: String,
+    pub session_id: SessionId,
+    pub turn_id: TurnId,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub domain_plan: Option<SearchDomainPlanDelivery>,
+    pub deliveries: Vec<SearchEvidenceDelivery>,
+    pub verified_sources: Vec<SearchVerificationDelivery>,
+    pub unconfirmed: Vec<SearchUnconfirmedDelivery>,
+    pub claims: Vec<SearchClaimDelivery>,
+    pub status: SearchEvidenceTurnStatus,
+    pub summary_ready: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub summary: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub blocked_reason: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub terminal: Option<SearchEvidenceTerminal>,
+}
+
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ToolResultContract {
     pub tool_call_id: ToolCallId,
     #[serde(default = "default_tool_result_status")]
     pub status: ToolResultStatus,
     pub output: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub search_evidence: Option<SearchEvidenceDelivery>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -685,5 +943,80 @@ mod tests {
         let json = serde_json::to_string(&preview).expect("serialize");
         let decoded: ToolPreviewContract = serde_json::from_str(&json).expect("deserialize");
         assert_eq!(decoded, preview);
+    }
+
+    #[test]
+    fn search_evidence_deliveries_round_trip_through_json() {
+        let plan = SearchDomainPlanDelivery {
+            schema: "search_evidence.domain_plan.v1".to_owned(),
+            delivery_id: "domain-1".to_owned(),
+            domain: SearchDomain::News,
+            preferred_source_kinds: vec!["official_publication".to_owned()],
+            social_platform_priority: vec![SearchSocialPlatform::Weibo],
+            minimum_verified_sources: 1,
+            policy_version: "2026-08-15".to_owned(),
+        };
+        let source = SearchVerificationDelivery {
+            schema: "search_evidence.verification.v1".to_owned(),
+            delivery_id: "verify-1".to_owned(),
+            source_id: "source-1".to_owned(),
+            original_url: "https://example.com/news".to_owned(),
+            camo_profile: "news".to_owned(),
+            accessed_at: "2026-08-15T12:00:00Z".to_owned(),
+            access_status: SearchAccessStatus::Verified,
+            page_title: Some("News".to_owned()),
+            evidence_excerpt: Some("Verified page evidence".to_owned()),
+            verified_by: Some("camo".to_owned()),
+            access_attempts: vec![SearchAccessAttempt {
+                attempt_id: "attempt-1".to_owned(),
+                channel: "camo".to_owned(),
+                status: SearchAccessStatus::Verified,
+                accessed_at: "2026-08-15T12:00:00Z".to_owned(),
+                error: None,
+            }],
+            error: None,
+        };
+        let delivery = SearchEvidenceTurnDelivery {
+            schema: "search_evidence.turn.v1".to_owned(),
+            session_id: SessionId::new("session-1"),
+            turn_id: TurnId::new("turn-1"),
+            domain_plan: Some(plan.clone()),
+            deliveries: vec![
+                SearchEvidenceDelivery::DomainPlan(plan),
+                SearchEvidenceDelivery::Verification(source.clone()),
+            ],
+            verified_sources: vec![source],
+            unconfirmed: Vec::new(),
+            claims: vec![SearchClaimDelivery {
+                claim_id: "claim-1".to_owned(),
+                text: "Claim".to_owned(),
+                source_ids: vec!["source-1".to_owned()],
+            }],
+            status: SearchEvidenceTurnStatus::TurnTerminalSuccess,
+            summary_ready: true,
+            summary: Some("Summary".to_owned()),
+            blocked_reason: None,
+            terminal: Some(SearchEvidenceTerminal::Success),
+        };
+
+        let json = serde_json::to_string(&delivery).expect("serialize");
+        let decoded: SearchEvidenceTurnDelivery = serde_json::from_str(&json).expect("deserialize");
+        assert_eq!(decoded, delivery);
+    }
+
+    #[test]
+    fn search_evidence_delivery_rejects_unknown_fields() {
+        let err = serde_json::from_value::<SearchDomainPlanDelivery>(json!({
+            "schema": "search_evidence.domain_plan.v1",
+            "delivery_id": "domain-1",
+            "domain": "news",
+            "preferred_source_kinds": ["official_publication"],
+            "social_platform_priority": ["weibo"],
+            "minimum_verified_sources": 1,
+            "policy_version": "2026-08-15",
+            "control_retry": true
+        }))
+        .expect_err("unknown fields must fail");
+        assert!(err.to_string().contains("unknown field `control_retry`"));
     }
 }

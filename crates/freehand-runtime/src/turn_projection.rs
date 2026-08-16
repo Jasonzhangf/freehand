@@ -107,6 +107,14 @@ pub(crate) fn project_runtime_turn_history(
         error_events: turn.error_events.clone(),
         slave_substream_card: false,
     });
+    projection.search_evidence = turn
+        .search_evidence
+        .as_ref()
+        .map(freehand_ui_protocol::UiSearchEvidenceProjection::from);
+    freehand_ui_protocol::merge_hosted_search_activities(
+        &mut projection.tool_activities,
+        projection.search_evidence.as_ref(),
+    );
     projection.attachments = turn
         .attachments
         .iter()

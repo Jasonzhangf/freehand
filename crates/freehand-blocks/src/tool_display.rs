@@ -1,4 +1,6 @@
-use freehand_contracts::{ToolArgument, ToolResultContract, ToolResultStatus};
+use freehand_contracts::{
+    SearchDiscoveryDelivery, ToolArgument, ToolResultContract, ToolResultStatus,
+};
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
@@ -105,6 +107,78 @@ pub fn project_tool_result_display(
     };
     display.result_summary = Some(result_summary_for(&display, result));
     display
+}
+
+pub fn project_hosted_search_display(delivery: &SearchDiscoveryDelivery) -> ToolDisplayProjection {
+    let attempt = delivery.hosted_search_attempt.as_ref();
+    let query = attempt
+        .map(|a| a.query.as_str())
+        .unwrap_or("hosted web search");
+    let status = attempt
+        .and_then(|a| a.status.as_deref())
+        .unwrap_or("unknown");
+    let result_count = attempt
+        .and_then(|a| a.result_count)
+        .unwrap_or(delivery.candidates.len());
+    let tool_call_id = attempt
+        .and_then(|a| a.tool_call_id.as_deref())
+        .unwrap_or("hosted-search");
+    let outcome = hosted_search_outcome(status);
+    let result_summary = match outcome {
+        ToolDisplayOutcome::Failed => Some("search failed".to_owned()),
+        ToolDisplayOutcome::Success => Some(format!(
+            "{result_count} result item{}",
+            if result_count == 1 { "" } else { "s" }
+        )),
+        ToolDisplayOutcome::Waiting => None,
+    };
+    ToolDisplayProjection {
+        kind: ToolDisplayKind::Search,
+        outcome,
+        action: "Web search".to_owned(),
+        target: Some(query.to_owned()),
+        parameter_summary: Some(format!("query={query}")),
+        summary: format!("Web search: {query}"),
+        result_summary,
+        fields: vec![
+            ToolDisplayField {
+                label: "tool".to_owned(),
+                value: "web_search".to_owned(),
+            },
+            ToolDisplayField {
+                label: "id".to_owned(),
+                value: tool_call_id.to_owned(),
+            },
+            ToolDisplayField {
+                label: "status".to_owned(),
+                value: status.to_owned(),
+            },
+            ToolDisplayField {
+                label: "result_items".to_owned(),
+                value: result_count.to_string(),
+            },
+        ],
+        diff: None,
+    }
+}
+
+fn hosted_search_outcome(status: &str) -> ToolDisplayOutcome {
+    let lowered = status.to_ascii_lowercase();
+    let terminal_success = lowered == "completed" || lowered == "succeeded" || lowered == "success";
+    if lowered.contains("fail")
+        || lowered.contains("error")
+        || lowered.contains("cancel")
+        || lowered.contains("incomplete")
+    {
+        return ToolDisplayOutcome::Failed;
+    }
+    // Terminal status is authoritative: only an explicitly terminal status
+    // promotes to Success. In-progress / unknown status with candidates
+    // stays Waiting (otherwise premature Success misleads the UI).
+    if terminal_success {
+        return ToolDisplayOutcome::Success;
+    }
+    ToolDisplayOutcome::Waiting
 }
 
 pub fn classify_tool_display_kind(tool_name: &str, arguments: &[ToolArgument]) -> ToolDisplayKind {
@@ -863,6 +937,63 @@ mod tests {
         assert_eq!(kind, ToolDisplayKind::Search);
     }
 
+    fn hosted_delivery(
+        query: &str,
+        tool_call_id: &str,
+        status: &str,
+        result_count: usize,
+    ) -> SearchDiscoveryDelivery {
+        SearchDiscoveryDelivery {
+            schema: "search_evidence.discovery.v1".to_owned(),
+            delivery_id: format!("anthropic-{tool_call_id}"),
+            discovery_channel: freehand_contracts::SearchDiscoveryChannel::HostedWebSearch,
+            domain_plan_ref: Some("domain-1".to_owned()),
+            hosted_search_attempt: Some(freehand_contracts::SearchHostedAttempt {
+                tool_call_id: Some(tool_call_id.to_owned()),
+                status: Some(status.to_owned()),
+                result_count: Some(result_count),
+                query: query.to_owned(),
+                provider: "anthropic_messages".to_owned(),
+            }),
+            candidates: Vec::new(),
+        }
+    }
+
+    #[test]
+    fn hosted_search_display_maps_completed_status_to_success() {
+        let display =
+            project_hosted_search_display(&hosted_delivery("shenzhen", "srv-1", "completed", 10));
+        assert_eq!(display.kind, ToolDisplayKind::Search);
+        assert_eq!(display.action, "Web search");
+        assert_eq!(display.target.as_deref(), Some("shenzhen"));
+        assert_eq!(display.outcome, ToolDisplayOutcome::Success);
+        assert_eq!(display.result_summary.as_deref(), Some("10 result items"));
+    }
+
+    #[test]
+    fn hosted_search_display_maps_failed_status_to_failed_even_with_results() {
+        let display =
+            project_hosted_search_display(&hosted_delivery("shenzhen", "srv-1", "failed", 0));
+        assert_eq!(display.outcome, ToolDisplayOutcome::Failed);
+        assert_eq!(display.result_summary.as_deref(), Some("search failed"));
+    }
+
+    #[test]
+    fn hosted_search_display_in_progress_status_with_candidates_stays_waiting_not_success() {
+        let display =
+            project_hosted_search_display(&hosted_delivery("shenzhen", "srv-1", "in_progress", 5));
+        assert_eq!(display.outcome, ToolDisplayOutcome::Waiting);
+        assert!(display.result_summary.is_none());
+    }
+
+    #[test]
+    fn hosted_search_display_unknown_status_without_results_stays_waiting() {
+        let display =
+            project_hosted_search_display(&hosted_delivery("shenzhen", "srv-1", "unknown", 0));
+        assert_eq!(display.outcome, ToolDisplayOutcome::Waiting);
+        assert!(display.result_summary.is_none());
+    }
+
     #[test]
     fn pwd_shell_projection_hides_raw_command_argument() {
         let display = project_tool_call_display("bash", &[arg("command", json!("pwd"))]);
@@ -908,6 +1039,7 @@ mod tests {
             tool_call_id: ToolCallId::new("tool-1"),
             status: ToolResultStatus::Failed,
             output: "cannot read".to_owned(),
+            search_evidence: None,
         };
         let updated = project_tool_result_display(display, &result);
 

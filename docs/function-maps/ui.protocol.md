@@ -12,6 +12,7 @@
   - `task.project_to_ui`
   - `input_attachment.validate_submit_metadata`
   - `debug_trace.read_snapshot`
+  - `search_evidence.project_to_ui`
 - owner entry symbols:
   - `UiTurnProjection`
   - `TurnProjectionInput`
@@ -30,6 +31,8 @@
   - `subscription_selector`
   - `subscription_matches`
   - `debug_projection_from_event`
+  - `merge_hosted_search_activities`
+  - `UiProtocolState::apply_search_evidence`
 
 ## Resource Map Binding
 
@@ -42,10 +45,12 @@
   - `session`
   - `node_pairing`
   - `debug_trace`
+  - `search_evidence`
 - resource operations:
   - `task.project_to_ui`
   - `input_attachment.validate_submit_metadata`
   - `debug_trace.read_snapshot`
+  - `search_evidence.project_to_ui`
 - forbidden shortcuts:
   - UI projection must not mutate task truth directly.
   - UI projection must not synthesize persisted sessions from temporary subagent turns.
@@ -140,6 +145,8 @@
 - subscriptions may target latest active turn, specific turn, specific turn debug state, or node/progress streams
 
 ## Response Mainline
+
+- `UiTurnProjection.search_evidence` projects typed persisted search evidence; UI protocol does not parse provider observations or camo stdout
 
 - query returns snapshots
 - checkpoint query returns read-only checkpoint summary projections supplied by runtime owner code
@@ -367,6 +374,7 @@
 | 11b | `project_tool_call_display` / `project_tool_result_display` | `crates/freehand-blocks/src/tool_display.rs` | attach structured tool display projection before UI consumption | tool call/result contracts | `ToolDisplayProjection` | ui.protocol | tool.display owner | bound |
 | 11a | `UiProtocolState::apply_model_request_waiting` / `apply_model_request_waiting_kind` | `crates/freehand-ui-protocol/src/lib.rs` | project provider-request-sent and continuation lifecycle state before model response arrives | runtime provider request built or continuation signal | queryable/subscribable turn projection with typed model request waiting kind | runtime debug bridge | protocol state | bound |
 | 11c | `UiProtocolState::apply_completion_schema_retry_waiting` | `crates/freehand-ui-protocol/src/lib.rs` | project completion-schema mismatch as user-visible model polishing wait state | schema mismatch retry count + issue summary | queryable/subscribable turn projection with `kind=SchemaRetry` and compact `schema polishing #N: issue` detail | runtime bridge | protocol state | bound |
+| 11d | `UiProtocolState::apply_search_evidence` / `merge_hosted_search_activities` | `crates/freehand-ui-protocol/src/lib.rs` / `crates/freehand-ui-protocol/src/projection.rs` | store typed persisted search evidence projection and merge hosted search tool activities into the turn projection | `SearchEvidenceTurnDelivery` | updated turn projection with `search_evidence` and `web_search` tool activities | runtime/reason bridge | protocol state / projector | bound |
 | 12 | `turn_projection_for_client` | `crates/freehand-ui-protocol/src/lib.rs` | gate client-specific slave substream visibility | turn projection + client kind | client-specific turn projection | CLI/WebUI adapter | projector | bound |
 | 13 | `UiProtocolState::set_debug_state` | `crates/freehand-ui-protocol/src/lib.rs` | store per-turn read-only debug projection for UI consumption and publish subscription updates | `freehand-debug` snapshot | queryable/subscribable debug state | reason/node/debug bridge | protocol state | bound |
 | 14 | `UiProtocolState::apply_debug_event` | `crates/freehand-ui-protocol/src/lib.rs` | ingest one observation-only debug event into UI protocol state when a snapshot is present | `freehand-debug` event | updated per-turn debug state or ignored event | reason/node/debug bridge | protocol state | bound |

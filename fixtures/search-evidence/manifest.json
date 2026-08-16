@@ -1,0 +1,40 @@
+{
+  "schema_version": 1,
+  "corpus_id": "freehand.search-evidence-schema-conformance.v1",
+  "fixtures": [
+    {"id":"domain.valid.news","path":"valid/domain-plan-news.json","operation":"parse","verdict":"accept","rules":["search.domain_plan.schema","search.domain_plan.news.weibo_first"]},
+    {"id":"discovery.valid.hosted","path":"valid/discovery-hosted.json","operation":"parse","verdict":"accept","rules":["search.discovery.hosted.attempt","search.discovery.original_url"]},
+    {"id":"discovery.valid.hosted_no_url","path":"valid/discovery-hosted-no-url.json","operation":"parse","verdict":"accept","rules":["search.discovery.missing_url.unusable"]},
+    {"id":"verification.valid.camo","path":"valid/verification-camo.json","operation":"parse","verdict":"accept","rules":["search.verification.camo_only","search.verification.evidence"]},
+    {"id":"supplement.valid.none","path":"valid/supplement-none.json","operation":"parse","verdict":"accept","rules":["search.supplement.not_required.empty"]},
+    {"id":"supplement.valid.required_weibo","path":"valid/supplement-required-weibo.json","operation":"parse","verdict":"accept","rules":["search.supplement.news.weibo_first"]},
+    {"id":"final.valid.complete","path":"valid/final-complete.json","operation":"build_final","context":"complete_one_verified","verdict":"accept","rules":["search.final.complete.source_binding"]},
+    {"id":"final.valid.blocked","path":"valid/final-blocked.json","operation":"build_final","context":"blocked_no_source","verdict":"accept","rules":["search.final.blocked.explicit"]},
+    {"id":"turn.valid.success","path":"valid/turn-success.json","operation":"validate_turn","verdict":"accept","rules":["search.turn.success.summary_ready"]},
+
+    {"id":"domain.invalid.unknown_field","path":"invalid/domain-plan-unknown-field.json","operation":"parse","verdict":"reject","rules":["search.schema.unknown_field"],"expected_error_category":"decode","expected_field_path":"retry_control"},
+    {"id":"domain.invalid.missing_policy_version","path":"invalid/domain-plan-missing-policy-version.json","operation":"parse","verdict":"reject","rules":["search.schema.required_field"],"expected_error_category":"decode","expected_field_path":"policy_version"},
+    {"id":"domain.invalid.news_priority","path":"invalid/domain-plan-news-wrong-priority.json","operation":"parse","verdict":"reject","rules":["search.domain_plan.news.weibo_first"],"expected_error_category":"validation","expected_field_path":"social_platform_priority"},
+    {"id":"domain.invalid.tutorial_priority","path":"invalid/domain-plan-tutorial-wrong-priority.json","operation":"parse","verdict":"reject","rules":["search.domain_plan.tutorial.xhs_first"],"expected_error_category":"validation","expected_field_path":"social_platform_priority"},
+    {"id":"delivery.invalid.malformed_json","path":"invalid/malformed-json.txt","operation":"parse","verdict":"reject","rules":["search.schema.json_syntax"],"expected_error_category":"json_syntax","expected_field_path":"freehand_search_delivery"},
+    {"id":"delivery.invalid.schema_version","path":"invalid/wrong-schema-version.json","operation":"parse","verdict":"reject","rules":["search.schema.version"],"expected_error_category":"decode","expected_field_path":"schema"},
+    {"id":"discovery.invalid.nested_url_type","path":"invalid/discovery-nested-url-type.json","operation":"parse","verdict":"reject","rules":["search.discovery.original_url.type"],"expected_error_category":"decode","expected_field_path":"candidates[0].original_url"},
+    {"id":"discovery.invalid.usable_missing_url","path":"invalid/discovery-usable-missing-url.json","operation":"parse","verdict":"reject","rules":["search.discovery.original_url.required"],"expected_error_category":"validation","expected_field_path":"candidates.original_url"},
+    {"id":"discovery.invalid.nested_unknown_field","path":"invalid/discovery-nested-unknown-field.json","operation":"parse","verdict":"reject","rules":["search.schema.nested_unknown_field"],"expected_error_category":"decode","expected_field_path":"candidates[0].routing_retry"},
+    {"id":"verification.invalid.non_camo","path":"invalid/verification-non-camo.json","operation":"parse","verdict":"reject","rules":["search.verification.camo_only"],"expected_error_category":"validation","expected_field_path":"verified_by"},
+    {"id":"verification.invalid.empty_evidence","path":"invalid/verification-empty-evidence.json","operation":"parse","verdict":"reject","rules":["search.verification.evidence.required"],"expected_error_category":"validation","expected_field_path":"evidence_excerpt"},
+    {"id":"verification.invalid.no_attempt","path":"invalid/verification-no-attempt.json","operation":"parse","verdict":"reject","rules":["search.verification.access_attempt.required"],"expected_error_category":"validation","expected_field_path":"access_attempts"},
+    {"id":"final.invalid.unknown_source","path":"invalid/final-complete-unknown-source.json","operation":"build_final","context":"complete_one_verified","verdict":"reject","rules":["search.final.source.known_verified"],"expected_error_category":"source_reference","expected_field_path":"claims.source_ids"},
+    {"id":"final.invalid.insufficient_sources","path":"invalid/final-complete-insufficient-sources.json","operation":"build_final","context":"complete_minimum_two","verdict":"reject","rules":["search.final.minimum_verified_sources"],"expected_error_category":"validation","expected_field_path":"verified_sources"},
+    {"id":"final.invalid.conflicted_source","path":"invalid/final-complete-conflicted-source.json","operation":"build_final","context":"complete_one_verified","verdict":"reject","rules":["search.final.conflicted_source"],"expected_error_category":"source_reference","expected_field_path":"claims.source_ids"},
+    {"id":"turn.invalid.success_without_summary","path":"invalid/turn-success-without-summary.json","operation":"validate_turn","verdict":"reject","rules":["search.turn.success.summary_ready"],"expected_error_category":"validation","expected_field_path":"summary_ready/status/summary"},
+
+    {"id":"stage.invalid.domain_receives_final","path":"valid/final-blocked.json","operation":"model_stage","stage":"domain_plan","verdict":"reject","rules":["search.stage.domain_plan.only"],"expected_error_category":"stage_mismatch","expected_field_path":"delivery_type"}
+  ],
+  "scenarios": [
+    "scenarios/openai-news.json",
+    "scenarios/openai-tutorial.json",
+    "scenarios/anthropic-news.json",
+    "scenarios/anthropic-technical.json"
+  ]
+}

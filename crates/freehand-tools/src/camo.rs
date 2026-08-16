@@ -12,6 +12,12 @@
 //! - `doctor` runs environment sanity checks; no `status`/`sessions`/`instances`
 //!   system commands in 0.4.2 (daemon status via `camo daemon status`).
 
+use freehand_contracts::{
+    SearchAccessAttempt, SearchAccessStatus, SearchCandidateStatus, SearchDiscoveryCandidate,
+    SearchDiscoveryChannel, SearchDiscoveryDelivery, SearchEvidenceDelivery, SearchEvidenceError,
+    SearchSocialPlatform, SearchVerificationDelivery,
+};
+use serde::Deserialize;
 use serde_json::Value;
 use std::io::Read;
 use std::process::{Command, Stdio};
@@ -22,6 +28,105 @@ use crate::{ToolArgument, ToolExecutionOutput, ToolRegistryError};
 
 const CAMO_DEFAULT_TIMEOUT_SECONDS: u64 = 90;
 const CAMO_POLL_INTERVAL_MS: u64 = 100;
+const CAMO_SEARCH_ENVELOPE_MARKER: &str = "{\n  \"kind\": \"result\",\n  \"cmd\": \"search\"";
+const CAMO_VERIFICATION_READABLE_LIMIT: i64 = 20_000;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum CamoSearchDeliveryKind {
+    SocialDiscovery,
+    UrlVerification,
+}
+
+impl CamoSearchDeliveryKind {
+    fn from_arguments(arguments: &[ToolArgument]) -> Result<Option<Self>, ToolRegistryError> {
+        let Some(value) = argument_string(arguments, "delivery_kind") else {
+            return Ok(None);
+        };
+        match value {
+            "social_discovery" => Ok(Some(Self::SocialDiscovery)),
+            "url_verification" => Ok(Some(Self::UrlVerification)),
+            other => Err(invalid_camo_arguments(format!(
+                "unsupported `delivery_kind` `{other}`; expected `social_discovery` or `url_verification`"
+            ))),
+        }
+    }
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct CamoSearchEnvelope {
+    kind: String,
+    cmd: String,
+    result: CamoSearchResult,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+struct CamoSearchResult {
+    cmd: String,
+    searched: bool,
+    platform: String,
+    query: String,
+    success: bool,
+    total_count: usize,
+    #[serde(rename = "pageURL")]
+    page_url: String,
+    results: Vec<CamoSearchItem>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct CamoSearchItem {
+    title: String,
+    url: String,
+    author: String,
+    timestamp: String,
+    likes: u64,
+    platform: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+struct CamoFetchPageEnvelope {
+    cmd: String,
+    profile: String,
+    url: String,
+    ok: bool,
+    status: Option<u16>,
+    body_length: usize,
+    issued_at: String,
+    trace_id: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+struct CamoPageInfoEnvelope {
+    cmd: String,
+    profile: String,
+    info: CamoPageInfo,
+    issued_at: String,
+    trace_id: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct CamoPageInfo {
+    cmd: String,
+    ok: bool,
+    url: String,
+    title: String,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields, rename_all = "camelCase")]
+struct CamoReadableEnvelope {
+    cmd: String,
+    profile: String,
+    text: String,
+    length: usize,
+    issued_at: String,
+    trace_id: String,
+}
 
 // ---------------------------------------------------------------------------
 // Command model — each variant corresponds to one camo 0.4.2 subcommand tree
@@ -435,6 +540,13 @@ pub fn build_camo_argv(
 pub fn execute_camo_impl(
     arguments: &[ToolArgument],
 ) -> Result<ToolExecutionOutput, ToolRegistryError> {
+    if let Some(delivery_kind) = CamoSearchDeliveryKind::from_arguments(arguments)? {
+        return match delivery_kind {
+            CamoSearchDeliveryKind::SocialDiscovery => execute_camo_social_discovery(arguments),
+            CamoSearchDeliveryKind::UrlVerification => execute_camo_url_verification(arguments),
+        };
+    }
+
     // Parse command
     let command = arguments
         .iter()
@@ -542,7 +654,534 @@ pub fn execute_camo_impl(
 
     Ok(ToolExecutionOutput {
         text: stdout.to_string(),
+        search_evidence: None,
     })
+}
+
+fn execute_camo_social_discovery(
+    arguments: &[ToolArgument],
+) -> Result<ToolExecutionOutput, ToolRegistryError> {
+    let command = required_camo_string(arguments, "command")?;
+    if command != "search" {
+        return Err(invalid_camo_arguments(
+            "`delivery_kind=social_discovery` requires `command=search`",
+        ));
+    }
+    let platform = required_camo_string(arguments, "platform")?;
+    if platform != "xhs" {
+        return Err(invalid_camo_arguments(format!(
+            "camo social platform `{platform}` is unsupported by the installed CLI; only `xhs` is currently declared"
+        )));
+    }
+    let query = required_camo_string(arguments, "query")?;
+    let domain_plan_ref = required_camo_string(arguments, "domain_plan_ref")?;
+    let delivery_id = required_camo_string(arguments, "delivery_id")?;
+    let profile = argument_string(arguments, "profile").unwrap_or("default");
+    let stdout = execute_camo_command(
+        CamoOp::Search,
+        Some(profile),
+        arguments,
+        CAMO_DEFAULT_TIMEOUT_SECONDS,
+    )?;
+    let envelope = parse_camo_search_envelope(&stdout)?;
+    if envelope.kind != "result"
+        || envelope.cmd != "search"
+        || envelope.result.cmd != "search"
+        || !envelope.result.searched
+        || !envelope.result.success
+    {
+        return Err(ToolRegistryError::ExecutionFailed {
+            tool: "camo".to_owned(),
+            message: "camo search did not return a successful typed result envelope".to_owned(),
+        });
+    }
+    if envelope.result.platform != platform || envelope.result.query != query {
+        return Err(ToolRegistryError::ExecutionFailed {
+            tool: "camo".to_owned(),
+            message: "camo search result does not match the requested platform/query".to_owned(),
+        });
+    }
+    if envelope.result.total_count != envelope.result.results.len() {
+        return Err(ToolRegistryError::ExecutionFailed {
+            tool: "camo".to_owned(),
+            message: "camo search result count does not match its result list".to_owned(),
+        });
+    }
+    if envelope.result.results.is_empty() {
+        return Err(ToolRegistryError::ExecutionFailed {
+            tool: "camo".to_owned(),
+            message: "camo search returned no social candidates".to_owned(),
+        });
+    }
+    let candidates = envelope
+        .result
+        .results
+        .into_iter()
+        .enumerate()
+        .map(|(index, item)| {
+            if item.platform != "xhs" {
+                return Err(ToolRegistryError::ExecutionFailed {
+                    tool: "camo".to_owned(),
+                    message: format!(
+                        "camo search result {} reported unexpected platform `{}`",
+                        index + 1,
+                        item.platform
+                    ),
+                });
+            }
+            let usable = is_http_url(&item.url);
+            let snippet = [item.author, item.timestamp, format!("likes={}", item.likes)]
+                .into_iter()
+                .filter(|value| !value.trim().is_empty())
+                .collect::<Vec<_>>()
+                .join(" | ");
+            Ok(SearchDiscoveryCandidate {
+                candidate_id: format!("{delivery_id}-candidate-{}", index + 1),
+                status: if usable {
+                    SearchCandidateStatus::Usable
+                } else {
+                    SearchCandidateStatus::UnusableOther
+                },
+                original_url: usable.then_some(item.url),
+                title: item.title,
+                snippet,
+                discovered_by: Some(SearchDiscoveryChannel::CamoSocialSearch),
+                platform: Some(SearchSocialPlatform::Xhs),
+                source_weight: None,
+                reason: (!usable).then_some("camo_search_returned_non_http_url".to_owned()),
+            })
+        })
+        .collect::<Result<Vec<_>, _>>()?;
+    let delivery = SearchDiscoveryDelivery {
+        schema: "search_evidence.discovery.v1".to_owned(),
+        delivery_id: delivery_id.to_owned(),
+        discovery_channel: SearchDiscoveryChannel::CamoSocialSearch,
+        domain_plan_ref: Some(domain_plan_ref.to_owned()),
+        hosted_search_attempt: None,
+        candidates,
+    };
+
+    Ok(ToolExecutionOutput {
+        text: format!(
+            "camo social discovery completed platform=xhs candidates={} page_url={}",
+            delivery.candidates.len(),
+            envelope.result.page_url
+        ),
+        search_evidence: Some(SearchEvidenceDelivery::Discovery(delivery)),
+    })
+}
+
+fn execute_camo_url_verification(
+    arguments: &[ToolArgument],
+) -> Result<ToolExecutionOutput, ToolRegistryError> {
+    let command = required_camo_string(arguments, "command")?;
+    if command != "fetch-page" {
+        return Err(invalid_camo_arguments(
+            "`delivery_kind=url_verification` requires `command=fetch-page`",
+        ));
+    }
+    let source_id = required_camo_string(arguments, "source_id")?;
+    let delivery_id = required_camo_string(arguments, "delivery_id")?;
+    let original_url = required_camo_string(arguments, "url")?;
+    if !is_http_url(original_url) {
+        return Err(invalid_camo_arguments("`url` must be HTTP or HTTPS"));
+    }
+    let profile = argument_string(arguments, "profile").unwrap_or("default");
+    let fetch_stdout = execute_camo_command(
+        CamoOp::FetchPage,
+        Some(profile),
+        arguments,
+        CAMO_DEFAULT_TIMEOUT_SECONDS,
+    )?;
+    let fetch: CamoFetchPageEnvelope = parse_camo_json(&fetch_stdout, "fetch-page")?;
+    validate_fetch_page_identity(&fetch, profile, original_url)?;
+    if !fetch.ok {
+        let status = fetch
+            .status
+            .map(|code| format!("http_{code}"))
+            .unwrap_or_else(|| "fetch_page_failed".to_owned());
+        return Ok(camo_verification_failure_output(
+            delivery_id,
+            source_id,
+            original_url,
+            profile,
+            fetch.issued_at,
+            SearchAccessStatus::HttpError,
+            status,
+            "camo could not access the requested page".to_owned(),
+        ));
+    }
+
+    let page_info_stdout = match execute_camo_command(
+        CamoOp::GetPageInfo,
+        Some(profile),
+        &[],
+        CAMO_DEFAULT_TIMEOUT_SECONDS,
+    ) {
+        Ok(stdout) => stdout,
+        Err(_) => {
+            return Ok(camo_verification_failure_output(
+                delivery_id,
+                source_id,
+                original_url,
+                profile,
+                fetch.issued_at,
+                SearchAccessStatus::Blocked,
+                "page_info_failed".to_owned(),
+                "camo could not inspect the accessed page".to_owned(),
+            ));
+        }
+    };
+    let page_info: CamoPageInfoEnvelope = match parse_camo_json(&page_info_stdout, "get-page-info")
+    {
+        Ok(envelope) => envelope,
+        Err(_) => {
+            return Ok(camo_verification_failure_output(
+                delivery_id,
+                source_id,
+                original_url,
+                profile,
+                fetch.issued_at,
+                SearchAccessStatus::Blocked,
+                "page_info_invalid".to_owned(),
+                "camo returned invalid page information".to_owned(),
+            ));
+        }
+    };
+    if validate_page_info_envelope(&page_info, profile).is_err() {
+        return Ok(camo_verification_failure_output(
+            delivery_id,
+            source_id,
+            original_url,
+            profile,
+            fetch.issued_at,
+            SearchAccessStatus::Blocked,
+            "page_info_unusable".to_owned(),
+            "camo page information did not prove a usable page".to_owned(),
+        ));
+    }
+
+    let readable_arguments = [ToolArgument {
+        name: "maxLength".to_owned(),
+        value: Value::from(CAMO_VERIFICATION_READABLE_LIMIT),
+    }];
+    let readable_stdout = match execute_camo_command(
+        CamoOp::GetReadable,
+        Some(profile),
+        &readable_arguments,
+        CAMO_DEFAULT_TIMEOUT_SECONDS,
+    ) {
+        Ok(stdout) => stdout,
+        Err(_) => {
+            return Ok(camo_verification_failure_output(
+                delivery_id,
+                source_id,
+                original_url,
+                profile,
+                fetch.issued_at,
+                SearchAccessStatus::Blocked,
+                "readable_failed".to_owned(),
+                "camo could not extract readable page evidence".to_owned(),
+            ));
+        }
+    };
+    let readable: CamoReadableEnvelope = match parse_camo_json(&readable_stdout, "get-readable") {
+        Ok(envelope) => envelope,
+        Err(_) => {
+            return Ok(camo_verification_failure_output(
+                delivery_id,
+                source_id,
+                original_url,
+                profile,
+                fetch.issued_at,
+                SearchAccessStatus::Blocked,
+                "readable_invalid".to_owned(),
+                "camo returned an invalid readable evidence envelope".to_owned(),
+            ));
+        }
+    };
+    if validate_readable_envelope(&readable, profile).is_err() {
+        return Ok(camo_verification_failure_output(
+            delivery_id,
+            source_id,
+            original_url,
+            profile,
+            readable.issued_at,
+            SearchAccessStatus::Blocked,
+            "evidence_empty".to_owned(),
+            "camo page contained no readable evidence".to_owned(),
+        ));
+    }
+
+    let accessed_at = readable.issued_at.clone();
+    let delivery = SearchVerificationDelivery {
+        schema: "search_evidence.verification.v1".to_owned(),
+        delivery_id: delivery_id.to_owned(),
+        source_id: source_id.to_owned(),
+        original_url: original_url.to_owned(),
+        camo_profile: profile.to_owned(),
+        accessed_at: accessed_at.clone(),
+        access_status: SearchAccessStatus::Verified,
+        page_title: Some(page_info.info.title),
+        evidence_excerpt: Some(readable.text),
+        verified_by: Some("camo".to_owned()),
+        access_attempts: vec![SearchAccessAttempt {
+            attempt_id: fetch.trace_id,
+            channel: "camo".to_owned(),
+            status: SearchAccessStatus::Verified,
+            accessed_at,
+            error: None,
+        }],
+        error: None,
+    };
+
+    Ok(ToolExecutionOutput {
+        text: format!("camo verified source_id={source_id} url={original_url}"),
+        search_evidence: Some(SearchEvidenceDelivery::Verification(delivery)),
+    })
+}
+
+#[allow(clippy::too_many_arguments)]
+fn camo_verification_failure_output(
+    delivery_id: &str,
+    source_id: &str,
+    original_url: &str,
+    profile: &str,
+    accessed_at: String,
+    status: SearchAccessStatus,
+    code: String,
+    message: String,
+) -> ToolExecutionOutput {
+    let error = SearchEvidenceError { code, message };
+    let delivery = SearchVerificationDelivery {
+        schema: "search_evidence.verification.v1".to_owned(),
+        delivery_id: delivery_id.to_owned(),
+        source_id: source_id.to_owned(),
+        original_url: original_url.to_owned(),
+        camo_profile: profile.to_owned(),
+        accessed_at: accessed_at.clone(),
+        access_status: status,
+        page_title: None,
+        evidence_excerpt: None,
+        verified_by: None,
+        access_attempts: vec![SearchAccessAttempt {
+            attempt_id: format!("{delivery_id}-attempt-1"),
+            channel: "camo".to_owned(),
+            status,
+            accessed_at,
+            error: Some(error.clone()),
+        }],
+        error: Some(error),
+    };
+    ToolExecutionOutput {
+        text: format!("camo could not verify source_id={source_id} url={original_url}"),
+        search_evidence: Some(SearchEvidenceDelivery::Verification(delivery)),
+    }
+}
+
+fn execute_camo_command(
+    op: CamoOp,
+    profile: Option<&str>,
+    arguments: &[ToolArgument],
+    default_timeout_seconds: u64,
+) -> Result<String, ToolRegistryError> {
+    let args = arguments
+        .iter()
+        .map(|argument| (argument.name.as_str(), &argument.value))
+        .collect::<Vec<_>>();
+    let argv = build_camo_argv(op, profile, &args)?;
+    let timeout_seconds = arguments
+        .iter()
+        .find(|argument| argument.name == "timeout_seconds")
+        .and_then(|argument| argument.value.as_u64())
+        .filter(|seconds| *seconds > 0)
+        .unwrap_or(default_timeout_seconds);
+    let output = run_camo_process(&argv, timeout_seconds)?;
+    String::from_utf8(output).map_err(|error| ToolRegistryError::ExecutionFailed {
+        tool: "camo".to_owned(),
+        message: format!("camo stdout is not valid UTF-8: {error}"),
+    })
+}
+
+fn run_camo_process(argv: &[String], timeout_seconds: u64) -> Result<Vec<u8>, ToolRegistryError> {
+    let mut command = Command::new(&argv[0]);
+    command
+        .args(&argv[1..])
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
+    let mut child = command
+        .spawn()
+        .map_err(|error| ToolRegistryError::ExecutionFailed {
+            tool: "camo".to_owned(),
+            message: format!("cannot run `{}`: {error}", argv.join(" ")),
+        })?;
+    let deadline = Instant::now() + Duration::from_secs(timeout_seconds);
+    let status = loop {
+        match child.try_wait() {
+            Ok(Some(status)) => break status,
+            Ok(None) if Instant::now() < deadline => {
+                sleep(Duration::from_millis(CAMO_POLL_INTERVAL_MS));
+            }
+            Ok(None) => {
+                child
+                    .kill()
+                    .map_err(|error| ToolRegistryError::ExecutionFailed {
+                        tool: "camo".to_owned(),
+                        message: format!("cannot stop timed-out camo process: {error}"),
+                    })?;
+                child
+                    .wait()
+                    .map_err(|error| ToolRegistryError::ExecutionFailed {
+                        tool: "camo".to_owned(),
+                        message: format!("cannot reap timed-out camo process: {error}"),
+                    })?;
+                return Err(ToolRegistryError::ExecutionFailed {
+                    tool: "camo".to_owned(),
+                    message: format!(
+                        "camo `{}` exceeded {}s execution timeout",
+                        argv.join(" "),
+                        timeout_seconds
+                    ),
+                });
+            }
+            Err(error) => {
+                return Err(ToolRegistryError::ExecutionFailed {
+                    tool: "camo".to_owned(),
+                    message: format!("cannot wait on `{}`: {error}", argv.join(" ")),
+                });
+            }
+        }
+    };
+    let mut stdout = Vec::new();
+    if let Some(mut pipe) = child.stdout.take() {
+        pipe.read_to_end(&mut stdout)
+            .map_err(|error| ToolRegistryError::ExecutionFailed {
+                tool: "camo".to_owned(),
+                message: format!("cannot read camo stdout: {error}"),
+            })?;
+    }
+    let mut stderr = Vec::new();
+    if let Some(mut pipe) = child.stderr.take() {
+        pipe.read_to_end(&mut stderr)
+            .map_err(|error| ToolRegistryError::ExecutionFailed {
+                tool: "camo".to_owned(),
+                message: format!("cannot read camo stderr: {error}"),
+            })?;
+    }
+    if !status.success() {
+        return Err(ToolRegistryError::ExecutionFailed {
+            tool: "camo".to_owned(),
+            message: format!(
+                "camo exited with {status}; stdout: {}; stderr: {}",
+                String::from_utf8_lossy(&stdout),
+                String::from_utf8_lossy(&stderr)
+            ),
+        });
+    }
+    Ok(stdout)
+}
+
+fn parse_camo_search_envelope(stdout: &str) -> Result<CamoSearchEnvelope, ToolRegistryError> {
+    let start = stdout.find(CAMO_SEARCH_ENVELOPE_MARKER).ok_or_else(|| {
+        ToolRegistryError::ExecutionFailed {
+            tool: "camo".to_owned(),
+            message: "camo search stdout is missing its typed JSON result envelope".to_owned(),
+        }
+    })?;
+    parse_camo_json(&stdout[start..], "search")
+}
+
+fn parse_camo_json<T: for<'de> Deserialize<'de>>(
+    stdout: &str,
+    command: &str,
+) -> Result<T, ToolRegistryError> {
+    serde_json::from_str(stdout.trim()).map_err(|error| ToolRegistryError::ExecutionFailed {
+        tool: "camo".to_owned(),
+        message: format!("camo `{command}` returned an invalid typed JSON envelope: {error}"),
+    })
+}
+
+fn validate_fetch_page_identity(
+    envelope: &CamoFetchPageEnvelope,
+    profile: &str,
+    original_url: &str,
+) -> Result<(), ToolRegistryError> {
+    if envelope.cmd != "fetch-page" || envelope.profile != profile || envelope.url != original_url {
+        return Err(ToolRegistryError::ExecutionFailed {
+            tool: "camo".to_owned(),
+            message: "camo fetch-page result does not match the requested profile and URL"
+                .to_owned(),
+        });
+    }
+    let _ = envelope.body_length;
+    Ok(())
+}
+
+fn validate_page_info_envelope(
+    envelope: &CamoPageInfoEnvelope,
+    profile: &str,
+) -> Result<(), ToolRegistryError> {
+    if envelope.cmd != "get-page-info"
+        || envelope.profile != profile
+        || envelope.info.cmd != "get-page-info"
+        || !envelope.info.ok
+        || envelope.info.title.trim().is_empty()
+        || !is_http_url(&envelope.info.url)
+    {
+        return Err(ToolRegistryError::ExecutionFailed {
+            tool: "camo".to_owned(),
+            message: "camo get-page-info result does not match the accessed URL or has no title"
+                .to_owned(),
+        });
+    }
+    let _ = (&envelope.issued_at, &envelope.trace_id);
+    Ok(())
+}
+
+fn validate_readable_envelope(
+    envelope: &CamoReadableEnvelope,
+    profile: &str,
+) -> Result<(), ToolRegistryError> {
+    if envelope.cmd != "get-readable"
+        || envelope.profile != profile
+        || envelope.text.trim().is_empty()
+        || envelope.length == 0
+    {
+        return Err(ToolRegistryError::ExecutionFailed {
+            tool: "camo".to_owned(),
+            message: "camo get-readable result contains no usable page evidence".to_owned(),
+        });
+    }
+    let _ = &envelope.trace_id;
+    Ok(())
+}
+
+fn is_http_url(value: &str) -> bool {
+    value.starts_with("https://") || value.starts_with("http://")
+}
+
+fn argument_string<'a>(arguments: &'a [ToolArgument], name: &str) -> Option<&'a str> {
+    arguments
+        .iter()
+        .find(|argument| argument.name == name)
+        .and_then(|argument| argument.value.as_str())
+        .filter(|value| !value.trim().is_empty())
+}
+
+fn required_camo_string<'a>(
+    arguments: &'a [ToolArgument],
+    name: &str,
+) -> Result<&'a str, ToolRegistryError> {
+    argument_string(arguments, name).ok_or_else(|| {
+        invalid_camo_arguments(format!("camo typed delivery requires non-empty `{name}`"))
+    })
+}
+
+fn invalid_camo_arguments(message: impl Into<String>) -> ToolRegistryError {
+    ToolRegistryError::InvalidArguments {
+        tool: "camo".to_owned(),
+        message: message.into(),
+    }
 }
 
 // ---------------------------------------------------------------------------
@@ -571,6 +1210,129 @@ mod tests {
     ) -> Result<Vec<String>, ToolRegistryError> {
         let args_ref: Vec<(&str, &Value)> = args.iter().map(|(k, v)| (*k, v)).collect();
         build_camo_argv(op, profile, &args_ref)
+    }
+
+    fn tool_arguments(values: &[(&str, Value)]) -> Vec<ToolArgument> {
+        values
+            .iter()
+            .map(|(name, value)| ToolArgument {
+                name: (*name).to_owned(),
+                value: value.clone(),
+            })
+            .collect()
+    }
+
+    #[test]
+    fn parses_successful_xhs_search_into_typed_social_discovery() {
+        let stdout = r#"[BrowserInstance] Login status: LOGGED_IN
+{
+  "kind": "result",
+  "cmd": "search",
+  "result": {
+    "cmd": "search",
+    "searched": true,
+    "platform": "xhs",
+    "query": "OpenAI",
+    "success": true,
+    "totalCount": 1,
+    "pageURL": "https://www.xiaohongshu.com/search_result?keyword=OpenAI",
+    "results": [{
+      "title": "OpenAI update",
+      "url": "https://www.xiaohongshu.com/search_result/abc",
+      "author": "author",
+      "timestamp": "today",
+      "likes": 3,
+      "platform": "xhs"
+    }]
+  }
+}"#;
+        let envelope = parse_camo_search_envelope(stdout).expect("typed search envelope");
+        assert!(envelope.result.success);
+        assert_eq!(envelope.result.results[0].platform, "xhs");
+    }
+
+    #[test]
+    fn social_discovery_rejects_unsupported_platform_before_execution() {
+        let arguments = tool_arguments(&[
+            ("delivery_kind", val("social_discovery")),
+            ("delivery_id", val("social-1")),
+            ("domain_plan_ref", val("domain-1")),
+            ("command", val("search")),
+            ("platform", val("weibo")),
+            ("query", val("news")),
+        ]);
+
+        assert!(matches!(
+            execute_camo_impl(&arguments),
+            Err(ToolRegistryError::InvalidArguments { message, .. })
+                if message.contains("only `xhs`")
+        ));
+    }
+
+    #[test]
+    fn typed_delivery_rejects_wrong_command_without_running_camo() {
+        let arguments = tool_arguments(&[
+            ("delivery_kind", val("url_verification")),
+            ("delivery_id", val("verify-1")),
+            ("source_id", val("source-1")),
+            ("command", val("get-readable")),
+            ("url", val("https://example.com")),
+        ]);
+
+        assert!(matches!(
+            execute_camo_impl(&arguments),
+            Err(ToolRegistryError::InvalidArguments { message, .. })
+                if message.contains("requires `command=fetch-page`")
+        ));
+    }
+
+    #[test]
+    fn verified_delivery_requires_fetch_page_info_and_readable_envelopes() {
+        let fetch: CamoFetchPageEnvelope = parse_camo_json(
+            r#"{
+              "cmd":"fetch-page","profile":"default","url":"https://example.com",
+              "ok":true,"status":null,"bodyLength":0,
+              "issuedAt":"2026-08-15T10:25:27Z","traceId":"fetch-1"
+            }"#,
+            "fetch-page",
+        )
+        .expect("fetch envelope");
+        let page: CamoPageInfoEnvelope = parse_camo_json(
+            r#"{
+              "cmd":"get-page-info","profile":"default",
+              "info":{"cmd":"get-page-info","ok":true,"url":"https://example.com/","title":"Example Domain"},
+              "issuedAt":"2026-08-15T10:25:35Z","traceId":"page-1"
+            }"#,
+            "get-page-info",
+        )
+        .expect("page envelope");
+        let readable: CamoReadableEnvelope = parse_camo_json(
+            r#"{
+              "cmd":"get-readable","profile":"default","text":"verified evidence","length":17,
+              "issuedAt":"2026-08-15T10:25:42Z","traceId":"readable-1"
+            }"#,
+            "get-readable",
+        )
+        .expect("readable envelope");
+
+        validate_fetch_page_identity(&fetch, "default", "https://example.com")
+            .expect("fetch identity");
+        validate_page_info_envelope(&page, "default").expect("page info");
+        validate_readable_envelope(&readable, "default").expect("readable evidence");
+    }
+
+    #[test]
+    fn empty_readable_envelope_cannot_be_verified() {
+        let readable: CamoReadableEnvelope = parse_camo_json(
+            r#"{
+              "cmd":"get-readable","profile":"default","text":"","length":0,
+              "issuedAt":"2026-08-15T10:25:42Z","traceId":"readable-1"
+            }"#,
+            "get-readable",
+        )
+        .expect("readable envelope");
+
+        assert!(validate_readable_envelope(&readable, "default").is_err());
     }
 
     // ---- Core 0.4.2 named-profile / positional-url rules ----

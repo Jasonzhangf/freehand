@@ -1,0 +1,12 @@
+{
+  "scenario_id": "anthropic.technical",
+  "provider_family": "anthropic_messages",
+  "domain": "technical",
+  "prompt": "Investigate this technical question using authoritative sources, verify the relevant pages, and cite the evidence behind each conclusion.",
+  "repetitions": 5,
+  "cases": [
+    {"case_id":"one_shot_valid","stage":"final_delivery","response_paths":["valid/final-complete.json"],"expected":"accepted","expected_rejections":0},
+    {"case_id":"wrong_stage_then_valid","stage":"final_delivery","response_paths":["valid/domain-plan-news.json","valid/final-complete.json"],"expected":"accepted","expected_rejections":1},
+    {"case_id":"three_invalid_exhausted","stage":"final_delivery","response_paths":["valid/domain-plan-news.json","valid/domain-plan-news.json","valid/domain-plan-news.json"],"expected":"blocked","expected_rejections":3}
+  ]
+}

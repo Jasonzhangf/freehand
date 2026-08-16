@@ -10,6 +10,8 @@
   - `tool_call.execute_workspace_path`
   - `tool_call.execute_external_http`
   - `tool_call.project_registry_to_ui`
+  - `tool_call.discover_social_candidate`
+  - `tool_call.verify_search_url`
 - owner entry symbols:
   - `BuiltinToolRegistry::reasonix_aligned`
   - `BuiltinToolRegistry::definitions`
@@ -35,10 +37,13 @@
 - touched resources:
   - `checkpoint`
   - `ui_projection`
+  - `search_evidence`
 - resource operations:
   - `tool_call.execute_workspace_path`
   - `tool_call.execute_external_http`
   - `tool_call.project_registry_to_ui`
+  - `tool_call.discover_social_candidate`
+  - `tool_call.verify_search_url`
 - forbidden shortcuts:
   - Runtime command restore paths must not mutate workspace paths without checkpoint owner admission.
   - Master workspace tool surface must not expose a Worker task cwd as direct Master authority; Master local tools are locked to the current selected session cwd only.

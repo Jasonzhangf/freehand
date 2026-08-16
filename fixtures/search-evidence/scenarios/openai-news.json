@@ -1,0 +1,13 @@
+{
+  "scenario_id": "openai.news",
+  "provider_family": "openai_responses",
+  "domain": "news",
+  "prompt": "Find and verify current reporting about a product release, then provide a source-backed answer.",
+  "repetitions": 5,
+  "cases": [
+    {"case_id":"one_shot_valid","stage":"domain_plan","response_paths":["valid/domain-plan-news.json"],"expected":"accepted","expected_rejections":0},
+    {"case_id":"unknown_field_then_valid","stage":"domain_plan","response_paths":["invalid/domain-plan-unknown-field.json","valid/domain-plan-news.json"],"expected":"accepted","expected_rejections":1},
+    {"case_id":"wrong_stage_then_valid","stage":"domain_plan","response_paths":["valid/final-blocked.json","valid/domain-plan-news.json"],"expected":"accepted","expected_rejections":1},
+    {"case_id":"three_invalid_exhausted","stage":"domain_plan","response_paths":["invalid/domain-plan-unknown-field.json","invalid/domain-plan-missing-policy-version.json","invalid/domain-plan-news-wrong-priority.json"],"expected":"blocked","expected_rejections":3}
+  ]
+}

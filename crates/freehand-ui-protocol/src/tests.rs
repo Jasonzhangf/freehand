@@ -1,8 +1,11 @@
 use crate::*;
+use freehand_blocks::{ToolDisplayKind, ToolDisplayOutcome};
 use freehand_contracts::{
     AgentId, ErrorClass, ErrorContract, ErrorErr01RuntimeClassified, FeatureId,
     ReasonReq04ToolCall, ReasonReq05ToolResultReentry, ReasonResp01SemanticEvent,
-    ReasonResp02UsageEvent, ReasonResp03TerminalEvent, RecoveryPolicy, SemanticEventKind,
+    ReasonResp02UsageEvent, ReasonResp03TerminalEvent, RecoveryPolicy, SearchDiscoveryChannel,
+    SearchDiscoveryDelivery, SearchDomain, SearchDomainPlanDelivery, SearchEvidenceDelivery,
+    SearchEvidenceTurnStatus, SearchHostedAttempt, SearchSocialPlatform, SemanticEventKind,
     SessionId, TerminalStatus, TraceId, TurnId,
 };
 use freehand_debug::{DebugEvent, DebugHub, DebugStateSnapshot};
@@ -1534,6 +1537,7 @@ fn tool_activity_waits_until_matching_result_reentry() {
                 tool_call_id: freehand_contracts::ToolCallId::new("tool-1"),
                 status: freehand_contracts::ToolResultStatus::Success,
                 output: "result body rendered in public summary".to_owned(),
+                search_evidence: None,
             },
         }],
         usage_events: Vec::new(),
@@ -1730,6 +1734,7 @@ fn failed_tool_result_updates_same_activity_without_error_projection() {
                 tool_call_id: freehand_contracts::ToolCallId::new("tool-1"),
                 status: freehand_contracts::ToolResultStatus::Failed,
                 output: "failure body rendered in public summary".to_owned(),
+                search_evidence: None,
             },
         }],
         usage_events: Vec::new(),
@@ -1840,6 +1845,7 @@ fn session_latest_status_does_not_call_text_only_turn_streaming() {
         terminal_text: None,
         user_options: None,
         errors: Vec::new(),
+        search_evidence: None,
         slave_substream_card: false,
     };
 
@@ -1898,6 +1904,7 @@ fn duplicate_tool_call_projection_updates_one_activity_card() {
                 tool_call_id: freehand_contracts::ToolCallId::new("tool-1"),
                 status: freehand_contracts::ToolResultStatus::Success,
                 output: "private output".to_owned(),
+                search_evidence: None,
             },
         }],
         usage_events: Vec::new(),
@@ -3823,4 +3830,85 @@ fn adp_protocol_manifest_covers_all_command_variants() {
     .expect("ADP receipt response must serialize");
     assert!(!receipt_response_json.contains("target_owner_module"));
     assert!(!receipt_response_json.contains("crates/freehand-"));
+}
+
+fn hosted_search_evidence(attempt: SearchHostedAttempt) -> UiSearchEvidenceProjection {
+    UiSearchEvidenceProjection {
+        domain_plan: Some(SearchDomainPlanDelivery {
+            schema: "search_evidence.domain_plan.v1".to_owned(),
+            delivery_id: "domain-1".to_owned(),
+            domain: SearchDomain::News,
+            preferred_source_kinds: vec!["official_publication".to_owned()],
+            social_platform_priority: vec![SearchSocialPlatform::Web],
+            minimum_verified_sources: 1,
+            policy_version: "2026-08-15".to_owned(),
+        }),
+        deliveries: vec![SearchEvidenceDelivery::Discovery(SearchDiscoveryDelivery {
+            schema: "search_evidence.discovery.v1".to_owned(),
+            delivery_id: "anthropic-srv-1".to_owned(),
+            discovery_channel: SearchDiscoveryChannel::HostedWebSearch,
+            domain_plan_ref: Some("domain-1".to_owned()),
+            hosted_search_attempt: Some(attempt),
+            candidates: Vec::new(),
+        })],
+        verified_sources: Vec::new(),
+        unconfirmed: Vec::new(),
+        claims: Vec::new(),
+        status: SearchEvidenceTurnStatus::HostedDiscoveryValidated,
+        summary_ready: false,
+        summary: None,
+        blocked_reason: None,
+        terminal: None,
+    }
+}
+
+#[test]
+fn hosted_web_search_typed_discovery_projects_completed_tool_activity() {
+    let search_evidence = hosted_search_evidence(SearchHostedAttempt {
+        tool_call_id: Some("srv-1".to_owned()),
+        status: Some("completed".to_owned()),
+        result_count: Some(10),
+        query: "深圳近期天气预报 未来7天".to_owned(),
+        provider: "anthropic_messages".to_owned(),
+    });
+    let mut activities = Vec::new();
+    merge_hosted_search_activities(&mut activities, Some(&search_evidence));
+
+    assert_eq!(activities.len(), 1);
+    let activity = &activities[0];
+    assert_eq!(activity.tool_name, "web_search");
+    assert_eq!(activity.status, UiToolActivityStatus::Completed);
+    assert_eq!(activity.tool_call_id, "srv-1");
+    let display = activity.display.as_ref().expect("display");
+    assert_eq!(display.kind, ToolDisplayKind::Search);
+    assert_eq!(display.outcome, ToolDisplayOutcome::Success);
+    assert_eq!(display.target.as_deref(), Some("深圳近期天气预报 未来7天"));
+    assert_eq!(display.result_summary.as_deref(), Some("10 result items"));
+}
+
+#[test]
+fn hosted_web_search_typed_discovery_maps_failed_status_to_failed_activity() {
+    let search_evidence = hosted_search_evidence(SearchHostedAttempt {
+        tool_call_id: Some("srv-2".to_owned()),
+        status: Some("failed".to_owned()),
+        result_count: Some(0),
+        query: "typhoon shenzhen".to_owned(),
+        provider: "anthropic_messages".to_owned(),
+    });
+    let mut activities = Vec::new();
+    merge_hosted_search_activities(&mut activities, Some(&search_evidence));
+
+    assert_eq!(activities.len(), 1);
+    let activity = &activities[0];
+    assert_eq!(activity.status, UiToolActivityStatus::Failed);
+    let display = activity.display.as_ref().expect("display");
+    assert_eq!(display.outcome, ToolDisplayOutcome::Failed);
+    assert_eq!(display.result_summary.as_deref(), Some("search failed"));
+}
+
+#[test]
+fn hosted_web_search_without_typed_evidence_projects_nothing() {
+    let mut activities = Vec::new();
+    merge_hosted_search_activities(&mut activities, None);
+    assert!(activities.is_empty());
 }

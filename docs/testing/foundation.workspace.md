@@ -71,6 +71,7 @@
   - launchd default master workdir is `$HOME/.freehand`
   - source-only search policy checks `.ignore`, `scripts/source-search.sh`, debug docs, local skill snippets, and unsafe-argument rejection
   - data/control boundary leak logic for request-node contracts and metadata-owner uniqueness
+  - search-evidence conformance manifest, fixture coverage, exact rejection category/path, and repeated provider/domain scenario tests
   - loop governance docs include required L1 report-only files and deny automated action until explicit L2 approval
 - module black-box plan:
   - `xtask gates check` smoke from repo root, including ADP generated artifact freshness
@@ -80,6 +81,7 @@
   - `cargo test -p xtask` call-table binding positive and negative tests
   - `cargo test -p xtask` CI/CD command-alignment positive and negative tests
   - `cargo test -p xtask` source-search boundary positive and negative tests, including missing generated-output exclusion and missing unsafe-argument guard
+  - `cargo run -p xtask -- search-schema check`
   - `bash -n scripts/release.sh`
   - `bash -n scripts/source-search.sh`
   - `bash -n scripts/provision-openminis-source.sh`

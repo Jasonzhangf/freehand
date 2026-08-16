@@ -8,16 +8,18 @@ use freehand_blocks::{
     parse_tool_arguments_json, render_context_segments_as_text, render_tool_arguments_json,
 };
 use freehand_contracts::{
-    ErrorClass, TerminalStatus, TokenUsage, ToolCallContract, ToolCallId, ToolResultStatus,
+    ErrorClass, SearchSocialPlatform, TerminalStatus, TokenUsage, ToolCallContract, ToolCallId,
+    ToolResultStatus,
 };
 use freehand_provider_core::{
     ProviderAdapterEvent, ProviderErrorHint, ProviderEventContext, ProviderExecutorConfig,
     ProviderExecutorErrorInfo, ProviderExecutorFactory, ProviderExecutorFactoryError,
-    ProviderFamily, ProviderHostedToolDefinition, ProviderInputAttachment,
-    ProviderInputAttachmentKind, ProviderLiveExecutor, ProviderLiveExecutorError, ProviderProtocol,
-    ProviderRawCapture, ProviderSemanticOutput, ProviderSemanticRequest, ProviderToolChoice,
-    ProviderToolExchange, ProviderWebSearchCapability, ProviderWebSearchToolType,
-    map_adapter_events,
+    ProviderFamily, ProviderHostedSearchCandidate, ProviderHostedSearchDiscovery,
+    ProviderHostedToolDefinition, ProviderInputAttachment, ProviderInputAttachmentKind,
+    ProviderLiveExecutor, ProviderLiveExecutorError, ProviderProtocol, ProviderRawCapture,
+    ProviderSemanticOutput, ProviderSemanticRequest, ProviderToolChoice, ProviderToolExchange,
+    ProviderWebSearchCapability, ProviderWebSearchToolType, map_adapter_events,
+    project_hosted_search_discovery,
 };
 use serde_json::{Value, json};
 use thiserror::Error;
@@ -459,7 +461,7 @@ impl OpenAiAdapter {
         let value: Value = serde_json::from_str(body)
             .map_err(|err| OpenAiAdapterError::InvalidJson(err.to_string()))?;
         let events = match protocol {
-            ProviderProtocol::OpenAiResponses => self.parse_responses_body(&value)?,
+            ProviderProtocol::OpenAiResponses => self.parse_responses_body(ctx, &value)?,
             ProviderProtocol::OpenAiChatCompletions => self.parse_chat_body(&value)?,
             other => return Err(OpenAiAdapterError::UnsupportedProtocol(other)),
         };
@@ -478,7 +480,7 @@ impl OpenAiAdapter {
         let value: Value = serde_json::from_str(event_body)
             .map_err(|err| OpenAiAdapterError::InvalidJson(err.to_string()))?;
         let events = match protocol {
-            ProviderProtocol::OpenAiResponses => self.parse_responses_stream_event(&value)?,
+            ProviderProtocol::OpenAiResponses => self.parse_responses_stream_event(ctx, &value)?,
             ProviderProtocol::OpenAiChatCompletions => self.parse_chat_stream_event(&value)?,
             other => return Err(OpenAiAdapterError::UnsupportedProtocol(other)),
         };
@@ -487,6 +489,7 @@ impl OpenAiAdapter {
 
     fn parse_responses_body(
         &mut self,
+        ctx: &ProviderEventContext,
         value: &Value,
     ) -> Result<Vec<ProviderAdapterEvent>, OpenAiAdapterError> {
         let mut events = Vec::new();
@@ -547,7 +550,9 @@ impl OpenAiAdapter {
                         }));
                     }
                     "web_search_call" => {
-                        events.push(provider_hosted_web_search_observation(item));
+                        if let Some(discovery) = openai_hosted_search_discovery(ctx, item) {
+                            events.push(ProviderAdapterEvent::SearchDiscovery(discovery));
+                        }
                     }
                     _ => {}
                 }
@@ -611,6 +616,7 @@ impl OpenAiAdapter {
 
     fn parse_responses_stream_event(
         &mut self,
+        ctx: &ProviderEventContext,
         value: &Value,
     ) -> Result<Vec<ProviderAdapterEvent>, OpenAiAdapterError> {
         let mut events = Vec::new();
@@ -659,8 +665,10 @@ impl OpenAiAdapter {
             "response.output_item.added" | "response.output_item.done" => {
                 if let Some(item) = value.get("item")
                     && item.get("type").and_then(Value::as_str) == Some("web_search_call")
+                    && event_type == "response.output_item.done"
+                    && let Some(discovery) = openai_hosted_search_discovery(ctx, item)
                 {
-                    events.push(provider_hosted_web_search_observation(item));
+                    events.push(ProviderAdapterEvent::SearchDiscovery(discovery));
                 }
             }
             "response.completed" => {
@@ -964,67 +972,120 @@ fn openai_tool_choice(choice: &ProviderToolChoice) -> Value {
     }
 }
 
-fn provider_hosted_web_search_observation(item: &Value) -> ProviderAdapterEvent {
-    ProviderAdapterEvent::ReasoningDelta(format!(
-        "provider-hosted web_search {}",
-        provider_hosted_web_search_summary(item)
-    ))
-}
-
-fn provider_hosted_web_search_summary(item: &Value) -> String {
-    let id = item
+fn openai_hosted_search_discovery(
+    ctx: &ProviderEventContext,
+    item: &Value,
+) -> Option<freehand_contracts::SearchDiscoveryDelivery> {
+    let domain_plan_ref = ctx.search_domain_plan_ref.clone();
+    let action = item.get("action")?.as_object()?;
+    let action_type = action.get("type").and_then(Value::as_str)?;
+    let call_id = item
         .get("id")
         .or_else(|| item.get("call_id"))
-        .and_then(Value::as_str)
-        .unwrap_or("unknown");
+        .and_then(Value::as_str)?;
     let status = item
         .get("status")
         .and_then(Value::as_str)
-        .unwrap_or("unknown");
-    match item.get("action").and_then(Value::as_object) {
-        Some(action) => {
-            let action_type = action
-                .get("type")
+        .map(str::to_owned);
+    let (query, candidates) = match action_type {
+        "search" => {
+            let query = action
+                .get("query")
                 .and_then(Value::as_str)
-                .unwrap_or("other");
-            let detail = match action_type {
-                "search" => action
-                    .get("query")
-                    .and_then(Value::as_str)
-                    .map(|query| format!("query={query}"))
-                    .or_else(|| {
-                        action
-                            .get("queries")
-                            .and_then(Value::as_array)
-                            .map(|queries| {
-                                let values = queries
-                                    .iter()
-                                    .filter_map(Value::as_str)
-                                    .collect::<Vec<_>>()
-                                    .join(", ");
-                                format!("queries={values}")
+                .map(str::to_owned)
+                .or_else(|| {
+                    action
+                        .get("queries")
+                        .and_then(Value::as_array)
+                        .map(|queries| {
+                            queries
+                                .iter()
+                                .filter_map(Value::as_str)
+                                .collect::<Vec<_>>()
+                                .join(", ")
+                        })
+                })
+                .unwrap_or_else(|| "search".to_owned());
+            let candidates = item
+                .get("results")
+                .and_then(Value::as_array)
+                .map(|results| {
+                    results
+                        .iter()
+                        .enumerate()
+                        .filter_map(|(index, result)| {
+                            let original_url =
+                                result.get("url").and_then(Value::as_str)?.to_owned();
+                            Some(ProviderHostedSearchCandidate {
+                                candidate_id: result
+                                    .get("id")
+                                    .and_then(Value::as_str)
+                                    .map(str::to_owned)
+                                    .unwrap_or_else(|| {
+                                        format!("{call_id}-candidate-{}", index + 1)
+                                    }),
+                                title: result
+                                    .get("title")
+                                    .and_then(Value::as_str)
+                                    .unwrap_or("")
+                                    .to_owned(),
+                                original_url: Some(original_url),
+                                snippet: result
+                                    .get("snippet")
+                                    .and_then(Value::as_str)
+                                    .unwrap_or("")
+                                    .to_owned(),
+                                platform: Some(SearchSocialPlatform::Web),
+                                source_weight: None,
                             })
-                    }),
-                "open_page" => action
-                    .get("url")
-                    .and_then(Value::as_str)
-                    .map(|url| format!("url={url}")),
-                "find_in_page" => {
-                    let url = action.get("url").and_then(Value::as_str).unwrap_or("");
-                    let pattern = action.get("pattern").and_then(Value::as_str).unwrap_or("");
-                    Some(format!("url={url} pattern={pattern}"))
-                }
-                _ => None,
-            };
-            match detail {
-                Some(detail) if !detail.is_empty() => {
-                    format!("id={id} status={status} action={action_type} {detail}")
-                }
-                _ => format!("id={id} status={status} action={action_type}"),
-            }
+                        })
+                        .collect()
+                })
+                .unwrap_or_default();
+            (query, candidates)
         }
-        None => format!("id={id} status={status} action=none"),
-    }
+        "open_page" | "find_in_page" => {
+            let url = action.get("url").and_then(Value::as_str)?.to_owned();
+            let query = if action_type == "find_in_page" {
+                action
+                    .get("pattern")
+                    .and_then(Value::as_str)
+                    .filter(|pattern| !pattern.trim().is_empty())
+                    .map(str::to_owned)
+                    .unwrap_or_else(|| format!("{action_type}:{url}"))
+            } else {
+                format!("{action_type}:{url}")
+            };
+            let candidates = vec![ProviderHostedSearchCandidate {
+                candidate_id: format!("{call_id}-candidate-1"),
+                title: String::new(),
+                original_url: Some(url),
+                snippet: String::new(),
+                platform: Some(SearchSocialPlatform::Web),
+                source_weight: None,
+            }];
+            (query, candidates)
+        }
+        _ => {
+            // Unknown hosted web_search action: emit an observation with the actual
+            // status and no candidates instead of silently dropping the activity.
+            let query = format!("hosted web search ({action_type})");
+            (query, Vec::new())
+        }
+    };
+    let result_count = Some(candidates.len());
+    Some(project_hosted_search_discovery(
+        domain_plan_ref,
+        format!("openai-{call_id}"),
+        ProviderHostedSearchDiscovery {
+            tool_call_id: Some(call_id.to_owned()),
+            status,
+            result_count,
+            query,
+            provider: "openai_responses".to_owned(),
+            candidates,
+        },
+    ))
 }
 
 fn terminal_event_from_reason(reason: &str) -> ProviderAdapterEvent {
@@ -1170,6 +1231,14 @@ mod tests {
             turn_id: TurnId::new("turn-1"),
             trace_id: TraceId::new("trace-1"),
             feature_id: FeatureId::new("provider.openai-adapter"),
+            search_domain_plan_ref: None,
+        }
+    }
+
+    fn sourced_search_ctx() -> ProviderEventContext {
+        ProviderEventContext {
+            search_domain_plan_ref: Some("domain-1".to_owned()),
+            ..ctx()
         }
     }
 
@@ -1256,6 +1325,7 @@ mod tests {
                     tool_call_id: ToolCallId::new("call-1"),
                     status: ToolResultStatus::Success,
                     output: "file contents".to_owned(),
+                    search_evidence: None,
                 },
             },
         });
@@ -1509,7 +1579,7 @@ mod tests {
         let mut adapter = OpenAiAdapter::new();
         let outputs = adapter
             .parse_response(
-                &ctx(),
+                &sourced_search_ctx(),
                 ProviderProtocol::OpenAiResponses,
                 r#"{
                     "status":"completed",
@@ -1529,18 +1599,32 @@ mod tests {
             )
             .expect("parsed");
 
-        assert!(outputs.iter().any(|output| matches!(
-            output,
-            ProviderSemanticOutput::SemanticEvent(event)
-                if event.content.contains("provider-hosted web_search")
-                    && event.content.contains("status=completed")
-                    && event.content.contains("query=OpenAI Responses web_search")
-        )));
+        let discovery = outputs
+            .iter()
+            .find_map(|output| match output {
+                ProviderSemanticOutput::SearchDiscovery(delivery) => Some(delivery),
+                _ => None,
+            })
+            .expect("typed hosted-search discovery");
+        let attempt = discovery.hosted_search_attempt.as_ref().expect("attempt");
+        assert_eq!(attempt.query, "OpenAI Responses web_search");
+        assert_eq!(attempt.provider, "openai_responses");
+        assert_eq!(attempt.tool_call_id.as_deref(), Some("ws-1"));
+        assert_eq!(attempt.status.as_deref(), Some("completed"));
+        assert_eq!(attempt.result_count, Some(0));
         assert!(
             !outputs
                 .iter()
                 .any(|output| matches!(output, ProviderSemanticOutput::ToolCall(_))),
             "hosted provider search must not enter the local function-tool execution loop"
+        );
+        assert!(
+            !outputs.iter().any(
+                |output| matches!(output, ProviderSemanticOutput::SemanticEvent(event)
+                    if event.kind == freehand_contracts::SemanticEventKind::Reasoning
+                        && event.content.contains("provider-hosted web_search"))
+            ),
+            "hosted search must be a typed observation, not reasoning text"
         );
     }
 
@@ -1549,7 +1633,7 @@ mod tests {
         let mut adapter = OpenAiAdapter::new();
         let outputs = adapter
             .parse_stream_event(
-                &ctx(),
+                &sourced_search_ctx(),
                 ProviderProtocol::OpenAiResponses,
                 r#"{
                     "type":"response.output_item.done",
@@ -1566,14 +1650,130 @@ mod tests {
             )
             .expect("parsed");
 
-        assert_eq!(outputs.len(), 1);
-        assert!(matches!(
-            &outputs[0],
-            ProviderSemanticOutput::SemanticEvent(event)
-                if event.content.contains("provider-hosted web_search")
-                    && event.content.contains("action=open_page")
-                    && event.content.contains("url=https://example.com/source")
-        ));
+        let discovery = outputs
+            .iter()
+            .find_map(|output| match output {
+                ProviderSemanticOutput::SearchDiscovery(delivery) => Some(delivery),
+                _ => None,
+            })
+            .expect("typed hosted-search discovery");
+        let attempt = discovery.hosted_search_attempt.as_ref().expect("attempt");
+        assert_eq!(attempt.tool_call_id.as_deref(), Some("ws-2"));
+        assert_eq!(attempt.status.as_deref(), Some("completed"));
+        assert_eq!(attempt.query, "open_page:https://example.com/source");
+        assert_eq!(attempt.result_count, Some(1));
+        assert_eq!(
+            discovery.candidates[0].original_url.as_deref(),
+            Some("https://example.com/source")
+        );
+    }
+
+    #[test]
+    fn projects_responses_open_page_url_as_typed_discovery() {
+        let mut adapter = OpenAiAdapter::new();
+        let outputs = adapter
+            .parse_stream_event(
+                &sourced_search_ctx(),
+                ProviderProtocol::OpenAiResponses,
+                r#"{
+                    "type":"response.output_item.done",
+                    "item":{
+                        "type":"web_search_call",
+                        "id":"ws-open",
+                        "status":"completed",
+                        "action":{"type":"open_page","url":"https://example.com/source"}
+                    }
+                }"#,
+            )
+            .expect("parsed");
+
+        let discovery = outputs
+            .iter()
+            .find_map(|output| match output {
+                ProviderSemanticOutput::SearchDiscovery(delivery) => Some(delivery),
+                _ => None,
+            })
+            .expect("typed discovery");
+        assert_eq!(discovery.domain_plan_ref.as_deref(), Some("domain-1"));
+        assert_eq!(
+            discovery.candidates[0].original_url.as_deref(),
+            Some("https://example.com/source")
+        );
+        assert_eq!(
+            discovery.candidates[0].status,
+            freehand_contracts::SearchCandidateStatus::Usable
+        );
+    }
+
+    #[test]
+    fn projects_responses_find_in_page_url_without_parsing_observation_text() {
+        let mut adapter = OpenAiAdapter::new();
+        let outputs = adapter
+            .parse_response(
+                &sourced_search_ctx(),
+                ProviderProtocol::OpenAiResponses,
+                r#"{
+                    "status":"completed",
+                    "output":[{
+                        "type":"web_search_call",
+                        "id":"ws-find",
+                        "status":"completed",
+                        "action":{
+                            "type":"find_in_page",
+                            "url":"https://example.com/guide",
+                            "pattern":"installation"
+                        }
+                    }]
+                }"#,
+            )
+            .expect("parsed");
+
+        assert!(outputs.iter().any(|output| matches!(
+            output,
+            ProviderSemanticOutput::SearchDiscovery(delivery)
+                if delivery.domain_plan_ref.as_deref() == Some("domain-1")
+                    && delivery.hosted_search_attempt.as_ref().is_some_and(|attempt| attempt.query == "installation")
+                    && delivery.candidates[0].original_url.as_deref() == Some("https://example.com/guide")
+        )));
+    }
+
+    #[test]
+    fn sourced_search_promotes_search_action_as_typed_discovery_without_url_candidates() {
+        let mut adapter = OpenAiAdapter::new();
+        let outputs = adapter
+            .parse_response(
+                &sourced_search_ctx(),
+                ProviderProtocol::OpenAiResponses,
+                r#"{
+                    "status":"completed",
+                    "output":[{
+                        "type":"web_search_call",
+                        "id":"ws-search",
+                        "status":"completed",
+                        "action":{"type":"search","query":"Freehand"}
+                    }]
+                }"#,
+            )
+            .expect("parsed");
+
+        let discovery = outputs
+            .iter()
+            .find_map(|output| match output {
+                ProviderSemanticOutput::SearchDiscovery(delivery) => Some(delivery),
+                _ => None,
+            })
+            .expect("typed hosted-search discovery for search action");
+        let attempt = discovery.hosted_search_attempt.as_ref().expect("attempt");
+        assert_eq!(attempt.tool_call_id.as_deref(), Some("ws-search"));
+        assert_eq!(attempt.status.as_deref(), Some("completed"));
+        assert_eq!(attempt.query, "Freehand");
+        assert_eq!(attempt.result_count, Some(0));
+        assert!(discovery.candidates.is_empty());
+        assert!(
+            !outputs
+                .iter()
+                .any(|output| matches!(output, ProviderSemanticOutput::ToolCall(_)))
+        );
     }
 
     #[test]

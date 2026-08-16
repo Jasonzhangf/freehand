@@ -3077,6 +3077,7 @@ fn master_autonomy_turn_projection(truth: &MockMasterWorkerAutonomyTruth) -> UiT
             truth.scenario, truth.final_status
         )),
         errors: Vec::new(),
+        search_evidence: None,
         slave_substream_card: false,
     }
 }
@@ -3215,6 +3216,7 @@ fn test_turn_projection() -> UiTurnProjection {
         terminal_status: None,
         terminal_text: None,
         errors: Vec::new(),
+        search_evidence: None,
         slave_substream_card: false,
     }
 }
@@ -3289,6 +3291,7 @@ fn test_sample_turn_projection(
         } else {
             Vec::new()
         },
+        search_evidence: None,
         slave_substream_card: false,
     }
 }

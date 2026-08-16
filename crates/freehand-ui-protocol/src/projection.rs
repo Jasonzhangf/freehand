@@ -1,12 +1,13 @@
 use crate::adp_wire::UiProjection;
 use crate::dto::*;
 use freehand_blocks::{
-    ToolDisplayOutcome, ToolDisplayProjection, project_tool_call_display,
-    project_tool_result_display, strip_completion_submission_block,
+    ToolDisplayOutcome, ToolDisplayProjection, project_hosted_search_display,
+    project_tool_call_display, project_tool_result_display, strip_completion_submission_block,
 };
 use freehand_contracts::{
     AgentId, ReasonReq04ToolCall, ReasonReq05ToolResultReentry, ReasonResp03TerminalEvent,
-    SessionId, TerminalStatus, ToolResultContract, ToolResultStatus, TurnId,
+    SearchEvidenceDelivery, SessionId, TerminalStatus, ToolResultContract, ToolResultStatus,
+    TurnId,
 };
 use freehand_control::strip_control_status_block;
 use freehand_debug::DebugEvent;
@@ -452,6 +453,50 @@ pub(crate) fn upsert_tool_activity(
         detail,
         display,
     });
+}
+
+/// Project provider-hosted web-search observations into tool activities using the
+/// `freehand-blocks::tool_display` owner for display semantics. Consumes only the
+/// typed `SearchEvidenceDelivery` side channel, never provider reasoning text.
+pub fn merge_hosted_search_activities(
+    activities: &mut Vec<UiToolActivity>,
+    search_evidence: Option<&UiSearchEvidenceProjection>,
+) {
+    let Some(search_evidence) = search_evidence else {
+        return;
+    };
+    for delivery in &search_evidence.deliveries {
+        let SearchEvidenceDelivery::Discovery(discovery) = delivery else {
+            continue;
+        };
+        let Some(attempt) = discovery.hosted_search_attempt.as_ref() else {
+            continue;
+        };
+        let display = project_hosted_search_display(discovery);
+        let tool_call_id = attempt
+            .tool_call_id
+            .clone()
+            .unwrap_or_else(|| discovery.delivery_id.clone());
+        let status = tool_activity_status_from_outcome(display.outcome);
+        upsert_tool_activity(
+            activities,
+            tool_call_id,
+            "web_search".to_owned(),
+            status,
+            Some(attempt.query.clone()),
+            Some(display),
+        );
+    }
+}
+
+pub(crate) fn tool_activity_status_from_outcome(
+    outcome: ToolDisplayOutcome,
+) -> UiToolActivityStatus {
+    match outcome {
+        ToolDisplayOutcome::Waiting => UiToolActivityStatus::Waiting,
+        ToolDisplayOutcome::Success => UiToolActivityStatus::Completed,
+        ToolDisplayOutcome::Failed => UiToolActivityStatus::Failed,
+    }
 }
 
 pub(crate) fn preserve_live_activity_on_nonterminal_refresh(

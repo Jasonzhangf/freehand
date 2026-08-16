@@ -3,10 +3,10 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use freehand_blocks::CompletionSchemaRejection;
+use freehand_blocks::{CompletionSchemaRejection, SearchEvidenceSchemaRejection};
 use freehand_contracts::{
     AgentId, ContextSegment, ErrorClass, ErrorContract, ErrorErr01RuntimeClassified, FeatureId,
-    RecoveryPolicy, SessionId, TraceId, TurnId,
+    RecoveryPolicy, SearchEvidenceDelivery, SessionId, TraceId, TurnId,
 };
 use freehand_provider_core::{ProviderFamily, ProviderSemanticOutput};
 use fs2::FileExt;
@@ -54,6 +54,14 @@ pub enum ReasonLedgerPayload {
     },
     CompletionRejected {
         rejection: CompletionSchemaRejection,
+        snapshot: ActiveTurnSnapshot,
+    },
+    SearchEvidenceRejected {
+        rejection: SearchEvidenceSchemaRejection,
+        snapshot: ActiveTurnSnapshot,
+    },
+    SearchEvidenceApplied {
+        delivery: SearchEvidenceDelivery,
         snapshot: ActiveTurnSnapshot,
     },
     TurnClosed {
@@ -301,6 +309,52 @@ impl ReasonPersistence {
             Some(turn.request.turn_id.clone()),
             ReasonLedgerPayload::CompletionRejected {
                 rejection: rejection.clone(),
+                snapshot: snapshot.clone(),
+            },
+            Some(snapshot),
+            None,
+        )
+    }
+
+    pub fn record_search_evidence_rejected(
+        &self,
+        history: &SessionHistory,
+        turn: &TurnRecord,
+        rejection: &SearchEvidenceSchemaRejection,
+        schema_rejections: u32,
+    ) -> Result<ReasonPersistenceCursor, ReasonPersistenceError> {
+        let snapshot = ActiveTurnSnapshot {
+            turn: turn.clone(),
+            schema_rejections,
+        };
+        self.persist_row(
+            history,
+            Some(turn.request.turn_id.clone()),
+            ReasonLedgerPayload::SearchEvidenceRejected {
+                rejection: rejection.clone(),
+                snapshot: snapshot.clone(),
+            },
+            Some(snapshot),
+            None,
+        )
+    }
+
+    pub fn record_search_evidence_applied(
+        &self,
+        history: &SessionHistory,
+        turn: &TurnRecord,
+        delivery: &SearchEvidenceDelivery,
+        schema_rejections: u32,
+    ) -> Result<ReasonPersistenceCursor, ReasonPersistenceError> {
+        let snapshot = ActiveTurnSnapshot {
+            turn: turn.clone(),
+            schema_rejections,
+        };
+        self.persist_row(
+            history,
+            Some(turn.request.turn_id.clone()),
+            ReasonLedgerPayload::SearchEvidenceApplied {
+                delivery: delivery.clone(),
                 snapshot: snapshot.clone(),
             },
             Some(snapshot),
@@ -1754,7 +1808,9 @@ fn apply_ledger_row(
     match &row.payload {
         ReasonLedgerPayload::TurnStarted { snapshot }
         | ReasonLedgerPayload::ProviderOutputApplied { snapshot, .. }
-        | ReasonLedgerPayload::CompletionRejected { snapshot, .. } => {
+        | ReasonLedgerPayload::CompletionRejected { snapshot, .. }
+        | ReasonLedgerPayload::SearchEvidenceRejected { snapshot, .. }
+        | ReasonLedgerPayload::SearchEvidenceApplied { snapshot, .. } => {
             let mut snapshot = snapshot.clone();
             ensure_turn_created_at(&mut snapshot.turn, row.created_at);
             restored.active_turn = Some(snapshot);
@@ -1860,7 +1916,9 @@ fn ui_turn_snapshots_from_ledger_rows(rows: Vec<ReasonLedgerRow>) -> Vec<TurnRec
         match row.payload {
             ReasonLedgerPayload::TurnStarted { snapshot }
             | ReasonLedgerPayload::ProviderOutputApplied { snapshot, .. }
-            | ReasonLedgerPayload::CompletionRejected { snapshot, .. } => {
+            | ReasonLedgerPayload::CompletionRejected { snapshot, .. }
+            | ReasonLedgerPayload::SearchEvidenceRejected { snapshot, .. }
+            | ReasonLedgerPayload::SearchEvidenceApplied { snapshot, .. } => {
                 let mut turn = snapshot.turn;
                 ensure_turn_created_at(&mut turn, row.created_at);
                 upsert_ui_turn_snapshot_by_turn_id(&mut turns_by_turn_id, turn);
@@ -2403,6 +2461,95 @@ mod tests {
     }
 
     #[test]
+    fn search_evidence_round_trips_without_rebuilding_source_truth() {
+        let runtime_home = temp_runtime_home();
+        let coordinator = ReasonPersistence::new(&runtime_home, AgentId::new("agent-1"));
+        let mut history = session_history();
+        let mut turn = started_turn(&mut history);
+        let plan = freehand_contracts::SearchDomainPlanDelivery {
+            schema: "search_evidence.domain_plan.v1".to_owned(),
+            delivery_id: "domain-1".to_owned(),
+            domain: freehand_contracts::SearchDomain::News,
+            preferred_source_kinds: vec!["official_publication".to_owned()],
+            social_platform_priority: vec![freehand_contracts::SearchSocialPlatform::Weibo],
+            minimum_verified_sources: 1,
+            policy_version: "2026-08-15".to_owned(),
+        };
+        let source = freehand_contracts::SearchVerificationDelivery {
+            schema: "search_evidence.verification.v1".to_owned(),
+            delivery_id: "verify-c1".to_owned(),
+            source_id: "c1".to_owned(),
+            original_url: "https://example.com/news".to_owned(),
+            camo_profile: "default".to_owned(),
+            accessed_at: "2026-08-15T12:00:00Z".to_owned(),
+            access_status: freehand_contracts::SearchAccessStatus::Verified,
+            page_title: Some("News".to_owned()),
+            evidence_excerpt: Some("Persisted evidence".to_owned()),
+            verified_by: Some("camo".to_owned()),
+            access_attempts: vec![freehand_contracts::SearchAccessAttempt {
+                attempt_id: "attempt-1".to_owned(),
+                channel: "camo".to_owned(),
+                status: freehand_contracts::SearchAccessStatus::Verified,
+                accessed_at: "2026-08-15T12:00:00Z".to_owned(),
+                error: None,
+            }],
+            error: None,
+        };
+        let claim = freehand_contracts::SearchClaimDelivery {
+            claim_id: "claim-1".to_owned(),
+            text: "Persisted claim".to_owned(),
+            source_ids: vec!["c1".to_owned()],
+        };
+        turn.search_evidence = Some(freehand_contracts::SearchEvidenceTurnDelivery {
+            schema: "search_evidence.turn.v1".to_owned(),
+            session_id: turn.request.session_id.clone(),
+            turn_id: turn.request.turn_id.clone(),
+            domain_plan: Some(plan.clone()),
+            deliveries: vec![
+                freehand_contracts::SearchEvidenceDelivery::DomainPlan(plan),
+                freehand_contracts::SearchEvidenceDelivery::Verification(source.clone()),
+            ],
+            verified_sources: vec![source],
+            unconfirmed: Vec::new(),
+            claims: vec![claim],
+            status: freehand_contracts::SearchEvidenceTurnStatus::TurnTerminalSuccess,
+            summary_ready: true,
+            summary: Some("Persisted summary".to_owned()),
+            blocked_reason: None,
+            terminal: Some(freehand_contracts::SearchEvidenceTerminal::Success),
+        });
+        turn.terminal_event = Some(freehand_contracts::ReasonResp03TerminalEvent {
+            session_id: turn.request.session_id.clone(),
+            turn_id: turn.request.turn_id.clone(),
+            trace_id: turn.request.trace_id.clone(),
+            feature_id: turn.request.feature_id.clone(),
+            agent_id: turn.request.agent_id.clone(),
+            status: TerminalStatus::Success,
+            summary: "Persisted summary".to_owned(),
+            user_options: None,
+        });
+
+        coordinator
+            .record_turn_closed(&history, &turn, 0)
+            .expect("persist search evidence");
+        let restored = coordinator.restore(history.session_id()).expect("restore");
+        let restored_evidence = restored.closed_turns[0]
+            .search_evidence
+            .as_ref()
+            .expect("restored search evidence");
+
+        assert_eq!(restored_evidence, turn.search_evidence.as_ref().unwrap());
+        assert_eq!(restored_evidence.verified_sources[0].source_id, "c1");
+        assert_eq!(
+            restored_evidence.verified_sources[0].access_attempts[0].attempt_id,
+            "attempt-1"
+        );
+        assert_eq!(restored_evidence.claims[0].source_ids, vec!["c1"]);
+
+        fs::remove_dir_all(runtime_home).expect("cleanup");
+    }
+
+    #[test]
     fn restore_ignores_leftover_atomic_tmp_turn_files() {
         let runtime_home = temp_runtime_home();
         let coordinator = ReasonPersistence::new(&runtime_home, AgentId::new("agent-1"));
@@ -2543,6 +2690,7 @@ mod tests {
                     tool_call_id: freehand_contracts::ToolCallId::new("tool-1"),
                     status: freehand_contracts::ToolResultStatus::Success,
                     output: "legacy output".to_owned(),
+                    search_evidence: None,
                 },
             });
         turn.terminal_event = Some(freehand_contracts::ReasonResp03TerminalEvent {

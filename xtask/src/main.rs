@@ -3,6 +3,11 @@ use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};
 
+use freehand_blocks::{SearchEvidenceModelStage, SearchEvidenceSchemaRejectionCategory};
+use freehand_testkit::{
+    SearchEvidenceConformanceContext, SearchEvidenceConformanceInput,
+    SearchEvidenceConformanceOperation, run_search_evidence_conformance_input,
+};
 use serde::{Deserialize, Serialize};
 mod openminis_ui_migration;
 
@@ -30,6 +35,17 @@ fn main() {
             }
             println!("xtask mainlines check: ok");
         }
+        [command, action] if command == "search-schema" && action == "check" => {
+            let root = env::current_dir().unwrap_or_else(|err| {
+                eprintln!("resolve repository root failed: {err}");
+                std::process::exit(1);
+            });
+            if let Err(err) = verify_search_evidence_schema_conformance(&root) {
+                eprintln!("xtask search-schema check failed: {err}");
+                std::process::exit(1);
+            }
+            println!("xtask search-schema check: ok");
+        }
         [command, action, node_id] if command == "openminis-ui" && action == "verify-node" => {
             let root = env::current_dir().unwrap_or_else(|err| {
                 eprintln!("resolve repository root failed: {err}");
@@ -47,7 +63,7 @@ fn main() {
         }
         _ => {
             eprintln!(
-                "usage: cargo run -p xtask -- <gates check|mainlines generate|mainlines check|openminis-ui verify-node NODE_ID>"
+                "usage: cargo run -p xtask -- <gates check|mainlines generate|mainlines check|search-schema check|openminis-ui verify-node NODE_ID>"
             );
             std::process::exit(1);
         }
@@ -267,12 +283,412 @@ fn run_gates_check() -> Result<(), String> {
     verify_relay_transport_boundary(&root)?;
     verify_account_config_sync_boundary(&root)?;
     verify_runtime_master_worker_loop_boundary(&root)?;
+    verify_search_evidence_schema_conformance(&root)?;
     verify_dependency_graph(&root)?;
     verify_task_status_single_writer(&root)?;
     verify_adp_protocol_artifacts(&root)?;
     verify_acp_server_boundary(&root)?;
     openminis_ui_migration::verify_openminis_ui_migration_manifest(&root)?;
     Ok(())
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct SearchEvidenceCorpusManifest {
+    schema_version: u32,
+    corpus_id: String,
+    fixtures: Vec<SearchEvidenceFixtureManifest>,
+    scenarios: Vec<String>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct SearchEvidenceFixtureManifest {
+    id: String,
+    path: String,
+    operation: String,
+    #[serde(default)]
+    context: Option<String>,
+    #[serde(default)]
+    stage: Option<String>,
+    verdict: String,
+    rules: Vec<String>,
+    #[serde(default)]
+    expected_error_category: Option<String>,
+    #[serde(default)]
+    expected_field_path: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct SearchEvidenceScenarioManifest {
+    scenario_id: String,
+    provider_family: String,
+    domain: String,
+    prompt: String,
+    repetitions: usize,
+    cases: Vec<SearchEvidenceScenarioCase>,
+}
+
+#[derive(Debug, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct SearchEvidenceScenarioCase {
+    case_id: String,
+    stage: String,
+    response_paths: Vec<String>,
+    expected: String,
+    expected_rejections: usize,
+}
+
+fn verify_search_evidence_schema_conformance(root: &Path) -> Result<(), String> {
+    let corpus_root = root.join("fixtures/search-evidence");
+    let manifest_path = corpus_root.join("manifest.json");
+    let manifest_source = fs::read_to_string(&manifest_path).map_err(|error| error.to_string())?;
+    let manifest: SearchEvidenceCorpusManifest = serde_json::from_str(&manifest_source)
+        .map_err(|error| format!("search evidence corpus manifest is invalid: {error}"))?;
+    if manifest.schema_version != 1
+        || manifest.corpus_id != "freehand.search-evidence-schema-conformance.v1"
+    {
+        return Err("search evidence corpus identity/version is invalid".to_owned());
+    }
+
+    let mut fixture_ids = BTreeSet::new();
+    let mut fixture_paths = BTreeSet::new();
+    for fixture in &manifest.fixtures {
+        if !fixture_ids.insert(fixture.id.clone()) {
+            return Err(format!(
+                "duplicate search evidence fixture id `{}`",
+                fixture.id
+            ));
+        }
+        fixture_paths.insert(fixture.path.clone());
+        if fixture.rules.is_empty() || fixture.rules.iter().any(|rule| rule.trim().is_empty()) {
+            return Err(format!("fixture `{}` has no stable rule ids", fixture.id));
+        }
+        let payload = fs::read_to_string(corpus_root.join(&fixture.path))
+            .map_err(|error| format!("fixture `{}` cannot be read: {error}", fixture.id))?;
+        let observed = run_search_evidence_conformance_input(SearchEvidenceConformanceInput {
+            operation: parse_search_conformance_operation(&fixture.operation)?,
+            context: fixture
+                .context
+                .as_deref()
+                .map(parse_search_conformance_context)
+                .transpose()?,
+            stage: fixture
+                .stage
+                .as_deref()
+                .map(parse_search_model_stage)
+                .transpose()?,
+            payload: &payload,
+        });
+        match (fixture.verdict.as_str(), observed) {
+            ("accept", Ok(())) => {}
+            ("accept", Err(rejection)) => {
+                return Err(format!(
+                    "fixture `{}` expected accept but observed {:?} at `{}`: {}",
+                    fixture.id, rejection.category, rejection.field, rejection.message
+                ));
+            }
+            ("reject", Ok(())) => {
+                return Err(format!(
+                    "fixture `{}` expected reject but was accepted",
+                    fixture.id
+                ));
+            }
+            ("reject", Err(rejection)) => {
+                let expected_category =
+                    fixture.expected_error_category.as_deref().ok_or_else(|| {
+                        format!(
+                            "fixture `{}` is missing expected_error_category",
+                            fixture.id
+                        )
+                    })?;
+                let expected_field = fixture.expected_field_path.as_deref().ok_or_else(|| {
+                    format!("fixture `{}` is missing expected_field_path", fixture.id)
+                })?;
+                if search_rejection_category_name(rejection.category) != expected_category
+                    || rejection.field != expected_field
+                {
+                    return Err(format!(
+                        "fixture `{}` rejection mismatch: expected {expected_category} at `{expected_field}`, observed {} at `{}`: {}",
+                        fixture.id,
+                        search_rejection_category_name(rejection.category),
+                        rejection.field,
+                        rejection.message
+                    ));
+                }
+            }
+            (verdict, _) => {
+                return Err(format!(
+                    "fixture `{}` has invalid verdict `{verdict}`",
+                    fixture.id
+                ));
+            }
+        }
+    }
+
+    let mut discovered_fixture_paths = BTreeSet::new();
+    collect_search_fixture_paths(
+        root,
+        &corpus_root.join("valid"),
+        &mut discovered_fixture_paths,
+    )?;
+    collect_search_fixture_paths(
+        root,
+        &corpus_root.join("invalid"),
+        &mut discovered_fixture_paths,
+    )?;
+    if discovered_fixture_paths != fixture_paths {
+        return Err(format!(
+            "search evidence fixture coverage mismatch; manifest={fixture_paths:?}; files={discovered_fixture_paths:?}"
+        ));
+    }
+
+    let mut scenario_ids = BTreeSet::new();
+    let mut scenario_runs = 0usize;
+    let mut one_shot_runs = 0usize;
+    let mut one_shot_accepts = 0usize;
+    let mut retry_runs = 0usize;
+    let mut retry_accepts = 0usize;
+    let mut retry_rejections = 0usize;
+    let mut exhaustion_runs = 0usize;
+    let mut exhaustion_blocks = 0usize;
+    let mut false_accepts = 0usize;
+    for scenario_path in &manifest.scenarios {
+        let source = fs::read_to_string(corpus_root.join(scenario_path))
+            .map_err(|error| format!("scenario `{scenario_path}` cannot be read: {error}"))?;
+        let scenario: SearchEvidenceScenarioManifest = serde_json::from_str(&source)
+            .map_err(|error| format!("scenario `{scenario_path}` is invalid: {error}"))?;
+        let metrics = verify_search_evidence_scenario(&corpus_root, &scenario, &mut scenario_ids)?;
+        scenario_runs += metrics.runs;
+        one_shot_runs += metrics.one_shot_runs;
+        one_shot_accepts += metrics.one_shot_accepts;
+        retry_runs += metrics.retry_runs;
+        retry_accepts += metrics.retry_accepts;
+        retry_rejections += metrics.retry_rejections;
+        exhaustion_runs += metrics.exhaustion_runs;
+        exhaustion_blocks += metrics.exhaustion_blocks;
+        false_accepts += metrics.false_accepts;
+    }
+    if false_accepts != 0 {
+        return Err(format!(
+            "search schema scenarios accepted {false_accepts} invalid payload(s)"
+        ));
+    }
+    println!(
+        "search_schema_conformance fixtures={} scenarios={} runs={} one_shot={}/{} retry_recovery={}/{} mean_retries={:.2} exhaustion={}/{} false_accepts={}",
+        manifest.fixtures.len(),
+        manifest.scenarios.len(),
+        scenario_runs,
+        one_shot_accepts,
+        one_shot_runs,
+        retry_accepts,
+        retry_runs,
+        if retry_accepts == 0 {
+            0.0
+        } else {
+            retry_rejections as f64 / retry_accepts as f64
+        },
+        exhaustion_blocks,
+        exhaustion_runs,
+        false_accepts
+    );
+    Ok(())
+}
+
+#[derive(Debug, Default)]
+struct SearchEvidenceScenarioMetrics {
+    runs: usize,
+    one_shot_runs: usize,
+    one_shot_accepts: usize,
+    retry_runs: usize,
+    retry_accepts: usize,
+    retry_rejections: usize,
+    exhaustion_runs: usize,
+    exhaustion_blocks: usize,
+    false_accepts: usize,
+}
+
+fn collect_search_fixture_paths(
+    root: &Path,
+    directory: &Path,
+    paths: &mut BTreeSet<String>,
+) -> Result<(), String> {
+    for entry in fs::read_dir(directory).map_err(|error| error.to_string())? {
+        let entry = entry.map_err(|error| error.to_string())?;
+        let path = entry.path();
+        if path.is_file() {
+            let relative = path
+                .strip_prefix(root.join("fixtures/search-evidence"))
+                .map_err(|error| error.to_string())?
+                .to_string_lossy()
+                .replace('\\', "/");
+            paths.insert(relative);
+        }
+    }
+    Ok(())
+}
+
+fn verify_search_evidence_scenario(
+    corpus_root: &Path,
+    scenario: &SearchEvidenceScenarioManifest,
+    scenario_ids: &mut BTreeSet<String>,
+) -> Result<SearchEvidenceScenarioMetrics, String> {
+    if !scenario_ids.insert(scenario.scenario_id.clone()) {
+        return Err(format!(
+            "duplicate search scenario id `{}`",
+            scenario.scenario_id
+        ));
+    }
+    if !matches!(
+        scenario.provider_family.as_str(),
+        "openai_responses" | "anthropic_messages"
+    ) || scenario.domain.trim().is_empty()
+        || scenario.repetitions < 5
+        || scenario.cases.is_empty()
+    {
+        return Err(format!(
+            "scenario `{}` has invalid provider/domain/repetition coverage",
+            scenario.scenario_id
+        ));
+    }
+    let prompt_lower = scenario.prompt.to_ascii_lowercase();
+    for forbidden in [
+        "searchdomaindelivery",
+        "searchdomainplandelivery",
+        "searchfinaldelivery",
+        "freehand_search_delivery",
+        "camo",
+    ] {
+        if prompt_lower.contains(forbidden) {
+            return Err(format!(
+                "scenario `{}` prompt exposes internal term `{forbidden}`",
+                scenario.scenario_id
+            ));
+        }
+    }
+    let mut case_ids = BTreeSet::new();
+    let mut metrics = SearchEvidenceScenarioMetrics::default();
+    for case in &scenario.cases {
+        if !case_ids.insert(case.case_id.clone()) || case.response_paths.is_empty() {
+            return Err(format!(
+                "scenario `{}` has duplicate/empty case `{}`",
+                scenario.scenario_id, case.case_id
+            ));
+        }
+        for _ in 0..scenario.repetitions {
+            metrics.runs += 1;
+            let mut rejections = 0usize;
+            let mut accepted = false;
+            for response_path in &case.response_paths {
+                let payload =
+                    fs::read_to_string(corpus_root.join(response_path)).map_err(|error| {
+                        format!("scenario response `{response_path}` cannot be read: {error}")
+                    })?;
+                let result =
+                    run_search_evidence_conformance_input(SearchEvidenceConformanceInput {
+                        operation: SearchEvidenceConformanceOperation::ModelStage,
+                        context: None,
+                        stage: Some(parse_search_model_stage(&case.stage)?),
+                        payload: &payload,
+                    });
+                if result.is_ok() {
+                    accepted = true;
+                    break;
+                }
+                rejections += 1;
+                if rejections == 3 {
+                    break;
+                }
+            }
+            let observed = if accepted {
+                "accepted"
+            } else if rejections == 3 {
+                "blocked"
+            } else {
+                "incomplete"
+            };
+            if observed != case.expected || rejections != case.expected_rejections {
+                return Err(format!(
+                    "scenario `{}` case `{}` expected {} with {} rejection(s), observed {observed} with {rejections}",
+                    scenario.scenario_id, case.case_id, case.expected, case.expected_rejections
+                ));
+            }
+            if case.expected_rejections == 0 && case.expected == "accepted" {
+                metrics.one_shot_runs += 1;
+                metrics.one_shot_accepts += usize::from(accepted);
+            } else if case.expected == "accepted" {
+                metrics.retry_runs += 1;
+                metrics.retry_accepts += usize::from(accepted);
+                metrics.retry_rejections += rejections;
+            } else if case.expected == "blocked" {
+                metrics.exhaustion_runs += 1;
+                metrics.exhaustion_blocks += usize::from(!accepted && rejections == 3);
+            }
+            if accepted && case.expected != "accepted" {
+                metrics.false_accepts += 1;
+            }
+        }
+    }
+    Ok(metrics)
+}
+
+fn parse_search_conformance_operation(
+    value: &str,
+) -> Result<SearchEvidenceConformanceOperation, String> {
+    match value {
+        "parse" => Ok(SearchEvidenceConformanceOperation::Parse),
+        "validate_turn" => Ok(SearchEvidenceConformanceOperation::ValidateTurn),
+        "build_final" => Ok(SearchEvidenceConformanceOperation::BuildFinal),
+        "model_stage" => Ok(SearchEvidenceConformanceOperation::ModelStage),
+        _ => Err(format!("unknown search conformance operation `{value}`")),
+    }
+}
+
+fn parse_search_conformance_context(
+    value: &str,
+) -> Result<SearchEvidenceConformanceContext, String> {
+    match value {
+        "complete_one_verified" => Ok(SearchEvidenceConformanceContext::CompleteOneVerified),
+        "complete_minimum_two" => Ok(SearchEvidenceConformanceContext::CompleteMinimumTwo),
+        "blocked_no_source" => Ok(SearchEvidenceConformanceContext::BlockedNoSource),
+        _ => Err(format!("unknown search conformance context `{value}`")),
+    }
+}
+
+fn parse_search_model_stage(value: &str) -> Result<SearchEvidenceModelStage, String> {
+    match value {
+        "domain_plan" => Ok(SearchEvidenceModelStage::DomainPlan),
+        "supplement_decision" => Ok(SearchEvidenceModelStage::SupplementDecision),
+        "final_delivery" => Ok(SearchEvidenceModelStage::FinalDelivery),
+        _ => Err(format!("unknown search model stage `{value}`")),
+    }
+}
+
+fn search_rejection_category_name(category: SearchEvidenceSchemaRejectionCategory) -> &'static str {
+    match category {
+        SearchEvidenceSchemaRejectionCategory::TaggedBlock => "tagged_block",
+        SearchEvidenceSchemaRejectionCategory::JsonSyntax => "json_syntax",
+        SearchEvidenceSchemaRejectionCategory::Decode => "decode",
+        SearchEvidenceSchemaRejectionCategory::Validation => "validation",
+        SearchEvidenceSchemaRejectionCategory::StateTransition => "state_transition",
+        SearchEvidenceSchemaRejectionCategory::SourceReference => "source_reference",
+        SearchEvidenceSchemaRejectionCategory::StageMismatch => "stage_mismatch",
+    }
+}
+
+#[cfg(test)]
+mod search_evidence_conformance_tests {
+    use super::*;
+
+    #[test]
+    fn search_evidence_conformance_corpus_passes() {
+        let root = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .expect("repository root");
+        verify_search_evidence_schema_conformance(root)
+            .expect("search evidence conformance corpus");
+    }
 }
 
 fn verify_runtime_master_worker_loop_boundary(root: &Path) -> Result<(), String> {

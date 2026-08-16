@@ -1,0 +1,19 @@
+{
+  "schema": "search_evidence.discovery.v1",
+  "delivery_id": "discovery-hosted-empty-1",
+  "discovery_channel": "hosted_web_search",
+  "domain_plan_ref": "domain-news-1",
+  "hosted_search_attempt": {
+    "query": "current product release news",
+    "provider": "openai_responses",
+    "result_count": 1
+  },
+  "candidates": [{
+    "candidate_id": "source-1",
+    "status": "unusable_missing_url",
+    "original_url": null,
+    "title": "Release news",
+    "snippet": "Provider omitted the original URL",
+    "reason": "hosted result did not include an original URL"
+  }]
+}

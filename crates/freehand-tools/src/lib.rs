@@ -17,8 +17,8 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 use freehand_blocks::render_tool_arguments_json;
 use freehand_contracts::{
-    ReasonReq04ToolCall, ToolArgument, ToolPreviewChangeKind, ToolPreviewContract,
-    ToolPreviewFileChange,
+    ReasonReq04ToolCall, SearchEvidenceDelivery, ToolArgument, ToolPreviewChangeKind,
+    ToolPreviewContract, ToolPreviewFileChange,
 };
 use freehand_provider_core::ProviderToolDefinition;
 use glob::Pattern;
@@ -37,6 +37,7 @@ pub struct BuiltinToolSpec {
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct ToolExecutionOutput {
     pub text: String,
+    pub search_evidence: Option<SearchEvidenceDelivery>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -1154,6 +1155,7 @@ fn execute_bash(arguments: &[ToolArgument]) -> Result<ToolExecutionOutput, ToolR
                 if status.success() {
                     return Ok(ToolExecutionOutput {
                         text: render_shell_output(output),
+                        search_evidence: None,
                     });
                 }
                 return Err(ToolRegistryError::ExecutionFailed {
@@ -1251,6 +1253,7 @@ fn execute_todo_write(
             in_progress,
             pending
         ),
+        search_evidence: None,
     })
 }
 
@@ -1276,6 +1279,7 @@ fn execute_complete_step(
             "Step `{step}` signed off with {} evidence item(s). Result: {result}",
             evidence.len()
         ),
+        search_evidence: None,
     })
 }
 
@@ -1365,6 +1369,7 @@ fn execute_web_fetch(arguments: &[ToolArgument]) -> Result<ToolExecutionOutput, 
             if truncated { " truncated=true" } else { "" },
             snippet
         ),
+        search_evidence: None,
     })
 }
 fn execute_read_file(arguments: &[ToolArgument]) -> Result<ToolExecutionOutput, ToolRegistryError> {
@@ -1400,6 +1405,7 @@ fn execute_read_file(arguments: &[ToolArgument]) -> Result<ToolExecutionOutput, 
     if lines.is_empty() {
         return Ok(ToolExecutionOutput {
             text: format!("{}:\n(empty file)", relative_display(&root, &path)),
+            search_evidence: None,
         });
     }
     if offset >= lines.len() {
@@ -1410,6 +1416,7 @@ fn execute_read_file(arguments: &[ToolArgument]) -> Result<ToolExecutionOutput, 
                 offset,
                 lines.len()
             ),
+            search_evidence: None,
         });
     }
 
@@ -1437,7 +1444,10 @@ fn execute_read_file(arguments: &[ToolArgument]) -> Result<ToolExecutionOutput, 
             end
         ));
     }
-    Ok(ToolExecutionOutput { text: rendered })
+    Ok(ToolExecutionOutput {
+        text: rendered,
+        search_evidence: None,
+    })
 }
 
 fn execute_write_file(
@@ -1447,6 +1457,7 @@ fn execute_write_file(
     write_plan(&plan, "write_file")?;
     Ok(ToolExecutionOutput {
         text: plan.success_text,
+        search_evidence: None,
     })
 }
 
@@ -1455,6 +1466,7 @@ fn execute_edit_file(arguments: &[ToolArgument]) -> Result<ToolExecutionOutput, 
     write_plan(&plan, "edit_file")?;
     Ok(ToolExecutionOutput {
         text: plan.success_text,
+        search_evidence: None,
     })
 }
 
@@ -1465,6 +1477,7 @@ fn execute_multi_edit(
     write_plan(&plan, "multi_edit")?;
     Ok(ToolExecutionOutput {
         text: plan.success_text,
+        search_evidence: None,
     })
 }
 
@@ -1706,6 +1719,7 @@ fn execute_delete_range(
     write_plan(&plan, "delete_range")?;
     Ok(ToolExecutionOutput {
         text: plan.success_text,
+        search_evidence: None,
     })
 }
 
@@ -1756,6 +1770,7 @@ fn execute_glob(arguments: &[ToolArgument]) -> Result<ToolExecutionOutput, ToolR
     if matches.is_empty() {
         return Ok(ToolExecutionOutput {
             text: "(no matches)".to_owned(),
+            search_evidence: None,
         });
     }
 
@@ -1776,7 +1791,10 @@ fn execute_glob(arguments: &[ToolArgument]) -> Result<ToolExecutionOutput, ToolR
             GLOB_MAX_RESULTS
         ));
     }
-    Ok(ToolExecutionOutput { text })
+    Ok(ToolExecutionOutput {
+        text,
+        search_evidence: None,
+    })
 }
 
 fn execute_grep(arguments: &[ToolArgument]) -> Result<ToolExecutionOutput, ToolRegistryError> {
@@ -1829,6 +1847,7 @@ fn execute_grep(arguments: &[ToolArgument]) -> Result<ToolExecutionOutput, ToolR
     if matches.is_empty() {
         return Ok(ToolExecutionOutput {
             text: "(no matches)".to_owned(),
+            search_evidence: None,
         });
     }
     truncated |= matches.len() > GREP_MAX_MATCHES;
@@ -1844,7 +1863,10 @@ fn execute_grep(arguments: &[ToolArgument]) -> Result<ToolExecutionOutput, ToolR
             GREP_MAX_MATCHES
         ));
     }
-    Ok(ToolExecutionOutput { text })
+    Ok(ToolExecutionOutput {
+        text,
+        search_evidence: None,
+    })
 }
 
 fn execute_ls(arguments: &[ToolArgument]) -> Result<ToolExecutionOutput, ToolRegistryError> {
@@ -1863,6 +1885,7 @@ fn execute_ls(arguments: &[ToolArgument]) -> Result<ToolExecutionOutput, ToolReg
         let size = metadata.len();
         return Ok(ToolExecutionOutput {
             text: format!("{}\t{size}", relative_display(&root, &path)),
+            search_evidence: None,
         });
     }
 
@@ -1896,10 +1919,12 @@ fn execute_ls(arguments: &[ToolArgument]) -> Result<ToolExecutionOutput, ToolReg
         if rows.is_empty() {
             return Ok(ToolExecutionOutput {
                 text: "(empty directory tree)".to_owned(),
+                search_evidence: None,
             });
         }
         return Ok(ToolExecutionOutput {
             text: rows.join("\n"),
+            search_evidence: None,
         });
     }
 
@@ -1931,10 +1956,12 @@ fn execute_ls(arguments: &[ToolArgument]) -> Result<ToolExecutionOutput, ToolReg
     if rows.is_empty() {
         return Ok(ToolExecutionOutput {
             text: "(empty directory)".to_owned(),
+            search_evidence: None,
         });
     }
     Ok(ToolExecutionOutput {
         text: rows.join("\n"),
+        search_evidence: None,
     })
 }
 

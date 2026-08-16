@@ -9,7 +9,9 @@
   "resource_operations": [
     "tool_call.execute_workspace_path",
     "tool_call.execute_external_http",
-    "tool_call.project_registry_to_ui"
+    "tool_call.project_registry_to_ui",
+    "tool_call.discover_social_candidate",
+    "tool_call.verify_search_url"
   ],
   "request_mainline": [
     "runtime asks the tool owner for a per-run registry",

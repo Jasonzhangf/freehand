@@ -91,8 +91,11 @@ use freehand_account_config::{
 use freehand_blocks::{
     CompactionTriggerAction, CompletionClaim, CompletionDecision, CompletionSchemaIssue,
     CompletionSchemaRejection, CompletionSubmission, RewritePolicyThresholds,
+    SearchEvidenceModelStage, SearchEvidenceSchemaRejection, SearchEvidenceSchemaRejectionCategory,
     completion_schema_rejection_feedback, parse_completion_submission_block,
+    parse_search_evidence_delivery_block, search_evidence_schema_rejection_feedback,
     strip_completion_submission_block, validate_completion_submission,
+    validate_search_evidence_model_stage,
 };
 pub use freehand_blocks::{ToolDisplayKind, ToolDisplayOutcome, classify_tool_display_kind};
 #[cfg(test)]
@@ -114,8 +117,9 @@ use freehand_contracts::{
     AgentId, ContextCachePolicy, ContextProvenance, ContextRole, ContextSegment, ContextSegmentId,
     ContextSegmentKind, ContextStability, ErrorClass, ErrorContract, ErrorErr01RuntimeClassified,
     FeatureId, InputAttachmentKind, InputAttachmentMetadata, ReasonReq03ProviderPayload,
-    ReasonReq04ToolCall, ReasonReq05ToolResultReentry, RecoveryPolicy, SessionId, ToolArgument,
-    ToolResultContract, ToolResultStatus, TraceId, TurnId,
+    ReasonReq04ToolCall, ReasonReq05ToolResultReentry, RecoveryPolicy, SearchEvidenceDelivery,
+    SearchEvidenceTurnStatus, SessionId, ToolArgument, ToolResultContract, ToolResultStatus,
+    TraceId, TurnId,
 };
 use freehand_control::{
     ControlRhythmDecision, ControlStatusRejection, ControlStatusSubmission, ErrorCenterDecision,
@@ -149,8 +153,9 @@ use freehand_reason::{
     CompactionPolicyRequest, PersistedSessionIndexEntry, PersistedSessionMetadataEntry,
     ProviderRawLedgerWrite, ProviderRawScenePosition, ReasonPersistence, ReasonPersistenceError,
     ReasonResp04CompletionSchemaRejected, ReasonResp05ModelContinuationWaiting,
-    ReasonRewriteRuntime, ReasonTurnEngine, ReasonTurnPageDirection, ReasonTurnPageRequest,
-    RewriteRuntimeState, SessionHistory, SessionRollbackMarker, TurnRecord, TurnStartInput,
+    ReasonResp06SearchEvidenceSchemaRejected, ReasonRewriteRuntime, ReasonTurnEngine,
+    ReasonTurnPageDirection, ReasonTurnPageRequest, RewriteRuntimeState, SessionHistory,
+    SessionRollbackMarker, TurnRecord, TurnStartInput,
 };
 use freehand_task::{
     AgentCreateRequest, AgentLifecycleActivity, AgentLifecycleSnapshot, AgentLifecycleState,
@@ -165,7 +170,8 @@ use freehand_task::{
     WorkerControlProjection, WorkerControlRequest,
 };
 use freehand_tools::{
-    BuiltinToolExecutionScope, BuiltinToolRegistry, ToolRegistryError, with_workspace_root,
+    BuiltinToolExecutionScope, BuiltinToolRegistry, ToolExecutionOutput, ToolRegistryError,
+    with_workspace_root,
 };
 use freehand_ui_protocol::{NodeStatusSnapshot as UiNodeStatusSnapshot, UiSource, UiStreamKind};
 use freehand_ui_protocol::{
@@ -226,6 +232,7 @@ pub type LiveReasonCancelToken = Arc<AtomicBool>;
 pub enum LiveReasonExecutionProfile {
     Workspace,
     CleanSearch,
+    SourcedSearch,
 }
 
 impl LiveReasonExecutionProfile {
@@ -233,6 +240,7 @@ impl LiveReasonExecutionProfile {
         match self {
             Self::Workspace => "workspace",
             Self::CleanSearch => "clean_search",
+            Self::SourcedSearch => "sourced_search",
         }
     }
 
@@ -246,6 +254,7 @@ impl From<TaskExecutionProfile> for LiveReasonExecutionProfile {
         match value {
             TaskExecutionProfile::Workspace => Self::Workspace,
             TaskExecutionProfile::CleanSearch => Self::CleanSearch,
+            TaskExecutionProfile::SourcedSearch => Self::SourcedSearch,
         }
     }
 }
@@ -271,6 +280,7 @@ pub struct LiveReasonTurnOutcome {
     pub broadcasts: Vec<ReasonBroadcastEvent>,
     pub rounds: usize,
     pub schema_rejections: Vec<CompletionSchemaRejection>,
+    pub search_schema_rejections: Vec<SearchEvidenceSchemaRejection>,
     pub tool_executions: usize,
     pub restore_status: LiveReasonRestoreStatus,
     pub restored_closed_turns: usize,
@@ -280,6 +290,68 @@ pub struct LiveReasonTurnOutcome {
 pub enum LiveReasonRestoreStatus {
     CreatedNew,
     RestoredExisting,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum SourcedSearchRoundStage {
+    DomainPlan,
+    HostedDiscovery,
+    CamoVerification,
+    SupplementDecision,
+    SocialDiscovery,
+    FinalDelivery,
+    Completion,
+}
+
+fn sourced_search_round_stage(turn: &TurnRecord) -> SourcedSearchRoundStage {
+    let Some(evidence) = turn.search_evidence.as_ref() else {
+        return SourcedSearchRoundStage::DomainPlan;
+    };
+    match evidence.status {
+        SearchEvidenceTurnStatus::DomainPlanValidated => SourcedSearchRoundStage::HostedDiscovery,
+        SearchEvidenceTurnStatus::HostedDiscoveryValidated => {
+            SourcedSearchRoundStage::SupplementDecision
+        }
+        SearchEvidenceTurnStatus::CamoVerificationRequired => {
+            SourcedSearchRoundStage::CamoVerification
+        }
+        SearchEvidenceTurnStatus::CamoVerificationValidated => {
+            SourcedSearchRoundStage::SupplementDecision
+        }
+        SearchEvidenceTurnStatus::SupplementDecisionValidated => evidence
+            .deliveries
+            .iter()
+            .find_map(|delivery| match delivery {
+                SearchEvidenceDelivery::SupplementDecision(decision) => Some(decision.required),
+                _ => None,
+            })
+            .map_or(SourcedSearchRoundStage::FinalDelivery, |required| {
+                if required {
+                    SourcedSearchRoundStage::SocialDiscovery
+                } else {
+                    SourcedSearchRoundStage::FinalDelivery
+                }
+            }),
+        SearchEvidenceTurnStatus::SocialDiscoveryValidated => {
+            SourcedSearchRoundStage::FinalDelivery
+        }
+        SearchEvidenceTurnStatus::FinalValidated
+        | SearchEvidenceTurnStatus::TurnTerminalSuccess
+        | SearchEvidenceTurnStatus::Blocked => SourcedSearchRoundStage::Completion,
+    }
+}
+
+fn sourced_search_delivery_matches_stage(
+    stage: SourcedSearchRoundStage,
+    delivery: &SearchEvidenceDelivery,
+) -> bool {
+    let model_stage = match stage {
+        SourcedSearchRoundStage::DomainPlan => SearchEvidenceModelStage::DomainPlan,
+        SourcedSearchRoundStage::SupplementDecision => SearchEvidenceModelStage::SupplementDecision,
+        SourcedSearchRoundStage::FinalDelivery => SearchEvidenceModelStage::FinalDelivery,
+        _ => return false,
+    };
+    validate_search_evidence_model_stage(model_stage, delivery).is_ok()
 }
 
 #[derive(Debug, Error, PartialEq, Eq)]
@@ -343,9 +415,24 @@ impl LiveReasonExecutionRole {
         self,
         registry: &BuiltinToolRegistry,
         execution_profile: LiveReasonExecutionProfile,
+        search_stage: Option<SourcedSearchRoundStage>,
     ) -> Vec<ProviderToolDefinition> {
         if execution_profile == LiveReasonExecutionProfile::CleanSearch {
             return Vec::new();
+        }
+        if execution_profile == LiveReasonExecutionProfile::SourcedSearch {
+            if !matches!(
+                search_stage,
+                Some(SourcedSearchRoundStage::CamoVerification)
+                    | Some(SourcedSearchRoundStage::SocialDiscovery)
+            ) {
+                return Vec::new();
+            }
+            return registry
+                .worker_implemented_definitions()
+                .into_iter()
+                .filter(|definition| definition.name == "camo")
+                .collect();
         }
         match self {
             Self::Master => registry.master_implemented_definitions(),
@@ -357,6 +444,7 @@ impl LiveReasonExecutionRole {
         self,
         descriptor: &ProviderDescriptor,
         execution_profile: LiveReasonExecutionProfile,
+        search_stage: Option<SourcedSearchRoundStage>,
     ) -> Vec<ProviderHostedToolDefinition> {
         let allow_hosted_search = match (self, execution_profile) {
             (Self::Master, LiveReasonExecutionProfile::Workspace) => descriptor
@@ -365,6 +453,10 @@ impl LiveReasonExecutionRole {
                 .can_mix_with_function_tools(),
             (Self::Worker, LiveReasonExecutionProfile::CleanSearch) => {
                 descriptor.capabilities.web_search.is_hosted()
+            }
+            (Self::Worker, LiveReasonExecutionProfile::SourcedSearch) => {
+                descriptor.capabilities.web_search.is_hosted()
+                    && search_stage == Some(SourcedSearchRoundStage::HostedDiscovery)
             }
             (Self::Worker, LiveReasonExecutionProfile::Workspace) => descriptor
                 .capabilities
@@ -386,9 +478,13 @@ impl LiveReasonExecutionRole {
         self,
         registry: &BuiltinToolRegistry,
         execution_profile: LiveReasonExecutionProfile,
+        search_stage: Option<SourcedSearchRoundStage>,
     ) -> String {
         if execution_profile == LiveReasonExecutionProfile::CleanSearch {
             return "clean-search:no-function-tools".to_owned();
+        }
+        if execution_profile == LiveReasonExecutionProfile::SourcedSearch {
+            return format!("sourced-search:{search_stage:?}");
         }
         match self {
             Self::Master => registry.master_implemented_schema_fingerprint(),
@@ -937,7 +1033,9 @@ where
 
     let mut broadcasts = Vec::new();
     let mut schema_rejections = Vec::new();
+    let mut search_schema_rejections = Vec::new();
     let mut consecutive_schema_rejections = 0usize;
+    let mut consecutive_search_schema_rejections = 0usize;
     let mut turns = Vec::new();
     let mut round = 0usize;
     let mut tool_executions = 0usize;
@@ -1083,8 +1181,6 @@ where
     let mut tool_exchanges: Vec<ProviderToolExchange> = Vec::new();
     let mut executed_tool_call_ids = Vec::<String>::new();
     let tool_registry = BuiltinToolRegistry::reasonix_aligned();
-    let tool_schema_fingerprint =
-        role.tool_schema_fingerprint(&tool_registry, request.execution_profile);
 
     'reason_loop: loop {
         ensure_live_not_cancelled(&request)?;
@@ -1133,6 +1229,15 @@ where
         round = round.saturating_add(1);
         let turn_id = derived_turn_id(&request.turn_id, round);
         let trace_id = derived_trace_id(&request.trace_id, round);
+        let search_stage = (request.execution_profile == LiveReasonExecutionProfile::SourcedSearch)
+            .then(|| {
+                turns.last().map_or(
+                    SourcedSearchRoundStage::DomainPlan,
+                    sourced_search_round_stage,
+                )
+            });
+        let tool_schema_fingerprint =
+            role.tool_schema_fingerprint(&tool_registry, request.execution_profile, search_stage);
         let mut turn = engine
             .start_turn(
                 &mut history,
@@ -1149,6 +1254,11 @@ where
                 },
             )
             .map_err(|err| RuntimeLiveBridgeError::TurnStartFailed(err.to_string()))?;
+        if let Some(previous) = turns.last() {
+            engine
+                .carry_search_evidence(previous, &mut turn)
+                .map_err(|err| RuntimeLiveBridgeError::TurnStartFailed(err.to_string()))?;
+        }
         turn.cwd = request
             .cwd
             .as_ref()
@@ -1156,6 +1266,10 @@ where
         if round == 1 {
             turn.attachments = request.attachment_metadata.clone();
         }
+        let search_delivery_count_before_provider = turn
+            .search_evidence
+            .as_ref()
+            .map_or(0, |evidence| evidence.deliveries.len());
         persistence
             .record_turn_started(&history, &turn, schema_rejections.len() as u32)
             .map_err(|err| RuntimeLiveBridgeError::ReasonPersistenceFailed(err.to_string()))?;
@@ -1172,9 +1286,13 @@ where
         } else {
             Vec::new()
         };
-        semantic_request.tools = role.tool_definitions(&tool_registry, request.execution_profile);
-        semantic_request.hosted_tools =
-            role.hosted_tool_definitions(&active_provider_descriptor, request.execution_profile);
+        semantic_request.tools =
+            role.tool_definitions(&tool_registry, request.execution_profile, search_stage);
+        semantic_request.hosted_tools = role.hosted_tool_definitions(
+            &active_provider_descriptor,
+            request.execution_profile,
+            search_stage,
+        );
         semantic_request.tool_choice = None;
         semantic_request.tool_exchanges = tool_exchanges.clone();
         write_control_hook_metadata(
@@ -1612,6 +1730,45 @@ where
         ensure_live_not_cancelled(&request)?;
         drain_broadcasts(&receiver, &mut broadcasts, &mut on_broadcast);
 
+        if request.execution_profile == LiveReasonExecutionProfile::SourcedSearch
+            && turn.search_evidence.as_ref().is_some_and(|evidence| {
+                evidence.deliveries.len() > search_delivery_count_before_provider
+            })
+        {
+            let status = turn
+                .search_evidence
+                .as_ref()
+                .map(|evidence| evidence.status);
+            if matches!(
+                status,
+                Some(
+                    SearchEvidenceTurnStatus::HostedDiscoveryValidated
+                        | SearchEvidenceTurnStatus::CamoVerificationRequired
+                        | SearchEvidenceTurnStatus::SocialDiscoveryValidated
+                )
+            ) {
+                next_prompt = "The typed search discovery result is persisted. Continue with the next required search evidence stage.".to_owned();
+                carryover_segments = next_round_segments(
+                    &request.prompt,
+                    &strip_control_status_block(&strip_completion_submission_block(
+                        &collect_turn_text(&turn),
+                    )),
+                    None,
+                    LiveRoundContext {
+                        role,
+                        execution_profile: request.execution_profile,
+                        configured_worker_set,
+                        web_search_route_guidance: Some(web_search_route_guidance.as_str()),
+                        runtime_home: &request.runtime_home,
+                        cwd: request.cwd.as_deref(),
+                        agent_id: &agent_id,
+                    },
+                )?;
+                turns.push(turn);
+                continue 'reason_loop;
+            }
+        }
+
         let mut attention_resolution_after_provider = record_master_live_safe_point(
             role,
             &request,
@@ -1934,6 +2091,7 @@ where
                     broadcasts,
                     rounds: round,
                     schema_rejections,
+                    search_schema_rejections,
                     tool_executions,
                     restore_status,
                     restored_closed_turns,
@@ -1962,6 +2120,7 @@ where
                     broadcasts,
                     rounds: round,
                     schema_rejections,
+                    search_schema_rejections,
                     tool_executions,
                     restore_status,
                     restored_closed_turns,
@@ -2038,6 +2197,7 @@ where
                 broadcasts,
                 rounds: round,
                 schema_rejections,
+                search_schema_rejections,
                 tool_executions,
                 restore_status,
                 restored_closed_turns,
@@ -2047,6 +2207,363 @@ where
         let provider_text = collect_turn_text(&turn);
         let public_provider_text =
             strip_control_status_block(&strip_completion_submission_block(&provider_text));
+        let model_search_stage = (request.execution_profile
+            == LiveReasonExecutionProfile::SourcedSearch)
+            .then(|| sourced_search_round_stage(&turn));
+        if let Some(search_stage) = model_search_stage
+            && matches!(
+                search_stage,
+                SourcedSearchRoundStage::DomainPlan
+                    | SourcedSearchRoundStage::SupplementDecision
+                    | SourcedSearchRoundStage::FinalDelivery
+            )
+        {
+            let parsed_delivery = parse_search_evidence_delivery_block(&provider_text);
+            match parsed_delivery {
+                Ok(delivery) => {
+                    if !sourced_search_delivery_matches_stage(search_stage, &delivery) {
+                        let rejection = SearchEvidenceSchemaRejection {
+                            category: SearchEvidenceSchemaRejectionCategory::StageMismatch,
+                            field: "delivery_type".to_owned(),
+                            message: format!(
+                                "delivery is not allowed in the current `{search_stage:?}` stage"
+                            ),
+                        };
+                        search_schema_rejections.push(rejection.clone());
+                        consecutive_search_schema_rejections =
+                            consecutive_search_schema_rejections.saturating_add(1);
+                        persistence
+                            .record_search_evidence_rejected(
+                                &history,
+                                &turn,
+                                &rejection,
+                                search_schema_rejections.len() as u32,
+                            )
+                            .map_err(|err| {
+                                RuntimeLiveBridgeError::ReasonPersistenceFailed(err.to_string())
+                            })?;
+                        let feedback = search_evidence_schema_rejection_feedback(&rejection);
+                        if consecutive_search_schema_rejections >= 3 {
+                            engine.block_turn(
+                                &mut turn,
+                                format!(
+                                    "Search evidence schema remained invalid after 3 attempts: {feedback}"
+                                ),
+                            );
+                            drain_broadcasts(&receiver, &mut broadcasts, &mut on_broadcast);
+                            drain_debug_events(&debug_receiver, &mut on_debug);
+                            persistence
+                                .record_turn_closed(&history, &turn, schema_rejections.len() as u32)
+                                .map_err(|err| {
+                                    RuntimeLiveBridgeError::ReasonPersistenceFailed(err.to_string())
+                                })?;
+                            turns.push(turn.clone());
+                            return Ok(LiveReasonTurnOutcome {
+                                turn,
+                                turns,
+                                broadcasts,
+                                rounds: round,
+                                schema_rejections,
+                                search_schema_rejections,
+                                tool_executions,
+                                restore_status,
+                                restored_closed_turns,
+                            });
+                        }
+                        let retry_event = ReasonBroadcastEvent::SearchEvidenceSchemaRejected(
+                            ReasonResp06SearchEvidenceSchemaRejected {
+                                session_id: turn.request.session_id.clone(),
+                                turn_id: turn.request.turn_id.clone(),
+                                trace_id: turn.request.trace_id.clone(),
+                                feature_id: turn.request.feature_id.clone(),
+                                agent_id: turn.request.agent_id.clone(),
+                                retry_index: consecutive_search_schema_rejections as u32,
+                                rejection,
+                                feedback: feedback.clone(),
+                            },
+                        );
+                        on_broadcast(&retry_event);
+                        broadcasts.push(retry_event);
+                        next_prompt = feedback.clone();
+                        carryover_segments = next_round_segments(
+                            &request.prompt,
+                            &public_provider_text,
+                            Some(feedback.as_str()),
+                            LiveRoundContext {
+                                role,
+                                execution_profile: request.execution_profile,
+                                configured_worker_set,
+                                web_search_route_guidance: Some(web_search_route_guidance.as_str()),
+                                runtime_home: &request.runtime_home,
+                                cwd: request.cwd.as_deref(),
+                                agent_id: &agent_id,
+                            },
+                        )?;
+                        turns.push(turn);
+                        continue 'reason_loop;
+                    }
+                    let apply_result = match delivery.clone() {
+                        SearchEvidenceDelivery::Final(final_delivery) => engine
+                            .apply_search_evidence_delivery(&mut turn, final_delivery)
+                            .map(|_| ()),
+                        stage_delivery => engine
+                            .apply_search_evidence_stage_delivery(&mut turn, stage_delivery)
+                            .map(|_| ()),
+                    };
+                    if let Err(error) = apply_result {
+                        let rejection = SearchEvidenceSchemaRejection {
+                            category: SearchEvidenceSchemaRejectionCategory::StateTransition,
+                            field: "state_transition".to_owned(),
+                            message: error.to_string(),
+                        };
+                        search_schema_rejections.push(rejection.clone());
+                        consecutive_search_schema_rejections =
+                            consecutive_search_schema_rejections.saturating_add(1);
+                        persistence
+                            .record_search_evidence_rejected(
+                                &history,
+                                &turn,
+                                &rejection,
+                                search_schema_rejections.len() as u32,
+                            )
+                            .map_err(|err| {
+                                RuntimeLiveBridgeError::ReasonPersistenceFailed(err.to_string())
+                            })?;
+                        if consecutive_search_schema_rejections >= 3 {
+                            engine.block_turn(
+                                &mut turn,
+                                format!(
+                                    "Search evidence schema remained invalid after 3 attempts: {}",
+                                    search_evidence_schema_rejection_feedback(&rejection)
+                                ),
+                            );
+                            drain_broadcasts(&receiver, &mut broadcasts, &mut on_broadcast);
+                            drain_debug_events(&debug_receiver, &mut on_debug);
+                            persistence
+                                .record_turn_closed(&history, &turn, schema_rejections.len() as u32)
+                                .map_err(|err| {
+                                    RuntimeLiveBridgeError::ReasonPersistenceFailed(err.to_string())
+                                })?;
+                            turns.push(turn.clone());
+                            return Ok(LiveReasonTurnOutcome {
+                                turn,
+                                turns,
+                                broadcasts,
+                                rounds: round,
+                                schema_rejections,
+                                search_schema_rejections,
+                                tool_executions,
+                                restore_status,
+                                restored_closed_turns,
+                            });
+                        }
+                        let feedback = search_evidence_schema_rejection_feedback(&rejection);
+                        let retry_event = ReasonBroadcastEvent::SearchEvidenceSchemaRejected(
+                            ReasonResp06SearchEvidenceSchemaRejected {
+                                session_id: turn.request.session_id.clone(),
+                                turn_id: turn.request.turn_id.clone(),
+                                trace_id: turn.request.trace_id.clone(),
+                                feature_id: turn.request.feature_id.clone(),
+                                agent_id: turn.request.agent_id.clone(),
+                                retry_index: consecutive_search_schema_rejections as u32,
+                                rejection,
+                                feedback: feedback.clone(),
+                            },
+                        );
+                        on_broadcast(&retry_event);
+                        broadcasts.push(retry_event);
+                        next_prompt = feedback.clone();
+                        carryover_segments = next_round_segments(
+                            &request.prompt,
+                            &public_provider_text,
+                            Some(feedback.as_str()),
+                            LiveRoundContext {
+                                role,
+                                execution_profile: request.execution_profile,
+                                configured_worker_set,
+                                web_search_route_guidance: Some(web_search_route_guidance.as_str()),
+                                runtime_home: &request.runtime_home,
+                                cwd: request.cwd.as_deref(),
+                                agent_id: &agent_id,
+                            },
+                        )?;
+                        turns.push(turn);
+                        continue 'reason_loop;
+                    }
+                    persistence
+                        .record_search_evidence_applied(
+                            &history,
+                            &turn,
+                            &delivery,
+                            schema_rejections.len() as u32,
+                        )
+                        .map_err(|err| {
+                            RuntimeLiveBridgeError::ReasonPersistenceFailed(err.to_string())
+                        })?;
+                    consecutive_search_schema_rejections = 0;
+                    next_prompt = match sourced_search_round_stage(&turn) {
+                        SourcedSearchRoundStage::HostedDiscovery => {
+                            "Hosted discovery is validated. Continue with the next required search evidence delivery."
+                                .to_owned()
+                        }
+                        SourcedSearchRoundStage::CamoVerification => {
+                            "Use camo to verify every usable discovered URL, one source at a time. Return typed tool calls; do not claim verification in text."
+                                .to_owned()
+                        }
+                        SourcedSearchRoundStage::SupplementDecision => {
+                            "Assess verified coverage and emit the required supplement decision schema."
+                                .to_owned()
+                        }
+                        SourcedSearchRoundStage::SocialDiscovery => {
+                            "Use the exposed camo social search capability for the requested supplement, then return its typed result."
+                                .to_owned()
+                        }
+                        SourcedSearchRoundStage::FinalDelivery => {
+                            "Emit the final search delivery schema using only persisted verified source ids."
+                                .to_owned()
+                        }
+                        SourcedSearchRoundStage::Completion => {
+                            "Emit the Freehand completion schema matching the validated search delivery."
+                                .to_owned()
+                        }
+                        SourcedSearchRoundStage::DomainPlan => unreachable!(
+                            "a validated model search delivery cannot return to domain planning"
+                        ),
+                    };
+                    carryover_segments = next_round_segments(
+                        &request.prompt,
+                        &public_provider_text,
+                        None,
+                        LiveRoundContext {
+                            role,
+                            execution_profile: request.execution_profile,
+                            configured_worker_set,
+                            web_search_route_guidance: Some(web_search_route_guidance.as_str()),
+                            runtime_home: &request.runtime_home,
+                            cwd: request.cwd.as_deref(),
+                            agent_id: &agent_id,
+                        },
+                    )?;
+                    turns.push(turn);
+                    continue 'reason_loop;
+                }
+                Err(rejection) => {
+                    search_schema_rejections.push(rejection.clone());
+                    consecutive_search_schema_rejections =
+                        consecutive_search_schema_rejections.saturating_add(1);
+                    persistence
+                        .record_search_evidence_rejected(
+                            &history,
+                            &turn,
+                            &rejection,
+                            search_schema_rejections.len() as u32,
+                        )
+                        .map_err(|err| {
+                            RuntimeLiveBridgeError::ReasonPersistenceFailed(err.to_string())
+                        })?;
+                    let feedback = search_evidence_schema_rejection_feedback(&rejection);
+                    if consecutive_search_schema_rejections >= 3 {
+                        engine.block_turn(
+                            &mut turn,
+                            format!(
+                                "Search evidence schema remained invalid after 3 attempts: {feedback}"
+                            ),
+                        );
+                        drain_broadcasts(&receiver, &mut broadcasts, &mut on_broadcast);
+                        drain_debug_events(&debug_receiver, &mut on_debug);
+                        persistence
+                            .record_turn_closed(&history, &turn, schema_rejections.len() as u32)
+                            .map_err(|err| {
+                                RuntimeLiveBridgeError::ReasonPersistenceFailed(err.to_string())
+                            })?;
+                        turns.push(turn.clone());
+                        return Ok(LiveReasonTurnOutcome {
+                            turn,
+                            turns,
+                            broadcasts,
+                            rounds: round,
+                            schema_rejections,
+                            search_schema_rejections,
+                            tool_executions,
+                            restore_status,
+                            restored_closed_turns,
+                        });
+                    }
+                    let retry_event = ReasonBroadcastEvent::SearchEvidenceSchemaRejected(
+                        ReasonResp06SearchEvidenceSchemaRejected {
+                            session_id: turn.request.session_id.clone(),
+                            turn_id: turn.request.turn_id.clone(),
+                            trace_id: turn.request.trace_id.clone(),
+                            feature_id: turn.request.feature_id.clone(),
+                            agent_id: turn.request.agent_id.clone(),
+                            retry_index: consecutive_search_schema_rejections as u32,
+                            rejection,
+                            feedback: feedback.clone(),
+                        },
+                    );
+                    on_broadcast(&retry_event);
+                    broadcasts.push(retry_event);
+                    next_prompt = feedback.clone();
+                    carryover_segments = next_round_segments(
+                        &request.prompt,
+                        &public_provider_text,
+                        Some(feedback.as_str()),
+                        LiveRoundContext {
+                            role,
+                            execution_profile: request.execution_profile,
+                            configured_worker_set,
+                            web_search_route_guidance: Some(web_search_route_guidance.as_str()),
+                            runtime_home: &request.runtime_home,
+                            cwd: request.cwd.as_deref(),
+                            agent_id: &agent_id,
+                        },
+                    )?;
+                    turns.push(turn);
+                    continue 'reason_loop;
+                }
+            }
+        }
+        if request.execution_profile == LiveReasonExecutionProfile::SourcedSearch {
+            let stage = sourced_search_round_stage(&turn);
+            if matches!(
+                stage,
+                SourcedSearchRoundStage::HostedDiscovery
+                    | SourcedSearchRoundStage::CamoVerification
+                    | SourcedSearchRoundStage::SocialDiscovery
+            ) {
+                next_prompt = match stage {
+                    SourcedSearchRoundStage::HostedDiscovery => {
+                        "Hosted discovery is validated. Emit the supplement decision schema based on verified-source coverage."
+                            .to_owned()
+                    }
+                    SourcedSearchRoundStage::CamoVerification => {
+                        "Use camo to verify every usable discovered URL, one source at a time. Return typed tool calls; do not claim verification in text."
+                            .to_owned()
+                    }
+                    SourcedSearchRoundStage::SocialDiscovery => {
+                        "Use the exposed camo social search capability for the required supplement, then return its typed result."
+                            .to_owned()
+                    }
+                    _ => unreachable!("sourced search stage was checked above"),
+                };
+                carryover_segments = next_round_segments(
+                    &request.prompt,
+                    &public_provider_text,
+                    None,
+                    LiveRoundContext {
+                        role,
+                        execution_profile: request.execution_profile,
+                        configured_worker_set,
+                        web_search_route_guidance: Some(web_search_route_guidance.as_str()),
+                        runtime_home: &request.runtime_home,
+                        cwd: request.cwd.as_deref(),
+                        agent_id: &agent_id,
+                    },
+                )?;
+                turns.push(turn);
+                continue 'reason_loop;
+            }
+        }
         if let Some(resolution) = attention_resolution_after_provider.take() {
             prepare_master_attention_reasoning_continuation(
                 &resolution,
@@ -2140,6 +2657,7 @@ where
                         broadcasts,
                         rounds: round,
                         schema_rejections,
+                        search_schema_rejections,
                         tool_executions,
                         restore_status,
                         restored_closed_turns,
@@ -2335,6 +2853,7 @@ where
                             broadcasts,
                             rounds: round,
                             schema_rejections,
+                            search_schema_rejections,
                             tool_executions,
                             restore_status,
                             restored_closed_turns,
@@ -2454,6 +2973,7 @@ where
                         broadcasts,
                         rounds: round,
                         schema_rejections,
+                        search_schema_rejections,
                         tool_executions,
                         restore_status,
                         restored_closed_turns,
@@ -2524,6 +3044,7 @@ where
                         broadcasts,
                         rounds: round,
                         schema_rejections,
+                        search_schema_rejections,
                         tool_executions,
                         restore_status,
                         restored_closed_turns,
@@ -2553,6 +3074,7 @@ where
                             broadcasts,
                             rounds: round,
                             schema_rejections,
+                            search_schema_rejections,
                             tool_executions,
                             restore_status,
                             restored_closed_turns,
@@ -2704,6 +3226,7 @@ where
                         broadcasts,
                         rounds: round,
                         schema_rejections,
+                        search_schema_rejections,
                         tool_executions,
                         restore_status,
                         restored_closed_turns,
@@ -2733,6 +3256,7 @@ where
                             broadcasts,
                             rounds: round,
                             schema_rejections,
+                            search_schema_rejections,
                             tool_executions,
                             restore_status,
                             restored_closed_turns,
@@ -2878,6 +3402,7 @@ where
                         broadcasts,
                         rounds: round,
                         schema_rejections,
+                        search_schema_rejections,
                         tool_executions,
                         restore_status,
                         restored_closed_turns,
@@ -5714,6 +6239,7 @@ fn execute_provider_web_search_test(
         turn_id,
         trace_id,
         feature_id: FeatureId::new("provider.reason-live-bridge"),
+        search_domain_plan_ref: Some("provider-web-search-test".to_owned()),
     };
     let outputs = driver
         .execute_once_with_raw(&ctx, &semantic_request, &mut |_| Ok(()))
@@ -5745,8 +6271,9 @@ fn provider_outputs_have_hosted_web_search(outputs: &[ProviderSemanticOutput]) -
     outputs.iter().any(|output| {
         matches!(
             output,
-            ProviderSemanticOutput::SemanticEvent(event)
-                if event.content.contains("provider-hosted web_search")
+            ProviderSemanticOutput::SearchDiscovery(discovery)
+                if discovery.discovery_channel
+                    == freehand_contracts::SearchDiscoveryChannel::HostedWebSearch
         )
     })
 }
@@ -5763,6 +6290,11 @@ fn provider_semantic_outputs_summary(outputs: &[ProviderSemanticOutput]) -> Stri
                 "semantic:{:?}:{}",
                 event.kind,
                 compact_status_fragment(&event.content, 160)
+            ),
+            ProviderSemanticOutput::SearchDiscovery(discovery) => format!(
+                "search_discovery:{:?}:candidates={}",
+                discovery.discovery_channel,
+                discovery.candidates.len()
             ),
             ProviderSemanticOutput::ToolCall(tool_call) => format!(
                 "tool_call:{}",
@@ -7029,6 +7561,18 @@ fn refresh_persisted_sessions_for_ui_query(
         }
         let turns = match persistence.restore_turn_snapshots_for_ui(&session.session_id) {
             Ok(turns) => turns,
+            Err(
+                ReasonPersistenceError::MissingRecoveryTruth(_)
+                | ReasonPersistenceError::JsonParseFailed(_)
+                | ReasonPersistenceError::InvalidCursorCoherence(_)
+                | ReasonPersistenceError::InvalidLedgerCoherence(_)
+                | ReasonPersistenceError::LedgerSequenceGap { .. },
+            ) => {
+                // A single poisoned/incomplete ledger must not block the whole
+                // UI refresh for every other session. The daemon-side restore
+                // already tolerates the same set of recoverable ledger errors.
+                continue;
+            }
             Err(error) => {
                 return Err(UiCommandDispatchPortError::DispatchFailed(format!(
                     "failed to refresh persisted session turns: {error}"
@@ -8664,6 +9208,12 @@ fn provider_ctx(turn: &TurnRecord) -> freehand_provider_core::ProviderEventConte
         turn_id: turn.request.turn_id.clone(),
         trace_id: turn.request.trace_id.clone(),
         feature_id: turn.request.feature_id.clone(),
+        search_domain_plan_ref: turn.search_evidence.as_ref().and_then(|evidence| {
+            evidence
+                .domain_plan
+                .as_ref()
+                .map(|plan| plan.delivery_id.clone())
+        }),
     }
 }
 
@@ -10128,11 +10678,19 @@ fn execute_registry_tool_call_with_workspace(
         let manifest = store
             .create_from_preview(turn, &preview, tool_name)
             .map_err(|err| RuntimeLiveBridgeError::ToolCheckpointFailed(err.to_string()))?;
-        let (status, output) = match registry.execute(tool_call) {
-            Ok(output) => (ToolResultStatus::Success, output.text),
+        let (status, output, search_evidence) = match registry.execute(tool_call) {
+            Ok(output) => (
+                ToolResultStatus::Success,
+                output.text,
+                output.search_evidence,
+            ),
             Err(err) => {
                 let _ = store.mark_failed(&manifest, &err.to_string());
-                (ToolResultStatus::Failed, registry_error_text(role, &err))
+                (
+                    ToolResultStatus::Failed,
+                    registry_error_text(role, &err),
+                    None,
+                )
             }
         };
         if status == ToolResultStatus::Success {
@@ -10141,16 +10699,34 @@ fn execute_registry_tool_call_with_workspace(
                 .map_err(|err| RuntimeLiveBridgeError::ToolCheckpointFailed(err.to_string()))?;
         }
         return Ok(ExecutedToolResult {
-            result: tool_result_reentry(turn, tool_call, status, output),
+            result: tool_result_reentry_with_search_evidence(
+                turn,
+                tool_call,
+                status,
+                output,
+                search_evidence,
+            ),
             task_truth_changed: false,
         });
     }
     let (status, output) = match registry.execute(tool_call) {
-        Ok(output) => (ToolResultStatus::Success, output.text),
-        Err(err) => (ToolResultStatus::Failed, registry_error_text(role, &err)),
+        Ok(output) => (ToolResultStatus::Success, output),
+        Err(err) => (
+            ToolResultStatus::Failed,
+            ToolExecutionOutput {
+                text: registry_error_text(role, &err),
+                search_evidence: None,
+            },
+        ),
     };
     Ok(ExecutedToolResult {
-        result: tool_result_reentry(turn, tool_call, status, output),
+        result: tool_result_reentry_with_search_evidence(
+            turn,
+            tool_call,
+            status,
+            output.text,
+            output.search_evidence,
+        ),
         task_truth_changed: false,
     })
 }
@@ -10700,6 +11276,7 @@ fn parse_task_execution_profile_value(value: &str) -> Result<TaskExecutionProfil
     match value.trim() {
         "" | "workspace" => Ok(TaskExecutionProfile::Workspace),
         "clean_search" => Ok(TaskExecutionProfile::CleanSearch),
+        "sourced_search" => Ok(TaskExecutionProfile::SourcedSearch),
         other => Err(format!(
             "unsupported execution_profile `{other}`; expected `workspace` or `clean_search`"
         )),
@@ -10841,6 +11418,16 @@ fn tool_result_reentry(
     status: ToolResultStatus,
     output: String,
 ) -> ReasonReq05ToolResultReentry {
+    tool_result_reentry_with_search_evidence(turn, tool_call, status, output, None)
+}
+
+fn tool_result_reentry_with_search_evidence(
+    turn: &TurnRecord,
+    tool_call: &ReasonReq04ToolCall,
+    status: ToolResultStatus,
+    output: String,
+    search_evidence: Option<SearchEvidenceDelivery>,
+) -> ReasonReq05ToolResultReentry {
     ReasonReq05ToolResultReentry {
         session_id: turn.request.session_id.clone(),
         turn_id: turn.request.turn_id.clone(),
@@ -10851,6 +11438,7 @@ fn tool_result_reentry(
             tool_call_id: tool_call.tool_call.tool_call_id.clone(),
             status,
             output,
+            search_evidence,
         },
     }
 }
@@ -11225,6 +11813,14 @@ pub(crate) fn apply_runtime_reason_broadcast(
                 false,
             );
         }
+        ReasonBroadcastEvent::SearchEvidence(event) => {
+            ui.apply_search_evidence(
+                reason_agent_id.clone(),
+                master_node_id.to_owned(),
+                event,
+                false,
+            );
+        }
         ReasonBroadcastEvent::Tool(event) => {
             ui.apply_tool_call(
                 reason_agent_id.clone(),
@@ -11264,6 +11860,17 @@ pub(crate) fn apply_runtime_reason_broadcast(
                 turn_id: event.turn_id.clone(),
                 retry_index: event.retry_index,
                 issue_summary,
+                slave_substream_card: false,
+            });
+        }
+        ReasonBroadcastEvent::SearchEvidenceSchemaRejected(event) => {
+            ui.apply_completion_schema_retry_waiting(UiCompletionSchemaRetryWaiting {
+                source_agent_id: reason_agent_id.clone(),
+                source_node_id: master_node_id.to_owned(),
+                session_id: event.session_id.clone(),
+                turn_id: event.turn_id.clone(),
+                retry_index: event.retry_index,
+                issue_summary: format!("{} {}", event.rejection.field, event.rejection.message),
                 slave_substream_card: false,
             });
         }

@@ -104,6 +104,7 @@ fn project_tool_result_success_carries_output_content() {
             tool_call_id: freehand_contracts::ToolCallId::new("call-1"),
             status: ToolResultStatus::Success,
             output: "command output text".to_owned(),
+            search_evidence: None,
         },
     };
     let notifications = project_tool_result(&session_id, &result);
@@ -135,6 +136,7 @@ fn project_tool_result_failed_carries_output_content() {
             tool_call_id: freehand_contracts::ToolCallId::new("call-1"),
             status: ToolResultStatus::Failed,
             output: "boom".to_owned(),
+            search_evidence: None,
         },
     };
     let notifications = project_tool_result(&session_id, &result);

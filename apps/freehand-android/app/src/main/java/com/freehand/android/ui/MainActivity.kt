@@ -220,7 +220,9 @@ class MainActivity : AppCompatActivity() {
         if (!requestInstallNotificationPermissionIfNeeded()) {
             requestInstallFileAccessIfNeeded()
         }
-        startAndroidApkUpdateCheck()
+        if (isApkAutoCheckEnabled()) {
+            startAndroidApkUpdateCheck()
+        }
         webView.loadUrl(host.webUiUrl)
     }
 
@@ -318,6 +320,14 @@ class MainActivity : AppCompatActivity() {
 
         @JavascriptInterface
         fun manifestUrl(): String = apkUpdater.updateManifestUrl
+
+        @JavascriptInterface
+        fun autoCheckOnLaunch(): Boolean = isApkAutoCheckEnabled()
+
+        @JavascriptInterface
+        fun setAutoCheckOnLaunch(enabled: Boolean) {
+            setApkAutoCheckEnabled(enabled)
+        }
     }
 
     private inner class AndroidNotificationsBridge {
@@ -587,6 +597,28 @@ class MainActivity : AppCompatActivity() {
             parts.add(extra)
         }
         Log.i(NOTIFICATION_TAG, parts.joinToString(" "))
+    }
+
+    private fun apkUpdatePreferences() =
+        getSharedPreferences("freehand_apk_update", Context.MODE_PRIVATE)
+
+    private fun isApkAutoCheckEnabled(): Boolean =
+        apkUpdatePreferences().getBoolean("auto_check_on_launch", true)
+
+    private fun setApkAutoCheckEnabled(enabled: Boolean) {
+        apkUpdatePreferences().edit().putBoolean("auto_check_on_launch", enabled).apply()
+        emitAndroidApkAutoCheckStatus(enabled)
+    }
+
+    private fun emitAndroidApkAutoCheckStatus(enabled: Boolean) {
+        if (!::webView.isInitialized || isFinishing) return
+        val payload = JSONObject()
+            .put("autoCheckOnLaunch", enabled)
+        webView.evaluateJavascript(
+            "window.__freehandAndroidApkAutoCheck && " +
+                "window.__freehandAndroidApkAutoCheck($payload);",
+            null,
+        )
     }
 
     private fun startAndroidApkUpdateCheck() {

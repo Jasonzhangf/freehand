@@ -4,10 +4,17 @@ use std::path::Path;
 
 use freehand_blocks::{
     RecoveryRewriteAction, RecoveryRewriteInput, RestoreStatus, RewritePolicyThresholds,
+    SearchEvidenceModelStage, SearchEvidenceSchemaRejection, SearchEvidenceSchemaRejectionCategory,
+    SearchEvidenceValidationError, build_search_evidence_turn_delivery,
+    parse_search_evidence_delivery_block, validate_search_evidence_model_stage,
+    validate_search_evidence_turn_delivery,
 };
 use freehand_contracts::{
     AgentId, ContextCachePolicy, ContextProvenance, ContextRole, ContextSegment, ContextSegmentId,
-    ContextSegmentKind, ContextStability, FeatureId, SessionId, TokenUsage, TraceId, TurnId,
+    ContextSegmentKind, ContextStability, FeatureId, SearchAccessAttempt, SearchAccessStatus,
+    SearchDiscoveryCandidate, SearchDiscoveryChannel, SearchDiscoveryDelivery, SearchDomain,
+    SearchDomainPlanDelivery, SearchEvidenceDelivery, SearchFinalDelivery, SearchHostedAttempt,
+    SearchSocialPlatform, SearchVerificationDelivery, SessionId, TokenUsage, TraceId, TurnId,
 };
 use freehand_provider_core::ProviderSemanticOutput;
 use freehand_reason::{
@@ -17,6 +24,196 @@ use freehand_reason::{
     TurnStartInput,
 };
 use thiserror::Error;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SearchEvidenceConformanceOperation {
+    Parse,
+    ValidateTurn,
+    BuildFinal,
+    ModelStage,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum SearchEvidenceConformanceContext {
+    CompleteOneVerified,
+    CompleteMinimumTwo,
+    BlockedNoSource,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct SearchEvidenceConformanceInput<'a> {
+    pub operation: SearchEvidenceConformanceOperation,
+    pub context: Option<SearchEvidenceConformanceContext>,
+    pub stage: Option<SearchEvidenceModelStage>,
+    pub payload: &'a str,
+}
+
+pub fn run_search_evidence_conformance_input(
+    input: SearchEvidenceConformanceInput<'_>,
+) -> Result<(), SearchEvidenceSchemaRejection> {
+    match input.operation {
+        SearchEvidenceConformanceOperation::Parse => {
+            parse_search_evidence_delivery_block(&tag_search_delivery(input.payload)).map(|_| ())
+        }
+        SearchEvidenceConformanceOperation::ValidateTurn => {
+            let delivery = serde_json::from_str(input.payload).map_err(decode_rejection)?;
+            validate_search_evidence_turn_delivery(&delivery).map_err(validation_rejection)
+        }
+        SearchEvidenceConformanceOperation::BuildFinal => {
+            let final_delivery: SearchFinalDelivery =
+                serde_json::from_str(input.payload).map_err(decode_rejection)?;
+            let context = input.context.ok_or_else(|| SearchEvidenceSchemaRejection {
+                category: SearchEvidenceSchemaRejectionCategory::Validation,
+                field: "context".to_owned(),
+                message: "build_final requires a declared context".to_owned(),
+            })?;
+            let (deliveries, final_delivery) = final_context(context, final_delivery);
+            build_search_evidence_turn_delivery(
+                SessionId::new("conformance-session"),
+                TurnId::new("conformance-turn"),
+                deliveries,
+                final_delivery,
+            )
+            .map(|_| ())
+            .map_err(validation_rejection)
+        }
+        SearchEvidenceConformanceOperation::ModelStage => {
+            let delivery =
+                parse_search_evidence_delivery_block(&tag_search_delivery(input.payload))?;
+            let stage = input.stage.ok_or_else(|| SearchEvidenceSchemaRejection {
+                category: SearchEvidenceSchemaRejectionCategory::StageMismatch,
+                field: "stage".to_owned(),
+                message: "model_stage requires a declared stage".to_owned(),
+            })?;
+            validate_search_evidence_model_stage(stage, &delivery)
+        }
+    }
+}
+
+fn tag_search_delivery(payload: &str) -> String {
+    format!("<freehand_search_delivery>{payload}</freehand_search_delivery>")
+}
+
+fn decode_rejection(error: serde_json::Error) -> SearchEvidenceSchemaRejection {
+    SearchEvidenceSchemaRejection {
+        category: SearchEvidenceSchemaRejectionCategory::Decode,
+        field: "freehand_search_delivery".to_owned(),
+        message: format!("schema decode failed: {error}"),
+    }
+}
+
+fn validation_rejection(error: SearchEvidenceValidationError) -> SearchEvidenceSchemaRejection {
+    match error {
+        SearchEvidenceValidationError::InvalidField { field, reason } => {
+            SearchEvidenceSchemaRejection {
+                category: SearchEvidenceSchemaRejectionCategory::Validation,
+                field,
+                message: reason,
+            }
+        }
+        SearchEvidenceValidationError::InvalidTransition { .. } => SearchEvidenceSchemaRejection {
+            category: SearchEvidenceSchemaRejectionCategory::StateTransition,
+            field: "state_transition".to_owned(),
+            message: error.to_string(),
+        },
+        SearchEvidenceValidationError::InvalidSourceReference(source_id) => {
+            SearchEvidenceSchemaRejection {
+                category: SearchEvidenceSchemaRejectionCategory::SourceReference,
+                field: "claims.source_ids".to_owned(),
+                message: format!("references unknown or unverified source `{source_id}`"),
+            }
+        }
+    }
+}
+
+fn final_context(
+    context: SearchEvidenceConformanceContext,
+    final_delivery: SearchFinalDelivery,
+) -> (Vec<SearchEvidenceDelivery>, SearchFinalDelivery) {
+    let minimum_verified_sources = match context {
+        SearchEvidenceConformanceContext::CompleteMinimumTwo => 2,
+        SearchEvidenceConformanceContext::CompleteOneVerified
+        | SearchEvidenceConformanceContext::BlockedNoSource => 1,
+    };
+    let plan = SearchDomainPlanDelivery {
+        schema: "search_evidence.domain_plan.v1".to_owned(),
+        delivery_id: final_delivery.domain_plan_ref.clone(),
+        domain: SearchDomain::News,
+        preferred_source_kinds: vec!["official_publication".to_owned()],
+        social_platform_priority: vec![SearchSocialPlatform::Weibo],
+        minimum_verified_sources,
+        policy_version: "2026-08-15".to_owned(),
+    };
+    let has_verified_source = context != SearchEvidenceConformanceContext::BlockedNoSource;
+    let candidate_status = if has_verified_source {
+        freehand_contracts::SearchCandidateStatus::Usable
+    } else {
+        freehand_contracts::SearchCandidateStatus::UnusableMissingUrl
+    };
+    let discovery = SearchDiscoveryDelivery {
+        schema: "search_evidence.discovery.v1".to_owned(),
+        delivery_id: "conformance-discovery".to_owned(),
+        discovery_channel: SearchDiscoveryChannel::HostedWebSearch,
+        domain_plan_ref: Some(plan.delivery_id.clone()),
+        hosted_search_attempt: Some(SearchHostedAttempt {
+            query: "conformance query".to_owned(),
+            provider: "fixture".to_owned(),
+            tool_call_id: None,
+            status: None,
+            result_count: Some(1),
+        }),
+        candidates: vec![SearchDiscoveryCandidate {
+            candidate_id: "source-1".to_owned(),
+            status: candidate_status,
+            original_url: has_verified_source.then(|| "https://example.com/news".to_owned()),
+            title: "Source".to_owned(),
+            snippet: "Discovery snippet".to_owned(),
+            discovered_by: has_verified_source.then_some(SearchDiscoveryChannel::HostedWebSearch),
+            platform: Some(SearchSocialPlatform::Web),
+            source_weight: Some(90),
+            reason: (!has_verified_source).then(|| "missing original URL".to_owned()),
+        }],
+    };
+    let mut deliveries = vec![
+        SearchEvidenceDelivery::DomainPlan(plan.clone()),
+        SearchEvidenceDelivery::Discovery(discovery),
+    ];
+    if has_verified_source {
+        deliveries.push(SearchEvidenceDelivery::Verification(
+            SearchVerificationDelivery {
+                schema: "search_evidence.verification.v1".to_owned(),
+                delivery_id: "conformance-verification".to_owned(),
+                source_id: "source-1".to_owned(),
+                original_url: "https://example.com/news".to_owned(),
+                camo_profile: "conformance".to_owned(),
+                accessed_at: "2026-08-15T12:00:00Z".to_owned(),
+                access_status: SearchAccessStatus::Verified,
+                page_title: Some("Source".to_owned()),
+                evidence_excerpt: Some("Verified evidence".to_owned()),
+                verified_by: Some("camo".to_owned()),
+                access_attempts: vec![SearchAccessAttempt {
+                    attempt_id: "attempt-1".to_owned(),
+                    channel: "camo".to_owned(),
+                    status: SearchAccessStatus::Verified,
+                    accessed_at: "2026-08-15T12:00:00Z".to_owned(),
+                    error: None,
+                }],
+                error: None,
+            },
+        ));
+    }
+    deliveries.push(SearchEvidenceDelivery::SupplementDecision(
+        freehand_contracts::SocialSupplementDecisionDelivery {
+            schema: "search_evidence.supplement_decision.v1".to_owned(),
+            delivery_id: "conformance-supplement".to_owned(),
+            domain_plan_ref: plan.delivery_id,
+            required: false,
+            reasons: Vec::new(),
+            platforms: Vec::new(),
+        },
+    ));
+    (deliveries, final_delivery)
+}
 
 pub struct ReasonRuntimeHarness {
     engine: ReasonTurnEngine,

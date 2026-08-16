@@ -1,0 +1,13 @@
+{
+  "schema": "search_evidence.final.v1",
+  "delivery_id": "final-complete-1",
+  "domain_plan_ref": "domain-news-1",
+  "claim": "complete",
+  "summary": "The release date is confirmed.",
+  "claims": [{
+    "claim_id": "claim-1",
+    "text": "The release date is confirmed.",
+    "source_ids": ["unknown-source"]
+  }],
+  "unconfirmed": []
+}

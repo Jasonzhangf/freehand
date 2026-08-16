@@ -16,8 +16,7 @@
   - `anthropic_messages_hosted_tool`
   - `AnthropicAdapter::parse_response`
   - `AnthropicAdapter::parse_stream_event`
-  - `anthropic_hosted_web_search_observation`
-  - `anthropic_hosted_web_search_result_observation`
+  - `anthropic_hosted_search_discovery`
   - `AnthropicExecutor::new`
   - `AnthropicExecutor::execute_once`
   - `AnthropicExecutor::execute_once_with_raw`
@@ -95,7 +94,7 @@
 | 01a | `anthropic_messages_hosted_tool` | `crates/freehand-provider-anthropic/src/lib.rs` | render provider-neutral hosted search declarations into Anthropic Messages server-tool wire | provider semantic request hosted tool metadata | Anthropic Messages hosted web_search tool JSON | `AnthropicAdapter::render_request` | adapter hosted-tool renderer | bound |
 | 01b | `anthropic_attachment_content` | `crates/freehand-provider-anthropic/src/lib.rs` | render provider-neutral image attachment bytes as an Anthropic base64 image source block | provider image attachment | Anthropic Messages image content block | `AnthropicAdapter::render_request` | adapter renderer | bound |
 | 02 | `AnthropicAdapter::parse_response` | `crates/freehand-provider-anthropic/src/lib.rs` | parse single-shot Anthropic response | raw response body | provider semantic outputs | runtime/provider caller | adapter parser | bound |
-| 02a | `anthropic_hosted_web_search_observation` / `anthropic_hosted_web_search_result_observation` | `crates/freehand-provider-anthropic/src/lib.rs` | map Anthropic Messages hosted web_search blocks into provider-neutral reasoning observations | raw Anthropic server_tool_use or web_search_tool_result block | provider semantic reasoning event | `AnthropicAdapter::parse_response` / `AnthropicAdapter::parse_stream_event` | adapter hosted-search parser | bound |
+| 02a | `anthropic_hosted_search_discovery` | `crates/freehand-provider-anthropic/src/lib.rs` | map Anthropic Messages hosted web_search result blocks into provider-neutral typed search discovery | domain plan, tracked query, and raw Anthropic web_search_tool_result block | `SearchDiscoveryDelivery` | `AnthropicAdapter::parse_response` / `AnthropicAdapter::parse_stream_event` | adapter hosted-search parser | bound |
 | 03 | `AnthropicAdapter::parse_stream_event` | `crates/freehand-provider-anthropic/src/lib.rs` | parse one Anthropic SSE event and update partial state | raw stream event | provider semantic outputs | runtime/provider caller | adapter stream parser | bound |
 | 04 | `AnthropicExecutor::execute_once` | `crates/freehand-provider-anthropic/src/lib.rs` | execute one Anthropic messages HTTP request through the raw-capable single-shot path | semantic request + auth/base URL | provider semantic outputs | runtime/provider caller | `execute_once_with_raw` + adapter parser | bound |
 | 05 | `AnthropicExecutor::execute_once_with_raw` | `crates/freehand-provider-anthropic/src/lib.rs` | execute one Anthropic messages HTTP request and expose raw response/error body before semantic parsing | semantic request + auth/base URL + raw callback | provider semantic outputs plus callback-visible raw body/error body | runtime/provider caller | HTTP executor + adapter parser | bound |

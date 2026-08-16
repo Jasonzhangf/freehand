@@ -9,7 +9,8 @@
   "resource_operations": [
     "task.project_to_ui",
     "input_attachment.validate_submit_metadata",
-    "debug_trace.read_snapshot"
+    "debug_trace.read_snapshot",
+    "search_evidence.project_to_ui"
   ],
   "request_mainline": [
     "UI commands enter one protocol truth shared by CLI and WebUI",

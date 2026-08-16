@@ -8,6 +8,7 @@
 - resource map: `docs/resource-maps/core.json`
 - resource operations:
   - `provider_hosted_search.declare`
+  - `provider_hosted_search.project_candidate`
 - owner entry symbols:
   - `build_semantic_request`
   - `ProviderToolDefinition`
@@ -17,6 +18,7 @@
   - `ProviderToolExchange`
   - `map_adapter_event`
   - `map_adapter_events`
+  - `project_hosted_search_discovery`
   - `classify_provider_error`
 
 ## Resource Map Binding
@@ -27,8 +29,10 @@
   - `provider_hosted_search`
 - touched resources:
   - `provider_request`
+  - `search_evidence`
 - resource operations:
   - `provider_hosted_search.declare` (`provider_hosted_search` -> `provider_request`)
+  - `provider_hosted_search.project_candidate` (`provider_hosted_search` -> `search_evidence`)
 - forbidden shortcuts:
   - Provider-hosted search must stay provider-neutral metadata on `ProviderSemanticRequest.hosted_tools`; it must not be exposed as a local Freehand function tool or executed by `tool.registry`.
   - Adapter-specific hosted search wire DTOs must not leak into `freehand-provider-core`.
@@ -51,6 +55,7 @@
 - provider raw stream or single-shot output becomes unified semantic events
 - semantic output carries text, reasoning, tool, usage, terminal, and error semantics
 - provider-hosted search observations enter normal semantic reasoning output, not local `ToolCall` execution truth
+- hosted result candidates with original URLs additionally enter typed `SearchDiscoveryDelivery`; hosted snippets never enter verified truth
 - tool-use output maps to shared `ReasonReq04ToolCall`; tool-result continuation maps to shared `ReasonReq05ToolResultReentry`
 - provider stop/finish signals remain metadata/usage signals until `freehand-reason` decides terminal truth
 
@@ -87,6 +92,7 @@
 | 05 | `map_adapter_events` | `crates/freehand-provider-core/src/lib.rs` | map normalized adapter event batch into shared semantic outputs | normalized adapter event batch | semantic output batch | adapter runtime | semantic mapper | bound |
 | 06 | `classify_provider_error` | `crates/freehand-provider-core/src/lib.rs` | classify provider failure into shared error contract | provider error hint | unified error contract | adapter/runtime | error classifier | bound |
 | 07 | `ProviderHostedToolDefinition` | `crates/freehand-provider-core/src/lib.rs` | carry provider-neutral hosted tool declarations outside request text and outside local tool execution | provider hosted capability selection | adapter-renderable hosted tool metadata | live bridge/tests | provider semantic request | bound |
+| 08 | `project_hosted_search_discovery` | `crates/freehand-provider-core/src/lib.rs` | project normalized provider-hosted search observation into a typed `SearchDiscoveryDelivery` side-channel | `ProviderHostedSearchDiscovery` | typed `SearchDiscoveryDelivery` | provider adapters | provider semantic discovery | bound |
 
 ## Sync Status Against Code
 

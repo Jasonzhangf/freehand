@@ -13,6 +13,7 @@ Generated from `docs/mainline-calls/ui.protocol.json`. Do not edit by hand.
 - task.project_to_ui
 - input_attachment.validate_submit_metadata
 - debug_trace.read_snapshot
+- search_evidence.project_to_ui
 
 ## Request Mainline
 

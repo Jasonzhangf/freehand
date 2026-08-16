@@ -1,0 +1,26 @@
+{
+  "schema": "search_evidence.turn.v1",
+  "session_id": "session-1",
+  "turn_id": "turn-1",
+  "domain_plan": {
+    "schema": "search_evidence.domain_plan.v1",
+    "delivery_id": "domain-news-1",
+    "domain": "news",
+    "preferred_source_kinds": ["official_publication"],
+    "social_platform_priority": ["weibo"],
+    "minimum_verified_sources": 1,
+    "policy_version": "2026-08-15"
+  },
+  "deliveries": [],
+  "verified_sources": [],
+  "unconfirmed": [],
+  "claims": [{
+    "claim_id": "claim-1",
+    "text": "The release date is confirmed.",
+    "source_ids": ["source-1"]
+  }],
+  "status": "turn_terminal_success",
+  "summary_ready": true,
+  "summary": "The release date is confirmed.",
+  "terminal": "success"
+}

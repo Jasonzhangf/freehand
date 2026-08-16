@@ -1,5 +1,9 @@
 use freehand_blocks::ToolDisplayProjection;
-use freehand_contracts::{AgentId, SessionId, TerminalStatus, TurnId};
+use freehand_contracts::{
+    AgentId, SearchClaimDelivery, SearchDomainPlanDelivery, SearchEvidenceDelivery,
+    SearchEvidenceTerminal, SearchEvidenceTurnDelivery, SearchEvidenceTurnStatus,
+    SearchUnconfirmedDelivery, SearchVerificationDelivery, SessionId, TerminalStatus, TurnId,
+};
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -413,7 +417,44 @@ pub struct UiTurnProjection {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub user_options: Option<Vec<String>>,
     pub errors: Vec<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub search_evidence: Option<UiSearchEvidenceProjection>,
     pub slave_substream_card: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct UiSearchEvidenceProjection {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub domain_plan: Option<SearchDomainPlanDelivery>,
+    pub deliveries: Vec<SearchEvidenceDelivery>,
+    pub verified_sources: Vec<SearchVerificationDelivery>,
+    pub unconfirmed: Vec<SearchUnconfirmedDelivery>,
+    pub claims: Vec<SearchClaimDelivery>,
+    pub status: SearchEvidenceTurnStatus,
+    pub summary_ready: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub summary: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub blocked_reason: Option<String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub terminal: Option<SearchEvidenceTerminal>,
+}
+
+impl From<&SearchEvidenceTurnDelivery> for UiSearchEvidenceProjection {
+    fn from(delivery: &SearchEvidenceTurnDelivery) -> Self {
+        Self {
+            domain_plan: delivery.domain_plan.clone(),
+            deliveries: delivery.deliveries.clone(),
+            verified_sources: delivery.verified_sources.clone(),
+            unconfirmed: delivery.unconfirmed.clone(),
+            claims: delivery.claims.clone(),
+            status: delivery.status,
+            summary_ready: delivery.summary_ready,
+            summary: delivery.summary.clone(),
+            blocked_reason: delivery.blocked_reason.clone(),
+            terminal: delivery.terminal,
+        }
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

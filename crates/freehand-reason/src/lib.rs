@@ -10,15 +10,18 @@ use std::sync::mpsc::{self, Receiver, SyncSender, TrySendError};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 use freehand_blocks::{
-    CompletionDecision, CompletionSchemaRejection, CompletionSubmission, CompletionValidationError,
-    ContextPlannerInput, PlannedContext, plan_context, validate_completion_submission,
+    CompletionClaim, CompletionDecision, CompletionSchemaRejection, CompletionSubmission,
+    CompletionValidationError, ContextPlannerInput, PlannedContext, SearchEvidenceSchemaRejection,
+    SearchEvidenceValidationError, build_search_evidence_turn_delivery, plan_context,
+    project_search_evidence_stage_status, validate_completion_submission,
 };
 use freehand_contracts::{
     AgentId, ContextProvenance, ContextSegment, ContextSegmentId, ErrorErr01RuntimeClassified,
     FeatureId, InputAttachmentMetadata, ReasonReq02ContextComposedInput,
     ReasonReq03ProviderPayload, ReasonReq04ToolCall, ReasonReq05ToolResultReentry,
-    ReasonResp01SemanticEvent, ReasonResp02UsageEvent, ReasonResp03TerminalEvent, SessionId,
-    TerminalStatus, TraceId, TurnId, validate_reason_req02,
+    ReasonResp01SemanticEvent, ReasonResp02UsageEvent, ReasonResp03TerminalEvent,
+    SearchEvidenceDelivery, SearchEvidenceTurnDelivery, SearchEvidenceTurnStatus,
+    SearchFinalDelivery, SessionId, TerminalStatus, TraceId, TurnId, validate_reason_req02,
 };
 use freehand_debug::{
     DebugEvent, DebugHub, DebugScenePosition, DebugSemanticPosition, DebugStateSnapshot,
@@ -65,6 +68,8 @@ pub struct TurnStartInput {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum ReasonBroadcastEvent {
     Semantic(ReasonResp01SemanticEvent),
+    SearchEvidence(SearchEvidenceTurnDelivery),
+    SearchEvidenceSchemaRejected(ReasonResp06SearchEvidenceSchemaRejected),
     Tool(ReasonReq04ToolCall),
     ToolResult(ReasonReq05ToolResultReentry),
     Usage(ReasonResp02UsageEvent),
@@ -97,6 +102,18 @@ pub struct ReasonResp05ModelContinuationWaiting {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ReasonResp06SearchEvidenceSchemaRejected {
+    pub session_id: SessionId,
+    pub turn_id: TurnId,
+    pub trace_id: TraceId,
+    pub feature_id: FeatureId,
+    pub agent_id: AgentId,
+    pub retry_index: u32,
+    pub rejection: SearchEvidenceSchemaRejection,
+    pub feedback: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TurnProjection {
     pub turn_id: TurnId,
     pub user_text: String,
@@ -122,6 +139,74 @@ pub struct TurnRecord {
     pub usage_events: Vec<ReasonResp02UsageEvent>,
     pub terminal_event: Option<ReasonResp03TerminalEvent>,
     pub error_events: Vec<ErrorErr01RuntimeClassified>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub search_evidence: Option<SearchEvidenceTurnDelivery>,
+}
+
+fn append_search_evidence_delivery(
+    turn: &mut TurnRecord,
+    delivery: SearchEvidenceDelivery,
+    status: freehand_contracts::SearchEvidenceTurnStatus,
+) {
+    match turn.search_evidence.as_mut() {
+        Some(evidence) => {
+            if let SearchEvidenceDelivery::Verification(verification) = &delivery
+                && verification.access_status == freehand_contracts::SearchAccessStatus::Verified
+            {
+                evidence.verified_sources.push(verification.clone());
+            }
+            evidence.status = status;
+            evidence.deliveries.push(delivery);
+        }
+        None => {
+            match delivery {
+                SearchEvidenceDelivery::DomainPlan(domain_plan) => {
+                    turn.search_evidence = Some(SearchEvidenceTurnDelivery {
+                        schema: "search_evidence.turn.v1".to_owned(),
+                        session_id: turn.request.session_id.clone(),
+                        turn_id: turn.request.turn_id.clone(),
+                        domain_plan: Some(domain_plan.clone()),
+                        deliveries: vec![SearchEvidenceDelivery::DomainPlan(domain_plan)],
+                        verified_sources: Vec::new(),
+                        unconfirmed: Vec::new(),
+                        claims: Vec::new(),
+                        status: freehand_contracts::SearchEvidenceTurnStatus::DomainPlanValidated,
+                        summary_ready: false,
+                        summary: None,
+                        blocked_reason: None,
+                        terminal: None,
+                    });
+                }
+                SearchEvidenceDelivery::Discovery(discovery) => {
+                    // Non-sourced hosted search: a provider-hosted discovery may be
+                    // emitted without a domain plan (clean_search profile). Represent it
+                    // as an observation-only turn delivery so the UI can project the
+                    // tool activity without blocking completion on a sourced final.
+                    turn.search_evidence = Some(SearchEvidenceTurnDelivery {
+                        schema: "search_evidence.turn.v1".to_owned(),
+                        session_id: turn.request.session_id.clone(),
+                        turn_id: turn.request.turn_id.clone(),
+                        domain_plan: None,
+                        deliveries: vec![SearchEvidenceDelivery::Discovery(discovery)],
+                        verified_sources: Vec::new(),
+                        unconfirmed: Vec::new(),
+                        claims: Vec::new(),
+                        status,
+                        summary_ready: false,
+                        summary: None,
+                        blocked_reason: None,
+                        terminal: None,
+                    });
+                }
+                // The stage validator guarantees a first delivery is either a domain
+                // plan (sourced) or a non-sourced hosted discovery; verification,
+                // supplement, and final cannot open the evidence stream.
+                _ => unreachable!(
+                    "stage validator requires first delivery to be a domain plan or hosted discovery"
+                ),
+            }
+        }
+    }
 }
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -192,6 +277,8 @@ pub enum ReasonTurnError {
     CompletionRequiresNextStep(String),
     #[error("metadata write failed: {0}")]
     MetadataWriteFailed(String),
+    #[error("search evidence rejected: {0}")]
+    SearchEvidenceRejected(String),
 }
 
 impl Default for ReasonTurnEngine {
@@ -310,6 +397,7 @@ impl ReasonTurnEngine {
             usage_events: Vec::new(),
             terminal_event: None,
             error_events: Vec::new(),
+            search_evidence: None,
         };
         self.write_metadata(
             &turn,
@@ -383,6 +471,16 @@ impl ReasonTurnEngine {
                     )],
                 );
             }
+            ProviderSemanticOutput::SearchDiscovery(delivery) => {
+                let evidence = SearchEvidenceDelivery::Discovery(delivery);
+                self.apply_search_evidence_stage_delivery(turn, evidence)?;
+                self.emit_debug(
+                    turn,
+                    "ReasonTurnEngine::apply_provider_output",
+                    "hosted search discovery applied",
+                    vec!["search_discovery=true".to_owned()],
+                );
+            }
             ProviderSemanticOutput::ToolCall(event) => {
                 turn.tool_calls.push(event.clone());
                 self.publish(ReasonBroadcastEvent::Tool(event));
@@ -400,6 +498,9 @@ impl ReasonTurnEngine {
                 );
             }
             ProviderSemanticOutput::ToolResultReentry(result) => {
+                if let Some(delivery) = result.tool_result.search_evidence.clone() {
+                    self.apply_search_evidence_stage_delivery(turn, delivery)?;
+                }
                 turn.tool_results.push(result.clone());
                 self.publish(ReasonBroadcastEvent::ToolResult(result));
                 self.emit_debug(
@@ -447,6 +548,48 @@ impl ReasonTurnEngine {
         turn: &mut TurnRecord,
         submission: &CompletionSubmission,
     ) -> Result<ReasonResp03TerminalEvent, ReasonTurnError> {
+        // Non-sourced hosted search (no domain plan) is observation-only and does not
+        // gate completion on a sourced final delivery; only sourced evidence applies
+        // the claim/summary final gate.
+        if let Some(search_evidence) = turn.search_evidence.as_ref()
+            && search_evidence.domain_plan.is_some()
+        {
+            let expected = match search_evidence.terminal {
+                None if search_evidence.status
+                    == freehand_contracts::SearchEvidenceTurnStatus::FinalValidated =>
+                {
+                    Some((
+                        CompletionClaim::Complete,
+                        search_evidence.summary.as_deref(),
+                    ))
+                }
+                Some(freehand_contracts::SearchEvidenceTerminal::Blocked) => Some((
+                    CompletionClaim::Blocked,
+                    search_evidence.blocked_reason.as_deref(),
+                )),
+                _ => None,
+            };
+            let Some((expected_claim, expected_text)) = expected else {
+                return Err(ReasonTurnError::SearchEvidenceRejected(
+                    "search completion requires a validated SearchFinalDelivery".to_owned(),
+                ));
+            };
+            if submission.claim != expected_claim {
+                return Err(ReasonTurnError::SearchEvidenceRejected(
+                    "completion claim must match validated search final claim".to_owned(),
+                ));
+            }
+            let submitted_text = match submission.claim {
+                CompletionClaim::Complete => submission.summary.as_deref(),
+                CompletionClaim::Blocked => submission.blocked_reason.as_deref(),
+                _ => None,
+            };
+            if submitted_text != expected_text {
+                return Err(ReasonTurnError::SearchEvidenceRejected(
+                    "completion text must match validated search final delivery".to_owned(),
+                ));
+            }
+        }
         match validate_completion_submission(submission) {
             Ok(CompletionDecision::Completed {
                 status,
@@ -486,6 +629,83 @@ impl ReasonTurnEngine {
         }
     }
 
+    pub fn apply_search_evidence_delivery<'a>(
+        &self,
+        turn: &'a mut TurnRecord,
+        final_delivery: SearchFinalDelivery,
+    ) -> Result<&'a SearchEvidenceTurnDelivery, ReasonTurnError> {
+        let deliveries = turn
+            .search_evidence
+            .as_ref()
+            .map(|evidence| evidence.deliveries.clone())
+            .unwrap_or_default();
+        let search_evidence = build_search_evidence_turn_delivery(
+            turn.request.session_id.clone(),
+            turn.request.turn_id.clone(),
+            deliveries,
+            final_delivery,
+        )
+        .map_err(|error: SearchEvidenceValidationError| {
+            ReasonTurnError::SearchEvidenceRejected(error.to_string())
+        })?;
+        turn.search_evidence = Some(search_evidence);
+        self.publish(ReasonBroadcastEvent::SearchEvidence(
+            turn.search_evidence
+                .as_ref()
+                .expect("search evidence was just assigned")
+                .clone(),
+        ));
+        Ok(turn
+            .search_evidence
+            .as_ref()
+            .expect("search evidence was just assigned"))
+    }
+
+    pub fn apply_search_evidence_stage_delivery<'a>(
+        &self,
+        turn: &'a mut TurnRecord,
+        delivery: SearchEvidenceDelivery,
+    ) -> Result<&'a SearchEvidenceTurnDelivery, ReasonTurnError> {
+        if matches!(delivery, SearchEvidenceDelivery::Final(_)) {
+            return Err(ReasonTurnError::SearchEvidenceRejected(
+                "final delivery must enter the final-delivery owner gate".to_owned(),
+            ));
+        }
+        let existing = turn
+            .search_evidence
+            .as_ref()
+            .map(|evidence| evidence.deliveries.as_slice())
+            .unwrap_or(&[]);
+        let status = project_search_evidence_stage_status(existing, &delivery)
+            .map_err(|error| ReasonTurnError::SearchEvidenceRejected(error.to_string()))?;
+        append_search_evidence_delivery(turn, delivery, status);
+        self.publish(ReasonBroadcastEvent::SearchEvidence(
+            turn.search_evidence
+                .as_ref()
+                .expect("validated stage delivery created search evidence truth")
+                .clone(),
+        ));
+        Ok(turn
+            .search_evidence
+            .as_ref()
+            .expect("validated stage delivery created search evidence truth"))
+    }
+
+    pub fn carry_search_evidence(
+        &self,
+        previous: &TurnRecord,
+        next: &mut TurnRecord,
+    ) -> Result<(), ReasonTurnError> {
+        let Some(evidence) = previous.search_evidence.as_ref() else {
+            return Ok(());
+        };
+        if evidence.status == SearchEvidenceTurnStatus::TurnTerminalSuccess {
+            return Ok(());
+        }
+        next.search_evidence = Some(evidence.clone());
+        Ok(())
+    }
+
     fn handle_completion_close(
         &self,
         turn: &mut TurnRecord,
@@ -503,6 +723,20 @@ impl ReasonTurnEngine {
             summary: terminal_text,
             user_options,
         };
+        if let Some(search_evidence) = turn.search_evidence.as_mut()
+            && search_evidence.status
+                == freehand_contracts::SearchEvidenceTurnStatus::FinalValidated
+            && event.status == TerminalStatus::Success
+        {
+            search_evidence.status =
+                freehand_contracts::SearchEvidenceTurnStatus::TurnTerminalSuccess;
+            search_evidence.terminal = Some(freehand_contracts::SearchEvidenceTerminal::Success);
+        }
+        if let Some(search_evidence) = turn.search_evidence.as_ref() {
+            self.publish(ReasonBroadcastEvent::SearchEvidence(
+                search_evidence.clone(),
+            ));
+        }
         turn.terminal_event = Some(event.clone());
         turn.timing.mark_completed(unix_millis_now());
         self.publish(ReasonBroadcastEvent::Terminal(event.clone()));
@@ -700,6 +934,21 @@ impl ReasonTurnEngine {
                     key: "provider_output.semantic_kind".to_owned(),
                     value: json!(format!("{:?}", event.kind)),
                 }],
+            ),
+            ProviderSemanticOutput::SearchDiscovery(delivery) => (
+                MetadataKind::Provider,
+                "SearchDiscoveryDelivery",
+                "search_discovery",
+                vec![
+                    MetadataEntry {
+                        key: "search.discovery_channel".to_owned(),
+                        value: json!(format!("{:?}", delivery.discovery_channel)),
+                    },
+                    MetadataEntry {
+                        key: "search.candidate_count".to_owned(),
+                        value: json!(delivery.candidates.len()),
+                    },
+                ],
             ),
             ProviderSemanticOutput::ToolCall(event) => (
                 MetadataKind::Routing,
@@ -960,6 +1209,7 @@ mod tests {
                 tool_call_id: ToolCallId::new("tool-1"),
                 status: freehand_contracts::ToolResultStatus::Success,
                 output: "done".to_owned(),
+                search_evidence: None,
             },
         };
         engine
@@ -973,6 +1223,367 @@ mod tests {
             receiver.recv().expect("tool result broadcast"),
             ReasonBroadcastEvent::ToolResult(_)
         ));
+    }
+
+    #[test]
+    fn search_evidence_is_persisted_only_after_verified_source_binding() {
+        let engine = ReasonTurnEngine::new();
+        let mut history = session_history();
+        let mut turn = engine
+            .start_turn(&mut history, start_input())
+            .expect("turn");
+        let plan = freehand_contracts::SearchDomainPlanDelivery {
+            schema: "search_evidence.domain_plan.v1".to_owned(),
+            delivery_id: "domain-1".to_owned(),
+            domain: freehand_contracts::SearchDomain::News,
+            preferred_source_kinds: vec!["official_publication".to_owned()],
+            social_platform_priority: vec![freehand_contracts::SearchSocialPlatform::Weibo],
+            minimum_verified_sources: 1,
+            policy_version: "2026-08-15".to_owned(),
+        };
+        let discovery = freehand_contracts::SearchDiscoveryDelivery {
+            schema: "search_evidence.discovery.v1".to_owned(),
+            delivery_id: "hosted-1".to_owned(),
+            discovery_channel: freehand_contracts::SearchDiscoveryChannel::HostedWebSearch,
+            domain_plan_ref: Some("domain-1".to_owned()),
+            hosted_search_attempt: Some(freehand_contracts::SearchHostedAttempt {
+                tool_call_id: None,
+                status: None,
+                result_count: None,
+                query: "news".to_owned(),
+                provider: "openai_responses".to_owned(),
+            }),
+            candidates: vec![freehand_contracts::SearchDiscoveryCandidate {
+                candidate_id: "c1".to_owned(),
+                status: freehand_contracts::SearchCandidateStatus::Usable,
+                original_url: Some("https://example.com/news".to_owned()),
+                title: "News".to_owned(),
+                snippet: "search snippet".to_owned(),
+                discovered_by: Some(freehand_contracts::SearchDiscoveryChannel::HostedWebSearch),
+                platform: Some(freehand_contracts::SearchSocialPlatform::Web),
+                source_weight: Some(90),
+                reason: None,
+            }],
+        };
+        let source = freehand_contracts::SearchVerificationDelivery {
+            schema: "search_evidence.verification.v1".to_owned(),
+            delivery_id: "verify-c1".to_owned(),
+            source_id: "c1".to_owned(),
+            original_url: "https://example.com/news".to_owned(),
+            camo_profile: "default".to_owned(),
+            accessed_at: "2026-08-15T12:00:00Z".to_owned(),
+            access_status: freehand_contracts::SearchAccessStatus::Verified,
+            page_title: Some("News".to_owned()),
+            evidence_excerpt: Some("Evidence".to_owned()),
+            verified_by: Some("camo".to_owned()),
+            access_attempts: vec![freehand_contracts::SearchAccessAttempt {
+                attempt_id: "attempt-1".to_owned(),
+                channel: "camo".to_owned(),
+                status: freehand_contracts::SearchAccessStatus::Verified,
+                accessed_at: "2026-08-15T12:00:00Z".to_owned(),
+                error: None,
+            }],
+            error: None,
+        };
+        let supplement = freehand_contracts::SocialSupplementDecisionDelivery {
+            schema: "search_evidence.supplement_decision.v1".to_owned(),
+            delivery_id: "supplement-1".to_owned(),
+            domain_plan_ref: "domain-1".to_owned(),
+            required: false,
+            reasons: Vec::new(),
+            platforms: Vec::new(),
+        };
+        let final_delivery = freehand_contracts::SearchFinalDelivery {
+            schema: "search_evidence.final.v1".to_owned(),
+            delivery_id: "final-1".to_owned(),
+            domain_plan_ref: "domain-1".to_owned(),
+            claim: freehand_contracts::SearchFinalClaimStatus::Complete,
+            summary: Some("Summary".to_owned()),
+            claims: vec![freehand_contracts::SearchClaimDelivery {
+                claim_id: "claim-1".to_owned(),
+                text: "Claim".to_owned(),
+                source_ids: vec!["c1".to_owned()],
+            }],
+            unconfirmed: Vec::new(),
+            blocked_reason: None,
+        };
+        for (index, delivery) in [
+            SearchEvidenceDelivery::DomainPlan(plan),
+            SearchEvidenceDelivery::Discovery(discovery),
+            SearchEvidenceDelivery::Verification(source),
+            SearchEvidenceDelivery::SupplementDecision(supplement),
+        ]
+        .into_iter()
+        .enumerate()
+        {
+            let result = ReasonReq05ToolResultReentry {
+                session_id: turn.request.session_id.clone(),
+                turn_id: turn.request.turn_id.clone(),
+                trace_id: turn.request.trace_id.clone(),
+                feature_id: turn.request.feature_id.clone(),
+                agent_id: turn.request.agent_id.clone(),
+                tool_result: freehand_contracts::ToolResultContract {
+                    tool_call_id: ToolCallId::new(format!("search-stage-{index}")),
+                    status: freehand_contracts::ToolResultStatus::Success,
+                    output: "typed search stage".to_owned(),
+                    search_evidence: Some(delivery),
+                },
+            };
+            engine
+                .apply_provider_output(&mut turn, ProviderSemanticOutput::ToolResultReentry(result))
+                .expect("append search stage");
+        }
+        engine
+            .apply_search_evidence_delivery(&mut turn, final_delivery)
+            .expect("valid search evidence");
+        assert!(turn.search_evidence.as_ref().is_some_and(|evidence| {
+            evidence.summary_ready
+                && evidence.status == freehand_contracts::SearchEvidenceTurnStatus::FinalValidated
+                && evidence.terminal.is_none()
+        }));
+
+        let submission = CompletionSubmission {
+            claim: CompletionClaim::Complete,
+            completion_reason: Some("search evidence validated".to_owned()),
+            evidence: Some("camo source bound".to_owned()),
+            summary: Some("Summary".to_owned()),
+            learned: Some("typed search evidence".to_owned()),
+            next_step: None,
+            blocked_reason: None,
+            user_options: None,
+        };
+        engine
+            .submit_completion(&mut turn, &submission)
+            .expect("terminal completion");
+        assert!(turn.search_evidence.as_ref().is_some_and(|evidence| {
+            evidence.status == freehand_contracts::SearchEvidenceTurnStatus::TurnTerminalSuccess
+                && evidence.terminal == Some(freehand_contracts::SearchEvidenceTerminal::Success)
+        }));
+    }
+
+    #[test]
+    fn search_evidence_rejects_unverified_final_without_mutating_turn() {
+        let engine = ReasonTurnEngine::new();
+        let mut history = session_history();
+        let mut turn = engine
+            .start_turn(&mut history, start_input())
+            .expect("turn");
+        let final_delivery = freehand_contracts::SearchFinalDelivery {
+            schema: "search_evidence.final.v1".to_owned(),
+            delivery_id: "final-1".to_owned(),
+            domain_plan_ref: "domain-1".to_owned(),
+            claim: freehand_contracts::SearchFinalClaimStatus::Complete,
+            summary: Some("Unsupported summary".to_owned()),
+            claims: vec![freehand_contracts::SearchClaimDelivery {
+                claim_id: "claim-1".to_owned(),
+                text: "Claim".to_owned(),
+                source_ids: vec!["missing".to_owned()],
+            }],
+            unconfirmed: Vec::new(),
+            blocked_reason: None,
+        };
+        assert!(
+            engine
+                .apply_search_evidence_delivery(&mut turn, final_delivery)
+                .is_err()
+        );
+        assert!(turn.search_evidence.is_none());
+    }
+
+    #[test]
+    fn search_stage_owner_rejects_final_and_invalid_stage_without_mutation() {
+        let engine = ReasonTurnEngine::new();
+        let mut history = session_history();
+        let mut turn = engine
+            .start_turn(&mut history, start_input())
+            .expect("turn");
+        let final_delivery = freehand_contracts::SearchFinalDelivery {
+            schema: "search_evidence.final.v1".to_owned(),
+            delivery_id: "final-1".to_owned(),
+            domain_plan_ref: "domain-1".to_owned(),
+            claim: freehand_contracts::SearchFinalClaimStatus::Blocked,
+            summary: None,
+            claims: Vec::new(),
+            unconfirmed: Vec::new(),
+            blocked_reason: Some("no_verified_source".to_owned()),
+        };
+        assert!(
+            engine
+                .apply_search_evidence_stage_delivery(
+                    &mut turn,
+                    SearchEvidenceDelivery::Final(final_delivery),
+                )
+                .is_err()
+        );
+        assert!(turn.search_evidence.is_none());
+
+        let discovery = freehand_contracts::SearchDiscoveryDelivery {
+            schema: "search_evidence.discovery.v1".to_owned(),
+            delivery_id: "hosted-1".to_owned(),
+            discovery_channel: freehand_contracts::SearchDiscoveryChannel::HostedWebSearch,
+            domain_plan_ref: Some("domain-1".to_owned()),
+            hosted_search_attempt: Some(freehand_contracts::SearchHostedAttempt {
+                tool_call_id: None,
+                status: None,
+                result_count: None,
+                query: "news".to_owned(),
+                provider: "openai_responses".to_owned(),
+            }),
+            candidates: vec![freehand_contracts::SearchDiscoveryCandidate {
+                candidate_id: "c1".to_owned(),
+                status: freehand_contracts::SearchCandidateStatus::Usable,
+                original_url: Some("https://example.com/news".to_owned()),
+                title: "News".to_owned(),
+                snippet: "snippet".to_owned(),
+                discovered_by: Some(freehand_contracts::SearchDiscoveryChannel::HostedWebSearch),
+                platform: Some(freehand_contracts::SearchSocialPlatform::Web),
+                source_weight: Some(90),
+                reason: None,
+            }],
+        };
+        assert!(
+            engine
+                .apply_search_evidence_stage_delivery(
+                    &mut turn,
+                    SearchEvidenceDelivery::Discovery(discovery),
+                )
+                .is_err()
+        );
+        assert!(turn.search_evidence.is_none());
+    }
+
+    #[test]
+    fn search_completion_rejects_generic_complete_before_final_delivery() {
+        let engine = ReasonTurnEngine::new();
+        let mut history = session_history();
+        let mut turn = engine
+            .start_turn(&mut history, start_input())
+            .expect("turn");
+        let plan = freehand_contracts::SearchDomainPlanDelivery {
+            schema: "search_evidence.domain_plan.v1".to_owned(),
+            delivery_id: "domain-1".to_owned(),
+            domain: freehand_contracts::SearchDomain::News,
+            preferred_source_kinds: vec!["official_publication".to_owned()],
+            social_platform_priority: vec![freehand_contracts::SearchSocialPlatform::Weibo],
+            minimum_verified_sources: 1,
+            policy_version: "2026-08-15".to_owned(),
+        };
+        engine
+            .apply_search_evidence_stage_delivery(
+                &mut turn,
+                SearchEvidenceDelivery::DomainPlan(plan),
+            )
+            .expect("domain plan");
+        let submission = CompletionSubmission {
+            claim: CompletionClaim::Complete,
+            completion_reason: Some("done".to_owned()),
+            evidence: Some("none".to_owned()),
+            summary: Some("unsupported summary".to_owned()),
+            learned: Some("none".to_owned()),
+            next_step: None,
+            blocked_reason: None,
+            user_options: None,
+        };
+        assert!(engine.submit_completion(&mut turn, &submission).is_err());
+        assert!(turn.terminal_event.is_none());
+    }
+
+    #[test]
+    fn non_sourced_hosted_discovery_streams_observation_only_and_completion_unblocks() {
+        let engine = ReasonTurnEngine::new();
+        let mut history = session_history();
+        let mut turn = engine
+            .start_turn(&mut history, start_input())
+            .expect("turn");
+        let discovery = freehand_contracts::SearchDiscoveryDelivery {
+            schema: "search_evidence.discovery.v1".to_owned(),
+            delivery_id: "hosted-non-sourced".to_owned(),
+            discovery_channel: freehand_contracts::SearchDiscoveryChannel::HostedWebSearch,
+            domain_plan_ref: None,
+            hosted_search_attempt: Some(freehand_contracts::SearchHostedAttempt {
+                tool_call_id: Some("srv-1".to_owned()),
+                status: Some("completed".to_owned()),
+                result_count: Some(3),
+                query: "shenzhen".to_owned(),
+                provider: "anthropic_messages".to_owned(),
+            }),
+            candidates: Vec::new(),
+        };
+        engine
+            .apply_search_evidence_stage_delivery(
+                &mut turn,
+                SearchEvidenceDelivery::Discovery(discovery),
+            )
+            .expect("non-sourced hosted discovery accepted");
+        let evidence = turn.search_evidence.as_ref().expect("evidence");
+        assert!(
+            evidence.domain_plan.is_none(),
+            "non-sourced hosted discovery must not synthesize a domain plan"
+        );
+        assert_eq!(evidence.deliveries.len(), 1);
+
+        // Without a domain plan, completion is unblocked and accepted.
+        let submission = CompletionSubmission {
+            claim: CompletionClaim::Complete,
+            completion_reason: Some("hosted_search_observation_only".to_owned()),
+            evidence: Some("hosted search observation".to_owned()),
+            summary: Some("observation-only summary".to_owned()),
+            learned: Some("non-sourced completion is unblocked".to_owned()),
+            next_step: None,
+            blocked_reason: None,
+            user_options: None,
+        };
+        engine
+            .submit_completion(&mut turn, &submission)
+            .expect("completion must not be blocked by sourced final gate");
+        assert!(turn.terminal_event.is_some());
+    }
+
+    #[test]
+    fn non_sourced_stage_appends_still_reject_verification_and_final() {
+        let engine = ReasonTurnEngine::new();
+        let mut history = session_history();
+        let mut turn = engine
+            .start_turn(&mut history, start_input())
+            .expect("turn");
+        let discovery = freehand_contracts::SearchDiscoveryDelivery {
+            schema: "search_evidence.discovery.v1".to_owned(),
+            delivery_id: "hosted-non-sourced".to_owned(),
+            discovery_channel: freehand_contracts::SearchDiscoveryChannel::HostedWebSearch,
+            domain_plan_ref: None,
+            hosted_search_attempt: Some(freehand_contracts::SearchHostedAttempt {
+                tool_call_id: None,
+                status: Some("completed".to_owned()),
+                result_count: Some(0),
+                query: "shenzhen".to_owned(),
+                provider: "anthropic_messages".to_owned(),
+            }),
+            candidates: Vec::new(),
+        };
+        engine
+            .apply_search_evidence_stage_delivery(
+                &mut turn,
+                SearchEvidenceDelivery::Discovery(discovery),
+            )
+            .expect("non-sourced hosted discovery accepted");
+
+        // Reverse guard: a verification or final delivery cannot follow an
+        // observation-only hosted discovery; the sourced stage gate stays strict.
+        let final_delivery = freehand_contracts::SearchFinalDelivery {
+            schema: "search_evidence.final.v1".to_owned(),
+            delivery_id: "final-illegal".to_owned(),
+            domain_plan_ref: "domain-1".to_owned(),
+            claim: freehand_contracts::SearchFinalClaimStatus::Complete,
+            summary: Some("Should not validate".to_owned()),
+            claims: Vec::new(),
+            unconfirmed: Vec::new(),
+            blocked_reason: None,
+        };
+        assert!(
+            engine
+                .apply_search_evidence_delivery(&mut turn, final_delivery)
+                .is_err()
+        );
     }
 
     #[test]
@@ -997,6 +1608,7 @@ mod tests {
                 tool_call_id: ToolCallId::new("tool-1"),
                 status: freehand_contracts::ToolResultStatus::Success,
                 output: "done".to_owned(),
+                search_evidence: None,
             },
         };
         engine
@@ -1013,6 +1625,7 @@ mod tests {
             turn_id: turn.request.turn_id.clone(),
             trace_id: turn.request.trace_id.clone(),
             feature_id: turn.request.feature_id.clone(),
+            search_domain_plan_ref: None,
         };
         engine
             .apply_provider_output(
@@ -1211,6 +1824,7 @@ mod tests {
             turn_id: turn.request.turn_id.clone(),
             trace_id: turn.request.trace_id.clone(),
             feature_id: turn.request.feature_id.clone(),
+            search_domain_plan_ref: None,
         };
         engine
             .apply_provider_output(
@@ -1247,6 +1861,7 @@ mod tests {
             turn_id: turn.request.turn_id.clone(),
             trace_id: turn.request.trace_id.clone(),
             feature_id: turn.request.feature_id.clone(),
+            search_domain_plan_ref: None,
         };
         engine
             .apply_provider_output(
