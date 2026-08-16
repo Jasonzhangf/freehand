@@ -1043,3 +1043,32 @@ Tags: #architecture #gap5 #node #ui-protocol #dependency-edge
   single allowed native surface; Android never renders a second conversation/
   settings UI. remote_registry startup failure keeps the open-connections
   button (only the legacy Tailscale host/port dialog is suppressed).
+
+## 2026-08-16 - Relay/Claw account-config and dual-path release goal closed
+
+- Goal `docs/goals/relay-claw-account-config-sync-upgrade-plan.md` is closed on
+  main commit `6100a55` and pushed to `origin/main`; both resolve to
+  `6100a559e090ed1f1998d19661da937f17539955`.
+- Android release `0.2.14` / `versionCode=20260819` is the verified upgrade
+  artifact. Tailscale and Claw Relay manifests serve the same signed APK:
+  SHA-256 `76fd8dd3d36e626fccaea074fe33100a53c1667e56f5d847029f3626e5e222fb`,
+  size `2758213`, signer SHA-256
+  `ecd63a2c2070970735cc079b0bb090427ca0b59200da0ebc07c80b50a1dfffda`.
+- Real Android Relay-only in-place upgrade passed. Claw runs deployed Relay
+  binary SHA-256
+  `e299cb48d160dec3c14d1ad3ec5122d1293b2d6e2125a121c256d582732ca4eb`
+  with systemd active and `/relay/health=ok`.
+- Local S profile and `relayS` are healthy after removing obsolete
+  `remote-relay --bind` launchd configuration and supplying explicit Relay
+  store, lease, cookie, and update-directory env truth. Installed daemon and
+  verified worktree binary match at SHA-256
+  `7ff360faab682f89a0811537df92f592ec1da9fae77c6a9ab1c8da8a89a94c6d`.
+- Full pre-push validation passed: workspace build/fmt/clippy/tests, runtime
+  281/281, Search Schema conformance 65/65, mainlines, gates, Relay deployment,
+  remote Relay online, and account-config process smoke. DSH reviewed both the
+  isolated worktree commit `13eb006` and main commit `6100a55` with
+  `VERDICT: PASS`; its remaining ACP observations are non-blocking P2.
+- Reusable release rule: a true dual-path in-place upgrade requires a strictly
+  higher device `versionCode`; both paths must first prove byte-identical signed
+  artifact truth. Runtime-backed ACP gates must isolate `HOME`, config,
+  credentials, and provider IO from operator state.

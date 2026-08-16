@@ -708,6 +708,11 @@ If any line is not true, do not claim completion.
 
 ## Android Release/Deploy Verification Rules
 
+- A real Android in-place upgrade proof requires a release `versionCode` that
+  is strictly higher than the version currently installed on the device.
+  Tailscale and Relay must publish that same signed APK, version, size, signer,
+  and SHA-256 before either update path is exercised; a same-version reinstall
+  is not upgrade evidence.
 - After a Claw disk-full or deploy failure, do not restart the service until
   `journalctl --since "-15 minutes" | grep -c "No space left on device"` is 0
   and free space can hold the complete new binary. Build into a separate
@@ -725,6 +730,10 @@ If any line is not true, do not claim completion.
   selects Relay only when the active endpoint is a remote_registry Relay
   endpoint and the account relayUrl is present; direct endpoints keep daemon
   `/android/update.json`. There is no automatic switch between paths.
+- ACP stdio verification that enters the real runtime must be hermetic: use an
+  isolated `HOME`, isolated runtime/config state, explicit fixture credentials,
+  and a local provider fixture. Never let the gate consume the operator's
+  provider config, credentials, session state, or runtime home.
 
 ## Task Phase 1 Lifecycle Closeout Rule
 

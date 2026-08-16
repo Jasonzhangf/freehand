@@ -1,5 +1,21 @@
 # Freehand Claw Relay、账号配置同步与双路径升级闭环
 
+Status: closed on 2026-08-16
+
+Final evidence:
+
+- Main and `origin/main`: `6100a559e090ed1f1998d19661da937f17539955`
+- Android: `0.2.14`, `versionCode=20260819`, APK SHA-256
+  `76fd8dd3d36e626fccaea074fe33100a53c1667e56f5d847029f3626e5e222fb`
+- Tailscale and Relay manifests: same version, size `2758213`, signer, and APK
+  bytes
+- Claw Relay: systemd active, `/relay/health=ok`, deployed binary SHA-256
+  `e299cb48d160dec3c14d1ad3ec5122d1293b2d6e2125a121c256d582732ca4eb`
+- Real Android Relay-only in-place upgrade: passed
+- Workspace pre-push stack, mainlines, gates, Relay deployment/online/config
+  smokes: passed
+- DSH reviews: isolated commit `13eb006` PASS; main commit `6100a55` PASS
+
 ## 目标与验收标准
 
 目标：参考 `~/code/zterm`，收口 Freehand 现有 Relay 能力，把同一 Relay/配置服务可重复部署到 Claw，并实现：账号登录后同账号共享非 secret 配置；Android/客户端通过 Tailscale 直连与 Relay 公网两条显式路径下载同一个已签名升级产物；所有升级、部署、配置边界都能被重复验证。

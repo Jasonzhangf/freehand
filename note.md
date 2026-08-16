@@ -9894,3 +9894,37 @@ negative_tests:
 - Session working directory: `session/new` records `req.cwd` in the transport-local registry; `session/prompt` forwards it to `LiveReasonTurnRequest.cwd`. No more hardcoded `/tmp`.
 - Streaming: this slice does not emit `session/update` notifications; the adapter only returns a `PromptResponse` with a `StopReason`. Adding streaming turns is a separate scope.
 - Non-goals: `authenticate`, `session/load`, `session/resume`, `session/list`, `session/close`, `session/delete`, ACP socket transport, MCP bridging, permission/terminal/fs proxy, vendor extensions, ADP changes.
+# 2026-08-16 - Search schema hosted-discovery first divergence
+
+- Real CC session `real-schema-cc-news-schema-intervention-001` persisted a valid domain plan, then ran 187 rounds without one typed hosted discovery. Reason seq 5 contains only the domain plan; seq 6 already prompts that hosted discovery is validated while status remains `domain_plan_validated`. Raw provider responses report `tools:null`.
+- The unique first divergence is `run_live_provider_reason_turn` treating expected stage `HostedDiscovery` as completed evidence after the provider added no `SearchDiscovery` delivery. Stage is required work, not proof.
+- Approved parent design remains `search-evidence-schema-delivery-pipeline-20260815-v2`. Narrow fix design `search-evidence-hosted-observation-fail-closed-20260816-v1`: no new typed hosted discovery closes blocked; actual typed discovery keeps the existing adjacent path. No provider wire, schema, reason owner, fallback, or payload boundary changes.
+
+# 2026-08-16 - Anthropic multi-hosted discovery stage diagnosis
+
+- Real MiniMax session `real-schema-minimax-tutorial-20260816-001` returned two hosted search calls with 10 URL-bearing results each in one Messages response. The adapter preserved both as typed discoveries; reason persisted the first and rejected the second only because `validate_search_evidence_stage_append` allowed exactly one hosted discovery after the domain plan.
+- Isolated positive intervention allowed contiguous hosted discoveries and preserved both attempts/candidate sets; reverse intervention restored the exact production error. First divergence is the search-evidence stage validator, not the adapter or runtime.
+- Proposed design `search-evidence-multi-hosted-discovery-stage-20260816-v1` keeps `search_evidence.discovery.v1` unchanged: one delivery per provider attempt, one or more contiguous hosted deliveries per hosted stage, duplicate identity rejection, and no hosted delivery after verification/supplement/final. Awaiting Jason approval before formal code changes.
+# 2026-08-16 - opencode review infra: rccgo/deepseek-v4-flash blocked by opencode-go balance
+
+- Mandated review model: `rccgo/deepseek-v4-flash` (local 127.0.0.1:10000, route group `anthropic_v3_10000`).
+- The 10000 default pool is `fwd.v3.opencode-go` -> opencode-go key1..4, all pointing at opencode.ai workspace `wrk_01KZDST41XPWXTX538RD56JT1J`.
+- Direct probe `POST https://opencode.ai/zen/go/v1/chat/completions` with the opencode-go API key returns `{"type":"error","error":{"type":"CreditsError","message":"Insufficient balance. ... /billing"}}`.
+- opencode surfaces this as `4 candidates unavailable: opencode-go:key1..4:...availability(provider_cooldown_probe_pending)` even when `--model rccgo/deepseek-v4-flash` is passed, because the rccgo 10000 host forwards deepseek-v4-flash to those opencode-go keys.
+- `routecodex 4444` (route group `routecodex_v3_4444`) serves deepseek-v4-flash via `dwarfstar` and works, and `MiniMax-M3` via rccgo 10000 also works — but both are different providers than the mandated opencode-go route.
+- Lesson: this is a hard external block (account credit), not a code or config problem. Do not silently substitute a different provider/model for review; report the balance block to Jason and let him top up or explicitly authorize a fallback.
+
+# 2026-08-16 - DSH review round 1 evidence correction
+
+- DSH `freehand-hosted-search-cli-runtime-20260816-dsh-review` used the required `opencode-go/deepseek-v4-flash` path and returned `VERDICT: FAIL` because its isolated run observed the ACP stdio sub-gate red.
+- The same source and installed environment immediately passed `bash scripts/verify-acp-stdio.sh` and `cargo run -p xtask -- gates check`; the ACP failure was not reproducible and no ACP files are in this diff.
+- The actionable CLI finding was valid: `reason-live --worker --execution-profile workspace` had no cwd input and reached `WorkerWorkspaceRequired`. The CLI parser now rejects that combination explicitly; a paired integration test locks the rejection while `clean_search` and `sourced_search` remain the supported no-cwd Worker profiles.
+- Because code changed after review, round-1 evidence is invalid for delivery. Reinstall/restart/online proof and a fresh DSH review are required.
+
+# 2026-08-16 - Relay/Claw goal final closeout
+
+- Main commit `6100a55` and `origin/main` both resolve to `6100a559e090ed1f1998d19661da937f17539955` after the pre-push full gate completed.
+- Verified release is Android `0.2.14` / `20260819`, APK SHA-256 `76fd8dd3d36e626fccaea074fe33100a53c1667e56f5d847029f3626e5e222fb`, size `2758213`, signer SHA-256 `ecd63a2c2070970735cc079b0bb090427ca0b59200da0ebc07c80b50a1dfffda`; Tailscale and Relay manifests match and the real Relay-only in-place upgrade passed.
+- Claw Relay binary SHA-256 `e299cb48d160dec3c14d1ad3ec5122d1293b2d6e2125a121c256d582732ca4eb` is active and healthy. Local `relayS` plus Master/three Workers are healthy after the obsolete launchd `--bind` argument was removed and required env/store truth was supplied.
+- Pre-push passed workspace build/fmt/clippy/tests, runtime 281/281, Search Schema conformance 65/65, mainlines/gates, Relay deployment/online/account-config smokes. DSH returned `VERDICT: PASS` for isolated commit `13eb006` and main commit `6100a55`.
+- Existing Search Schema source/docs changes remain unstaged and untouched.
