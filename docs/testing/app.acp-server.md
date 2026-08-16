@@ -36,17 +36,21 @@
 ## Project Black-box
 
 - `scripts/verify-acp-stdio.sh` runs the installed daemon over real
-  stdin/stdout with a deterministic payload and asserts stdout carries only
-  valid NDJSON JSON-RPC frames including both `cancelled` and `end_turn`
-  stop reasons, and that stderr stays empty.
+  stdin/stdout with a deterministic payload and a hermetic local
+  Anthropic-compatible mock provider in an isolated temporary HOME. It
+  asserts stdout carries only valid NDJSON JSON-RPC frames including both
+  `cancelled` and `end_turn` stop reasons, and that stderr stays empty.
+- The gate does not read or write the developer's real `.freehand` runtime
+  home and does not depend on real provider credentials or upstream provider
+  availability.
 
 ## Project Black-box
 
 - daemon `acp` subcommand over real stdin/stdout returns only JSON-RPC
   frames on stdout and keeps stderr clean.
 - end-to-end initialize + session/new + session/prompt returns a stop
-  reason through the real runtime live-reason turn mainline with the
-  configured agent.
+  reason through the real runtime live-reason turn mainline using the
+  isolated mock provider configuration.
 - session/cancel then session/prompt returns stopReason cancelled without
   invoking the provider (next-prompt semantics) and mid-flight cancellation
   aborts the live turn with `RuntimeLiveBridgeError::Cancelled`, which the

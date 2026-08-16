@@ -122,7 +122,9 @@ by aborting), so a stale cancel does not leak into the next prompt.
 - `cargo test -p freehand-acp` covers the pure helpers (`extract_text`,
   `monotonic_id`, cancel token flip).
 - daemon `acp` end-to-end smoke runs against the real binary over real
-  stdio:
+  stdio with a hermetic local Anthropic-compatible mock provider in an
+  isolated temporary HOME, so the gate never depends on a developer's real
+  provider credentials or upstream provider availability:
   - `initialize` returns the agent capability advertisement with only the
     methods we actually implement.
   - `session/new` returns a generated sessionId.

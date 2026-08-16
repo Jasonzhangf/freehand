@@ -64,7 +64,9 @@ It must not depend on `freehand-reason`, `freehand-task`,
 
 1. `cargo test -p freehand-acp` (4 unit tests).
 2. `cargo run -p freehand-daemon -- acp` piped initialize + session/new +
-   session/prompt returning `stopReason end_turn`.
+   session/prompt returning `stopReason end_turn`, using the hermetic local
+   mock provider fixture in `scripts/verify-acp-stdio.sh` so the gate does
+   not depend on real provider credentials.
 3. `cargo run -p freehand-daemon -- acp` piped initialize + session/new +
    session/cancel + session/prompt returning `stopReason cancelled`
    without invoking the provider.

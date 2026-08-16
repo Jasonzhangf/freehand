@@ -2883,9 +2883,9 @@ provider = "provider-live"
         "pull must persist the device mirror"
     );
     unsafe {
-        std::env::remove_var("SHARED_RUNTIME_API_KEY");
-        std::env::remove_var("SHARED_MASTER_TOKEN");
-        std::env::remove_var("SHARED_WORKER_TOKEN");
+        std::env::remove_var("PUSH_CONFLICT_API_KEY");
+        std::env::remove_var("PUSH_CONFLICT_MASTER_TOKEN");
+        std::env::remove_var("PUSH_CONFLICT_WORKER_TOKEN");
     }
     fs::remove_dir_all(runtime_home).expect("cleanup runtime home");
 }
@@ -3242,9 +3242,9 @@ provider = "provider-live"
     assert_eq!(mirror.revision, Some(7));
     assert_eq!(mirror.document.provider_registry.len(), 1);
     unsafe {
-        std::env::remove_var("PUSH_CONFLICT_API_KEY");
-        std::env::remove_var("PUSH_CONFLICT_MASTER_TOKEN");
-        std::env::remove_var("PUSH_CONFLICT_WORKER_TOKEN");
+        std::env::remove_var("SHARED_RUNTIME_API_KEY");
+        std::env::remove_var("SHARED_MASTER_TOKEN");
+        std::env::remove_var("SHARED_WORKER_TOKEN");
     }
     fs::remove_dir_all(runtime_home).expect("cleanup runtime home");
 }
