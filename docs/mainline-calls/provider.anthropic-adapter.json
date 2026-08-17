@@ -27,7 +27,7 @@
     "partial tool-use input stays adapter-local until enough JSON exists to emit structured arguments",
     "streamed tool-use blocks may carry the tool id/name only on `content_block_start`; subsequent `input_json_delta` and `content_block_stop` events may carry only the stream `index`, so the adapter owns index-to-tool-call state until the block closes",
     "server-side hosted web_search blocks become provider-neutral reasoning observations and never local `ToolCall` values",
-    "usage parsing normalizes Anthropic uncached input plus cache creation and cache read counters into one total input before projecting cache hit rate and total tokens",
+    "usage parsing keeps Anthropic-compatible `input_tokens` as the provider-reported field, writes the contracts-resolved total as explicit `normalized_input_tokens`, and projects cache hit rate and total tokens from that normalized total without inflating cache counters already contained in provider input",
     "live `minimonth` single-shot and SSE fixtures replay through the same parser entrypoints as synthetic tests",
     "executor single-shot path parses response body through `AnthropicAdapter::parse_response`",
     "executor stream path reads SSE event boundaries incrementally, parses `data:` payloads through `AnthropicAdapter::parse_stream_event`, and can notify callers before the HTTP response finishes"
@@ -136,7 +136,7 @@
       "step": "02b",
       "symbol_path": "parse_anthropic_usage",
       "file_path": "crates/freehand-provider-anthropic/src/lib.rs",
-      "responsibility": "normalize uncached input plus cache creation and cache read counters into provider-neutral total-input usage",
+      "responsibility": "preserve provider-reported input and write the contracts-resolved total as explicit normalized-input usage",
       "input_semantic": "raw Anthropic usage object",
       "output_semantic": "provider-neutral TokenUsage",
       "caller": "AnthropicAdapter::parse_response / AnthropicAdapter::parse_stream_event",

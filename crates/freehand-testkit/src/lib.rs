@@ -451,6 +451,7 @@ pub fn run_reason_runtime_smoke(
                             reasoning_tokens: None,
                             cache_creation_tokens: 10,
                             cache_read_tokens: 70,
+                            normalized_input_tokens: Some(80),
                             finish_reason: Some("stop".to_owned()),
                         },
                     },
@@ -474,7 +475,7 @@ pub fn run_reason_runtime_smoke(
                 scenario,
                 rewrite_action: format!("{:?}", decision.decision.action),
                 rewrite_version: harness.history().rewrite_version(),
-                latest_usage_tokens: outcome.latest_usage.map(|usage| usage.input_tokens),
+                latest_usage_tokens: outcome.latest_usage.map(|usage| usage.total_input_tokens()),
                 blocked: false,
             })
         }
@@ -703,6 +704,7 @@ mod tests {
                 reasoning_tokens: None,
                 cache_creation_tokens: 10,
                 cache_read_tokens: input_tokens.saturating_sub(10),
+                normalized_input_tokens: Some(input_tokens),
                 finish_reason: Some("stop".to_owned()),
             },
         })

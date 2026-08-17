@@ -807,7 +807,7 @@ pub fn turn_projection_from_events(input: TurnProjectionInput) -> UiTurnProjecti
             .map(|usage| {
                 format!(
                     "input={} output={} cache_create={} cache_read={} reasoning={}",
-                    usage.usage.input_tokens,
+                    usage.usage.total_input_tokens(),
                     usage.usage.output_tokens,
                     usage.usage.cache_creation_tokens,
                     usage.usage.cache_read_tokens,
@@ -816,7 +816,7 @@ pub fn turn_projection_from_events(input: TurnProjectionInput) -> UiTurnProjecti
             })
             .collect(),
         usage_projection: input.usage_events.last().map(|usage| UiUsageProjection {
-            input_tokens: usage.usage.input_tokens,
+            input_tokens: usage.usage.total_input_tokens(),
             output_tokens: usage.usage.output_tokens,
             total_tokens: usage.usage.resolved_total_tokens(),
             reasoning_tokens: usage.usage.reasoning_tokens,

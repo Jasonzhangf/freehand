@@ -975,7 +975,7 @@ impl ReasonTurnEngine {
                 vec![
                     MetadataEntry {
                         key: "usage.input_tokens".to_owned(),
-                        value: json!(event.usage.input_tokens),
+                        value: json!(event.usage.total_input_tokens()),
                     },
                     MetadataEntry {
                         key: "usage.output_tokens".to_owned(),
@@ -1892,6 +1892,7 @@ mod tests {
                         reasoning_tokens: Some(4),
                         cache_creation_tokens: 0,
                         cache_read_tokens: 0,
+                        normalized_input_tokens: Some(10),
                         finish_reason: Some("stop".to_owned()),
                     }),
                 ),
@@ -2162,6 +2163,7 @@ mod tests {
                 reasoning_tokens: Some(3),
                 cache_creation_tokens: 2,
                 cache_read_tokens: 8,
+                normalized_input_tokens: Some(10),
                 finish_reason: Some("stop".to_owned()),
             },
         });
@@ -2222,6 +2224,7 @@ mod tests {
                 reasoning_tokens: Some(3),
                 cache_creation_tokens: 2,
                 cache_read_tokens: 8,
+                normalized_input_tokens: Some(10),
                 finish_reason: Some("stop".to_owned()),
             },
         });

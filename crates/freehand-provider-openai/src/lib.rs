@@ -1154,6 +1154,7 @@ fn parse_openai_usage(usage: Option<&Value>, finish_reason: Option<String>) -> O
         reasoning_tokens,
         cache_creation_tokens,
         cache_read_tokens,
+        normalized_input_tokens: Some(wire_input_tokens),
         finish_reason,
     })
 }

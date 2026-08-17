@@ -82,6 +82,7 @@ fn sample_turn_projection(slave_substream_card: bool) -> UiTurnProjection {
                 reasoning_tokens: Some(3),
                 cache_creation_tokens: 0,
                 cache_read_tokens: 0,
+                normalized_input_tokens: Some(10),
                 finish_reason: Some("stop".to_owned()),
             },
         }],
@@ -270,6 +271,7 @@ fn usage_projection_cache_hit_rate_uses_total_input_denominator() {
                 reasoning_tokens: None,
                 cache_creation_tokens: 0,
                 cache_read_tokens: 80,
+                normalized_input_tokens: Some(100),
                 finish_reason: Some("stop".to_owned()),
             },
         }],
@@ -283,6 +285,100 @@ fn usage_projection_cache_hit_rate_uses_total_input_denominator() {
         .expect("usage_projection must be populated from usage events");
     assert_eq!(usage.context_tokens, 100);
     assert_eq!(usage.cache_hit_rate_bps, 8000);
+}
+
+#[test]
+fn legacy_anthropic_usage_projection_reconstructs_total_input() {
+    let legacy_usage = serde_json::from_value(serde_json::json!({
+        "input_tokens": 14,
+        "output_tokens": 82,
+        "total_tokens": 96,
+        "reasoning_tokens": null,
+        "cache_creation_tokens": 0,
+        "cache_read_tokens": 32,
+        "finish_reason": "end_turn"
+    }))
+    .expect("legacy Anthropic usage");
+    let projection = turn_projection_from_events(TurnProjectionInput {
+        source_agent_id: AgentId::new("agent-1"),
+        source_node_id: "node-1".to_owned(),
+        session_id: SessionId::new("session-1"),
+        turn_id: TurnId::new("turn-1"),
+        created_at: Some(10),
+        timing: None,
+        cwd: None,
+        user_text: Some("run the task".to_owned()),
+        semantic_events: Vec::new(),
+        tool_calls: Vec::new(),
+        tool_results: Vec::new(),
+        usage_events: vec![ReasonResp02UsageEvent {
+            session_id: SessionId::new("session-1"),
+            turn_id: TurnId::new("turn-1"),
+            trace_id: TraceId::new("trace-1"),
+            feature_id: FeatureId::new("ui.protocol"),
+            agent_id: AgentId::new("agent-1"),
+            usage: legacy_usage,
+        }],
+        terminal_event: None,
+        error_events: Vec::new(),
+        slave_substream_card: false,
+    });
+    let usage = projection
+        .usage_projection
+        .as_ref()
+        .expect("legacy usage projection");
+
+    assert_eq!(usage.input_tokens, 46);
+    assert_eq!(usage.context_tokens, 46);
+    assert_eq!(usage.total_tokens, 128);
+    assert_eq!(usage.cache_hit_rate_bps, 6957);
+}
+
+#[test]
+fn legacy_usage_projection_preserves_cache_subset_denominator() {
+    let legacy_usage = serde_json::from_value(serde_json::json!({
+        "input_tokens": 19474,
+        "output_tokens": 1574,
+        "total_tokens": 21048,
+        "reasoning_tokens": null,
+        "cache_creation_tokens": 0,
+        "cache_read_tokens": 15125,
+        "finish_reason": "end_turn"
+    }))
+    .expect("legacy subset usage");
+    let projection = turn_projection_from_events(TurnProjectionInput {
+        source_agent_id: AgentId::new("agent-1"),
+        source_node_id: "node-1".to_owned(),
+        session_id: SessionId::new("session-1"),
+        turn_id: TurnId::new("turn-1"),
+        created_at: Some(10),
+        timing: None,
+        cwd: None,
+        user_text: Some("run the task".to_owned()),
+        semantic_events: Vec::new(),
+        tool_calls: Vec::new(),
+        tool_results: Vec::new(),
+        usage_events: vec![ReasonResp02UsageEvent {
+            session_id: SessionId::new("session-1"),
+            turn_id: TurnId::new("turn-1"),
+            trace_id: TraceId::new("trace-1"),
+            feature_id: FeatureId::new("ui.protocol"),
+            agent_id: AgentId::new("agent-1"),
+            usage: legacy_usage,
+        }],
+        terminal_event: None,
+        error_events: Vec::new(),
+        slave_substream_card: false,
+    });
+    let usage = projection
+        .usage_projection
+        .as_ref()
+        .expect("legacy subset usage projection");
+
+    assert_eq!(usage.input_tokens, 19474);
+    assert_eq!(usage.context_tokens, 19474);
+    assert_eq!(usage.total_tokens, 21048);
+    assert_eq!(usage.cache_hit_rate_bps, 7767);
 }
 
 #[test]

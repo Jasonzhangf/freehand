@@ -54,7 +54,7 @@
 - optional wire `error` fields are absent when missing or JSON null; only a non-null error object becomes a provider semantic error
 - OpenAI Responses `web_search_call` output items are observed as provider-hosted reasoning events so the search stays provider-native and never enters local tool execution
 - partial tool calls stay adapter-local until enough JSON exists to emit structured arguments
-- usage parsing keeps OpenAI `input_tokens`/`prompt_tokens` as normalized total input and maps cache-read/cache-write aliases from `input_tokens_details` or `prompt_tokens_details`; cache categories never inflate the input denominator
+- usage parsing keeps OpenAI `input_tokens`/`prompt_tokens` as normalized total input, writes it explicitly to `normalized_input_tokens`, and maps cache-read/cache-write aliases from `input_tokens_details` or `prompt_tokens_details`; cache categories never inflate the input denominator
 - OpenAI executor owns HTTP endpoint selection, bearer auth, status/body capture, SSE reading, and callback mapping before returning provider-neutral semantic outputs
 
 ## Error Mainline
