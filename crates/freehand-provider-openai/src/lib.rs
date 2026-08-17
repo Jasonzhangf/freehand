@@ -1104,7 +1104,7 @@ fn terminal_event_from_reason(reason: &str) -> ProviderAdapterEvent {
 
 fn parse_openai_usage(usage: Option<&Value>, finish_reason: Option<String>) -> Option<TokenUsage> {
     let usage = usage?;
-    let input_tokens = usage
+    let wire_input_tokens = usage
         .get("input_tokens")
         .or_else(|| usage.get("prompt_tokens"))
         .and_then(Value::as_u64)
@@ -1124,20 +1124,31 @@ fn parse_openai_usage(usage: Option<&Value>, finish_reason: Option<String>) -> O
                 .and_then(|details| details.get("reasoning_tokens"))
         })
         .and_then(Value::as_u64);
-    let cache_creation_tokens = usage
+    let input_details = usage
         .get("input_tokens_details")
-        .and_then(|details| details.get("cache_creation_tokens"))
+        .or_else(|| usage.get("prompt_tokens_details"));
+    let cache_creation_tokens = input_details
+        .and_then(|details| {
+            details
+                .get("cache_creation_tokens")
+                .or_else(|| details.get("cached_write_tokens"))
+                .or_else(|| details.get("cache_write_tokens"))
+        })
         .or_else(|| usage.get("cache_creation_input_tokens"))
         .and_then(Value::as_u64)
         .unwrap_or(0);
-    let cache_read_tokens = usage
-        .get("input_tokens_details")
-        .and_then(|details| details.get("cached_tokens"))
+    let cache_read_tokens = input_details
+        .and_then(|details| {
+            details
+                .get("cached_tokens")
+                .or_else(|| details.get("cached_read_tokens"))
+                .or_else(|| details.get("cache_read_tokens"))
+        })
         .or_else(|| usage.get("cache_read_input_tokens"))
         .and_then(Value::as_u64)
         .unwrap_or(0);
     Some(TokenUsage {
-        input_tokens,
+        input_tokens: wire_input_tokens,
         output_tokens,
         total_tokens,
         reasoning_tokens,
@@ -1572,6 +1583,40 @@ mod tests {
             )
             .expect("parsed");
         assert_eq!(outputs.len(), 5);
+        assert!(outputs.iter().any(|output| {
+            matches!(
+                output,
+                ProviderSemanticOutput::Usage(usage)
+                    if usage.usage.input_tokens == 10
+                        && usage.usage.cache_read_tokens == 3
+                        && usage.usage.total_input_tokens() == 10
+                        && (usage.usage.cache_hit_rate() - 0.3).abs() < f64::EPSILON
+            )
+        }));
+    }
+
+    #[test]
+    fn normalizes_openai_compatible_cache_detail_aliases() {
+        let usage = parse_openai_usage(
+            Some(&json!({
+                "input_tokens": 100,
+                "output_tokens": 5,
+                "total_tokens": 105,
+                "input_tokens_details": {
+                    "cached_read_tokens": 80,
+                    "cached_write_tokens": 5
+                }
+            })),
+            Some("completed".to_owned()),
+        )
+        .expect("usage");
+
+        assert_eq!(usage.input_tokens, 100);
+        assert_eq!(usage.cache_creation_tokens, 5);
+        assert_eq!(usage.cache_read_tokens, 80);
+        assert_eq!(usage.total_input_tokens(), 100);
+        assert!((usage.cache_hit_rate() - 0.8).abs() < f64::EPSILON);
+        assert_eq!(usage.resolved_total_tokens(), 105);
     }
 
     #[test]

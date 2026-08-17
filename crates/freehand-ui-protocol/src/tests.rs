@@ -244,6 +244,48 @@ fn usage_projection_carries_cache_hit_and_context_tokens() {
 }
 
 #[test]
+fn usage_projection_cache_hit_rate_uses_total_input_denominator() {
+    let projection = turn_projection_from_events(TurnProjectionInput {
+        source_agent_id: AgentId::new("agent-1"),
+        source_node_id: "node-1".to_owned(),
+        session_id: SessionId::new("session-1"),
+        turn_id: TurnId::new("turn-1"),
+        created_at: Some(10),
+        timing: None,
+        cwd: None,
+        user_text: Some("run the task".to_owned()),
+        semantic_events: Vec::new(),
+        tool_calls: Vec::new(),
+        tool_results: Vec::new(),
+        usage_events: vec![ReasonResp02UsageEvent {
+            session_id: SessionId::new("session-1"),
+            turn_id: TurnId::new("turn-1"),
+            trace_id: TraceId::new("trace-1"),
+            feature_id: FeatureId::new("ui.protocol"),
+            agent_id: AgentId::new("agent-1"),
+            usage: freehand_contracts::TokenUsage {
+                input_tokens: 100,
+                output_tokens: 5,
+                total_tokens: Some(105),
+                reasoning_tokens: None,
+                cache_creation_tokens: 0,
+                cache_read_tokens: 80,
+                finish_reason: Some("stop".to_owned()),
+            },
+        }],
+        terminal_event: None,
+        error_events: Vec::new(),
+        slave_substream_card: false,
+    });
+    let usage = projection
+        .usage_projection
+        .as_ref()
+        .expect("usage_projection must be populated from usage events");
+    assert_eq!(usage.context_tokens, 100);
+    assert_eq!(usage.cache_hit_rate_bps, 8000);
+}
+
+#[test]
 fn compact_session_context_roundtrips_through_wire_and_validates() {
     let command = UiCommand::CompactSessionContext {
         session_id: SessionId::new("webui-compact-session"),

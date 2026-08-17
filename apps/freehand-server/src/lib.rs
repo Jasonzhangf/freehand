@@ -2478,6 +2478,15 @@ mod tests {
         assert!(legacy_body.contains("__freehandOpenAndroidComposerForReadyHost"));
         assert!(legacy_body.contains("openAndroidComposerForReadyHost"));
         assert!(legacy_body.contains("scheduleAndroidComposerFocus"));
+        assert!(legacy_body.contains("function formatCacheHitPercent"));
+        assert!(legacy_body.contains("((read / total) * 100).toFixed(3)"));
+        assert!(legacy_body.contains("if (total <= 0)"));
+        assert!(!legacy_body.contains("if (read <= 0 || total <= 0)"));
+        assert!(legacy_body.contains("counts.activeCount} 活动"));
+        assert!(legacy_body.contains("counts.reviewCount} 审核"));
+        assert!(legacy_body.contains("counts.blockedCount} 阻塞"));
+        assert!(legacy_body.contains("counts.closedCount} 关闭"));
+        assert!(!legacy_body.contains("counts.activeCount}A"));
 
         let layout_shape = client
             .get(format!(

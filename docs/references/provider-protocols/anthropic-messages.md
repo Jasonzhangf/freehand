@@ -24,6 +24,11 @@
 - Messages API is stateless; caller sends full conversational history on each request
 - docs describe message structure, system prompts, and stop reasons as core concepts
 
+### Usage And Cache
+
+- Messages usage reports uncached `input_tokens`, `cache_creation_input_tokens`, and `cache_read_input_tokens` separately
+- Freehand normalizes their sum as total input before calculating cache hit rate; output tokens are then added for total-token projection
+
 ### Streaming
 
 - set `stream: true` to receive server-sent events

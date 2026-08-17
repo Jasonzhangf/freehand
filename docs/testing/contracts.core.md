@@ -16,6 +16,7 @@
   - structured tool argument round-trip
   - writable preview contract round-trip
   - usage total/reasoning/finish-reason round-trip
+  - cache hit rate uses cache-read tokens over normalized total input and includes uncached input in the denominator
   - task/attention context segment kind round-trip for `TaskContract`,
     `TaskSpaceSnapshot`, and `AttentionResolution`
   - context-composed request validation

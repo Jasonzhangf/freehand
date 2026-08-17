@@ -16,6 +16,7 @@
   - `anthropic_messages_hosted_tool`
   - `AnthropicAdapter::parse_response`
   - `AnthropicAdapter::parse_stream_event`
+  - `parse_anthropic_usage`
   - `anthropic_hosted_search_discovery`
   - `AnthropicExecutor::new`
   - `AnthropicExecutor::execute_once`
@@ -60,6 +61,7 @@
 - partial tool-use input stays adapter-local until enough JSON exists to emit structured arguments
 - streamed tool-use blocks may carry the tool id/name only on `content_block_start`; subsequent `input_json_delta` and `content_block_stop` events may carry only the stream `index`, so the adapter owns index-to-tool-call state until the block closes
 - server-side hosted web_search blocks become provider-neutral reasoning observations and never local `ToolCall` values
+- usage parsing normalizes Anthropic's uncached `input_tokens` plus cache creation/read counters into one total input before projecting cache hit rate and total tokens
 - live `minimonth` single-shot and SSE fixtures replay through the same parser entrypoints as synthetic tests
 - executor single-shot path parses response body through `AnthropicAdapter::parse_response`
 - executor stream path reads SSE event boundaries incrementally, parses `data:` payloads through `AnthropicAdapter::parse_stream_event`, and can notify callers before the HTTP response finishes
@@ -95,6 +97,7 @@
 | 01b | `anthropic_attachment_content` | `crates/freehand-provider-anthropic/src/lib.rs` | render provider-neutral image attachment bytes as an Anthropic base64 image source block | provider image attachment | Anthropic Messages image content block | `AnthropicAdapter::render_request` | adapter renderer | bound |
 | 02 | `AnthropicAdapter::parse_response` | `crates/freehand-provider-anthropic/src/lib.rs` | parse single-shot Anthropic response | raw response body | provider semantic outputs | runtime/provider caller | adapter parser | bound |
 | 02a | `anthropic_hosted_search_discovery` | `crates/freehand-provider-anthropic/src/lib.rs` | map Anthropic Messages hosted web_search result blocks into provider-neutral typed search discovery | domain plan, tracked query, and raw Anthropic web_search_tool_result block | `SearchDiscoveryDelivery` | `AnthropicAdapter::parse_response` / `AnthropicAdapter::parse_stream_event` | adapter hosted-search parser | bound |
+| 02b | `parse_anthropic_usage` | `crates/freehand-provider-anthropic/src/lib.rs` | normalize uncached input plus cache creation/read counters into provider-neutral total-input usage | raw Anthropic usage object | provider-neutral `TokenUsage` | `AnthropicAdapter::parse_response` / `AnthropicAdapter::parse_stream_event` | adapter usage parser | bound |
 | 03 | `AnthropicAdapter::parse_stream_event` | `crates/freehand-provider-anthropic/src/lib.rs` | parse one Anthropic SSE event and update partial state | raw stream event | provider semantic outputs | runtime/provider caller | adapter stream parser | bound |
 | 04 | `AnthropicExecutor::execute_once` | `crates/freehand-provider-anthropic/src/lib.rs` | execute one Anthropic messages HTTP request through the raw-capable single-shot path | semantic request + auth/base URL | provider semantic outputs | runtime/provider caller | `execute_once_with_raw` + adapter parser | bound |
 | 05 | `AnthropicExecutor::execute_once_with_raw` | `crates/freehand-provider-anthropic/src/lib.rs` | execute one Anthropic messages HTTP request and expose raw response/error body before semantic parsing | semantic request + auth/base URL + raw callback | provider semantic outputs plus callback-visible raw body/error body | runtime/provider caller | HTTP executor + adapter parser | bound |

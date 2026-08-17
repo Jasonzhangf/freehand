@@ -823,11 +823,7 @@ pub fn turn_projection_from_events(input: TurnProjectionInput) -> UiTurnProjecti
             cache_creation_tokens: usage.usage.cache_creation_tokens,
             cache_read_tokens: usage.usage.cache_read_tokens,
             cache_hit_rate_bps: (usage.usage.cache_hit_rate() * 10000.0).round() as u64,
-            context_tokens: usage
-                .usage
-                .input_tokens
-                .saturating_add(usage.usage.cache_creation_tokens)
-                .saturating_add(usage.usage.cache_read_tokens),
+            context_tokens: usage.usage.total_input_tokens(),
             compacted_tokens: 0,
             model_label: None,
         }),

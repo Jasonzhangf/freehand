@@ -29,6 +29,7 @@
   - Responses and Chat Completions success bodies carrying a wire-level `error: null` field must not emit `ProviderSemanticOutput::Error`
   - a non-null wire-level error object must still emit the typed provider error semantic output
   - hosted `web_search` request rendering must be adapter-owned and must not create a local `ToolCall`
+  - usage parsing preserves total input tokens while mapping `cached_tokens`, `cached_read_tokens`, `cached_write_tokens`, and cache read/write aliases into cache categories; a 100-token input with 80 cached reads must yield 80% rather than 100%
 - module black-box plan:
   - adapter emits provider-neutral text/tool/usage/terminal/error outputs for both OpenAI protocols
   - successful completed output with `error: null` remains semantically successful and cannot create a user-visible error projection, while a real error object remains observable

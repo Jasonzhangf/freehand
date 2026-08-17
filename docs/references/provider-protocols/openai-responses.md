@@ -87,6 +87,11 @@
 - stateful context can preserve reasoning and tool context across turns
 - encrypted reasoning is mentioned as an opt-out statefulness path
 
+### Usage And Cache
+
+- Responses usage reports `input_tokens` as the total input count and cache detail inside `input_tokens_details`
+- OpenAI-compatible providers may name read/write cache details `cached_tokens`, `cached_read_tokens`, `cached_write_tokens`, `cache_read_tokens`, or `cache_write_tokens`; the adapter normalizes these aliases without adding them again to total input
+
 ### Streaming
 
 - response retrieval docs indicate streaming support through event sequences when enabled

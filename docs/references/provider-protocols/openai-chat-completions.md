@@ -34,6 +34,11 @@
 - tool invocations appear under `choices[*].message.tool_calls`
 - `finish_reason` is carried per choice
 
+### Usage And Cache
+
+- Chat Completions usage reports total prompt input under `prompt_tokens`; cache categories may appear under `prompt_tokens_details`
+- compatible detail aliases are normalized by the adapter, but cache categories remain subsets of total prompt input
+
 ### Streaming
 
 - stream responses emit incremental `choices[*].delta`

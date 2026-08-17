@@ -487,8 +487,14 @@ pub struct TokenUsage {
 }
 
 impl TokenUsage {
+    /// Normalized provider input total. Cache creation/read counters are
+    /// categories within this total, not additional tokens.
+    pub fn total_input_tokens(&self) -> u64 {
+        self.input_tokens
+    }
+
     pub fn cache_hit_rate(&self) -> f64 {
-        let total = self.cache_creation_tokens + self.cache_read_tokens;
+        let total = self.total_input_tokens();
         if total == 0 {
             0.0
         } else {
@@ -498,7 +504,7 @@ impl TokenUsage {
 
     pub fn resolved_total_tokens(&self) -> u64 {
         self.total_tokens
-            .unwrap_or(self.input_tokens.saturating_add(self.output_tokens))
+            .unwrap_or(self.total_input_tokens().saturating_add(self.output_tokens))
     }
 }
 
@@ -893,8 +899,25 @@ mod tests {
             finish_reason: Some("stop".to_owned()),
         };
         assert!((usage.cache_hit_rate() - 0.8).abs() < f64::EPSILON);
+        assert_eq!(usage.total_input_tokens(), 100);
         assert_eq!(usage.resolved_total_tokens(), 150);
         assert_eq!(usage.finish_reason.as_deref(), Some("stop"));
+    }
+
+    #[test]
+    fn cache_hit_rate_includes_uncached_input_in_denominator() {
+        let usage = TokenUsage {
+            input_tokens: 100,
+            output_tokens: 5,
+            total_tokens: Some(105),
+            reasoning_tokens: None,
+            cache_creation_tokens: 0,
+            cache_read_tokens: 80,
+            finish_reason: None,
+        };
+        assert!((usage.cache_hit_rate() - 0.8).abs() < f64::EPSILON);
+        assert_eq!(usage.total_input_tokens(), 100);
+        assert_eq!(usage.resolved_total_tokens(), 105);
     }
 
     #[test]
