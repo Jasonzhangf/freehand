@@ -9928,3 +9928,35 @@ negative_tests:
 - Claw Relay binary SHA-256 `e299cb48d160dec3c14d1ad3ec5122d1293b2d6e2125a121c256d582732ca4eb` is active and healthy. Local `relayS` plus Master/three Workers are healthy after the obsolete launchd `--bind` argument was removed and required env/store truth was supplied.
 - Pre-push passed workspace build/fmt/clippy/tests, runtime 281/281, Search Schema conformance 65/65, mainlines/gates, Relay deployment/online/account-config smokes. DSH returned `VERDICT: PASS` for isolated commit `13eb006` and main commit `6100a55`.
 - Existing Search Schema source/docs changes remain unstaged and untouched.
+
+# 2026-08-17 - Launchd restart-storm protection and resource audit
+
+- The S-profile Master and three Workers now run under an installed wrapper
+  with label-scoped guard state, `KeepAlive.SuccessfulExit=false`, 30-second
+  launchd throttling, permanent startup blocking, and a five-in-five-minutes
+  rapid transient failure limit. Explicit service-scoped restart clears only
+  that label's guard.
+- Deterministic guard proof passed: permanent startup failure plateaued at one
+  run, transient failure remained retryable, and rapid failure blocked after
+  the configured threshold. Online isolated launchd proof passed with
+  `permanent_runs=1 transient_runs=2 rapid_runs=3`.
+- Reinstalled and restarted only `com.freehand.daemonS` and the three named
+  Worker labels. Source and installed daemon SHA-256 both resolve to
+  `fd6fce9ff7bcf3fe346c1592c39354072df968c64e138095141fe3287c456234`;
+  source and installed wrapper SHA-256 both resolve to
+  `98dcd878eedab58813a9acf75dd733f3cc92062bd6561bca3df2fc171fd5ccd0`.
+  All four guard states are `running`, launchd `runs=1`, and Master health is
+  `ok` at `100.66.1.82:4042`.
+- Read-only resource audit found the next root issue outside this change:
+  production Master/Worker loops boot TaskRuntime every second and repeatedly
+  deserialize all task ledgers. Process samples place hot stacks in
+  `TaskStore::load_task_ledger`/`serde_json::from_str`; this is a separate
+  `runtime.master-worker-loop` + `task.orchestration` owner change, not a sleep
+  tuning problem.
+- Runtime disk consumers are reason ledgers (~1.27 GiB), turn state (~395 MiB),
+  metadata ledgers (~187 MiB), and logs (~32 MiB). Repo `target` is ~98.4 GiB
+  and `playground` ~26.6 GiB. No files, worktrees, symlinks, ledgers, or caches
+  were deleted because cleanup requires explicit authorization.
+- Broken symlinks remain read-only findings: `~/.local/bin/agent`,
+  `~/.local/bin/vclaw-cli`, and `~/.local/bin/t2s-smb-mount`. Approximately 30
+  stale `/private/tmp` worktree records are prunable but were not pruned.

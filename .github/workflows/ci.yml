@@ -8,6 +8,13 @@ on:
       - master
 
 jobs:
+  launchd-gates:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Launchd restart guards
+        run: make launchd-guards
+
   rust-gates:
     runs-on: ubuntu-latest
     steps:

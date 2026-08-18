@@ -1,0 +1,42 @@
+{
+  "schema_version": 1,
+  "verification_map_id": "app.runtime-daemon.verification",
+  "feature_id": "app.runtime-daemon",
+  "status": "active",
+  "module_registry": "docs/module-registry/app.runtime-daemon.json",
+  "function_map": "docs/function-maps/app.runtime-daemon.md",
+  "mainline_call_map": "docs/mainline-calls/app.runtime-daemon.json",
+  "test_design": "docs/testing/app.runtime-daemon.md",
+  "gates": [
+    {
+      "gate_id": "app.runtime-daemon.unit",
+      "kind": "test",
+      "command": "cargo test -p freehand-daemon -- --nocapture",
+      "binding_status": "active"
+    },
+    {
+      "gate_id": "app.runtime-daemon.clippy",
+      "kind": "lint",
+      "command": "cargo clippy -p freehand-daemon --all-targets -- -D warnings",
+      "binding_status": "active"
+    },
+    {
+      "gate_id": "app.runtime-daemon.launchd-offline",
+      "kind": "test",
+      "command": "bash scripts/verify-launchd-restart-guard.sh",
+      "binding_status": "active"
+    },
+    {
+      "gate_id": "app.runtime-daemon.launchd-online",
+      "kind": "project-blackbox",
+      "command": "bash scripts/verify-launchd-restart-guard-online.sh",
+      "binding_status": "active"
+    },
+    {
+      "gate_id": "app.runtime-daemon.architecture",
+      "kind": "architecture",
+      "command": "cargo run -p xtask -- gates check",
+      "binding_status": "active"
+    }
+  ]
+}

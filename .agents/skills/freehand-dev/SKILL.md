@@ -319,6 +319,10 @@ set must update, in lockstep with the code, the following eight artifacts:
 - `docs/testing/app.acp-server.md` (test design)
 - `docs/verification-maps/app.acp-server.json` (verification map)
 - `docs/wiki/app.acp-server.md` (generated wiki)
+- `docs/module-registry/app.runtime-daemon.json` (module ownership)
+- `docs/verification-maps/app.runtime-daemon.json` (verification map)
+- `docs/module-registry/foundation.workspace.json` (module ownership)
+- `docs/verification-maps/foundation.workspace.json` (verification map)
 
 `xtask gates check` runs `scripts/verify-acp-stdio.sh` against the installed
 daemon to assert the wire carries only NDJSON JSON-RPC frames and that
@@ -564,6 +568,14 @@ prompt after that returns `end_turn` (cancel-token reset invariant).
   not leave persistent `launchctl enable` overrides. Kill only the explicit
   gamma PID, let KeepAlive restart it, then verify AgentBoard owner truth shows
   the same task/execution, new PID/process instance, and `restart_count=1`.
+- Launchd production profiles must execute the installed Freehand wrapper, not
+  an inline shell. Keep startup/config failure classification in the daemon and
+  wrapper owner, persist label-scoped guard truth outside the business payload,
+  use `KeepAlive.SuccessfulExit=false` plus throttling, and stop automatic
+  retries after the bounded rapid-failure threshold. An explicit service-scoped
+  install/restart is the only operation that clears that label's blocked guard.
+  Online proof must cover a permanent one-run plateau, bounded transient
+  retries, and matching source/installed daemon and wrapper hashes.
 - When global `~/.freehand` EventInbox/TaskBoard contains unrelated historical truth, run Master/Worker lifecycle fixtures with an isolated temporary `HOME/.freehand`; do not delete, skip, or rewrite global truth to obtain a pass. Switch both the fixture Master and Worker provider configurations through the config owner before submitting work, and stop only the explicit fixture/server/worker PIDs started by that verifier.
 - Before an isolated online verifier launches a workspace binary such as
   `target/debug/freehand-daemon`, rebuild that exact binary after source changes;

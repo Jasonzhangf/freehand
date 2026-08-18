@@ -81,6 +81,7 @@ This table is the feature-map backlink for `docs/resource-maps/core.json`. The r
 
 | feature_id | owned resources | resource map |
 | --- | --- | --- |
+| `foundation.workspace` | `workspace_gate_policy` | `docs/resource-maps/core.json` |
 | `config.core` | `config`, `remote_daemon_registry` | `docs/resource-maps/core.json` |
 | `config.account-config-sync` | `account_config_document` | `docs/resource-maps/core.json` |
 | `reason.persistence` | `session` | `docs/resource-maps/core.json` |
@@ -117,6 +118,8 @@ Non-violation pending items live in `docs/architecture/architecture-gaps.md`. Ea
 - owner: `xtask`, workspace root
 - allowed_paths: `.ignore`, `Cargo.toml`, `Makefile`, `.github/workflows/**`, `.githooks/**`, `.agents/skills/freehand-dev/**`, `scripts/**`, `xtask/**`, `docs/architecture/**`, `docs/function-maps/**`, `docs/testing/**`, `docs/mainline-calls/**`, `docs/wiki/**`, `docs/goals/**`, `docs/loops/**`, `docs/release.md`, `CACHE.md`, `MEMORY.md`, `note.md`
 - forbidden_paths: provider and reason implementation crates unless scaffold-related
+- module_registry: `docs/module-registry/foundation.workspace.json`
+- verification_map: `docs/verification-maps/foundation.workspace.json`
 - required_checks:
   - `cargo test --workspace`
   - `cargo run -p xtask -- mainlines check`
@@ -768,8 +771,10 @@ Non-violation pending items live in `docs/architecture/architecture-gaps.md`. Ea
 ### `app.runtime-daemon`
 
 - owner: `apps/freehand-daemon`
-- allowed_paths: `apps/freehand-daemon/**`, `crates/freehand-runtime/**`, `crates/freehand-task/**` for daemon test fixture seeding only, `apps/freehand-server/**`, `docs/function-maps/**`, `docs/testing/**`, `docs/design/**`
+- allowed_paths: `apps/freehand-daemon/**`, `crates/freehand-runtime/**`, `crates/freehand-task/**` for daemon test fixture seeding only, `apps/freehand-server/**`, `scripts/freehand-daemon-launchd.sh`, `scripts/install-launchd.sh`, `scripts/verify-launchd-restart-guard.sh`, `scripts/verify-launchd-restart-guard-online.sh`, `scripts/verify-master-three-worker-e2e-online.sh`, `docs/resource-maps/core.json`, `docs/function-maps/**`, `docs/testing/**`, `docs/design/**`, `docs/mainline-calls/app.runtime-daemon.json`, `docs/wiki/app.runtime-daemon.md`
 - forbidden_paths: `crates/freehand-reason/**`, `crates/freehand-node/**`, `crates/freehand-config/**`, `crates/freehand-provider-*/**` except through `crates/freehand-runtime`
+- module_registry: `docs/module-registry/app.runtime-daemon.json`
+- verification_map: `docs/verification-maps/app.runtime-daemon.json`
 - required_checks:
   - `cargo test -p freehand-daemon`
   - `cargo run -p xtask -- mainlines check`
@@ -793,6 +798,8 @@ Non-violation pending items live in `docs/architecture/architecture-gaps.md`. Ea
   - daemon slave-mode production Worker runner bootstrap smoke
   - Relay-configured Slave loopback WebUI/ADP, outbound tunnel, typed presence,
     and shared-cancellation lifecycle smoke
+  - launchd permanent-startup failure plateau, transient restart, and bounded
+    rapid-failure circuit smoke
 - required_project_black_box_tests:
   - real runtime owner injection over shared HTTP/SSE/command and ADP WebSocket transport without app-owned business logic
 - test_design_doc: `docs/testing/app.runtime-daemon.md`
@@ -809,6 +816,7 @@ Non-violation pending items live in `docs/architecture/architecture-gaps.md`. Ea
   - runtime transport injection changes
   - daemon bootstrap contract changes
   - daemon service-manager startup contract changes
+  - daemon startup/runtime exit classification or launchd retry policy changes
   - shared app transport injection shape changes
   - generated wiki freshness policy changes
 - lifecycle_checks:
@@ -818,6 +826,8 @@ Non-violation pending items live in `docs/architecture/architecture-gaps.md`. Ea
   - config-selected bootstrap remains one-process-one-agent; Master hosts UI
     transport, while an explicitly Relay-configured Slave hosts only its own
     loopback UI/ADP namespace beside the production Worker runner
+  - launchd retries transient host failures only; permanent startup failures and
+    bounded rapid-failure storms stop with explicit host-control state
   - migrated mainline call source and generated wiki stay in sync with the function map
 
 ### `app.acp-server`

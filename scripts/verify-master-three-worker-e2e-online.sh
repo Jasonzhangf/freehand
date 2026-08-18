@@ -12,6 +12,9 @@ cli_path="${FREEHAND_THREE_WORKER_CLI:-$HOME/.local/bin/freehand-cliS}"
 daemon_path="${FREEHAND_THREE_WORKER_DAEMON:-$repo_root/target/debug/freehand-daemon}"
 port="${FREEHAND_THREE_WORKER_FIXTURE_PORT:-18084}"
 session_id="${FREEHAND_THREE_WORKER_SESSION:-online-master-three-worker-evaluation-$(date +%s)}"
+adp_auth_token="${FREEHAND_THREE_WORKER_ADP_AUTH_TOKEN:-three-worker-adp-auth-$$}"
+export FREEHAND_THREE_WORKER_ADP_AUTH_TOKEN="$adp_auth_token"
+export FREEHAND_ADP_AUTH_TOKEN="$adp_auth_token"
 fixture_key_name="FREEHAND_THREE_WORKER_FIXTURE_KEY"
 fixture_key_value="test-three-worker-key"
 config_path="$runtime_home/config.toml"
@@ -124,6 +127,7 @@ EOF
 start_master() {
   env HOME="$isolated_home" \
     FREEHAND_PAIR_TOKEN_SHARED="$pair_token" \
+    FREEHAND_ADP_AUTH_TOKEN="$adp_auth_token" \
     FREEHAND_CC_API_KEY="isolated-bootstrap-only" \
     FREEHAND_PROVIDER_RETRY_BACKOFF_MS=0 \
     "${fixture_key_name}=${fixture_key_value}" \
@@ -150,6 +154,7 @@ start_worker() {
   fi
   env HOME="$isolated_home" \
     FREEHAND_PAIR_TOKEN_SHARED="$pair_token" \
+    FREEHAND_ADP_AUTH_TOKEN="$adp_auth_token" \
     FREEHAND_CC_API_KEY="isolated-bootstrap-only" \
     FREEHAND_PROVIDER_RETRY_BACKOFF_MS=0 \
     "${fixture_key_name}=${fixture_key_value}" \
@@ -175,10 +180,10 @@ launchd_plist_for_agent() {
 
 launchd_pid_for_agent() {
   local agent_name="$1"
-  local label
+  local label state_file
   label="$(launchd_label_for_agent "$agent_name")"
-  launchctl print "gui/$(id -u)/$label" 2>/dev/null \
-    | awk '$1 == "pid" && $2 == "=" { print $3; exit }'
+  state_file="$runtime_home/state/launchd/$label.json"
+  /usr/bin/plutil -extract daemon_pid raw -o - "$state_file" 2>/dev/null
 }
 
 wait_for_launchd_worker_pid() {
@@ -273,6 +278,7 @@ query_worker_health() {
   python3 - "$adp_url" "$phase" "$alpha_pid" "$beta_pid" "$gamma_pid" "$previous_gamma_instance" "$previous_gamma_task" "$previous_gamma_execution" <<'PY'
 import asyncio
 import json
+import os
 import sys
 import websockets
 
@@ -293,10 +299,24 @@ expected_pids = {
     "worker-beta": int(beta_pid),
     "worker-gamma": int(gamma_pid),
 }
+headers = {
+    "Authorization": f"Bearer {os.environ['FREEHAND_THREE_WORKER_ADP_AUTH_TOKEN']}"
+}
 
 async def query_board():
-    async with websockets.connect(url) as ws:
+    async with websockets.connect(url, additional_headers=headers) as ws:
         await ws.send(json.dumps({
+            "protocol_version": 3,
+            "kind": "handshake",
+            "request_id": f"worker-health-handshake-{phase}",
+            "client_name": "three-worker-verifier",
+            "capabilities": ["adp.v3.handshake"],
+        }))
+        handshake = json.loads(await asyncio.wait_for(ws.recv(), timeout=20))
+        if handshake.get("request_id") != f"worker-health-handshake-{phase}":
+            raise RuntimeError(f"ADP worker health handshake failed: {handshake}")
+        await ws.send(json.dumps({
+            "protocol_version": 3,
             "kind": "query",
             "request_id": f"worker-health-{phase}",
             "query": {"QueryAgentBoard": {}},
@@ -863,6 +883,7 @@ run_adp_submit_and_verify() {
   python3 - "$adp_url" "$session_id" "$task_alpha" "$task_beta" "$task_gamma" "$task_integration" "$worker_alpha" "$worker_beta" "$worker_gamma" "$worker_integration" "$prompt" <<'PY'
 import asyncio
 import json
+import os
 import sys
 import websockets
 
@@ -892,12 +913,27 @@ initial_workers = {
     task_gamma: worker_gamma,
     task_integration: worker_integration,
 }
+headers = {
+    "Authorization": f"Bearer {os.environ['FREEHAND_THREE_WORKER_ADP_AUTH_TOKEN']}"
+}
 
 def adp_command(request_id, command):
-    return {"kind": "command", "request_id": request_id, "command": command}
+    return {"protocol_version": 3, "kind": "command", "request_id": request_id, "command": command}
 
 def adp_query(request_id, query):
-    return {"kind": "query", "request_id": request_id, "query": query}
+    return {"protocol_version": 3, "kind": "query", "request_id": request_id, "query": query}
+
+async def handshake(ws, request_id):
+    await ws.send(json.dumps({
+        "protocol_version": 3,
+        "kind": "handshake",
+        "request_id": request_id,
+        "client_name": "three-worker-verifier",
+        "capabilities": ["adp.v3.handshake"],
+    }))
+    response = json.loads(await asyncio.wait_for(ws.recv(), timeout=20))
+    if response.get("request_id") != request_id or response.get("kind") != "handshake_accepted":
+        raise RuntimeError(f"ADP handshake failed: {response}")
 
 async def recv_until(ws, request_id, timeout_seconds):
     deadline = asyncio.get_event_loop().time() + timeout_seconds
@@ -912,7 +948,8 @@ async def recv_until(ws, request_id, timeout_seconds):
         seen.append(f"{msg.get('kind')}:{msg.get('request_id')}")
 
 async def query_all():
-    async with websockets.connect(url) as ws:
+    async with websockets.connect(url, additional_headers=headers) as ws:
+        await handshake(ws, "three-worker-query-handshake")
         requests = [
             adp_query("turns", {"QuerySessionTurns": {"session_id": session_id}}),
             adp_query("tasks", {"QueryTaskBoard": {"include_terminal": True}}),
@@ -931,7 +968,8 @@ async def query_all():
         return responses
 
 async def main():
-    async with websockets.connect(url) as ws:
+    async with websockets.connect(url, additional_headers=headers) as ws:
+        await handshake(ws, "three-worker-submit-handshake")
         await ws.send(json.dumps(adp_command("three-worker-submit", {
             "SubmitUserInput": {"text": prompt, "session_id": session_id}
         })))
@@ -1215,14 +1253,29 @@ verify_restart_idempotency() {
   python3 - "$adp_url" "$session_id" "$expected_stamp" <<'PY'
 import asyncio
 import json
+import os
 import sys
 import websockets
 
 url, session_id, stamp = sys.argv[1:4]
+headers = {
+    "Authorization": f"Bearer {os.environ['FREEHAND_THREE_WORKER_ADP_AUTH_TOKEN']}"
+}
 
 async def main():
-    async with websockets.connect(url) as ws:
+    async with websockets.connect(url, additional_headers=headers) as ws:
         await ws.send(json.dumps({
+            "protocol_version": 3,
+            "kind": "handshake",
+            "request_id": "restart-handshake",
+            "client_name": "three-worker-verifier",
+            "capabilities": ["adp.v3.handshake"],
+        }))
+        handshake = json.loads(await asyncio.wait_for(ws.recv(), timeout=20))
+        if handshake.get("request_id") != "restart-handshake" or handshake.get("kind") != "handshake_accepted":
+            raise RuntimeError(f"ADP restart handshake failed: {handshake}")
+        await ws.send(json.dumps({
+            "protocol_version": 3,
             "kind": "query",
             "request_id": "restart-turns",
             "query": {"QuerySessionTurns": {"session_id": session_id}},
@@ -1307,8 +1360,8 @@ run_three_worker_e2e() {
   start_workers
   verify_worker_processes
 
-  "$cli_path" adp-session-manage --url "$adp_url" --action delete --session "$session_id" >/dev/null 2>&1 || true
-  "$cli_path" adp-session-manage --url "$adp_url" --action create --session "$session_id" --title "Three worker E2E" --cwd "$repo_root" >/dev/null
+  FREEHAND_ADP_AUTH_TOKEN="$adp_auth_token" "$cli_path" adp-session-manage --url "$adp_url" --action delete --session "$session_id" >/dev/null 2>&1 || true
+  FREEHAND_ADP_AUTH_TOKEN="$adp_auth_token" "$cli_path" adp-session-manage --url "$adp_url" --action create --session "$session_id" --title "Three worker E2E" --cwd "$repo_root" >/dev/null
 
   proof="$(run_adp_submit_and_verify \
     "$stamp" \

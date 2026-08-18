@@ -2,6 +2,8 @@
 
 - feature_id: `app.runtime-daemon`
 - owner: `apps/freehand-daemon`
+- module_registry: `docs/module-registry/app.runtime-daemon.json`
+- verification_map: `docs/verification-maps/app.runtime-daemon.json`
 - resource map: `docs/resource-maps/core.json`
 - lifecycle path under test:
   - daemon bootstrap selects one agent from config and creates a runtime dispatcher
@@ -35,13 +37,23 @@
     through `agent.lifecycle`; daemon and launchd remain non-owner hosts
   - three configured Workers receive unique launchd labels, env files, and log
     files so their processes cannot overwrite one another's service truth
+  - launchd wrapper classifies permanent startup failure separately from
+    transient host termination, writes explicit service-control state, retries
+    transient failure within a bounded window, and opens a circuit instead of
+    producing an unbounded restart/log storm
 - resource operations under test:
+  - `runtime_daemon_host.host_runtime_transport`
+  - `runtime_daemon_host.validate_local_adp_token`
+  - `runtime_daemon_host.supervise_launchd_lifetime`
   - `runtime_agent_activity.merge_for_presence`
 
 ## Resource Operation Test Coverage
 
 | resource operation | status | white-box | module black-box | project black-box |
 | --- | --- | --- | --- | --- |
+| `runtime_daemon_host.host_runtime_transport` | bound | `cargo test -p freehand-daemon run_master_mode_binds_after_validated_local_adp -- --nocapture` proves the Master listener binds only after `relay_startup_auth` succeeds | `bash scripts/install-launchd.sh restartS` plus `curl http://100.66.1.82:4042/health` proves the installed S daemon reaches the host-binds step | `bash scripts/install-launchd.sh restartS` plus `curl http://100.66.1.82:4042/health` and `freehand-cliS adp-smoke --url ws://100.66.1.82:4042/adp` prove the installed S daemon reaches healthy host |
+| `runtime_daemon_host.validate_local_adp_token` | bound | `cargo test -p freehand-daemon relay_master_requires_local_adp_auth_before_host_start -- --nocapture` proves `relay_startup_auth` rejects missing and whitespace tokens before Master bind; `cargo test -p freehand-daemon relay_worker_requires_local_adp_auth_before_host_start -- --nocapture` proves the Worker host fails fast on the same condition | `bash scripts/install-launchd.sh restartS` with `FREEHAND_ADP_AUTH_TOKEN` set propagates the token to `~/.freehand/daemonS.env`; a negative restart with the token removed proves the installed service exits before bind | `freehand-cliS adp-smoke --url ws://100.66.1.82:4042/adp` with the propagated token proves the live ADP bridge accepts the persisted token; a missing-token restart proves the daemon does not bind |
+| `runtime_daemon_host.supervise_launchd_lifetime` | bound | `cargo test -p freehand-daemon daemon_exit_code -- --nocapture` proves startup errors map to `78` and post-start host errors map to `75`; `bash scripts/verify-launchd-restart-guard.sh` proves state parsing and bounded circuit behavior; `cargo test -p xtask daemon_launchd_mainline_edges_ -- --nocapture` locks the observer PID edge to its exact file and symbol | `bash scripts/verify-launchd-restart-guard-online.sh` proves a real isolated LaunchAgent plateaus after permanent startup failure, restarts a transient failure, and plateaus after the rapid-failure limit; `bash scripts/verify-master-three-worker-e2e-online.sh` reads the same label-scoped guarded PID during the three-Worker proof | `scripts/install-launchd.sh restartS` plus `launchctl print` and `/health` prove the installed S daemon uses the same guarded wrapper and remains healthy |
 | `runtime_agent_activity.merge_for_presence` | bound | `cargo test -p freehand-daemon relay_presence_projection_maps_only_typed_control_activity -- --nocapture` verifies typed foreground/background activity merge and Relay control projection mapping | `cargo test -p freehand-daemon relay_worker_requires_local_adp_auth_before_host_start -- --nocapture` verifies the Relay Worker host does not start without local ADP auth; `cargo test -p freehand-runtime production_master_runner_activity -- --nocapture` verifies the background owner projection | `scripts/verify-remote-relay-local-online.sh` plus authenticated directory observation verifies online Relay presence status/count during real background Master work without ADP payload copying |
 
 - white-box plan:
@@ -65,9 +77,20 @@
     status and exact active-session count
   - negative: missing or empty local ADP authentication rejects Worker Relay
     host startup before the listener is exposed
+  - negative: missing or empty local ADP authentication rejects Master Relay
+    host startup before its WebUI listener is bound or service-started truth is
+    published, so launchd classifies the failure as permanent startup error
   - Worker host startup proves the selected Worker reason/session namespace is
     queryable through ADP while Master-only commands fail explicitly
   - launchd wrapper env validation coverage through shell syntax, explicit daemon binary validation, Tailscale bind selection, and runtime smoke
+  - positive: startup-complete host failure returns retryable `75`
+  - negative: pre-host config/bootstrap failure returns permanent `78`
+  - negative: an existing blocked launchd state prevents another daemon spawn
+  - negative: failure to persist running or retry guard state stops automatic
+    restart and does not leave the supervised child running
+  - positive: `cargo test -p xtask daemon_launchd_mainline_edges_accept_exact_adjacent_bindings -- --nocapture` proves every launchd source edge has one exact step, file, symbol, and resource operation
+  - negative: `cargo test -p xtask daemon_launchd_mainline_edges_reject_compound_binding -- --nocapture` proves a slash-combined launchd symbol binding fails the architecture gate
+  - positive: explicit install/restart clears only the selected label's blocked state after preflight
   - launchd source audit rejects any call to the removed Relay launchd helper or any `upstreamBaseUrl` registration path
   - bind-arg parsing coverage
   - dependency boundary scan
@@ -116,6 +139,12 @@
   - daemon ADP error-center metadata query smoke
   - daemon ADP query-as-command rejection smoke
   - launchd service smoke: `launchctl print`, `/health`, `/`, log file creation, restart wait-until-healthy behavior, and Tailscale-IP `/health` reachability for Android clients when Tailscale is present
+  - launchd restart-guard online smoke uses isolated HOME and unique labels to
+    prove permanent failure run-count plateau, one transient restart into a
+    stable process, and bounded repeated transient failure plateau
+  - `make ci` enters both restart-guard verifier targets; the online target runs
+    on Darwin, and CI plus release each carry a dedicated macOS job that executes
+    the real launchd verifier before completion or publication
   - `scripts/install-launchd.sh restartS` succeeds with daemon health independent of Relay deployment state; Relay deployment is verified only through `relay.transport` gates
 - project black-box impact:
   - closes the first real runtime host gap without polluting the protocol-only app boundary
@@ -126,6 +155,7 @@
   - `~/.freehand/ledgers/reason`
   - `~/.freehand/logs/daemon.stdout.log`
   - `~/.freehand/logs/daemon.stderr.log`
+  - `~/.freehand/state/launchd/<label>.json`
 - known gaps:
   - real node-pairing websocket transport is not wired yet; daemon ADP WebSocket is a UI/control/status transport over existing runtime-owned local node semantics, not the node pairing transport
   - isolated controlled-provider three-process proof and launchd-managed

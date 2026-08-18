@@ -1,4 +1,4 @@
-.PHONY: provision-openminis-source build fmt clippy test mainlines gates relay-deployment-smoke relay-local-online relay-account-config-smoke ci verify-webui-online verify-webui-release-online release install-global install-symlink install-launchd install-launchdS install-worker-launchd install-worker-launchdS restart-launchd restart-launchdS restart-worker-launchd restart-worker-launchdS uninstall-launchd uninstall-launchdS uninstall-worker-launchd uninstall-worker-launchdS launchd-status launchd-statusS worker-launchd-status worker-launchd-statusS launchd-logs launchd-logsS worker-launchd-logs worker-launchd-logsS hooks
+.PHONY: provision-openminis-source build fmt clippy test mainlines gates relay-deployment-smoke relay-local-online relay-account-config-smoke launchd-guard-offline launchd-guard-online launchd-guards ci verify-webui-online verify-webui-release-online release install-global install-symlink install-launchd install-launchdS install-worker-launchd install-worker-launchdS restart-launchd restart-launchdS restart-worker-launchd restart-worker-launchdS uninstall-launchd uninstall-launchdS uninstall-worker-launchd uninstall-worker-launchdS launchd-status launchd-statusS worker-launchd-status worker-launchd-statusS launchd-logs launchd-logsS worker-launchd-logs worker-launchd-logsS hooks
 .PHONY: dev pre-push-fast nightly
 
 # Build/test tiers (from fastest to slowest):
@@ -43,6 +43,22 @@ relay-local-online:
 relay-account-config-smoke:
 	scripts/verify-relay-account-config-smoke.sh
 
+launchd-guard-offline:
+	@if [ "$$(uname -s)" = "Darwin" ]; then \
+		bash scripts/verify-launchd-restart-guard.sh; \
+	else \
+		printf '%s\n' 'launchd_restart_guard_offline_not_applicable platform='"$$(uname -s)"; \
+	fi
+
+launchd-guard-online:
+	@if [ "$$(uname -s)" = "Darwin" ]; then \
+		bash scripts/verify-launchd-restart-guard-online.sh; \
+	else \
+		printf '%s\n' 'launchd_restart_guard_online_not_applicable platform='"$$(uname -s)"; \
+	fi
+
+launchd-guards: launchd-guard-offline launchd-guard-online
+
 dev: provision-openminis-source
 	cargo build --workspace
 	cargo fmt --check
@@ -59,7 +75,7 @@ pre-push-fast: provision-openminis-source
 	cargo run -p xtask -- gates check
 	scripts/verify-relay-deployment-smoke.sh
 
-ci: provision-openminis-source build fmt clippy test mainlines gates relay-deployment-smoke relay-local-online relay-account-config-smoke
+ci: provision-openminis-source build fmt clippy test mainlines gates relay-deployment-smoke relay-local-online relay-account-config-smoke launchd-guards
 
 nightly: ci verify-webui-online verify-webui-release-online
 
