@@ -11,7 +11,7 @@ Generated from `docs/mainline-calls/reason.rewrite-policy.json`. Do not edit by 
 ## Request Mainline
 
 - runtime or orchestrator gathers rewrite trigger facts
-- provider usage enters as shared `TokenUsage`, then `prompt_tokens_from_usage` extracts prompt usage from `input_tokens`
+- provider usage enters as shared `TokenUsage`, then `prompt_tokens_from_usage` extracts prompt usage from `TokenUsage::total_input_tokens()`
 - project black-box harness can feed provider semantic outputs into reason turn truth before evaluating rewrite policy
 - facts stay on the metadata/debug/runtime side, not in request text
 - rewrite policy classifies whether the next action is hold, soft notice, prune-only, compaction, rollback, resume rebuild, or explicit block
@@ -56,7 +56,7 @@ Generated from `docs/mainline-calls/reason.rewrite-policy.json`. Do not edit by 
   - why shared: recovery/rewrite trigger semantics must stay separate from session-history mutation code
 - `prompt_tokens_from_usage`
   - owner: `crates/freehand-blocks`
-  - purpose: convert provider-normalized `TokenUsage.input_tokens` into rewrite-policy prompt token pressure
+  - purpose: convert provider-normalized `TokenUsage::total_input_tokens()` into rewrite-policy prompt token pressure
   - allowed callers: freehand-reason, runtime/orchestrator, tests
   - related tests: provider-usage prompt-token conversion tests, conflicting usage source tests
   - why shared: all provider families must feed compaction pressure through one usage interpretation path
@@ -68,7 +68,7 @@ Generated from `docs/mainline-calls/reason.rewrite-policy.json`. Do not edit by 
 | 01 | `decide_compaction_trigger` | `crates/freehand-blocks/src/rewrite_policy.rs` | decide whether ordinary-turn pressure should remain append-only, warn, prune stale evidence, or stage compaction | prompt usage plus context window plus stale reclaim estimate plus rewrite guard state | typed compaction trigger decision | runtime/orchestrator | rewrite-policy block |  |  |  | bound |
 | 02 | `assess_compaction_follow_up` | `crates/freehand-blocks/src/rewrite_policy.rs` | decide whether auto-compaction state resets or pauses after a compaction attempt | post-compaction prompt usage plus context window plus consecutive compaction count | typed compaction follow-up decision | runtime/orchestrator | rewrite-policy block |  |  |  | bound |
 | 03 | `decide_recovery_rewrite` | `crates/freehand-blocks/src/rewrite_policy.rs` | decide whether restore/rewrite-regression path should rollback, resume rebuild, or block | restore status plus rewrite regression state plus rollback/rebuild truth availability | typed recovery rewrite decision | runtime/orchestrator | rewrite-policy block |  |  |  | bound |
-| 04 | `prompt_tokens_from_usage` | `crates/freehand-blocks/src/rewrite_policy.rs` | convert provider-normalized usage into compaction prompt pressure | `TokenUsage.input_tokens` | `prompt_tokens` or usage error | `ReasonRewriteRuntime` | usage policy block |  |  |  | bound |
+| 04 | `prompt_tokens_from_usage` | `crates/freehand-blocks/src/rewrite_policy.rs` | convert provider-normalized usage into compaction prompt pressure | `TokenUsage::total_input_tokens()` | `prompt_tokens` or usage error | `ReasonRewriteRuntime` | usage policy block |  |  |  | bound |
 | 05 | `ReasonRewriteRuntime::apply_compaction_policy` | `crates/freehand-reason/src/rewrite_runtime.rs` | consume compaction trigger decision and call session-history compaction gate only when approved | session history plus runtime compaction facts plus optional provider usage plus optional rewrite payload | typed decision plus optional rewrite ledger record | runtime/orchestrator | usage policy plus rewrite policy plus session-history gate |  |  |  | bound |
 | 06 | `ReasonRewriteRuntime::record_compaction_follow_up` | `crates/freehand-reason/src/rewrite_runtime.rs` | update soft-notice, consecutive-compaction, and auto-pause state after compaction observation | runtime rewrite state plus post-compaction usage | typed follow-up decision plus updated runtime state | runtime/orchestrator | rewrite policy |  |  |  | bound |
 | 07 | `ReasonRewriteRuntime::apply_recovery_policy` | `crates/freehand-reason/src/rewrite_runtime.rs` | consume recovery decision and call rollback/resume-rebuild gate only when approved | session history plus recovery facts plus optional rewrite payloads | typed decision plus optional rewrite ledger record | runtime/orchestrator | rewrite policy plus session-history gate |  |  |  | bound |

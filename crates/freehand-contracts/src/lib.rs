@@ -477,18 +477,51 @@ pub struct ReasonReq05ToolResultReentry {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct TokenUsage {
+    /// Provider-reported input count. OpenAI-compatible responses report the
+    /// full input total; Anthropic-compatible providers expose both observed
+    /// uncached-input and total-input shapes.
     pub input_tokens: u64,
     pub output_tokens: u64,
     pub total_tokens: Option<u64>,
     pub reasoning_tokens: Option<u64>,
     pub cache_creation_tokens: u64,
     pub cache_read_tokens: u64,
+    /// Explicit provider-normalized total input. New records carry the exact
+    /// denominator selected by the adapter through the contracts-owned rule.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub normalized_input_tokens: Option<u64>,
     pub finish_reason: Option<String>,
 }
 
 impl TokenUsage {
+    pub fn resolve_reported_input_tokens(
+        input_tokens: u64,
+        cache_creation_tokens: u64,
+        cache_read_tokens: u64,
+    ) -> u64 {
+        let cache_tokens = cache_creation_tokens.saturating_add(cache_read_tokens);
+        if cache_tokens > input_tokens {
+            input_tokens.saturating_add(cache_tokens)
+        } else {
+            input_tokens
+        }
+    }
+
+    /// Provider-normalized total input. New records carry an explicit value.
+    /// For legacy records, cache counters are added only when they exceed the
+    /// reported input and therefore cannot already be categories within it.
+    pub fn total_input_tokens(&self) -> u64 {
+        self.normalized_input_tokens.unwrap_or_else(|| {
+            Self::resolve_reported_input_tokens(
+                self.input_tokens,
+                self.cache_creation_tokens,
+                self.cache_read_tokens,
+            )
+        })
+    }
+
     pub fn cache_hit_rate(&self) -> f64 {
-        let total = self.cache_creation_tokens + self.cache_read_tokens;
+        let total = self.total_input_tokens();
         if total == 0 {
             0.0
         } else {
@@ -497,8 +530,10 @@ impl TokenUsage {
     }
 
     pub fn resolved_total_tokens(&self) -> u64 {
+        let normalized_total = self.total_input_tokens().saturating_add(self.output_tokens);
         self.total_tokens
-            .unwrap_or(self.input_tokens.saturating_add(self.output_tokens))
+            .filter(|total| *total >= normalized_total)
+            .unwrap_or(normalized_total)
     }
 }
 
@@ -890,11 +925,86 @@ mod tests {
             reasoning_tokens: Some(12),
             cache_creation_tokens: 20,
             cache_read_tokens: 80,
+            normalized_input_tokens: Some(100),
             finish_reason: Some("stop".to_owned()),
         };
         assert!((usage.cache_hit_rate() - 0.8).abs() < f64::EPSILON);
+        assert_eq!(usage.total_input_tokens(), 100);
         assert_eq!(usage.resolved_total_tokens(), 150);
         assert_eq!(usage.finish_reason.as_deref(), Some("stop"));
+    }
+
+    #[test]
+    fn cache_hit_rate_includes_uncached_input_in_denominator() {
+        let usage = TokenUsage {
+            input_tokens: 100,
+            output_tokens: 5,
+            total_tokens: Some(105),
+            reasoning_tokens: None,
+            cache_creation_tokens: 0,
+            cache_read_tokens: 80,
+            normalized_input_tokens: Some(100),
+            finish_reason: None,
+        };
+        assert!((usage.cache_hit_rate() - 0.8).abs() < f64::EPSILON);
+        assert_eq!(usage.total_input_tokens(), 100);
+        assert_eq!(usage.resolved_total_tokens(), 105);
+    }
+
+    #[test]
+    fn legacy_anthropic_usage_reconstructs_normalized_total_without_guessing() {
+        let legacy = serde_json::from_value::<TokenUsage>(json!({
+            "input_tokens": 14,
+            "output_tokens": 82,
+            "total_tokens": 96,
+            "reasoning_tokens": null,
+            "cache_creation_tokens": 0,
+            "cache_read_tokens": 32,
+            "finish_reason": "end_turn"
+        }))
+        .expect("legacy usage");
+
+        assert_eq!(legacy.input_tokens, 14);
+        assert_eq!(legacy.total_input_tokens(), 46);
+        assert!((legacy.cache_hit_rate() - 32.0 / 46.0).abs() < f64::EPSILON);
+        assert_eq!(legacy.resolved_total_tokens(), 128);
+    }
+
+    #[test]
+    fn legacy_usage_preserves_reported_total_when_cache_is_already_a_subset() {
+        let legacy = serde_json::from_value::<TokenUsage>(json!({
+            "input_tokens": 19474,
+            "output_tokens": 1574,
+            "total_tokens": 21048,
+            "reasoning_tokens": null,
+            "cache_creation_tokens": 0,
+            "cache_read_tokens": 15125,
+            "finish_reason": "end_turn"
+        }))
+        .expect("legacy usage with total input");
+
+        assert_eq!(legacy.total_input_tokens(), 19474);
+        assert!((legacy.cache_hit_rate() - 15125.0 / 19474.0).abs() < f64::EPSILON);
+        assert_eq!(legacy.resolved_total_tokens(), 21048);
+    }
+
+    #[test]
+    fn normalized_input_tokens_round_trips_through_serialization() {
+        let usage = TokenUsage {
+            input_tokens: 14,
+            output_tokens: 82,
+            total_tokens: Some(128),
+            reasoning_tokens: None,
+            cache_creation_tokens: 0,
+            cache_read_tokens: 32,
+            normalized_input_tokens: Some(46),
+            finish_reason: Some("end_turn".to_owned()),
+        };
+        let encoded = serde_json::to_value(&usage).expect("encode");
+        assert_eq!(encoded.get("normalized_input_tokens"), Some(&json!(46)));
+        let decoded: TokenUsage = serde_json::from_value(encoded).expect("decode");
+        assert_eq!(decoded.total_input_tokens(), 46);
+        assert_eq!(decoded.cache_read_tokens, 32);
     }
 
     #[test]

@@ -24,6 +24,11 @@
 - Messages API is stateless; caller sends full conversational history on each request
 - docs describe message structure, system prompts, and stop reasons as core concepts
 
+### Usage And Cache
+
+- Anthropic Messages reports uncached `input_tokens`, `cache_creation_input_tokens`, and `cache_read_input_tokens` separately, while observed Anthropic-compatible providers may report cache counters as subsets of `input_tokens`
+- Freehand persists an explicit normalized input total: cache counters are added when they exceed reported input and therefore cannot already be subsets; otherwise reported input remains the denominator. Output tokens are then added for total-token projection
+
 ### Streaming
 
 - set `stream: true` to receive server-sent events

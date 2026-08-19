@@ -273,10 +273,11 @@ pub fn decide_compaction_trigger(input: CompactionTriggerInput) -> CompactionTri
 }
 
 pub fn prompt_tokens_from_usage(usage: &TokenUsage) -> Result<u32, RewritePolicyUsageError> {
-    if usage.input_tokens == 0 {
+    let prompt_tokens = usage.total_input_tokens();
+    if prompt_tokens == 0 {
         return Err(RewritePolicyUsageError::ZeroPromptTokens);
     }
-    u32::try_from(usage.input_tokens).map_err(|_| RewritePolicyUsageError::PromptTokensOverflow)
+    u32::try_from(prompt_tokens).map_err(|_| RewritePolicyUsageError::PromptTokensOverflow)
 }
 
 pub fn assess_compaction_follow_up(input: CompactionFollowUpInput) -> CompactionFollowUpDecision {
@@ -519,6 +520,7 @@ mod tests {
             reasoning_tokens: None,
             cache_creation_tokens: 8,
             cache_read_tokens: 80,
+            normalized_input_tokens: Some(88),
             finish_reason: Some("stop".to_owned()),
         };
 
@@ -534,6 +536,7 @@ mod tests {
             reasoning_tokens: None,
             cache_creation_tokens: 0,
             cache_read_tokens: 0,
+            normalized_input_tokens: Some(0),
             finish_reason: Some("stop".to_owned()),
         };
 

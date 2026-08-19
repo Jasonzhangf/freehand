@@ -30,6 +30,7 @@
   - indexed Anthropic streaming tool-use path where `content_block_start` provides id/name but later `input_json_delta` and `content_block_stop` events only provide `index`
   - Anthropic `tools` / `tool_choice` / `tool_result` request rendering
   - Anthropic hosted web_search request rendering and hosted block observation
+  - Anthropic-compatible usage parsing writes explicit normalized input: live MiniMax fixture `14 + 0 + 32` yields `32 / 46` and 128 total tokens, while the real subset-shaped sample `16512 / 22385` preserves 22385 as total input and resolves 23945 total tokens with 1560 output tokens
   - executor URL joining, header emission, non-success status handling, SSE event-boundary parsing, and incremental callback delivery
   - raw-capable executor callback coverage for response bodies, HTTP error bodies, and SSE event bodies before semantic parse
 - module black-box plan:

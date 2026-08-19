@@ -5489,12 +5489,13 @@ function formatTokenCount(tokens) {
   return `${value}`;
 }
 
-function formatPercentBps(bps) {
-  const value = Number(bps) || 0;
-  if (value <= 0) {
+function formatCacheHitPercent(cacheReadTokens, totalInputTokens) {
+  const read = Number(cacheReadTokens) || 0;
+  const total = Number(totalInputTokens) || 0;
+  if (total <= 0) {
     return "--";
   }
-  return `${(value / 100).toFixed(1)}%`;
+  return `${((read / total) * 100).toFixed(3)}%`;
 }
 
 function currentSessionUsageProjections() {
@@ -5515,17 +5516,17 @@ function renderComposerContextStrip() {
     return;
   }
 
-  const hit = latest.cache_hit_rate_bps || 0;
   const readTotal = projections.reduce((sum, p) => sum + (Number(p.cache_read_tokens) || 0), 0);
-  const createTotal = projections.reduce((sum, p) => sum + (Number(p.cache_creation_tokens) || 0), 0);
-  const cachePool = readTotal + createTotal;
-  const avgBps = cachePool > 0 ? Math.round((readTotal / cachePool) * 10000) : 0;
+  const inputTotal = projections.reduce((sum, p) => sum + (Number(p.context_tokens) || 0), 0);
   const thinking = latest.reasoning_tokens || 0;
   const context = Number(latest.context_tokens) || 0;
   const compacted = projections.reduce((sum, p) => sum + (Number(p.compacted_tokens) || 0), 0);
 
-  setText("context-stat-cache-hit", `缓存 ${formatPercentBps(hit)}`);
-  setText("context-stat-cache-avg", `平均 ${formatPercentBps(avgBps)}`);
+  setText(
+    "context-stat-cache-hit",
+    `缓存 ${formatCacheHitPercent(latest.cache_read_tokens, latest.context_tokens)}`,
+  );
+  setText("context-stat-cache-avg", `平均 ${formatCacheHitPercent(readTotal, inputTotal)}`);
   setText("context-stat-thinking", `思考 ${formatTokenCount(thinking)}`);
   setText("context-stat-context", `上下文 ${formatTokenCount(context)}`);
   const compactedText = compacted > 0 ? `压缩 ${formatTokenCount(compacted)}` : "压缩 --";
@@ -7222,7 +7223,7 @@ function renderSessionRelationHeader(model = buildMobileAgentDashboardModel()) {
    "session-relation-metrics",
    liveObservation
      ? `${liveObservation.label} · ${liveObservation.turnId || "活动 turn"} · ${runningAgents} 个 Agent${workerLimitText}`
-     : `${counts.activeCount}A · ${counts.reviewCount}R · ${counts.blockedCount}B · ${counts.closedCount}C`,
+     : `${counts.activeCount} 活动 · ${counts.reviewCount} 审核 · ${counts.blockedCount} 阻塞 · ${counts.closedCount} 关闭`,
  );
   // copy omitted on mobile - compact metrics pill + title carry the signal
   if (sessionRelationToggleButton) {

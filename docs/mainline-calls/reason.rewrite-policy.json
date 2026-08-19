@@ -8,7 +8,7 @@
   "generated_wiki_doc": "docs/wiki/reason.rewrite-policy.md",
   "request_mainline": [
     "runtime or orchestrator gathers rewrite trigger facts",
-    "provider usage enters as shared `TokenUsage`, then `prompt_tokens_from_usage` extracts prompt usage from `input_tokens`",
+    "provider usage enters as shared `TokenUsage`, then `prompt_tokens_from_usage` extracts prompt usage from `TokenUsage::total_input_tokens()`",
     "project black-box harness can feed provider semantic outputs into reason turn truth before evaluating rewrite policy",
     "facts stay on the metadata/debug/runtime side, not in request text",
     "rewrite policy classifies whether the next action is hold, soft notice, prune-only, compaction, rollback, resume rebuild, or explicit block",
@@ -76,7 +76,7 @@
     {
       "symbol": "prompt_tokens_from_usage",
       "owner": "crates/freehand-blocks",
-      "purpose": "convert provider-normalized `TokenUsage.input_tokens` into rewrite-policy prompt token pressure",
+      "purpose": "convert provider-normalized `TokenUsage::total_input_tokens()` into rewrite-policy prompt token pressure",
       "allowed_callers": [
         "freehand-reason",
         "runtime/orchestrator",
@@ -128,7 +128,7 @@
       "symbol_path": "prompt_tokens_from_usage",
       "file_path": "crates/freehand-blocks/src/rewrite_policy.rs",
       "responsibility": "convert provider-normalized usage into compaction prompt pressure",
-      "input_semantic": "`TokenUsage.input_tokens`",
+      "input_semantic": "`TokenUsage::total_input_tokens()`",
       "output_semantic": "`prompt_tokens` or usage error",
       "caller": "`ReasonRewriteRuntime`",
       "callee": "usage policy block",

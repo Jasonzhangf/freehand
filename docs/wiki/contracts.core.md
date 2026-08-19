@@ -21,6 +21,7 @@ Generated from `docs/mainline-calls/contracts.core.json`. Do not edit by hand.
 
 - response-chain semantic nodes are defined and exported as cross-module contracts
 - semantic response events remain serializable, replayable, and persistable across crate boundaries
+- TokenUsage.input_tokens keeps provider-reported input semantics; normalized_input_tokens is the explicit normalized total input for new records, while legacy records without it preserve input_tokens when cache counters fit inside that total and add cache counters only when they exceed the reported input; cache hit rate is cache-read tokens divided by normalized total input
 
 ## Error Mainline
 
@@ -68,6 +69,7 @@ Generated from `docs/mainline-calls/contracts.core.json`. Do not edit by hand.
 | 13 | `validate_reason_req03` | `crates/freehand-contracts/src/lib.rs` | validate provider payload contract | provider payload contract | validated provider payload | provider semantic boundary | shared validator |  |  |  | bound |
 | 14 | `FREEHAND_REMOTE_ACCESS_SCOPE_HEADER / FREEHAND_REMOTE_ACCESS_SCOPE_VALUE` | `crates/freehand-contracts/src/lib.rs` | define one shared Relay-to-WebUI remote access-scope header contract without adding the marker to business payload DTOs | typed transport boundary | stable header name and value | Relay Agent bridge and WebUI server | contract module |  |  |  | bound |
 | 15 | `SearchEvidenceDelivery / SearchEvidenceTurnDelivery` | `crates/freehand-contracts/src/lib.rs` | define strict versioned search-evidence stage and turn contracts with unknown-field rejection | search delivery schema | replayable typed business delivery | provider/tool/reason/runtime owners | contract module |  |  |  | bound |
+| 16 | `TokenUsage::total_input_tokens / TokenUsage::cache_hit_rate` | `crates/freehand-contracts/src/lib.rs` | define explicit provider-normalized total-input and cache-hit semantics, including conservative reconstruction for legacy persisted usage | provider usage with optional explicit normalized input total | normalized total input tokens plus cache-read ratio | provider adapters, reason metadata, and UI protocol | contract module |  |  |  | bound |
 
 ## Sync Status Against Mainline Call
 

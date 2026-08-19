@@ -4,7 +4,12 @@
   "feature_id": "app.runtime-daemon",
   "status": "active",
   "coverage_roots": [
-    "apps/freehand-daemon"
+    "apps/freehand-daemon",
+    "scripts/freehand-daemon-launchd.sh",
+    "scripts/install-launchd.sh",
+    "scripts/verify-launchd-restart-guard.sh",
+    "scripts/verify-launchd-restart-guard-online.sh",
+    "scripts/verify-master-three-worker-e2e-online.sh"
   ],
   "modules": [
     {
@@ -37,6 +42,46 @@
         "freehand-node",
         "freehand-reason"
       ]
+    },
+    {
+      "module_id": "app.runtime-daemon.launchd-control",
+      "owner_feature_id": "app.runtime-daemon",
+      "status": "active",
+      "owned_paths": [
+        "scripts/freehand-daemon-launchd.sh",
+        "scripts/install-launchd.sh",
+        "scripts/verify-launchd-restart-guard.sh",
+        "scripts/verify-launchd-restart-guard-online.sh"
+      ],
+      "allowed_dependencies": [
+        "rust.std",
+        "third_party.plutil",
+        "third_party.launchctl",
+        "third_party.bash",
+        "third_party.install"
+      ],
+      "forbidden_dependencies": []
+    },
+    {
+      "module_id": "app.runtime-daemon.launchd-e2e-observer",
+      "owner_feature_id": "app.runtime-daemon",
+      "status": "active",
+      "owned_paths": [
+        "scripts/verify-master-three-worker-e2e-online.sh"
+      ],
+      "allowed_dependencies": [
+        "app.runtime-daemon.launchd-control",
+        "rust.std",
+        "third_party.bash",
+        "third_party.curl",
+        "third_party.launchctl",
+        "third_party.node",
+        "third_party.plutil",
+        "third_party.python3",
+        "third_party.sed",
+        "third_party.websockets"
+      ],
+      "forbidden_dependencies": []
     }
   ],
   "declared_edges": [
@@ -45,6 +90,18 @@
       "from_module_id": "app.runtime-daemon.compatibility-host",
       "to_module_id": "relay.transport.library",
       "import_name": "freehand_relay"
+    },
+    {
+      "edge_id": "app.runtime-daemon.launchd-control_to_compatibility-host",
+      "from_module_id": "app.runtime-daemon.launchd-control",
+      "to_module_id": "app.runtime-daemon.compatibility-host",
+      "import_name": "FREEHAND_DAEMON_BIN"
+    },
+    {
+      "edge_id": "app.runtime-daemon.launchd-e2e-observer_to_launchd-control",
+      "from_module_id": "app.runtime-daemon.launchd-e2e-observer",
+      "to_module_id": "app.runtime-daemon.launchd-control",
+      "import_name": "scripts/install-launchd.sh restartWorkerS"
     }
   ]
 }

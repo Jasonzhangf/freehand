@@ -1,0 +1,75 @@
+{
+  "schema_version": 1,
+  "registry_id": "foundation.workspace.modules",
+  "feature_id": "foundation.workspace",
+  "status": "active",
+  "coverage_roots": [
+    "xtask/src/main.rs",
+    "Makefile",
+    ".github/workflows/ci.yml",
+    ".github/workflows/release.yml"
+  ],
+  "modules": [
+    {
+      "module_id": "foundation.workspace.gate-runner",
+      "owner_feature_id": "foundation.workspace",
+      "status": "active",
+      "owned_paths": [
+        "xtask/src/main.rs"
+      ],
+      "allowed_dependencies": [
+        "rust.std",
+        "third_party.anyhow",
+        "third_party.chrono",
+        "third_party.clap",
+        "third_party.plist",
+        "third_party.serde",
+        "third_party.serde-json",
+        "third_party.syn",
+        "third_party.walkdir"
+      ],
+      "forbidden_dependencies": [
+        "freehand-config",
+        "freehand-reason",
+        "freehand-runtime",
+        "freehand-node"
+      ]
+    },
+    {
+      "module_id": "foundation.workspace.automation",
+      "owner_feature_id": "foundation.workspace",
+      "status": "active",
+      "owned_paths": [
+        "Makefile",
+        ".github/workflows/ci.yml",
+        ".github/workflows/release.yml"
+      ],
+      "allowed_dependencies": [
+        "foundation.workspace.gate-runner",
+        "app.runtime-daemon.launchd-control",
+        "third_party.github-actions",
+        "third_party.make"
+      ],
+      "forbidden_dependencies": [
+        "freehand-config",
+        "freehand-reason",
+        "freehand-runtime",
+        "freehand-node"
+      ]
+    }
+  ],
+  "declared_edges": [
+    {
+      "edge_id": "foundation.workspace.automation_to_gate-runner",
+      "from_module_id": "foundation.workspace.automation",
+      "to_module_id": "foundation.workspace.gate-runner",
+      "import_name": "cargo run -p xtask"
+    },
+    {
+      "edge_id": "foundation.workspace.automation_to_launchd-control",
+      "from_module_id": "foundation.workspace.automation",
+      "to_module_id": "app.runtime-daemon.launchd-control",
+      "import_name": "make launchd-guards"
+    }
+  ]
+}

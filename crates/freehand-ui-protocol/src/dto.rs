@@ -468,7 +468,7 @@ pub struct UiUsageProjection {
     pub cache_read_tokens: u64,
     /// Cache hit rate in basis points (0-10000; 8000 == 80%).
     pub cache_hit_rate_bps: u64,
-    /// Context size after this turn, in tokens (input + cache read + cache create).
+    /// Provider-normalized total input tokens for this turn.
     pub context_tokens: u64,
     /// Context compaction applied before this turn, in tokens.
     #[serde(default)]

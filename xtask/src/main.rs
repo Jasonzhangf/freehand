@@ -251,6 +251,10 @@ fn run_gates_check() -> Result<(), String> {
             "docs/verification-maps/app.acp-server.json",
             "docs/module-registry/config.account-config-sync.json",
             "docs/verification-maps/config.account-config-sync.json",
+            "docs/module-registry/app.runtime-daemon.json",
+            "docs/verification-maps/app.runtime-daemon.json",
+            "docs/module-registry/foundation.workspace.json",
+            "docs/verification-maps/foundation.workspace.json",
             "docs/wiki/app.acp-server.md",
             "scripts/verify-acp-stdio.sh",
             "scripts/verify-relay-account-config-smoke.sh",
@@ -280,6 +284,7 @@ fn run_gates_check() -> Result<(), String> {
     verify_webui_app_boundary(&root)?;
     verify_webui_foundation_contracts(&root)?;
     verify_runtime_daemon_boundary(&root)?;
+    verify_foundation_workspace_boundary(&root)?;
     verify_relay_transport_boundary(&root)?;
     verify_account_config_sync_boundary(&root)?;
     verify_runtime_master_worker_loop_boundary(&root)?;
@@ -2724,7 +2729,7 @@ fn verify_ci_cd_gate_commands(root: &Path) -> Result<(), String> {
         fs::read_to_string(root.join("Makefile")).map_err(|err| format!("read Makefile: {err}"))?;
     require_contains(
         &makefile,
-        ".PHONY: provision-openminis-source build fmt clippy test mainlines gates relay-deployment-smoke relay-local-online relay-account-config-smoke ci verify-webui-online verify-webui-release-online release install-global install-symlink install-launchd install-launchdS install-worker-launchd install-worker-launchdS restart-launchd restart-launchdS restart-worker-launchd restart-worker-launchdS uninstall-launchd uninstall-launchdS uninstall-worker-launchd uninstall-worker-launchdS launchd-status launchd-statusS worker-launchd-status worker-launchd-statusS launchd-logs launchd-logsS worker-launchd-logs worker-launchd-logsS hooks",
+        ".PHONY: provision-openminis-source build fmt clippy test mainlines gates relay-deployment-smoke relay-local-online relay-account-config-smoke launchd-guard-offline launchd-guard-online launchd-guards ci verify-webui-online verify-webui-release-online release install-global install-symlink install-launchd install-launchdS install-worker-launchd install-worker-launchdS restart-launchd restart-launchdS restart-worker-launchd restart-worker-launchdS uninstall-launchd uninstall-launchdS uninstall-worker-launchd uninstall-worker-launchdS launchd-status launchd-statusS worker-launchd-status worker-launchd-statusS launchd-logs launchd-logsS worker-launchd-logs worker-launchd-logsS hooks",
         "Makefile",
     )?;
     require_contains(
@@ -2741,8 +2746,28 @@ fn verify_ci_cd_gate_commands(root: &Path) -> Result<(), String> {
     )?;
     require_contains(
         &makefile,
-        "ci: provision-openminis-source build fmt clippy test mainlines gates relay-deployment-smoke relay-local-online relay-account-config-smoke",
+        "ci: provision-openminis-source build fmt clippy test mainlines gates relay-deployment-smoke relay-local-online relay-account-config-smoke launchd-guards",
         "Makefile",
+    )?;
+    require_contains(
+        &makefile,
+        "launchd-guard-offline:",
+        "Makefile launchd offline gate",
+    )?;
+    require_contains(
+        &makefile,
+        "bash scripts/verify-launchd-restart-guard.sh",
+        "Makefile launchd offline gate",
+    )?;
+    require_contains(
+        &makefile,
+        "launchd-guard-online:",
+        "Makefile launchd online gate",
+    )?;
+    require_contains(
+        &makefile,
+        "bash scripts/verify-launchd-restart-guard-online.sh",
+        "Makefile launchd online gate",
     )?;
     require_contains(&makefile, "release:\n\tscripts/release.sh", "Makefile")?;
     require_contains(
@@ -2902,15 +2927,31 @@ fn verify_ci_cd_gate_commands(root: &Path) -> Result<(), String> {
         "mkdir -p \"$runtime_home\" \"$logs_dir\" \"$workdir\"",
         "scripts/install-launchd.sh",
     )?;
-    if !install_launchd.contains("set -a; [ -f \"$env_file\" ] && . \"$env_file\"; set +a;")
-        && !install_launchd
-            .contains("set -a; [ -f \"$env_file\" ] &amp;&amp; . \"$env_file\"; set +a;")
-    {
-        return Err(
-            "mainline manifest cross-link missing launchd env-file sourcing in scripts/install-launchd.sh"
-                .to_string(),
-        );
-    }
+    require_contains(
+        &install_launchd,
+        "<string>$launchd_wrapper</string>",
+        "scripts/install-launchd.sh",
+    )?;
+    require_contains(
+        &install_launchd,
+        "<key>SuccessfulExit</key>",
+        "scripts/install-launchd.sh",
+    )?;
+    require_contains(
+        &install_launchd,
+        "<key>ThrottleInterval</key>",
+        "scripts/install-launchd.sh",
+    )?;
+    require_contains(
+        &install_launchd,
+        "<key>FREEHAND_LAUNCHD_STATE_DIR</key>",
+        "scripts/install-launchd.sh",
+    )?;
+    require_contains(
+        &install_launchd,
+        "install -m 0755 scripts/freehand-daemon-launchd.sh \"$launchd_wrapper\"",
+        "scripts/install-launchd.sh",
+    )?;
     require_contains(&install_launchd, "restartS)", "scripts/install-launchd.sh")?;
     require_contains(
         &install_launchd,
@@ -2922,11 +2963,12 @@ fn verify_ci_cd_gate_commands(root: &Path) -> Result<(), String> {
         "default_label=\"com.freehand.workerS\"",
         "scripts/install-launchd.sh",
     )?;
-    require_contains(
-        &install_launchd,
-        "exec \"$daemon_bin\" serve --agent \"$agent\"</string>",
-        "scripts/install-launchd.sh",
-    )?;
+    if install_launchd.contains("exec \"$daemon_bin\" serve --agent \"$agent\"</string>") {
+        return Err(
+            "scripts/install-launchd.sh must not bypass the guarded launchd wrapper with inline daemon exec"
+                .to_owned(),
+        );
+    }
     require_contains(
         &install_launchd,
         "worker requires FREEHAND_PAIR_TOKEN_SHARED",
@@ -2949,8 +2991,25 @@ fn verify_ci_cd_gate_commands(root: &Path) -> Result<(), String> {
     )?;
     require_contains(
         &install_launchd,
-        "kill -0 \"$service_pid\"",
+        "/usr/bin/plutil -extract daemon_pid raw -o - \"$launchd_state_file\"",
         "scripts/install-launchd.sh",
+    )?;
+    let launchd_wrapper = fs::read_to_string(root.join("scripts/freehand-daemon-launchd.sh"))
+        .map_err(|err| format!("read scripts/freehand-daemon-launchd.sh: {err}"))?;
+    require_contains(
+        &launchd_wrapper,
+        ". \"$env_file\"",
+        "scripts/freehand-daemon-launchd.sh",
+    )?;
+    require_contains(
+        &launchd_wrapper,
+        "write_state \"running\"",
+        "scripts/freehand-daemon-launchd.sh",
+    )?;
+    require_contains(
+        &launchd_wrapper,
+        "block_after_exit \"transient_runtime\" \"rapid_failure_limit\"",
+        "scripts/freehand-daemon-launchd.sh",
     )?;
     require_contains(
         &install_launchd,
@@ -2985,6 +3044,16 @@ fn verify_ci_cd_gate_commands(root: &Path) -> Result<(), String> {
         ".github/workflows/ci.yml",
     )?;
     require_contains(&ci_workflow, "run: make ci", ".github/workflows/ci.yml")?;
+    require_contains(
+        &ci_workflow,
+        "runs-on: macos-latest",
+        ".github/workflows/ci.yml launchd gate",
+    )?;
+    require_contains(
+        &ci_workflow,
+        "run: make launchd-guards",
+        ".github/workflows/ci.yml launchd gate",
+    )?;
 
     let release_workflow = fs::read_to_string(root.join(".github/workflows/release.yml"))
         .map_err(|err| format!("read .github/workflows/release.yml: {err}"))?;
@@ -2997,6 +3066,21 @@ fn verify_ci_cd_gate_commands(root: &Path) -> Result<(), String> {
         &release_workflow,
         "run: scripts/release.sh",
         ".github/workflows/release.yml",
+    )?;
+    require_contains(
+        &release_workflow,
+        "runs-on: macos-latest",
+        ".github/workflows/release.yml launchd gate",
+    )?;
+    require_contains(
+        &release_workflow,
+        "run: make launchd-guards",
+        ".github/workflows/release.yml launchd gate",
+    )?;
+    require_contains(
+        &release_workflow,
+        "needs: launchd-gates",
+        ".github/workflows/release.yml launchd dependency",
     )?;
 
     Ok(())
@@ -4122,6 +4206,117 @@ fn verify_runtime_daemon_boundary(root: &Path) -> Result<(), String> {
     Ok(())
 }
 
+fn verify_foundation_workspace_boundary(root: &Path) -> Result<(), String> {
+    let registry_path = root.join("docs/module-registry/foundation.workspace.json");
+    let registry_source = fs::read_to_string(&registry_path).map_err(|error| error.to_string())?;
+    let registry: RelayModuleRegistry =
+        serde_json::from_str(&registry_source).map_err(|error| error.to_string())?;
+    if registry.schema_version != 1
+        || registry.registry_id != "foundation.workspace.modules"
+        || registry.feature_id != "foundation.workspace"
+        || registry.status != "active"
+        || registry.coverage_roots
+            != [
+                "xtask/src/main.rs",
+                "Makefile",
+                ".github/workflows/ci.yml",
+                ".github/workflows/release.yml",
+            ]
+        || registry.modules.len() != 2
+        || registry.declared_edges.len() != 2
+    {
+        return Err("foundation.workspace module registry identity/shape is invalid".to_owned());
+    }
+    let module = &registry.modules[0];
+    if module.module_id != "foundation.workspace.gate-runner"
+        || module.owner_feature_id != "foundation.workspace"
+        || module.status != "active"
+        || module.owned_paths != ["xtask/src/main.rs"]
+    {
+        return Err("foundation.workspace gate-runner module identity/paths is invalid".to_owned());
+    }
+    if !root.join("xtask/src/main.rs").is_file() {
+        return Err("foundation.workspace gate-runner owns missing path".to_owned());
+    }
+    let automation = &registry.modules[1];
+    let automation_paths = [
+        "Makefile",
+        ".github/workflows/ci.yml",
+        ".github/workflows/release.yml",
+    ];
+    if automation.module_id != "foundation.workspace.automation"
+        || automation.owner_feature_id != "foundation.workspace"
+        || automation.status != "active"
+        || automation.owned_paths != automation_paths
+    {
+        return Err("foundation.workspace automation module identity/paths is invalid".to_owned());
+    }
+    for path in &automation.owned_paths {
+        if !root.join(path).is_file() {
+            return Err(format!(
+                "foundation.workspace automation owns missing path `{path}`"
+            ));
+        }
+    }
+    for edge_id in [
+        "foundation.workspace.automation_to_gate-runner",
+        "foundation.workspace.automation_to_launchd-control",
+    ] {
+        if !registry
+            .declared_edges
+            .iter()
+            .any(|edge| edge.edge_id == edge_id)
+        {
+            return Err(format!(
+                "foundation.workspace registry is missing edge `{edge_id}`"
+            ));
+        }
+    }
+
+    let verification_path = root.join("docs/verification-maps/foundation.workspace.json");
+    let verification_source =
+        fs::read_to_string(&verification_path).map_err(|error| error.to_string())?;
+    let verification: RelayVerificationMap =
+        serde_json::from_str(&verification_source).map_err(|error| error.to_string())?;
+    if verification.schema_version != 1
+        || verification.verification_map_id != "foundation.workspace.verification"
+        || verification.feature_id != "foundation.workspace"
+        || verification.status != "active"
+        || verification.module_registry != "docs/module-registry/foundation.workspace.json"
+        || verification.function_map != "docs/function-maps/foundation.workspace.md"
+        || verification.mainline_call_map != "docs/mainline-calls/foundation.workspace.json"
+        || verification.test_design != "docs/testing/foundation.workspace.md"
+    {
+        return Err(
+            "foundation.workspace verification map identity/backlinks are invalid".to_owned(),
+        );
+    }
+    for gate_id in [
+        "foundation.workspace.unit",
+        "foundation.workspace.clippy",
+        "foundation.workspace.mainlines",
+        "foundation.workspace.launchd-ci-wiring",
+        "foundation.workspace.architecture",
+    ] {
+        let gate = verification
+            .gates
+            .iter()
+            .find(|gate| gate.gate_id == gate_id)
+            .ok_or_else(|| {
+                format!("foundation.workspace verification map is missing `{gate_id}`")
+            })?;
+        if gate.binding_status != "active"
+            || gate.command.trim().is_empty()
+            || gate.kind.trim().is_empty()
+        {
+            return Err(format!(
+                "foundation.workspace verification gate `{gate_id}` is not active"
+            ));
+        }
+    }
+    Ok(())
+}
+
 fn verify_relay_transport_boundary(root: &Path) -> Result<(), String> {
     let required_paths = [
         "docs/module-registry/relay.transport.json",
@@ -4743,11 +4938,38 @@ fn verify_daemon_module_registry(
     {
         return Err("app.runtime-daemon module registry identity/status is invalid".to_owned());
     }
-    if registry.coverage_roots != ["apps/freehand-daemon"] || registry.modules.len() != 1 {
+    let expected_coverage_roots = [
+        "apps/freehand-daemon",
+        "scripts/freehand-daemon-launchd.sh",
+        "scripts/install-launchd.sh",
+        "scripts/verify-launchd-restart-guard.sh",
+        "scripts/verify-launchd-restart-guard-online.sh",
+        "scripts/verify-master-three-worker-e2e-online.sh",
+    ];
+    if registry.coverage_roots != expected_coverage_roots || registry.modules.len() != 3 {
         return Err(
-            "app.runtime-daemon registry must cover exactly the daemon compatibility host"
+            "app.runtime-daemon registry must cover exactly the host, launchd-control, and launchd-e2e-observer modules"
                 .to_owned(),
         );
+    }
+    let mut covered_files = BTreeSet::new();
+    for coverage_root in &registry.coverage_roots {
+        let coverage_path = root.join(coverage_root);
+        if coverage_path.is_file() {
+            covered_files.insert(coverage_root.clone());
+        } else {
+            collect_all_file_paths(root, &coverage_path, &mut covered_files)?;
+        }
+    }
+    let registered_files = registry
+        .modules
+        .iter()
+        .flat_map(|module| module.owned_paths.iter().cloned())
+        .collect::<BTreeSet<_>>();
+    if covered_files != registered_files {
+        return Err(format!(
+            "app.runtime-daemon module coverage mismatch; covered={covered_files:?}; owned={registered_files:?}"
+        ));
     }
     let module = &registry.modules[0];
     if module.module_id != "app.runtime-daemon.compatibility-host"
@@ -4756,33 +4978,99 @@ fn verify_daemon_module_registry(
     {
         return Err("daemon compatibility-host module identity is invalid".to_owned());
     }
-    let mut covered_files = BTreeSet::new();
-    collect_all_file_paths(root, &root.join("apps/freehand-daemon"), &mut covered_files)?;
-    let owned_files = module.owned_paths.iter().cloned().collect::<BTreeSet<_>>();
-    if covered_files != owned_files {
-        return Err(format!(
-            "daemon module coverage mismatch; covered={covered_files:?}; owned={owned_files:?}"
-        ));
-    }
     for path in &module.owned_paths {
         if !root.join(path).is_file() {
             return Err(format!("daemon module owns missing path `{path}`"));
         }
     }
-    let edge = registry
-        .declared_edges
-        .as_slice()
-        .first()
-        .filter(|_| registry.declared_edges.len() == 1)
-        .ok_or_else(|| "daemon module registry must declare exactly one Relay edge".to_owned())?;
-    if edge.edge_id != "app.runtime-daemon.compatibility-host_to_relay.transport.library"
-        || edge.from_module_id != module.module_id
-        || edge.to_module_id != "relay.transport.library"
-        || edge.import_name != "freehand_relay"
-        || !relay_module_ids.contains(&edge.to_module_id)
+    let launchd_control = &registry.modules[1];
+    let launchd_paths = [
+        "scripts/freehand-daemon-launchd.sh",
+        "scripts/install-launchd.sh",
+        "scripts/verify-launchd-restart-guard.sh",
+        "scripts/verify-launchd-restart-guard-online.sh",
+    ];
+    if launchd_control.module_id != "app.runtime-daemon.launchd-control"
+        || launchd_control.owner_feature_id != "app.runtime-daemon"
+        || launchd_control.status != "active"
+        || launchd_control.owned_paths != launchd_paths
     {
-        return Err("daemon compatibility-host Relay edge is invalid".to_owned());
+        return Err(
+            "app.runtime-daemon launchd-control module identity/paths is invalid".to_owned(),
+        );
     }
+    for path in &launchd_control.owned_paths {
+        if !root.join(path).is_file() {
+            return Err(format!(
+                "app.runtime-daemon launchd-control owns missing path `{path}`"
+            ));
+        }
+    }
+    let observer = &registry.modules[2];
+    if observer.module_id != "app.runtime-daemon.launchd-e2e-observer"
+        || observer.owner_feature_id != "app.runtime-daemon"
+        || observer.status != "active"
+        || observer.owned_paths != ["scripts/verify-master-three-worker-e2e-online.sh"]
+    {
+        return Err("daemon launchd-e2e-observer module identity/paths is invalid".to_owned());
+    }
+    for dependency in &observer.forbidden_dependencies {
+        if observer.allowed_dependencies.contains(dependency) {
+            return Err(format!(
+                "daemon observer module both allows and forbids dependency `{dependency}`"
+            ));
+        }
+    }
+    if !root
+        .join("scripts/verify-master-three-worker-e2e-online.sh")
+        .is_file()
+    {
+        return Err("daemon launchd-e2e-observer owns missing verifier path".to_owned());
+    }
+    let relay_edge = registry
+        .declared_edges
+        .iter()
+        .find(|edge| {
+            edge.edge_id == "app.runtime-daemon.compatibility-host_to_relay.transport.library"
+                && edge.from_module_id == module.module_id
+                && edge.to_module_id == "relay.transport.library"
+                && edge.import_name == "freehand_relay"
+        })
+        .ok_or_else(|| "daemon module registry must declare the Relay host edge".to_owned())?;
+    if !relay_module_ids.contains(&relay_edge.to_module_id) {
+        return Err("daemon compatibility-host Relay edge target is not registered".to_owned());
+    }
+    let launchd_edge = registry
+        .declared_edges
+        .iter()
+        .find(|edge| {
+            edge.edge_id == "app.runtime-daemon.launchd-control_to_compatibility-host"
+                && edge.from_module_id == launchd_control.module_id
+                && edge.to_module_id == module.module_id
+                && edge.import_name == "FREEHAND_DAEMON_BIN"
+        })
+        .ok_or_else(|| {
+            "app.runtime-daemon registry must declare launchd-control host edge".to_owned()
+        })?;
+    let _ = launchd_edge;
+    let observer_edge = registry
+        .declared_edges
+        .iter()
+        .find(|edge| {
+            edge.edge_id == "app.runtime-daemon.launchd-e2e-observer_to_launchd-control"
+                && edge.from_module_id == observer.module_id
+                && edge.to_module_id == launchd_control.module_id
+                && edge.import_name == "scripts/install-launchd.sh restartWorkerS"
+        })
+        .ok_or_else(|| {
+            "daemon module registry must declare launchd-e2e-observer to launchd-control edge"
+                .to_owned()
+        })?;
+    let _ = observer_edge;
+    if registry.declared_edges.len() != 3 {
+        return Err("app.runtime-daemon registry must declare exactly three edges".to_owned());
+    }
+    verify_daemon_launchd_mainline_edges(root)?;
     let cargo = fs::read_to_string(root.join("apps/freehand-daemon/Cargo.toml"))
         .map_err(|error| error.to_string())?;
     require_contains(
@@ -4790,6 +5078,109 @@ fn verify_daemon_module_registry(
         "freehand-relay = { path = \"../../crates/freehand-relay\" }",
         "apps/freehand-daemon/Cargo.toml",
     )?;
+    let verification_path = root.join("docs/verification-maps/app.runtime-daemon.json");
+    let verification_source =
+        fs::read_to_string(&verification_path).map_err(|error| error.to_string())?;
+    let verification: RelayVerificationMap =
+        serde_json::from_str(&verification_source).map_err(|error| error.to_string())?;
+    if verification.schema_version != 1
+        || verification.verification_map_id != "app.runtime-daemon.verification"
+        || verification.feature_id != "app.runtime-daemon"
+        || verification.status != "active"
+        || verification.module_registry != "docs/module-registry/app.runtime-daemon.json"
+        || verification.function_map != "docs/function-maps/app.runtime-daemon.md"
+        || verification.mainline_call_map != "docs/mainline-calls/app.runtime-daemon.json"
+        || verification.test_design != "docs/testing/app.runtime-daemon.md"
+    {
+        return Err(
+            "app.runtime-daemon verification map identity/backlinks are invalid".to_owned(),
+        );
+    }
+    for gate_id in [
+        "app.runtime-daemon.unit",
+        "app.runtime-daemon.clippy",
+        "app.runtime-daemon.launchd-offline",
+        "app.runtime-daemon.launchd-online",
+        "app.runtime-daemon.architecture",
+    ] {
+        let gate = verification
+            .gates
+            .iter()
+            .find(|gate| gate.gate_id == gate_id)
+            .ok_or_else(|| format!("app.runtime-daemon verification map is missing `{gate_id}`"))?;
+        if gate.binding_status != "active"
+            || gate.command.trim().is_empty()
+            || gate.kind.trim().is_empty()
+        {
+            return Err(format!(
+                "app.runtime-daemon verification gate `{gate_id}` is not active"
+            ));
+        }
+    }
+    Ok(())
+}
+
+fn verify_daemon_launchd_mainline_edges(root: &Path) -> Result<(), String> {
+    let mainline = load_mainline_doc(&root.join("docs/mainline-calls/app.runtime-daemon.json"))?;
+    let required_edges = [
+        ("01", "apps/freehand-daemon/src/main.rs", "daemon_exit_code"),
+        (
+            "09",
+            "scripts/freehand-daemon-launchd.sh",
+            "run_launchd_wrapper",
+        ),
+        (
+            "09d",
+            "scripts/freehand-daemon-launchd.sh",
+            "run_launchd_wrapper",
+        ),
+        ("09e", "scripts/install-launchd.sh", "write_launchd_plist"),
+        (
+            "09f",
+            "scripts/install-launchd.sh",
+            "install_launchd_wrapper",
+        ),
+        ("09g", "scripts/install-launchd.sh", "stop_launchd_service"),
+        (
+            "09h",
+            "scripts/install-launchd.sh",
+            "clear_launchd_guard_after_shutdown",
+        ),
+        (
+            "09i",
+            "scripts/install-launchd.sh",
+            "bootstrap_launchd_service",
+        ),
+        (
+            "09j",
+            "scripts/verify-master-three-worker-e2e-online.sh",
+            "launchd_pid_for_agent",
+        ),
+    ];
+    for (step, file_path, symbol_path) in required_edges {
+        let matches = mainline
+            .call_table
+            .iter()
+            .filter(|row| row.step == step)
+            .collect::<Vec<_>>();
+        if matches.len() != 1 {
+            return Err(format!(
+                "app.runtime-daemon launchd step `{step}` must bind exactly one row"
+            ));
+        }
+        let row = matches[0];
+        if row.file_path != file_path
+            || row.symbol_path != symbol_path
+            || row.resource_operation.as_deref()
+                != Some("runtime_daemon_host.supervise_launchd_lifetime")
+            || row.source_resource.as_deref() != Some("runtime_daemon_host")
+            || row.target_resource.as_deref() != Some("runtime_daemon_host")
+        {
+            return Err(format!(
+                "app.runtime-daemon launchd step `{step}` must bind exact file `{file_path}` and symbol `{symbol_path}`"
+            ));
+        }
+    }
     Ok(())
 }
 
@@ -5550,6 +5941,180 @@ mod tests {
     }
 
     #[test]
+    fn daemon_launchd_mainline_edges_accept_exact_adjacent_bindings() {
+        let root = test_repo_root("daemon-launchd-mainline-exact");
+        fs::create_dir_all(root.join("docs/mainline-calls")).expect("create mainline directory");
+        let repository_root = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .expect("repository root");
+        fs::copy(
+            repository_root.join("docs/mainline-calls/app.runtime-daemon.json"),
+            root.join("docs/mainline-calls/app.runtime-daemon.json"),
+        )
+        .expect("copy daemon mainline");
+
+        verify_daemon_launchd_mainline_edges(&root)
+            .expect("exact adjacent launchd bindings should pass");
+    }
+
+    #[test]
+    fn daemon_launchd_mainline_edges_reject_compound_binding() {
+        let root = test_repo_root("daemon-launchd-mainline-compound");
+        fs::create_dir_all(root.join("docs/mainline-calls")).expect("create mainline directory");
+        let repository_root = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .expect("repository root");
+        let source =
+            fs::read_to_string(repository_root.join("docs/mainline-calls/app.runtime-daemon.json"))
+                .expect("read daemon mainline");
+        let mut mainline: serde_json::Value =
+            serde_json::from_str(&source).expect("parse daemon mainline");
+        let row = mainline["call_table"]
+            .as_array_mut()
+            .expect("call table")
+            .iter_mut()
+            .find(|row| row["step"] == "09f")
+            .expect("launchd wrapper install row");
+        row["symbol_path"] =
+            serde_json::Value::String("install_launchd_wrapper / stop_launchd_service".to_owned());
+        fs::write(
+            root.join("docs/mainline-calls/app.runtime-daemon.json"),
+            serde_json::to_vec(&mainline).expect("encode daemon mainline"),
+        )
+        .expect("write compound daemon mainline");
+
+        let err = verify_daemon_launchd_mainline_edges(&root)
+            .expect_err("compound launchd binding must fail");
+        assert!(err.contains("step `09f` must bind exact file"), "{err}");
+    }
+
+    #[test]
+    fn daemon_module_registry_accepts_observer_owner_and_edge() {
+        let root = test_repo_root("daemon-module-observer-exact");
+        let repository_root = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .expect("repository root");
+        fs::create_dir_all(root.join("docs/module-registry")).expect("create registry directory");
+        fs::create_dir_all(root.join("docs/verification-maps"))
+            .expect("create verification directory");
+        fs::create_dir_all(root.join("docs/mainline-calls")).expect("create mainline directory");
+        fs::copy(
+            repository_root.join("docs/module-registry/app.runtime-daemon.json"),
+            root.join("docs/module-registry/app.runtime-daemon.json"),
+        )
+        .expect("copy daemon registry");
+        fs::copy(
+            repository_root.join("docs/verification-maps/app.runtime-daemon.json"),
+            root.join("docs/verification-maps/app.runtime-daemon.json"),
+        )
+        .expect("copy daemon verification map");
+        fs::create_dir_all(root.join("apps/freehand-daemon/src")).expect("create daemon directory");
+        fs::write(
+            root.join("apps/freehand-daemon/Cargo.toml"),
+            "freehand-relay = { path = \"../../crates/freehand-relay\" }\n",
+        )
+        .expect("write daemon cargo fixture");
+        fs::write(
+            root.join("apps/freehand-daemon/src/main.rs"),
+            "use freehand_relay::{Host};\n",
+        )
+        .expect("write daemon source fixture");
+        for path in [
+            "scripts/freehand-daemon-launchd.sh",
+            "scripts/install-launchd.sh",
+            "scripts/verify-launchd-restart-guard.sh",
+            "scripts/verify-launchd-restart-guard-online.sh",
+            "scripts/verify-master-three-worker-e2e-online.sh",
+        ] {
+            let path = root.join(path);
+            fs::create_dir_all(path.parent().expect("script parent")).expect("create script dir");
+            fs::write(path, "#!/usr/bin/env bash\n").expect("write script fixture");
+        }
+        fs::copy(
+            repository_root.join("docs/mainline-calls/app.runtime-daemon.json"),
+            root.join("docs/mainline-calls/app.runtime-daemon.json"),
+        )
+        .expect("copy daemon mainline");
+
+        let relay_ids = BTreeSet::from(["relay.transport.library".to_owned()]);
+        verify_daemon_module_registry(&root, &relay_ids)
+            .expect("observer module and declared edge should pass");
+    }
+
+    #[test]
+    fn daemon_module_registry_rejects_observer_without_launchd_edge() {
+        let root = test_repo_root("daemon-module-observer-missing-edge");
+        let repository_root = Path::new(env!("CARGO_MANIFEST_DIR"))
+            .parent()
+            .expect("repository root");
+        fs::create_dir_all(root.join("docs/module-registry")).expect("create registry directory");
+        fs::create_dir_all(root.join("docs/verification-maps"))
+            .expect("create verification directory");
+        fs::create_dir_all(root.join("docs/mainline-calls")).expect("create mainline directory");
+        fs::copy(
+            repository_root.join("docs/module-registry/app.runtime-daemon.json"),
+            root.join("docs/module-registry/app.runtime-daemon.json"),
+        )
+        .expect("copy daemon registry");
+        fs::copy(
+            repository_root.join("docs/verification-maps/app.runtime-daemon.json"),
+            root.join("docs/verification-maps/app.runtime-daemon.json"),
+        )
+        .expect("copy daemon verification map");
+        fs::create_dir_all(root.join("apps/freehand-daemon/src")).expect("create daemon directory");
+        fs::write(
+            root.join("apps/freehand-daemon/Cargo.toml"),
+            "freehand-relay = { path = \"../../crates/freehand-relay\" }\n",
+        )
+        .expect("write daemon cargo fixture");
+        fs::write(
+            root.join("apps/freehand-daemon/src/main.rs"),
+            "use freehand_relay::{Host};\n",
+        )
+        .expect("write daemon source fixture");
+        for path in [
+            "scripts/freehand-daemon-launchd.sh",
+            "scripts/install-launchd.sh",
+            "scripts/verify-launchd-restart-guard.sh",
+            "scripts/verify-launchd-restart-guard-online.sh",
+            "scripts/verify-master-three-worker-e2e-online.sh",
+        ] {
+            let path = root.join(path);
+            fs::create_dir_all(path.parent().expect("script parent")).expect("create script dir");
+            fs::write(path, "#!/usr/bin/env bash\n").expect("write script fixture");
+        }
+        fs::copy(
+            repository_root.join("docs/mainline-calls/app.runtime-daemon.json"),
+            root.join("docs/mainline-calls/app.runtime-daemon.json"),
+        )
+        .expect("copy daemon mainline");
+        let registry_path = root.join("docs/module-registry/app.runtime-daemon.json");
+        let source = fs::read_to_string(&registry_path).expect("read daemon registry");
+        let mut registry: serde_json::Value =
+            serde_json::from_str(&source).expect("parse registry");
+        registry["declared_edges"]
+            .as_array_mut()
+            .expect("declared edges")
+            .retain(|edge| {
+                edge["edge_id"] != "app.runtime-daemon.launchd-e2e-observer_to_launchd-control"
+            });
+        fs::write(
+            &registry_path,
+            serde_json::to_vec(&registry).expect("encode registry"),
+        )
+        .expect("write registry");
+        let err = verify_daemon_module_registry(
+            &root,
+            &BTreeSet::from(["relay.transport.library".to_owned()]),
+        )
+        .expect_err("missing observer edge must fail");
+        assert!(
+            err.contains("exactly three edges") || err.contains("observer to launchd-control"),
+            "{err}"
+        );
+    }
+
+    #[test]
     fn ci_cd_gate_commands_accept_aligned_full_gate() {
         let root = test_repo_root("ci-cd-aligned");
         write_ci_cd_fixture(&root, CiFixtureMode::Aligned);
@@ -5657,6 +6222,16 @@ mod tests {
     }
 
     #[test]
+    fn ci_cd_gate_commands_reject_ci_without_macos_launchd_gate() {
+        let root = test_repo_root("ci-cd-missing-macos-launchd");
+        write_ci_cd_fixture(&root, CiFixtureMode::CiWorkflowMissingLaunchdGate);
+
+        let err = verify_ci_cd_gate_commands(&root)
+            .expect_err("CI without real macOS launchd execution must fail");
+        assert!(err.contains(".github/workflows/ci.yml"), "{err}");
+    }
+
+    #[test]
     fn ci_cd_gate_commands_reject_ci_without_swift_parser() {
         let root = test_repo_root("ci-cd-missing-swift-parser");
         write_ci_cd_fixture(&root, CiFixtureMode::Aligned);
@@ -5689,6 +6264,26 @@ mod tests {
         let err = verify_ci_cd_gate_commands(&root)
             .expect_err("launchd repository-root master workdir must fail");
         assert!(err.contains("repository root"), "{err}");
+    }
+
+    #[test]
+    fn ci_cd_gate_commands_reject_launchd_inline_daemon_exec() {
+        let root = test_repo_root("ci-cd-launchd-inline-daemon-exec");
+        write_ci_cd_fixture(&root, CiFixtureMode::Aligned);
+        let path = root.join("scripts/install-launchd.sh");
+        let source = fs::read_to_string(&path).expect("read launchd fixture");
+        fs::write(
+            &path,
+            source.replace(
+                "<string>$launchd_wrapper</string>",
+                "exec \"$daemon_bin\" serve --agent \"$agent\"</string>",
+            ),
+        )
+        .expect("write inline launchd fixture");
+
+        let err = verify_ci_cd_gate_commands(&root)
+            .expect_err("inline daemon exec must not bypass launchd guard ownership");
+        assert!(err.contains("scripts/install-launchd.sh"), "{err}");
     }
 
     #[test]
@@ -6261,6 +6856,7 @@ mod tests {
         Aligned,
         MakeCiMissingMainlines,
         CiWorkflowPartialGate,
+        CiWorkflowMissingLaunchdGate,
         LaunchdMissingEnvBind,
         LaunchdRepoRootWorkdir,
     }
@@ -6387,9 +6983,10 @@ mod tests {
         let makefile = match mode {
             CiFixtureMode::Aligned
             | CiFixtureMode::CiWorkflowPartialGate
+            | CiFixtureMode::CiWorkflowMissingLaunchdGate
             | CiFixtureMode::LaunchdMissingEnvBind
             | CiFixtureMode::LaunchdRepoRootWorkdir => {
-                ".PHONY: provision-openminis-source build fmt clippy test mainlines gates relay-deployment-smoke relay-local-online relay-account-config-smoke ci verify-webui-online verify-webui-release-online release install-global install-symlink install-launchd install-launchdS install-worker-launchd install-worker-launchdS restart-launchd restart-launchdS restart-worker-launchd restart-worker-launchdS uninstall-launchd uninstall-launchdS uninstall-worker-launchd uninstall-worker-launchdS launchd-status launchd-statusS worker-launchd-status worker-launchd-statusS launchd-logs launchd-logsS worker-launchd-logs worker-launchd-logsS hooks\n\
+                ".PHONY: provision-openminis-source build fmt clippy test mainlines gates relay-deployment-smoke relay-local-online relay-account-config-smoke launchd-guard-offline launchd-guard-online launchd-guards ci verify-webui-online verify-webui-release-online release install-global install-symlink install-launchd install-launchdS install-worker-launchd install-worker-launchdS restart-launchd restart-launchdS restart-worker-launchd restart-worker-launchdS uninstall-launchd uninstall-launchdS uninstall-worker-launchd uninstall-worker-launchdS launchd-status launchd-statusS worker-launchd-status worker-launchd-statusS launchd-logs launchd-logsS worker-launchd-logs worker-launchd-logsS hooks\n\
 provision-openminis-source:\n\tscripts/provision-openminis-source.sh\n\
 build:\n\tcargo build --workspace\n\
 fmt:\n\tcargo fmt --check\n\
@@ -6400,7 +6997,10 @@ gates: provision-openminis-source\n\tcargo run -p xtask -- gates check\n\
 relay-deployment-smoke:\n\tscripts/verify-relay-deployment-smoke.sh\n\
 relay-local-online:\n\tscripts/verify-remote-relay-local-online.sh\n\
 relay-account-config-smoke:\n\tscripts/verify-relay-account-config-smoke.sh\n\
-ci: provision-openminis-source build fmt clippy test mainlines gates relay-deployment-smoke relay-local-online relay-account-config-smoke\n\
+launchd-guard-offline:\n\tbash scripts/verify-launchd-restart-guard.sh\n\
+launchd-guard-online:\n\tbash scripts/verify-launchd-restart-guard-online.sh\n\
+launchd-guards: launchd-guard-offline launchd-guard-online\n\
+ci: provision-openminis-source build fmt clippy test mainlines gates relay-deployment-smoke relay-local-online relay-account-config-smoke launchd-guards\n\
 verify-webui-online:\n\tscripts/verify-webui-online.sh\n\
 verify-webui-release-online:\n\tscripts/verify-webui-release-online.sh\n\
 release:\n\tscripts/release.sh\n\
@@ -6461,7 +7061,12 @@ default_daemon_bind() {\n\
 bind_addr=\"$default_bind_addr\"\n",
                     "installWorkerS|restartWorkerS)\n\
 default_label=\"com.freehand.workerS\"\n\
-exec \"$daemon_bin\" serve --agent \"$agent\"</string>\n\
+<string>$launchd_wrapper</string>\n\
+<key>SuccessfulExit</key>\n\
+<key>ThrottleInterval</key>\n\
+<key>FREEHAND_LAUNCHD_STATE_DIR</key>\n\
+install -m 0755 scripts/freehand-daemon-launchd.sh \"$launchd_wrapper\"\n\
+/usr/bin/plutil -extract daemon_pid raw -o - \"$launchd_state_file\"\n\
 echo \"worker requires FREEHAND_PAIR_TOKEN_SHARED\"\n\
 copy_worker_provider_env_from_master() {\n\
   [[ \"$key\" =~ ^FREEHAND_.*(_KEY|CREDENTIAL|SECRET)$ ]]\n\
@@ -6501,7 +7106,12 @@ fi\n",
     restart_launchd\n",
                     "installWorkerS|restartWorkerS)\n\
 default_label=\"com.freehand.workerS\"\n\
-exec \"$daemon_bin\" serve --agent \"$agent\"</string>\n\
+<string>$launchd_wrapper</string>\n\
+<key>SuccessfulExit</key>\n\
+<key>ThrottleInterval</key>\n\
+<key>FREEHAND_LAUNCHD_STATE_DIR</key>\n\
+install -m 0755 scripts/freehand-daemon-launchd.sh \"$launchd_wrapper\"\n\
+/usr/bin/plutil -extract daemon_pid raw -o - \"$launchd_state_file\"\n\
 echo \"worker requires FREEHAND_PAIR_TOKEN_SHARED\"\n\
 copy_worker_provider_env_from_master() {\n\
   [[ \"$key\" =~ ^FREEHAND_.*(_KEY|CREDENTIAL|SECRET)$ ]]\n\
@@ -6512,7 +7122,8 @@ kill -0 \"$service_pid\"\n",
             }
             CiFixtureMode::Aligned
             | CiFixtureMode::MakeCiMissingMainlines
-            | CiFixtureMode::CiWorkflowPartialGate => {
+            | CiFixtureMode::CiWorkflowPartialGate
+            | CiFixtureMode::CiWorkflowMissingLaunchdGate => {
                 concat!(
                     "#!/usr/bin/env bash\n\
 runtime_home=\"$HOME/.freehand\"\n\
@@ -6543,7 +7154,12 @@ fi\n",
     restart_launchd\n",
                     "installWorkerS|restartWorkerS)\n\
 default_label=\"com.freehand.workerS\"\n\
-exec \"$daemon_bin\" serve --agent \"$agent\"</string>\n\
+<string>$launchd_wrapper</string>\n\
+<key>SuccessfulExit</key>\n\
+<key>ThrottleInterval</key>\n\
+<key>FREEHAND_LAUNCHD_STATE_DIR</key>\n\
+install -m 0755 scripts/freehand-daemon-launchd.sh \"$launchd_wrapper\"\n\
+/usr/bin/plutil -extract daemon_pid raw -o - \"$launchd_state_file\"\n\
 echo \"worker requires FREEHAND_PAIR_TOKEN_SHARED\"\n\
 copy_worker_provider_env_from_master() {\n\
   [[ \"$key\" =~ ^FREEHAND_.*(_KEY|CREDENTIAL|SECRET)$ ]]\n\
@@ -6555,6 +7171,11 @@ kill -0 \"$service_pid\"\n",
         };
         fs::write(root.join("scripts/install-launchd.sh"), launchd_script)
             .expect("write install launchd fixture");
+        fs::write(
+            root.join("scripts/freehand-daemon-launchd.sh"),
+            "#!/usr/bin/env bash\n. \"$env_file\"\nwrite_state \"running\"\nblock_after_exit \"transient_runtime\" \"rapid_failure_limit\"\n",
+        )
+        .expect("write launchd wrapper fixture");
         fs::write(
             root.join("scripts/provision-openminis-source.sh"),
             "#!/usr/bin/env bash\n\
@@ -6614,17 +7235,20 @@ FREEHAND_WEBUI_PROFILE=\"${FREEHAND_WEBUI_PROFILE:-4041}\" \\\n\
             | CiFixtureMode::MakeCiMissingMainlines
             | CiFixtureMode::LaunchdMissingEnvBind
             | CiFixtureMode::LaunchdRepoRootWorkdir => {
-                "name: ci\njobs:\n  rust-gates:\n    steps:\n      - name: Install Swift toolchain\n        uses: swift-actions/setup-swift@v2\n      - name: Full gate\n        run: make ci\n"
+                "name: ci\njobs:\n  launchd-gates:\n    runs-on: macos-latest\n    steps:\n      - name: Launchd restart guards\n        run: make launchd-guards\n  rust-gates:\n    steps:\n      - name: Install Swift toolchain\n        uses: swift-actions/setup-swift@v2\n      - name: Full gate\n        run: make ci\n"
             }
             CiFixtureMode::CiWorkflowPartialGate => {
                 "name: ci\njobs:\n  rust-gates:\n    steps:\n      - name: Install Swift toolchain\n        uses: swift-actions/setup-swift@v2\n      - name: Architecture gates\n        run: cargo run -p xtask -- gates check\n"
+            }
+            CiFixtureMode::CiWorkflowMissingLaunchdGate => {
+                "name: ci\njobs:\n  rust-gates:\n    steps:\n      - name: Install Swift toolchain\n        uses: swift-actions/setup-swift@v2\n      - name: Full gate\n        run: make ci\n"
             }
         };
         fs::write(root.join(".github/workflows/ci.yml"), ci_workflow)
             .expect("write ci workflow fixture");
         fs::write(
             root.join(".github/workflows/release.yml"),
-            "name: release\njobs:\n  release:\n    steps:\n      - uses: actions/checkout@v4\n        with:\n          repository: OpenMinis/OpenMinis\n          ref: 9cf3a855fecd27bb5735b84cacbd56852a3ab8dd\n          path: external/OpenMinis\n      - uses: swift-actions/setup-swift@v2\n      - name: Full gate\n        run: make ci\n      - name: Build release artifacts\n        run: scripts/release.sh\n",
+            "name: release\njobs:\n  launchd-gates:\n    runs-on: macos-latest\n    steps:\n      - name: Launchd restart guards\n        run: make launchd-guards\n  release:\n    needs: launchd-gates\n    steps:\n      - uses: actions/checkout@v4\n        with:\n          repository: OpenMinis/OpenMinis\n          ref: 9cf3a855fecd27bb5735b84cacbd56852a3ab8dd\n          path: external/OpenMinis\n      - uses: swift-actions/setup-swift@v2\n      - name: Full gate\n        run: make ci\n      - name: Build release artifacts\n        run: scripts/release.sh\n",
         )
         .expect("write release workflow fixture");
     }

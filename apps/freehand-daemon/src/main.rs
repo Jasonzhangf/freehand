@@ -16,6 +16,9 @@ use tokio::net::TcpListener;
 
 const TEST_DISABLE_MASTER_LIFECYCLE_RUNNER_ENV: &str =
     "FREEHAND_TEST_DISABLE_MASTER_LIFECYCLE_RUNNER";
+const EX_TEMPFAIL: i32 = 75;
+const EX_CONFIG: i32 = 78;
+static DAEMON_SERVICE_STARTED: AtomicBool = AtomicBool::new(false);
 
 #[tokio::main]
 async fn main() {
@@ -27,9 +30,38 @@ async fn main() {
         }
         Err(message) => {
             eprintln!("{message}");
-            std::process::exit(2);
+            std::process::exit(daemon_exit_code(
+                DAEMON_SERVICE_STARTED.load(Ordering::Acquire),
+            ));
         }
     }
+}
+
+fn daemon_exit_code(service_started: bool) -> i32 {
+    if service_started {
+        EX_TEMPFAIL
+    } else {
+        EX_CONFIG
+    }
+}
+
+fn mark_daemon_service_started() {
+    DAEMON_SERVICE_STARTED.store(true, Ordering::Release);
+}
+
+fn relay_startup_auth(
+    bootstrap: &RuntimeAgentBootstrap,
+) -> Result<Option<(String, AgentRole)>, String> {
+    if bootstrap.selected_agent.relay_connection.is_none() {
+        return Ok(None);
+    }
+    let local_adp_token = required_local_adp_token()?;
+    let role = match bootstrap.selected_agent.mode.as_str() {
+        "master" => AgentRole::Master,
+        "slave" => AgentRole::Worker,
+        mode => return Err(format!("unsupported Relay Agent mode: {mode}")),
+    };
+    Ok(Some((local_adp_token, role)))
 }
 
 async fn run() -> Result<String, String> {
@@ -107,6 +139,7 @@ async fn run_remote_relay_mode() -> Result<String, String> {
         .local_addr()
         .map_err(|err| format!("failed to read local addr: {err}"))?;
     println!("freehand-daemon remote relay listening on http://{local_addr}");
+    mark_daemon_service_started();
     service
         .serve(listener)
         .await
@@ -140,6 +173,7 @@ async fn run_master_mode(
             .map_err(|err| format!("failed to build production master runner: {err}"))?,
         ))
     };
+    let relay_startup_auth = relay_startup_auth(&bootstrap)?;
     let listener = TcpListener::bind(bind_addr)
         .await
         .map_err(|err| format!("failed to bind {bind_addr}: {err}"))?;
@@ -147,13 +181,10 @@ async fn run_master_mode(
         .local_addr()
         .map_err(|err| format!("failed to read local addr: {err}"))?;
     println!("freehand-daemon listening on http://{local_addr}");
-    let relay_client = if let Some(connection) = bootstrap.selected_agent.relay_connection.clone() {
-        let local_adp_token = required_local_adp_token()?;
-        let role = match bootstrap.selected_agent.mode.as_str() {
-            "master" => AgentRole::Master,
-            "slave" => AgentRole::Worker,
-            mode => return Err(format!("unsupported Relay Agent mode: {mode}")),
-        };
+    let relay_client = if let (Some(connection), Some((local_adp_token, role))) = (
+        bootstrap.selected_agent.relay_connection.clone(),
+        relay_startup_auth,
+    ) {
         let config = RelayAgentClientConfig {
             relay_base_url: connection.relay_url,
             access_token: connection.access_token,
@@ -193,6 +224,7 @@ async fn run_master_mode(
     let dispatch_port: Arc<dyn freehand_ui_protocol::UiCommandDispatchPort> = dispatcher.clone();
     let query_port: Arc<dyn freehand_ui_protocol::UiRuntimeQueryPort> = dispatcher.clone();
     let cancel = Arc::new(AtomicBool::new(false));
+    mark_daemon_service_started();
     if let Some(master_runner) = master_runner {
         let runner_cancel = Arc::clone(&cancel);
         let runner_owner = Arc::clone(&master_runner);
@@ -287,6 +319,7 @@ async fn run_worker_mode(
         )
         .map_err(|err| format!("failed to build production worker runner: {err}"))?;
         println!("freehand-daemon worker runner started for {agent_name}");
+        mark_daemon_service_started();
         run_blocking_worker_service(move || runner.run()).await?;
         return Ok(String::new());
     };
@@ -311,6 +344,7 @@ async fn run_worker_mode(
     let dispatch_port: Arc<dyn freehand_ui_protocol::UiCommandDispatchPort> = dispatcher.clone();
     let query_port: Arc<dyn freehand_ui_protocol::UiRuntimeQueryPort> = dispatcher;
     let cancel = Arc::new(AtomicBool::new(false));
+    mark_daemon_service_started();
     let runner_cancel = Arc::clone(&cancel);
     let mut runner_task = tokio::task::spawn_blocking(move || runner.run_until(runner_cancel));
     println!("freehand-daemon local Worker host started for {agent_name} on {bind_addr}");
@@ -411,6 +445,7 @@ async fn run_relay_worker_mode(
     let dispatch_port: Arc<dyn freehand_ui_protocol::UiCommandDispatchPort> = dispatcher.clone();
     let query_port: Arc<dyn freehand_ui_protocol::UiRuntimeQueryPort> = dispatcher;
     let cancel = Arc::new(AtomicBool::new(false));
+    mark_daemon_service_started();
     let runner_cancel = Arc::clone(&cancel);
     let mut runner_task = tokio::task::spawn_blocking(move || runner.run_until(runner_cancel));
     println!("freehand-daemon Relay Worker host started for {agent_name}");
@@ -2466,6 +2501,12 @@ mod tests {
         }
     }
 
+    #[test]
+    fn daemon_exit_code_distinguishes_startup_from_started_host_failure() {
+        assert_eq!(daemon_exit_code(false), EX_CONFIG);
+        assert_eq!(daemon_exit_code(true), EX_TEMPFAIL);
+    }
+
     #[tokio::test]
     async fn daemon_worker_service_runs_blocking_runtime_outside_async_context() {
         run_blocking_worker_service(|| {
@@ -2514,6 +2555,50 @@ mod tests {
             Some(value) => unsafe { env::set_var("FREEHAND_ADP_AUTH_TOKEN", value) },
             None => unsafe { env::remove_var("FREEHAND_ADP_AUTH_TOKEN") },
         }
+    }
+
+    #[tokio::test]
+    #[serial]
+    async fn relay_master_requires_local_adp_auth_before_host_start() {
+        let (home, bootstrap) = {
+            let _guard = HOME_LOCK.lock().unwrap_or_else(|err| err.into_inner());
+            let home = write_test_home(&master_relay_config_text(
+                "https://example.invalid",
+                "FREEHAND_RELAY_TEST_TOKEN",
+            ))
+            .expect("test home");
+            let old_home = env::var_os("HOME");
+            let old_pair_token = env::var_os("FREEHAND_PAIR_TOKEN_SHARED");
+            let old_relay_token = env::var_os("FREEHAND_RELAY_TEST_TOKEN");
+            unsafe { env::set_var("HOME", &home) };
+            unsafe { env::set_var("FREEHAND_PAIR_TOKEN_SHARED", "pair-token-shared") };
+            unsafe { env::set_var("FREEHAND_RELAY_TEST_TOKEN", "relay-token") };
+            let bootstrap = load_default_runtime_agent("master").expect("bootstrap");
+            restore_env(old_home, "FREEHAND_PAIR_TOKEN_SHARED", old_pair_token);
+            match old_relay_token {
+                Some(value) => unsafe { env::set_var("FREEHAND_RELAY_TEST_TOKEN", value) },
+                None => unsafe { env::remove_var("FREEHAND_RELAY_TEST_TOKEN") },
+            }
+            (home, bootstrap)
+        };
+        let old_adp_auth_token = env::var_os("FREEHAND_ADP_AUTH_TOKEN");
+        unsafe { env::remove_var("FREEHAND_ADP_AUTH_TOKEN") };
+        let socket = StdTcpListener::bind("127.0.0.1:0").expect("test port");
+        let addr = socket.local_addr().expect("addr");
+        drop(socket);
+
+        let error = run_master_mode("master".to_owned(), bootstrap, addr)
+            .await
+            .expect_err("missing ADP token must fail");
+        let rebound = StdTcpListener::bind(addr).expect("failed startup must not bind listener");
+        drop(rebound);
+
+        match old_adp_auth_token {
+            Some(value) => unsafe { env::set_var("FREEHAND_ADP_AUTH_TOKEN", value) },
+            None => unsafe { env::remove_var("FREEHAND_ADP_AUTH_TOKEN") },
+        }
+        let _ = fs::remove_dir_all(home);
+        assert!(error.contains("requires FREEHAND_ADP_AUTH_TOKEN"));
     }
 
     #[test]
@@ -2716,6 +2801,16 @@ default_model = "MiniMax-M2.7"
 type = "apikey"
 api_key = "test-api-key"
 "#
+        )
+    }
+
+    fn master_relay_config_text(base_url: &str, relay_token_env: &str) -> String {
+        master_config_text(base_url).replacen(
+            "provider = \"minimonth\"",
+            &format!(
+                "provider = \"minimonth\"\nrelay_url = \"https://relay.example.invalid\"\nrelay_token_env = \"{relay_token_env}\""
+            ),
+            1,
         )
     }
 

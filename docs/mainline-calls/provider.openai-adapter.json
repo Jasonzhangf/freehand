@@ -24,6 +24,7 @@
     "optional wire error fields are absent when missing or JSON null; only a non-null error object becomes a provider semantic error",
     "OpenAI Responses `web_search_call` output items are observed as provider-hosted reasoning events so the search stays provider-native and never enters local tool execution",
     "partial tool calls stay adapter-local until enough JSON exists to emit structured arguments",
+    "usage parsing preserves OpenAI input_tokens or prompt_tokens as normalized total input, writes it explicitly to normalized_input_tokens, and maps compatible cache-read and cache-write detail aliases into cache categories without inflating the denominator",
     "OpenAI executor owns HTTP endpoint selection, bearer auth, status/body capture, SSE reading, and callback mapping before returning provider-neutral semantic outputs"
   ],
   "error_mainline": [
@@ -111,6 +112,17 @@
       "source_resource": "provider_response",
       "target_resource": "provider_hosted_search",
       "resource_operation": "provider_response.observe_hosted_search_call",
+      "binding_status": "bound"
+    },
+    {
+      "step": "02b",
+      "symbol_path": "parse_openai_usage",
+      "file_path": "crates/freehand-provider-openai/src/lib.rs",
+      "responsibility": "normalize Responses and Chat Completions usage totals plus compatible cache-read and cache-write detail aliases",
+      "input_semantic": "raw OpenAI-compatible usage object",
+      "output_semantic": "provider-neutral TokenUsage",
+      "caller": "OpenAiAdapter::parse_response / OpenAiAdapter::parse_stream_event",
+      "callee": "adapter usage parser",
       "binding_status": "bound"
     },
     {

@@ -740,6 +740,7 @@ mod tests {
                 reasoning_tokens: Some(25),
                 cache_creation_tokens: 20,
                 cache_read_tokens: 80,
+                normalized_input_tokens: Some(100),
                 finish_reason: Some("stop".to_owned()),
             }),
         );

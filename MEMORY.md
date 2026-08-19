@@ -1072,3 +1072,22 @@ Tags: #architecture #gap5 #node #ui-protocol #dependency-edge
   higher device `versionCode`; both paths must first prove byte-identical signed
   artifact truth. Runtime-backed ACP gates must isolate `HOME`, config,
   credentials, and provider IO from operator state.
+
+## 2026-08-17 - Launchd restart-storm protection
+
+- Freehand launchd services use an installed owner wrapper with label-scoped
+  guard state under `~/.freehand/state/launchd`. Daemon startup/config failures
+  exit as `EX_CONFIG=78` and block automatic restart; failures after service
+  startup exit as `EX_TEMPFAIL=75` and remain bounded retry candidates.
+- LaunchAgents use `KeepAlive.SuccessfulExit=false` and a 30-second throttle.
+  Five rapid failures inside five minutes open the guard; an explicit scoped
+  install/restart is the only path that clears the selected label after repair.
+- Closure requires deterministic permanent/transient/rapid-failure tests plus
+  isolated launchd online proof and source-to-installed hash equality. The
+  verified S profile passed with permanent runs 1, transient runs 2, rapid runs
+  3, all four production labels at launchd runs 1, and Master health `ok`.
+- Resource audit truth: the current dominant CPU path is not launchd churn.
+  Master/Worker production loops rebuild TaskRuntime every second and reparse
+  all task ledgers. Fix this under the separate runtime-loop/task owner with
+  positive change visibility and negative idle-no-reparse/restart-recovery
+  coverage; do not hide it by only increasing poll sleep.

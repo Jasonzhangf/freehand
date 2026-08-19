@@ -140,7 +140,7 @@ This mode is for local development and unattended verification. Rebuilding the r
 
 `scripts/install-launchd.sh install` performs first-time launchd setup: it installs the host binaries, writes a user LaunchAgent, and starts the daemon in the background.
 
-`scripts/install-launchd.sh restart` restarts the existing LaunchAgent with `launchctl kickstart -k`, then waits for `/health` on the fixed bind to become ready before reporting success. It does not rewrite the install state.
+`scripts/install-launchd.sh restart` reruns permission/update/env preflight, installs the current launchd wrapper, rewrites the selected plist, clears only that label's blocked guard, reloads the LaunchAgent, and waits for `/health` on the fixed bind before reporting success.
 
 Default service truth:
 
@@ -150,7 +150,8 @@ Default service truth:
 - daemon env: `~/.freehand/daemon.env`
 - stdout log: `~/.freehand/logs/daemon.stdout.log`
 - stderr log: `~/.freehand/logs/daemon.stderr.log`
-- launchd policy: `RunAtLoad=true`, `KeepAlive=true`
+- launchd policy: `RunAtLoad=true`, `KeepAlive.SuccessfulExit=false`, `ThrottleInterval=30`
+- launchd guard: `~/.freehand/state/launchd/com.freehand.daemon.json`
 
 Development symlink service truth:
 
@@ -165,7 +166,7 @@ Development symlink service truth:
 - worker env: `~/.freehand/workerS.env`
 - worker stdout/stderr: `~/.freehand/logs/workerS.*.log`
 - worker startup: `serve --agent worker` with no `--bind`
-- worker lifecycle: `RunAtLoad=true`, `KeepAlive=true`
+- worker lifecycle: `RunAtLoad=true`, `KeepAlive.SuccessfulExit=false`, `ThrottleInterval=30`
 - worker pair token: copied from `~/.freehand/daemonS.env`; missing Master
   token is an explicit install failure
 
@@ -194,6 +195,11 @@ scripts/install-launchd.sh restartS
 ```
 
 Both `install` and `restart` wait for the daemon to answer `GET /health` on the configured fixed bind before they exit successfully.
+
+Startup/config/bootstrap errors block the selected label instead of entering a
+restart storm. Runtime host failures remain retryable, but five rapid failures
+inside five minutes open the same guard. After repairing configuration, use the
+explicit install/restart command to clear the selected guard and re-run preflight.
 
 Status:
 

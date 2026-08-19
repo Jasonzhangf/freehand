@@ -16,6 +16,7 @@
   - `openai_responses_hosted_tool`
   - `OpenAiAdapter::parse_response`
   - `OpenAiAdapter::parse_stream_event`
+  - `parse_openai_usage`
   - `provider_hosted_web_search_observation`
   - `OpenAiExecutor::execute_once_with_raw`
   - `OpenAiExecutor::execute_stream_with_raw`
@@ -53,6 +54,7 @@
 - optional wire `error` fields are absent when missing or JSON null; only a non-null error object becomes a provider semantic error
 - OpenAI Responses `web_search_call` output items are observed as provider-hosted reasoning events so the search stays provider-native and never enters local tool execution
 - partial tool calls stay adapter-local until enough JSON exists to emit structured arguments
+- usage parsing keeps OpenAI `input_tokens`/`prompt_tokens` as normalized total input, writes it explicitly to `normalized_input_tokens`, and maps cache-read/cache-write aliases from `input_tokens_details` or `prompt_tokens_details`; cache categories never inflate the input denominator
 - OpenAI executor owns HTTP endpoint selection, bearer auth, status/body capture, SSE reading, and callback mapping before returning provider-neutral semantic outputs
 
 ## Error Mainline
@@ -79,6 +81,7 @@
 | 01a | `openai_responses_hosted_tool` | `crates/freehand-provider-openai/src/lib.rs` | render provider-neutral hosted search declarations into OpenAI Responses hosted tool wire | provider semantic request hosted tool metadata | OpenAI Responses hosted tool JSON | `OpenAiAdapter::render_request` | adapter renderer | bound |
 | 01b | `openai_responses_attachment_content` / `openai_chat_attachment_content` | `crates/freehand-provider-openai/src/lib.rs` | render provider-neutral image attachment bytes into the selected OpenAI protocol image content block | provider image attachment | Responses `input_image` or Chat Completions `image_url` data URL | `OpenAiAdapter::render_request` | adapter renderer | bound |
 | 02 | `OpenAiAdapter::parse_response` | `crates/freehand-provider-openai/src/lib.rs` | parse single-shot OpenAI response | raw response body | provider semantic outputs | runtime/provider caller | adapter parser | bound |
+| 02b | `parse_openai_usage` | `crates/freehand-provider-openai/src/lib.rs` | normalize Responses and Chat Completions usage totals plus compatible cache-read/cache-write detail aliases | raw OpenAI-compatible usage object | provider-neutral `TokenUsage` | `OpenAiAdapter::parse_response` / `OpenAiAdapter::parse_stream_event` | adapter usage parser | bound |
 | 02a | `provider_hosted_web_search_observation` | `crates/freehand-provider-openai/src/lib.rs` | map OpenAI Responses `web_search_call` items into provider-neutral reasoning observations | raw OpenAI response item | provider semantic reasoning event | `OpenAiAdapter::parse_response` / `OpenAiAdapter::parse_stream_event` | adapter parser | bound |
 | 03 | `OpenAiAdapter::parse_stream_event` | `crates/freehand-provider-openai/src/lib.rs` | parse one OpenAI stream event and update partial state | raw stream event | provider semantic outputs | runtime/provider caller | adapter stream parser | bound |
 | 04 | `OpenAiExecutor::execute_once_with_raw` | `crates/freehand-provider-openai/src/lib.rs` | render and execute one non-stream OpenAI-compatible request without leaking wire DTOs to runtime | provider semantic request + auth/base URL + raw callback | provider semantic outputs plus callback-visible raw body/error body | runtime provider driver | OpenAI executor | bound |

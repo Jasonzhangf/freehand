@@ -58,6 +58,27 @@ Status:
 - provider-backed execution loop must cover Anthropic `messages`, completion schema, tool re-entry, persistence, and UI projection in the first live daemon baseline
 - config-selected bootstrap chooses the active agent from `~/.freehand/config.toml` and uses its reciprocal paired-agent topology for local one-master-one-slave wiring
 
+## Launchd Lifetime Guard
+
+- daemon startup failures exit with `EX_CONFIG` (`78`) before a role host enters
+  its long-running service lifetime
+- host failures after startup exit with `EX_TEMPFAIL` (`75`) so launchd may
+  restart them
+- the launchd wrapper owns only process/service control state under
+  `~/.freehand/state/launchd`; it never reads or writes session, task, provider,
+  Relay presence, or business payload truth
+- one permanent startup failure opens the guard immediately and exits the
+  wrapper successfully so `KeepAlive.SuccessfulExit=false` stops retrying
+- transient failures restart only while the configured count remains below the
+  retry limit inside the retry window; reaching the limit opens the guard
+- install or explicit restart clears the guard only after installer preflight;
+  there is no timed or silent auto-recovery
+- launchd also applies `ThrottleInterval` so a wrapper or state regression cannot
+  become an unbounded tight loop
+- module ownership and active gates for the daemon host and launchd control
+  scripts are machine-checked through `docs/module-registry/app.runtime-daemon.json`
+  and `docs/verification-maps/app.runtime-daemon.json`
+
 ## Dependency Rule
 
 - `apps/freehand-daemon` may depend on:

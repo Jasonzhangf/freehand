@@ -2,6 +2,8 @@
 
 - feature_id: `foundation.workspace`
 - owner: `xtask`, workspace root
+- module_registry: `docs/module-registry/foundation.workspace.json`
+- verification_map: `docs/verification-maps/foundation.workspace.json`
 - lifecycle path under test:
   - workspace scaffold exists
   - required architecture docs exist
@@ -32,6 +34,7 @@
   - gate command can reject data/control boundary leaks at the repo source level
   - mainline generation command can render wiki from JSON truth
   - mainline check command rejects stale wiki
+  - launchd control mainline rows are split into adjacent single-symbol bindings; the architecture gate rejects compound `symbol_path` rows for the daemon launchd edges
   - framework loop governance docs initialize in L1 report-only mode with state, constraints, budget, run log, owner binding, and kill switch path
 - white-box plan:
   - xtask rule-check logic
@@ -79,7 +82,12 @@
   - `xtask mainlines check` smoke from repo root
   - `cargo test -p xtask` manifest-link positive and negative tests
   - `cargo test -p xtask` call-table binding positive and negative tests
+  - `cargo test -p xtask daemon_launchd_mainline_edges_ -- --nocapture`
   - `cargo test -p xtask` CI/CD command-alignment positive and negative tests
+    lock launchd plist wrapper execution, env-file side-channel wiring,
+    `KeepAlive.SuccessfulExit=false`, `ThrottleInterval`, label-scoped guard
+    state, and guarded child-PID readiness while rejecting the retired inline
+    daemon exec path
   - `cargo test -p xtask` source-search boundary positive and negative tests, including missing generated-output exclusion and missing unsafe-argument guard
   - `cargo run -p xtask -- search-schema check`
   - `bash -n scripts/release.sh`
@@ -94,6 +102,11 @@
   - `bash -n scripts/freehand-daemon-launchd.sh`
   - `bash -n scripts/install-launchd.sh`
   - `bash -n scripts/uninstall-launchd.sh`
+  - `bash scripts/verify-launchd-restart-guard.sh`
+  - `bash scripts/verify-launchd-restart-guard-online.sh`
+  - `make ci` includes both launchd guard targets; non-Darwin full builds leave
+    the real online execution to the required macOS CI/release job rather than
+    claiming Linux can host a LaunchAgent
   - `cargo test -p xtask` data/control leak-gate positive and negative tests
   - `cargo test -p xtask` feature-map uniqueness positive and negative tests
   - `cargo test -p xtask resource_map_ -- --nocapture` resource-map positive and negative gate tests
@@ -107,7 +120,7 @@
   - `bash -n apps/freehand-relay-server/deploy/claw-deploy.sh` validates the Claw deployment evidence script before any external deployment
   - `scripts/install-global.sh` installs `freehand-cli`, `freehand-server`, `freehand-daemon`, and runtime-home Android update artifacts
   - `scripts/install-symlink.sh` installs `freehand-cliS`, `freehand-serverS`, `freehand-daemonS`, and `freehand-daemon-launchdS` as symlinks
-  - `scripts/install-launchd.sh` starts `com.freehand.daemon` with `RunAtLoad`, `KeepAlive`, explicit daemon binary path, explicit Android update manifest/APK paths, fixed `127.0.0.1:4041`, and logs under `~/.freehand/logs`
+  - `scripts/install-launchd.sh` starts `com.freehand.daemon` with `RunAtLoad`, `KeepAlive.SuccessfulExit=false`, `ThrottleInterval`, explicit daemon binary path, explicit Android update manifest/APK paths, fixed `127.0.0.1:4041`, logs under `~/.freehand/logs`, and service-control state under `~/.freehand/state/launchd`
   - `scripts/install-launchd.sh installS` starts `com.freehand.daemonS` without replacing the global service, fixed at `127.0.0.1:4042`, with Android update env paths pointing at runtime-home staged artifacts
   - `scripts/install-launchd.sh restartS` refreshes S debug binaries, stages current repo Android update artifacts when present, rewrites the env-sourcing plist, reloads only `com.freehand.daemonS`, reads the existing env bind for health checks, and restarts only that label
   - `scripts/freehand-file-permission-preflight.sh` records macOS runtime/workdir/protected-folder permission preflight status under `~/.freehand/state/file-permission-preflight.json`; denial opens Full Disk Access settings and fails install/restart unless explicitly run with `FREEHAND_FILE_PERMISSION_PREFLIGHT=warn`

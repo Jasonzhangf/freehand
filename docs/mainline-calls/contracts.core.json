@@ -16,7 +16,8 @@
   ],
   "response_mainline": [
     "response-chain semantic nodes are defined and exported as cross-module contracts",
-    "semantic response events remain serializable, replayable, and persistable across crate boundaries"
+    "semantic response events remain serializable, replayable, and persistable across crate boundaries",
+    "TokenUsage.input_tokens keeps provider-reported input semantics; normalized_input_tokens is the explicit normalized total input for new records, while legacy records without it preserve input_tokens when cache counters fit inside that total and add cache counters only when they exceed the reported input; cache hit rate is cache-read tokens divided by normalized total input"
   ],
   "error_mainline": [
     "error-chain semantic nodes and base error contracts are defined and exported as cross-module contracts",
@@ -230,6 +231,17 @@
       "input_semantic": "search delivery schema",
       "output_semantic": "replayable typed business delivery",
       "caller": "provider/tool/reason/runtime owners",
+      "callee": "contract module",
+      "binding_status": "bound"
+    },
+    {
+      "step": "16",
+      "symbol_path": "TokenUsage::total_input_tokens / TokenUsage::cache_hit_rate",
+      "file_path": "crates/freehand-contracts/src/lib.rs",
+      "responsibility": "define explicit provider-normalized total-input and cache-hit semantics, including conservative reconstruction for legacy persisted usage",
+      "input_semantic": "provider usage with optional explicit normalized input total",
+      "output_semantic": "normalized total input tokens plus cache-read ratio",
+      "caller": "provider adapters, reason metadata, and UI protocol",
       "callee": "contract module",
       "binding_status": "bound"
     }

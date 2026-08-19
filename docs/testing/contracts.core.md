@@ -16,6 +16,13 @@
   - structured tool argument round-trip
   - writable preview contract round-trip
   - usage total/reasoning/finish-reason round-trip
+  - cache hit rate uses cache-read tokens over normalized total input and includes uncached input in the denominator
+  - legacy Anthropic usage without `normalized_input_tokens` reconstructs the
+    normalized total when cache counters exceed the reported input and resolves
+    total tokens without accepting the uncached-only provider total; the paired
+    reverse regression preserves reported total input when cache counters are
+    already a subset. Fixtures lock `14 + 0 + 32` to `32 / 46` plus 128 total,
+    and `15125 / 19474` to the persisted total-input denominator
   - task/attention context segment kind round-trip for `TaskContract`,
     `TaskSpaceSnapshot`, and `AttentionResolution`
   - context-composed request validation

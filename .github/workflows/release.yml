@@ -6,7 +6,15 @@ on:
       - "v*"
 
 jobs:
+  launchd-gates:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Launchd restart guards
+        run: make launchd-guards
+
   release:
+    needs: launchd-gates
     runs-on: ubuntu-latest
     permissions:
       contents: write

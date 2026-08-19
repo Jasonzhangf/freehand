@@ -1,0 +1,42 @@
+{
+  "schema_version": 1,
+  "verification_map_id": "foundation.workspace.verification",
+  "feature_id": "foundation.workspace",
+  "status": "active",
+  "module_registry": "docs/module-registry/foundation.workspace.json",
+  "function_map": "docs/function-maps/foundation.workspace.md",
+  "mainline_call_map": "docs/mainline-calls/foundation.workspace.json",
+  "test_design": "docs/testing/foundation.workspace.md",
+  "gates": [
+    {
+      "gate_id": "foundation.workspace.unit",
+      "kind": "test",
+      "command": "cargo test -p xtask -- --nocapture",
+      "binding_status": "active"
+    },
+    {
+      "gate_id": "foundation.workspace.clippy",
+      "kind": "lint",
+      "command": "cargo clippy -p xtask --all-targets -- -D warnings",
+      "binding_status": "active"
+    },
+    {
+      "gate_id": "foundation.workspace.mainlines",
+      "kind": "architecture",
+      "command": "cargo run -p xtask -- mainlines check",
+      "binding_status": "active"
+    },
+    {
+      "gate_id": "foundation.workspace.launchd-ci-wiring",
+      "kind": "project-blackbox",
+      "command": "make launchd-guards",
+      "binding_status": "active"
+    },
+    {
+      "gate_id": "foundation.workspace.architecture",
+      "kind": "architecture",
+      "command": "cargo run -p xtask -- gates check",
+      "binding_status": "active"
+    }
+  ]
+}

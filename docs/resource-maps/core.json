@@ -155,12 +155,15 @@
       "identity": "configured agent id plus daemon service instance",
       "truth_store": "process and service lifetime only; no session, task, presence, or payload truth",
       "operations": [
-        "host_runtime_transport"
+        "host_runtime_transport",
+        "supervise_launchd_lifetime",
+        "validate_local_adp_token"
       ],
       "projections": [
         "HTTP/WebUI/ADP listener lifetime",
         "role-selected runtime host",
-        "explicit host termination error"
+        "explicit host termination error",
+        "launchd retry or blocked startup state"
       ],
       "forbidden": [
         "business payload ownership",
@@ -768,20 +771,43 @@
       ]
     },
     {
+      "resource_type": "workspace_gate_policy",
+      "owner_feature_id": "foundation.workspace",
+      "owner_crate": "xtask",
+      "identity": "gate registry version plus required gate definitions plus source-edge registry plus verification map for workspace gate orchestration",
+      "truth_store": "docs/verification-maps/foundation.workspace.json plus xtask source; not runtime or business truth",
+      "operations": [
+        "run_gates_check",
+        "run_mainlines_generate",
+        "run_mainlines_check",
+        "verify_ci_cd_gate_commands",
+        "verify_feature_map_unique_entries",
+        "verify_resource_map",
+        "verify_module_registry",
+        "verify_mainline_call_table_bindings"
+      ],
+      "projections": [
+        "gate pass/fail per gate name",
+        "mainline manifest and call table consistency",
+        "source edge registry coverage",
+        "CI/CD gate command alignment"
+      ]
+    },
+    {
       "resource_type": "account_config_document",
       "owner_feature_id": "config.account-config-sync",
       "owner_crate": "crates/freehand-account-config",
       "identity": "relay account id plus schemaVersion plus revision plus content etag",
       "truth_store": "account-scoped versioned JSON documents under deployment-owned FREEHAND_RELAY_ACCOUNT_CONFIG_DIR, one file per account id, written atomically before publication",
-  "operations": [
-    "validate",
-    "get",
-    "put",
-    "project_safe",
-    "pull",
-    "push",
-    "apply_shared_account_config"
-  ],
+      "operations": [
+        "validate",
+        "get",
+        "put",
+        "project_safe",
+        "pull",
+        "push",
+        "apply_shared_account_config"
+      ],
       "projections": [
         "GET /relay/api/config document with revision and etag",
         "PUT /relay/api/config response with next revision and etag",
@@ -1363,6 +1389,15 @@
       "binding_status": "bound"
     },
     {
+      "operation_id": "runtime_daemon_host.supervise_launchd_lifetime",
+      "owner_feature_id": "app.runtime-daemon",
+      "source_resource": "runtime_daemon_host",
+      "target_resource": "runtime_daemon_host",
+      "effect": "classify daemon startup versus runtime termination, restart bounded transient failures, and stop launchd retry after a permanent startup failure or a bounded rapid-failure circuit opens",
+      "mainline_call_doc": "docs/mainline-calls/app.runtime-daemon.json",
+      "binding_status": "bound"
+    },
+    {
       "operation_id": "runtime_agent_activity.merge_for_presence",
       "owner_feature_id": "app.runtime-daemon",
       "source_resource": "runtime_agent_activity",
@@ -1702,6 +1737,24 @@
       "target_resource": "account_config_document",
       "effect": "push one validated non-secret account document with the local mirror etag and return explicit success, conflict, or transport failure",
       "mainline_call_doc": "docs/mainline-calls/config.account-config-sync.json",
+      "binding_status": "bound"
+    },
+    {
+      "operation_id": "runtime_daemon_host.validate_local_adp_token",
+      "owner_feature_id": "app.runtime-daemon",
+      "source_resource": "runtime_daemon_host",
+      "target_resource": "runtime_daemon_host",
+      "effect": "validate that the configured Relay connection has a non-empty local ADP auth token before the host binds, returning a typed pre-bind startup error",
+      "mainline_call_doc": "docs/mainline-calls/app.runtime-daemon.json",
+      "binding_status": "bound"
+    },
+    {
+      "operation_id": "runtime_daemon_host.host_runtime_transport",
+      "owner_feature_id": "app.runtime-daemon",
+      "source_resource": "runtime_daemon_host",
+      "target_resource": "runtime_daemon_host",
+      "effect": "bind the host listener, build the runtime dispatcher, and construct the configured Relay Agent client using the validated local ADP token before serving WebUI/ADP traffic",
+      "mainline_call_doc": "docs/mainline-calls/app.runtime-daemon.json",
       "binding_status": "bound"
     }
   ],
@@ -2323,12 +2376,111 @@
       "binding_status": "bound"
     },
     {
-      "edge_id": "app.runtime-daemon#10a",
+      "edge_id": "app.runtime-daemon#01",
+      "operation_id": "runtime_daemon_host.supervise_launchd_lifetime",
+      "source_resource": "runtime_daemon_host",
+      "target_resource": "runtime_daemon_host",
+      "mainline_call_doc": "docs/mainline-calls/app.runtime-daemon.json",
+      "call_table_step": "01",
+      "file_path": "apps/freehand-daemon/src/main.rs",
+      "symbol_path": "daemon_exit_code",
+      "binding_status": "bound"
+    },
+    {
+      "edge_id": "app.runtime-daemon#09",
+      "operation_id": "runtime_daemon_host.supervise_launchd_lifetime",
+      "source_resource": "runtime_daemon_host",
+      "target_resource": "runtime_daemon_host",
+      "mainline_call_doc": "docs/mainline-calls/app.runtime-daemon.json",
+      "call_table_step": "09",
+      "file_path": "scripts/freehand-daemon-launchd.sh",
+      "symbol_path": "run_launchd_wrapper",
+      "binding_status": "bound"
+    },
+    {
+      "edge_id": "app.runtime-daemon#09d",
+      "operation_id": "runtime_daemon_host.supervise_launchd_lifetime",
+      "source_resource": "runtime_daemon_host",
+      "target_resource": "runtime_daemon_host",
+      "mainline_call_doc": "docs/mainline-calls/app.runtime-daemon.json",
+      "call_table_step": "09d",
+      "file_path": "scripts/freehand-daemon-launchd.sh",
+      "symbol_path": "run_launchd_wrapper",
+      "binding_status": "bound"
+    },
+    {
+      "edge_id": "app.runtime-daemon#09e",
+      "operation_id": "runtime_daemon_host.supervise_launchd_lifetime",
+      "source_resource": "runtime_daemon_host",
+      "target_resource": "runtime_daemon_host",
+      "mainline_call_doc": "docs/mainline-calls/app.runtime-daemon.json",
+      "call_table_step": "09e",
+      "file_path": "scripts/install-launchd.sh",
+      "symbol_path": "write_launchd_plist",
+      "binding_status": "bound"
+    },
+    {
+      "edge_id": "app.runtime-daemon#09f",
+      "operation_id": "runtime_daemon_host.supervise_launchd_lifetime",
+      "source_resource": "runtime_daemon_host",
+      "target_resource": "runtime_daemon_host",
+      "mainline_call_doc": "docs/mainline-calls/app.runtime-daemon.json",
+      "call_table_step": "09f",
+      "file_path": "scripts/install-launchd.sh",
+      "symbol_path": "install_launchd_wrapper",
+      "binding_status": "bound"
+    },
+    {
+      "edge_id": "app.runtime-daemon#09g",
+      "operation_id": "runtime_daemon_host.supervise_launchd_lifetime",
+      "source_resource": "runtime_daemon_host",
+      "target_resource": "runtime_daemon_host",
+      "mainline_call_doc": "docs/mainline-calls/app.runtime-daemon.json",
+      "call_table_step": "09g",
+      "file_path": "scripts/install-launchd.sh",
+      "symbol_path": "stop_launchd_service",
+      "binding_status": "bound"
+    },
+    {
+      "edge_id": "app.runtime-daemon#09h",
+      "operation_id": "runtime_daemon_host.supervise_launchd_lifetime",
+      "source_resource": "runtime_daemon_host",
+      "target_resource": "runtime_daemon_host",
+      "mainline_call_doc": "docs/mainline-calls/app.runtime-daemon.json",
+      "call_table_step": "09h",
+      "file_path": "scripts/install-launchd.sh",
+      "symbol_path": "clear_launchd_guard_after_shutdown",
+      "binding_status": "bound"
+    },
+    {
+      "edge_id": "app.runtime-daemon#09i",
+      "operation_id": "runtime_daemon_host.supervise_launchd_lifetime",
+      "source_resource": "runtime_daemon_host",
+      "target_resource": "runtime_daemon_host",
+      "mainline_call_doc": "docs/mainline-calls/app.runtime-daemon.json",
+      "call_table_step": "09i",
+      "file_path": "scripts/install-launchd.sh",
+      "symbol_path": "bootstrap_launchd_service",
+      "binding_status": "bound"
+    },
+    {
+      "edge_id": "app.runtime-daemon#09j",
+      "operation_id": "runtime_daemon_host.supervise_launchd_lifetime",
+      "source_resource": "runtime_daemon_host",
+      "target_resource": "runtime_daemon_host",
+      "mainline_call_doc": "docs/mainline-calls/app.runtime-daemon.json",
+      "call_table_step": "09j",
+      "file_path": "scripts/verify-master-three-worker-e2e-online.sh",
+      "symbol_path": "launchd_pid_for_agent",
+      "binding_status": "bound"
+    },
+    {
+      "edge_id": "app.runtime-daemon#10c",
       "operation_id": "runtime_agent_activity.merge_for_presence",
       "source_resource": "runtime_agent_activity",
       "target_resource": "agent_presence",
       "mainline_call_doc": "docs/mainline-calls/app.runtime-daemon.json",
-      "call_table_step": "10a",
+      "call_table_step": "10c",
       "file_path": "apps/freehand-daemon/src/main.rs",
       "symbol_path": "run_master_mode / run_relay_worker_mode / relay_presence_from_runtime",
       "binding_status": "bound"
@@ -2827,6 +2979,39 @@
       "file_path": "crates/freehand-runtime/src/lib.rs",
       "symbol_path": "dispatch_push_account_config",
       "binding_status": "bound"
+    },
+    {
+      "edge_id": "app.runtime-daemon#10",
+      "operation_id": "runtime_daemon_host.validate_local_adp_token",
+      "source_resource": "runtime_daemon_host",
+      "target_resource": "runtime_daemon_host",
+      "mainline_call_doc": "docs/mainline-calls/app.runtime-daemon.json",
+      "call_table_step": "10",
+      "file_path": "apps/freehand-daemon/src/main.rs",
+      "symbol_path": "relay_startup_auth",
+      "binding_status": "bound"
+    },
+    {
+      "edge_id": "app.runtime-daemon#10a",
+      "operation_id": "runtime_daemon_host.host_runtime_transport",
+      "source_resource": "runtime_daemon_host",
+      "target_resource": "runtime_daemon_host",
+      "mainline_call_doc": "docs/mainline-calls/app.runtime-daemon.json",
+      "call_table_step": "10a",
+      "file_path": "apps/freehand-daemon/src/main.rs",
+      "symbol_path": "run_master_mode",
+      "binding_status": "bound"
+    },
+    {
+      "edge_id": "app.runtime-daemon#10b",
+      "operation_id": "runtime_daemon_host.host_runtime_transport",
+      "source_resource": "runtime_daemon_host",
+      "target_resource": "runtime_daemon_host",
+      "mainline_call_doc": "docs/mainline-calls/app.runtime-daemon.json",
+      "call_table_step": "10b",
+      "file_path": "apps/freehand-daemon/src/main.rs",
+      "symbol_path": "monitor_master_lifecycle_runner",
+      "binding_status": "bound"
     }
   ],
   "relation_rules": [
@@ -2935,6 +3120,14 @@
         "search_evidence"
       ],
       "reason": "Hosted snippets and observations cannot become verified turn evidence without typed camo verification and reason-turn validation."
+    },
+    {
+      "rule_id": "runtime-daemon-host-supervises-self-direct",
+      "source_resource": "runtime_daemon_host",
+      "target_resource": "runtime_daemon_host",
+      "allowed_direct": true,
+      "via_resources": [],
+      "reason": "The daemon host owner may classify and supervise only its own process/service lifetime, while business payload, Relay presence, reason, and task truth remain forbidden."
     },
     {
       "rule_id": "input-attachment-validates-self-direct",

@@ -626,7 +626,7 @@ Task Center truth before another execution starts.
   original goal, decomposed goal/deliverables/acceptance, and accepted review
   truth; the first evaluation must create next-round work and only the later
   evaluation may complete the original parent session
-- S-profile stale-wait cleanup proof uses `freehand-cliS adp-session-query --url ws://127.0.0.1:4042/adp` after service-scoped restart and the mobile UI tree verifier. The accepted artifact `artifacts/webui-online/mobile-ui-tree-phase1-20260726T180200-56388` showed no Home running rows and historical stale session `webui-session-20260723001509-bd98e156` projected `已阻塞` from owner truth.
+- S-profile stale-wait cleanup proof uses `freehand-cliS adp-session-query --url ws://127.0.0.1:4042/adp` after service-scoped restart and the mobile UI tree verifier. The accepted artifact `artifacts/webui-online/mobile-ui-tree-phase1-20260726T180200-56388` showed no Home running rows and historical stale session `webui-session-20260723001509-bd98e156` projected `已阻塞` from owner truth. Launchd child PID observation belongs to `app.runtime-daemon.launchd-e2e-observer`; this feature consumes the verifier as a project black-box entrance and does not own its launchd state read.
 - controlled online proof is landed in
   `scripts/verify-master-three-worker-e2e-online.sh`: it starts three explicit
   Worker processes in an isolated runtime home, writes JSON evidence, forces
@@ -648,8 +648,9 @@ Task Center truth before another execution starts.
 - launchd-managed online proof is landed in
   `scripts/verify-launchd-three-worker-services-online.sh`: it reuses the same
   three-Worker parent-evaluation verifier with Worker start mode set to
-  launchd, then kills the now-idle gamma resource and requires KeepAlive to
-  restart the same reusable Agent with a new PID/process instance and
+  launchd, reads each wrapper-owned child daemon PID from the label-scoped guard
+  state, then kills the now-idle gamma daemon and requires KeepAlive to restart
+  the same reusable Agent with a new child PID/process instance and
   AgentBoard `restart_count=1`; task identity and execution ownership remain
   proven separately by the gamma-to-alpha TaskHistory
 - only claim production closure when the Worker produced a real deliverable or an explicit real-provider blocked result

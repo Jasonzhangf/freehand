@@ -1086,29 +1086,35 @@ fn sse_data_events(raw_sse: &str) -> Vec<String> {
 
 fn parse_anthropic_usage(usage: Option<&Value>, finish_reason: Option<&str>) -> Option<TokenUsage> {
     let usage = usage?;
+    let uncached_input_tokens = usage
+        .get("input_tokens")
+        .and_then(Value::as_u64)
+        .unwrap_or(0);
+    let output_tokens = usage
+        .get("output_tokens")
+        .and_then(Value::as_u64)
+        .unwrap_or(0);
+    let cache_creation_tokens = usage
+        .get("cache_creation_input_tokens")
+        .and_then(Value::as_u64)
+        .unwrap_or(0);
+    let cache_read_tokens = usage
+        .get("cache_read_input_tokens")
+        .and_then(Value::as_u64)
+        .unwrap_or(0);
+    let normalized_input_tokens = TokenUsage::resolve_reported_input_tokens(
+        uncached_input_tokens,
+        cache_creation_tokens,
+        cache_read_tokens,
+    );
     Some(TokenUsage {
-        input_tokens: usage
-            .get("input_tokens")
-            .and_then(Value::as_u64)
-            .unwrap_or(0),
-        output_tokens: usage
-            .get("output_tokens")
-            .and_then(Value::as_u64)
-            .unwrap_or(0),
-        total_tokens: usage
-            .get("input_tokens")
-            .and_then(Value::as_u64)
-            .zip(usage.get("output_tokens").and_then(Value::as_u64))
-            .map(|(input, output)| input + output),
+        input_tokens: uncached_input_tokens,
+        output_tokens,
+        total_tokens: Some(normalized_input_tokens.saturating_add(output_tokens)),
         reasoning_tokens: usage.get("reasoning_tokens").and_then(Value::as_u64),
-        cache_creation_tokens: usage
-            .get("cache_creation_input_tokens")
-            .and_then(Value::as_u64)
-            .unwrap_or(0),
-        cache_read_tokens: usage
-            .get("cache_read_input_tokens")
-            .and_then(Value::as_u64)
-            .unwrap_or(0),
+        cache_creation_tokens,
+        cache_read_tokens,
+        normalized_input_tokens: Some(normalized_input_tokens),
         finish_reason: finish_reason.map(ToOwned::to_owned),
     })
 }
@@ -1666,6 +1672,9 @@ mod tests {
                     if usage.usage.input_tokens == 14
                         && usage.usage.output_tokens == 82
                         && usage.usage.cache_read_tokens == 32
+                        && usage.usage.total_input_tokens() == 46
+                        && (usage.usage.cache_hit_rate() - 32.0 / 46.0).abs() < f64::EPSILON
+                        && usage.usage.resolved_total_tokens() == 128
                         && usage.usage.finish_reason.as_deref() == Some("end_turn")
             )
         }));
@@ -1677,6 +1686,26 @@ mod tests {
                         && terminal.summary == "end_turn"
             )
         }));
+    }
+
+    #[test]
+    fn preserves_anthropic_compatible_total_when_cache_is_a_subset() {
+        let usage = parse_anthropic_usage(
+            Some(&json!({
+                "input_tokens": 22385,
+                "output_tokens": 1560,
+                "cache_creation_input_tokens": 0,
+                "cache_read_input_tokens": 16512
+            })),
+            Some("end_turn"),
+        )
+        .expect("usage");
+
+        assert_eq!(usage.input_tokens, 22385);
+        assert_eq!(usage.normalized_input_tokens, Some(22385));
+        assert_eq!(usage.total_input_tokens(), 22385);
+        assert!((usage.cache_hit_rate() - 16512.0 / 22385.0).abs() < f64::EPSILON);
+        assert_eq!(usage.resolved_total_tokens(), 23945);
     }
 
     #[test]
@@ -1726,6 +1755,9 @@ mod tests {
                     if usage.usage.input_tokens == 14
                         && usage.usage.output_tokens == 82
                         && usage.usage.cache_read_tokens == 32
+                        && usage.usage.total_input_tokens() == 46
+                        && (usage.usage.cache_hit_rate() - 32.0 / 46.0).abs() < f64::EPSILON
+                        && usage.usage.resolved_total_tokens() == 128
                         && usage.usage.finish_reason.as_deref() == Some("end_turn")
             )
         }));

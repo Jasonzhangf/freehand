@@ -91,6 +91,14 @@ if [[ "$service_suffix" == "S" ]]; then
   daemon_bin="$bin_dir/freehand-daemonS-bin"
 fi
 launchd_wrapper="$bin_dir/freehand-daemon-launchd${service_suffix}"
+launchd_state_dir="$runtime_home/state/launchd"
+launchd_state_file="$launchd_state_dir/$label.json"
+launchd_throttle_seconds="${FREEHAND_LAUNCHD_THROTTLE_SECONDS:-30}"
+
+if [[ ! "$launchd_throttle_seconds" =~ ^[1-9][0-9]*$ ]]; then
+  echo "FREEHAND_LAUNCHD_THROTTLE_SECONDS must be a positive integer" >&2
+  exit 2
+fi
 
 if [[ "${FREEHAND_LAUNCHD_PLAN_ONLY:-0}" == "1" ]]; then
   printf 'role=%s\n' "$service_role"
@@ -201,7 +209,7 @@ copy_worker_provider_env_from_master() {
     return 0
   fi
   while IFS='=' read -r key raw_value; do
-    if [[ "$key" =~ ^FREEHAND_.*(_KEY|CREDENTIAL|SECRET)$ ]]; then
+    if [[ "$key" =~ ^FREEHAND_.*(_KEY|CREDENTIAL|SECRET)$ ]] || [[ "$key" == "FREEHAND_ADP_AUTH_TOKEN" ]]; then
       local value="$raw_value"
       value="${value%\"}"
       value="${value#\"}"
@@ -247,6 +255,9 @@ EOF
       printf 'FREEHAND_ANDROID_UPDATE_MANIFEST_PATH="%s"\n' "$runtime_android_update_manifest" >>"$env_file"
       printf 'FREEHAND_ANDROID_APK_PATH="%s"\n' "$runtime_android_apk" >>"$env_file"
     fi
+    if [[ -n "${FREEHAND_ADP_AUTH_TOKEN:-}" ]]; then
+      printf 'FREEHAND_ADP_AUTH_TOKEN="%s"\n' "$FREEHAND_ADP_AUTH_TOKEN" >>"$env_file"
+    fi
     chmod 0600 "$env_file"
   else
     required_pair_token="$pair_token"
@@ -283,6 +294,9 @@ EOF
       remove_env_var "FREEHAND_ANDROID_UPDATE_MANIFEST_PATH"
       remove_env_var "FREEHAND_ANDROID_APK_PATH"
     fi
+    if [[ -n "${FREEHAND_ADP_AUTH_TOKEN:-}" ]]; then
+      upsert_env_var "FREEHAND_ADP_AUTH_TOKEN" "$FREEHAND_ADP_AUTH_TOKEN"
+    fi
     if [[ -z "${HOME:-}" ]]; then
       printf '\nHOME="%s"\n' "$HOME" >>"$env_file"
     elif ! rg -q '^HOME=' "$env_file"; then
@@ -294,7 +308,7 @@ EOF
 }
 
 write_launchd_plist() {
-  mkdir -p "$runtime_home" "$logs_dir" "$HOME/Library/LaunchAgents"
+  mkdir -p "$runtime_home" "$logs_dir" "$launchd_state_dir" "$HOME/Library/LaunchAgents"
 
   if [[ "$service_role" == "worker" ]]; then
     cat >"$plist_path" <<EOF
@@ -307,14 +321,17 @@ write_launchd_plist() {
   <string>$label</string>
   <key>ProgramArguments</key>
   <array>
-    <string>/bin/bash</string>
-    <string>-lc</string>
-    <string>set -a; [ -f "$env_file" ] &amp;&amp; . "$env_file"; set +a; cd "$workdir" &amp;&amp; exec "$daemon_bin" serve --agent "$agent"</string>
+    <string>$launchd_wrapper</string>
   </array>
   <key>RunAtLoad</key>
   <true/>
   <key>KeepAlive</key>
-  <true/>
+  <dict>
+    <key>SuccessfulExit</key>
+    <false/>
+  </dict>
+  <key>ThrottleInterval</key>
+  <integer>$launchd_throttle_seconds</integer>
   <key>WorkingDirectory</key>
   <string>$HOME</string>
   <key>StandardOutPath</key>
@@ -325,6 +342,10 @@ write_launchd_plist() {
   <dict>
     <key>FREEHAND_DAEMON_ENV_FILE</key>
     <string>$env_file</string>
+    <key>FREEHAND_LAUNCHD_LABEL</key>
+    <string>$label</string>
+    <key>FREEHAND_LAUNCHD_STATE_DIR</key>
+    <string>$launchd_state_dir</string>
     <key>HOME</key>
     <string>$HOME</string>
     <key>PATH</key>
@@ -354,14 +375,17 @@ EOF
   <string>$label</string>
   <key>ProgramArguments</key>
   <array>
-    <string>/bin/bash</string>
-    <string>-lc</string>
-    <string>set -a; [ -f "$env_file" ] &amp;&amp; . "$env_file"; set +a; cd "$workdir" &amp;&amp; exec "$daemon_bin" serve --agent "$agent" --bind "$bind_addr"</string>
+    <string>$launchd_wrapper</string>
   </array>
   <key>RunAtLoad</key>
   <true/>
   <key>KeepAlive</key>
-  <true/>
+  <dict>
+    <key>SuccessfulExit</key>
+    <false/>
+  </dict>
+  <key>ThrottleInterval</key>
+  <integer>$launchd_throttle_seconds</integer>
   <key>WorkingDirectory</key>
   <string>$HOME</string>
   <key>StandardOutPath</key>
@@ -372,6 +396,10 @@ EOF
   <dict>
     <key>FREEHAND_DAEMON_ENV_FILE</key>
     <string>$env_file</string>
+    <key>FREEHAND_LAUNCHD_LABEL</key>
+    <string>$label</string>
+    <key>FREEHAND_LAUNCHD_STATE_DIR</key>
+    <string>$launchd_state_dir</string>
     <key>HOME</key>
     <string>$HOME</string>
     <key>PATH</key>
@@ -392,12 +420,54 @@ EOF
 EOF
 }
 
-run_install_launchd() {
-  launchctl bootout "gui/$(id -u)" "$plist_path" >/dev/null 2>&1 || true
-  launchctl bootstrap "gui/$(id -u)" "$plist_path"
+install_launchd_wrapper() {
+  install -m 0755 scripts/freehand-daemon-launchd.sh "$launchd_wrapper"
+}
+
+launchd_service_present() {
+  local status
+  status="$(launchctl print "gui/$(id -u)/$label" 2>/dev/null | head -n1 || true)"
+  [[ "$status" == *""$label""* ]]
+}
+
+stop_launchd_service() {
+  if launchd_service_present; then
+    if ! launchctl bootout "gui/$(id -u)" "$plist_path"; then
+      echo "launchctl bootout failed for $label; refusing to clear guard" >&2
+      exit 3
+    fi
+  else
+    echo "[freehand-launchd] service absent before stop: $label"
+  fi
+}
+
+clear_launchd_guard_after_shutdown() {
+  if [[ -f "$launchd_state_file" ]]; then
+    rm -f "$launchd_state_file" || {
+      echo "failed to clear launchd guard state: $launchd_state_file" >&2
+      exit 2
+    }
+  fi
+}
+
+bootstrap_launchd_service() {
+  if ! launchctl bootstrap "gui/$(id -u)" "$plist_path"; then
+    echo "launchctl bootstrap failed for $label" >&2
+    exit 3
+  fi
+}
+
+activate_launchd_service() {
+  install_launchd_wrapper
+  stop_launchd_service
+  clear_launchd_guard_after_shutdown
+  bootstrap_launchd_service
   enable_launchd_service
   wait_for_service
+}
 
+run_install_launchd() {
+  activate_launchd_service
   echo "[freehand-launchd] installed:"
   echo "  label: $label"
   echo "  plist: $plist_path"
@@ -415,10 +485,7 @@ run_install_launchd() {
 }
 
 restart_launchd() {
-  launchctl bootout "gui/$(id -u)" "$plist_path" >/dev/null 2>&1 || true
-  launchctl bootstrap "gui/$(id -u)" "$plist_path"
-  enable_launchd_service
-  wait_for_service
+  activate_launchd_service
   echo "[freehand-launchd] restarted $label"
 }
 
@@ -456,11 +523,13 @@ wait_for_worker_service() {
   local max_attempts="${FREEHAND_LAUNCHD_HEALTH_WAIT_SECONDS:-60}"
 
   while [[ $attempt -le $max_attempts ]]; do
-    service_pid="$(launchctl print "gui/$(id -u)/$label" 2>/dev/null | awk '$1 == "pid" && $2 == "=" { print $3; exit }')"
-    if [[ -n "$service_pid" ]] && kill -0 "$service_pid" 2>/dev/null; then
+    service_pid="$(/usr/bin/plutil -extract daemon_pid raw -o - "$launchd_state_file" 2>/dev/null || true)"
+    service_status="$(/usr/bin/plutil -extract status raw -o - "$launchd_state_file" 2>/dev/null || true)"
+    if [[ "$service_status" == "running" && -n "$service_pid" ]] && kill -0 "$service_pid" 2>/dev/null; then
       sleep 1
-      stable_pid="$(launchctl print "gui/$(id -u)/$label" 2>/dev/null | awk '$1 == "pid" && $2 == "=" { print $3; exit }')"
-      if [[ "$stable_pid" == "$service_pid" ]] && kill -0 "$stable_pid" 2>/dev/null; then
+      stable_pid="$(/usr/bin/plutil -extract daemon_pid raw -o - "$launchd_state_file" 2>/dev/null || true)"
+      stable_status="$(/usr/bin/plutil -extract status raw -o - "$launchd_state_file" 2>/dev/null || true)"
+      if [[ "$stable_status" == "running" && "$stable_pid" == "$service_pid" ]] && kill -0 "$stable_pid" 2>/dev/null; then
         return 0
       fi
     fi
@@ -478,67 +547,50 @@ run_file_permission_preflight() {
     scripts/freehand-file-permission-preflight.sh
 }
 
+prepare_launchd_service() {
+  run_file_permission_preflight
+  stage_android_update_dist_if_available
+  write_launchd_env
+  write_launchd_plist
+}
+
 case "$command" in
   install)
     env -u FREEHAND_DAEMON_WORKDIR -u FREEHAND_WORKSPACE_ROOT scripts/install-global.sh
-    run_file_permission_preflight
-    stage_android_update_dist_if_available
-    write_launchd_env
-    write_launchd_plist
+    prepare_launchd_service
     run_install_launchd
     ;;
   installS)
     env -u FREEHAND_DAEMON_WORKDIR -u FREEHAND_WORKSPACE_ROOT scripts/install-symlink.sh
-    run_file_permission_preflight
-    stage_android_update_dist_if_available
-    write_launchd_env
-    write_launchd_plist
+    prepare_launchd_service
     run_install_launchd
     ;;
   restart)
-    run_file_permission_preflight
-    stage_android_update_dist_if_available
-    write_launchd_env
-    write_launchd_plist
+    prepare_launchd_service
     restart_launchd
     ;;
   restartS)
     env -u FREEHAND_DAEMON_WORKDIR -u FREEHAND_WORKSPACE_ROOT scripts/install-symlink.sh
-    run_file_permission_preflight
-    stage_android_update_dist_if_available
-    write_launchd_env
-    write_launchd_plist
+    prepare_launchd_service
     restart_launchd
     ;;
   installWorker)
     env -u FREEHAND_DAEMON_WORKDIR -u FREEHAND_WORKSPACE_ROOT scripts/install-global.sh
-    run_file_permission_preflight
-    stage_android_update_dist_if_available
-    write_launchd_env
-    write_launchd_plist
+    prepare_launchd_service
     run_install_launchd
     ;;
   installWorkerS)
     env -u FREEHAND_DAEMON_WORKDIR -u FREEHAND_WORKSPACE_ROOT scripts/install-symlink.sh
-    run_file_permission_preflight
-    stage_android_update_dist_if_available
-    write_launchd_env
-    write_launchd_plist
+    prepare_launchd_service
     run_install_launchd
     ;;
   restartWorker)
-    run_file_permission_preflight
-    stage_android_update_dist_if_available
-    write_launchd_env
-    write_launchd_plist
+    prepare_launchd_service
     restart_launchd
     ;;
   restartWorkerS)
     env -u FREEHAND_DAEMON_WORKDIR -u FREEHAND_WORKSPACE_ROOT scripts/install-symlink.sh
-    run_file_permission_preflight
-    stage_android_update_dist_if_available
-    write_launchd_env
-    write_launchd_plist
+    prepare_launchd_service
     restart_launchd
     ;;
 esac
