@@ -91,6 +91,7 @@ use freehand_account_config::{
 use freehand_blocks::{
     CompactionTriggerAction, CompletionClaim, CompletionDecision, CompletionSchemaIssue,
     CompletionSchemaRejection, CompletionSubmission, RewritePolicyThresholds,
+    ToolDisplayProjection, project_tool_call_display,
     SearchEvidenceModelStage, SearchEvidenceSchemaRejection, SearchEvidenceSchemaRejectionCategory,
     completion_schema_rejection_feedback, parse_completion_submission_block,
     parse_search_evidence_delivery_block, search_evidence_schema_rejection_feedback,
@@ -418,7 +419,11 @@ impl LiveReasonExecutionRole {
         search_stage: Option<SourcedSearchRoundStage>,
     ) -> Vec<ProviderToolDefinition> {
         if execution_profile == LiveReasonExecutionProfile::CleanSearch {
-            return Vec::new();
+            return registry
+                .worker_implemented_definitions()
+                .into_iter()
+                .filter(|definition| definition.name == "camo")
+                .collect();
         }
         if execution_profile == LiveReasonExecutionProfile::SourcedSearch {
             if !matches!(
@@ -481,7 +486,17 @@ impl LiveReasonExecutionRole {
         search_stage: Option<SourcedSearchRoundStage>,
     ) -> String {
         if execution_profile == LiveReasonExecutionProfile::CleanSearch {
-            return "clean-search:no-function-tools".to_owned();
+            let names = self
+                .tool_definitions(registry, execution_profile, search_stage)
+                .into_iter()
+                .map(|definition| definition.name)
+                .collect::<Vec<_>>()
+                .join(",");
+            return if names.is_empty() {
+                "clean-search:no-function-tools".to_owned()
+            } else {
+                format!("clean-search:{names}")
+            };
         }
         if execution_profile == LiveReasonExecutionProfile::SourcedSearch {
             return format!("sourced-search:{search_stage:?}");
@@ -1903,6 +1918,33 @@ where
                     turns.push(turn);
                     continue 'reason_loop;
                 }
+                let tool_display: ToolDisplayProjection = project_tool_call_display(
+                    tool_call.tool_call.tool_name.as_str(),
+                    &tool_call.tool_call.arguments,
+                );
+                emit_live_bridge_debug(
+                    &debug_hub,
+                    &agent_id,
+                    &request.session_id,
+                    RuntimeDebugEmitSpec {
+                        turn_id: &turn.request.turn_id,
+                        trace_id: &turn.request.trace_id,
+                        pipeline_node: "RuntimeLive03ToolExecuting",
+                        function: "run_live_provider_reason_turn",
+                        status_text: &tool_display.summary,
+                        detail_lines: vec![
+                            format!("round={round}"),
+                            format!("tool_name={}", tool_call.tool_call.tool_name.as_str()),
+                            format!("tool_call_id={}", tool_call.tool_call.tool_call_id.as_str()),
+                            format!("action={}", tool_display.action),
+                            match &tool_display.target {
+                                Some(target) => format!("target={target}"),
+                                None => "target=unknown".to_owned(),
+                            },
+                        ],
+                    },
+                );
+                drain_debug_events(&debug_receiver, &mut on_debug);
                 let executed_tool_result = execute_registry_tool_call(
                     &tool_registry,
                     &request.runtime_home,
@@ -10467,6 +10509,21 @@ fn execute_registry_tool_call(
                     task_truth_changed: false,
                 });
             }
+            if matches!(
+                registry.execution_scope(tool_name),
+                Some(BuiltinToolExecutionScope::Framework)
+                    | Some(BuiltinToolExecutionScope::Network)
+            ) {
+                return execute_registry_tool_call_with_workspace(
+                    registry,
+                    runtime_home,
+                    runtime_home,
+                    role,
+                    configured_worker_set,
+                    turn,
+                    tool_call,
+                );
+            }
             let requested_root =
                 workspace_root.ok_or(RuntimeLiveBridgeError::WorkerWorkspaceRequired)?;
             fs::canonicalize(requested_root).map_err(|err| {
@@ -11918,7 +11975,8 @@ pub(crate) fn apply_runtime_debug_event(
         | Some("RuntimeLive01ContextSegmentCompleted")
         | Some("RuntimeLive01ContextSegmentFailed")
         | Some("RuntimeLive01ContextPlanningCompleted")
-        | Some("RuntimeLive02ProviderRequestBuilt") => Some(ErrorCenterModelWaitingActivity {
+        | Some("RuntimeLive02ProviderRequestBuilt")
+        | Some("RuntimeLive03ToolExecuting") => Some(ErrorCenterModelWaitingActivity {
             kind: UiModelRequestKind::Thinking,
             detail: event
                 .snapshot
