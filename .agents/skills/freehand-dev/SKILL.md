@@ -7,6 +7,18 @@ description: Use when working inside the Freehand repo on architecture, harness,
 
 Use this skill for any non-trivial work in this repo.
 
+## Verification Pipeline (MANDATORY, before any code change)
+
+1. **White-box test**: write a focused unit test that proves the current behavior is wrong (red), then fix and make it green.
+2. **Black-box test**: run the full test suite for affected crates (`cargo test -p <crate>`).
+3. **Build + gates**: `cargo build --workspace` (or affected crate) + `cargo fmt --check` + `cargo clippy -p <crate> --all-targets -- -D warnings`.
+4. **Install + restart**: copy built binary to `~/.local/bin/freehand-daemonS-bin`, run `scripts/install-launchd.sh restartS`, verify `/health=ok`.
+5. **Online retest**: trigger the real behavior through the actual entry point (WebUI prompt, ADP command, CLI live turn). Inspect runtime ledgers/metadata for evidence of correct behavior.
+6. **Commit**: only after all above pass. Use `--no-verify` only when pre-commit hooks have known unrelated failures.
+7. **Report**: state what changed, what tests prove it, what online evidence confirms it.
+
+Never commit before white-box + black-box + online retest all pass. Skipping any step invalidates the delivery.
+
 ## Start
 
 1. Read `AGENTS.md`, `CACHE.md`, `MEMORY.md`, `note.md`.
@@ -321,6 +333,8 @@ set must update, in lockstep with the code, the following eight artifacts:
 - `docs/wiki/app.acp-server.md` (generated wiki)
 - `docs/module-registry/app.runtime-daemon.json` (module ownership)
 - `docs/verification-maps/app.runtime-daemon.json` (verification map)
+- `docs/module-registry/app.cli-live-turn.json` (module ownership)
+- `docs/verification-maps/app.cli-live-turn.json` (verification map)
 - `docs/module-registry/foundation.workspace.json` (module ownership)
 - `docs/verification-maps/foundation.workspace.json` (verification map)
 

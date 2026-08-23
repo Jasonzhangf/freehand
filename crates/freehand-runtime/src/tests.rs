@@ -7500,6 +7500,34 @@ fn openai_responses_complete_response(visible_text: &str) -> String {
     .to_string()
 }
 
+fn openai_responses_continue_response(visible_text: &str, next_step: &str) -> String {
+    let tagged = tagged_completion_json(&format!(
+        r#"{{"claim":"continue","next_step":"{next_step}"}}"#
+    ));
+    json!({
+        "id": "resp-test",
+        "object": "response",
+        "status": "completed",
+        "output": [{
+            "type": "message",
+            "id": "msg-test",
+            "role": "assistant",
+            "status": "completed",
+            "content": [{
+                "type": "output_text",
+                "text": format!("{visible_text}\n{tagged}"),
+                "annotations": []
+            }]
+        }],
+        "usage": {
+            "input_tokens": 14,
+            "output_tokens": 82,
+            "total_tokens": 96
+        }
+    })
+    .to_string()
+}
+
 fn status_stop_single_response(visible_text: &str) -> String {
     let status = r#"<<<freehand_status>>>
 {"schema_version":1,"status":{"simple_question":true}}
@@ -7684,7 +7712,7 @@ fn assert_master_task_request_contract(
     assert!(raw_request.contains("current selected session cwd"));
     assert!(raw_request.contains("Use them directly for local repository analysis"));
     assert!(raw_request.contains("Do not dispatch when"));
-    assert!(raw_request.contains("`web_fetch` fetches known HTTP/HTTPS URLs"));
+    assert!(raw_request.contains("`web_fetch` fetches one known HTTP/HTTPS URL via plain HTTP"));
     assert!(raw_request.contains("Configured Worker capability surface"));
     assert!(raw_request.contains("configured_worker_capabilities"));
     assert!(raw_request.contains("network_tools"));
@@ -7972,7 +8000,7 @@ fn live_bridge_runs_single_shot_anthropic_provider_into_turn_truth() {
                     && record.write_node.pipeline_node == "RuntimeLive01ContextSegmentStarted"
             })
             .count(),
-        6
+        7
     );
     assert_eq!(
         metadata
@@ -7982,7 +8010,7 @@ fn live_bridge_runs_single_shot_anthropic_provider_into_turn_truth() {
                     && record.write_node.pipeline_node == "RuntimeLive01ContextSegmentCompleted"
             })
             .count(),
-        6
+        7
     );
     assert!(metadata.iter().any(|record| {
         record.owner.feature_id.as_str() == "provider.reason-live-bridge"
@@ -8039,11 +8067,11 @@ fn live_bridge_runs_single_shot_anthropic_provider_into_turn_truth() {
     );
     assert_eq!(
         runtime_debug_events(&debug_events, "RuntimeLive01ContextSegmentStarted").len(),
-        6
+        7
     );
     assert_eq!(
         runtime_debug_events(&debug_events, "RuntimeLive01ContextSegmentCompleted").len(),
-        6
+        7
     );
     assert_eq!(
         runtime_debug_events(&debug_events, "RuntimeLive01ContextPlanningCompleted").len(),
@@ -8174,6 +8202,51 @@ fn worker_live_bridge_returns_injected_shell_as_failed_tool_result() {
 
     fs::remove_dir_all(runtime_home).expect("cleanup runtime home");
     fs::remove_dir_all(workspace).expect("cleanup workspace");
+}
+
+#[test]
+fn worker_live_bridge_clean_search_declares_hosted_web_search_in_request() {
+    let _cwd_lock = cwd_lock()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    let (base_url, rx, handle) = spawn_mock_server(
+        200,
+        "application/json",
+        complete_single_response("search done"),
+    );
+    let mut request = live_request(false);
+    request.execution_profile = LiveReasonExecutionProfile::CleanSearch;
+    request.cwd = None;
+    request.prompt = "Use provider-hosted web_search to find the current UTC date.".to_owned();
+    let runtime_home = request.runtime_home.clone();
+    let mut selected = live_selected_agent(base_url, freehand_config::ProviderType::Anthropic);
+    selected.name = "worker-clean-search".to_owned();
+    selected.mode = AgentMode::Slave;
+    set_single_master_peer(&mut selected, "master-clean-search");
+
+    let outcome = run_worker_live_reason_turn(&selected, request).expect("worker clean search");
+    let raw_request = rx.recv().expect("provider request");
+    handle.join().expect("join provider");
+
+    assert!(
+        raw_request.contains(r#""type":"web_search_20250305""#),
+        "anthropic messages body must declare provider-hosted web_search; got {raw_request}"
+    );
+    assert!(raw_request.contains(r#""name":"web_search""#));
+    assert!(
+        raw_request.contains(r#""name":"camo""#),
+        "clean_search profile must expose camo browser-verification tool; got {raw_request}"
+    );
+    assert_eq!(
+        outcome
+            .turn
+            .terminal_event
+            .as_ref()
+            .map(|event| event.status.clone()),
+        Some(TerminalStatus::Success)
+    );
+
+    fs::remove_dir_all(runtime_home).expect("cleanup runtime home");
 }
 
 #[test]
@@ -11694,6 +11767,330 @@ fn live_bridge_derives_hosted_web_search_for_configured_provider_native_protocol
 }
 
 #[test]
+fn sourced_search_blocks_when_hosted_round_returns_no_typed_discovery() {
+    let domain_plan = r#"<freehand_search_delivery>
+{"schema":"search_evidence.domain_plan.v1","delivery_id":"plan-news-001","domain":"news","preferred_source_kinds":["official_publication","mainstream_news"],"social_platform_priority":["weibo","x"],"minimum_verified_sources":2,"policy_version":"2026-08-15"}
+</freehand_search_delivery>"#;
+    let (base_url, rx, handle) = spawn_sequence_server(
+        "application/json",
+        vec![
+            openai_responses_continue_response(domain_plan, "continue to hosted discovery"),
+            openai_responses_complete_response("hosted search was not observed"),
+        ],
+    );
+    let mut selected = live_selected_worker_agent(base_url, freehand_config::ProviderType::OpenAi);
+    selected.provider.protocol = ConfigProviderProtocol::Responses;
+    selected.provider.default_model = "gpt-5.6-sol".to_owned();
+    let mut request = live_request(false);
+    request.execution_profile = LiveReasonExecutionProfile::SourcedSearch;
+    request.prompt = "Find current technology news with verified sources.".to_owned();
+
+    let outcome = run_worker_live_reason_turn(&selected, request)
+        .expect("missing hosted discovery must close the sourced-search turn");
+    let first_request = rx.recv().expect("domain-plan request");
+    let second_request = rx.recv().expect("hosted-discovery request");
+    handle.join().expect("join provider");
+
+    assert!(
+        !http_request_body_json(&first_request)["tools"]
+            .as_array()
+            .is_some_and(|tools| tools.iter().any(|tool| tool["type"] == "web_search"))
+    );
+    assert!(
+        http_request_body_json(&second_request)["tools"]
+            .as_array()
+            .is_some_and(|tools| tools.iter().any(|tool| tool["type"] == "web_search"))
+    );
+    assert_eq!(outcome.rounds, 2);
+    assert_eq!(
+        outcome
+            .turn
+            .terminal_event
+            .as_ref()
+            .map(|event| event.status.clone()),
+        Some(TerminalStatus::Blocked)
+    );
+    assert!(
+        outcome
+            .turn
+            .terminal_event
+            .as_ref()
+            .is_some_and(|event| event.summary.contains("typed hosted discovery"))
+    );
+    assert_eq!(
+        outcome
+            .turn
+            .search_evidence
+            .as_ref()
+            .map(|evidence| evidence.status),
+        Some(SearchEvidenceTurnStatus::DomainPlanValidated)
+    );
+}
+
+#[test]
+fn sourced_search_with_typed_hosted_discovery_advances_to_supplement_decision() {
+    let domain_plan = r#"<freehand_search_delivery>
+{"schema":"search_evidence.domain_plan.v1","delivery_id":"plan-news-typed-001","domain":"news","preferred_source_kinds":["official_publication","mainstream_news"],"social_platform_priority":["weibo","x"],"minimum_verified_sources":2,"policy_version":"2026-08-15"}
+</freehand_search_delivery>"#;
+    let supplement = r#"<freehand_search_delivery>
+{"schema":"search_evidence.supplement_decision.v1","delivery_id":"supplement-news-typed-001","domain_plan_ref":"plan-news-typed-001","required":false,"reasons":[],"platforms":[]}
+</freehand_search_delivery>"#;
+    let blocked_reason = "hosted discovery returned no usable original URLs";
+    let final_delivery = format!(
+        r#"<freehand_search_delivery>
+{{"schema":"search_evidence.final.v1","delivery_id":"final-news-typed-001","domain_plan_ref":"plan-news-typed-001","claim":"blocked","claims":[],"unconfirmed":[],"blocked_reason":"{blocked_reason}"}}
+</freehand_search_delivery>"#
+    );
+    let hosted_discovery = json!({
+        "id": "resp-hosted-empty",
+        "object": "response",
+        "status": "completed",
+        "output": [
+            {
+                "type": "web_search_call",
+                "id": "ws-hosted-empty",
+                "status": "completed",
+                "action": {
+                    "type": "search",
+                    "query": "current technology news"
+                }
+            },
+            {
+                "type": "message",
+                "id": "msg-hosted-empty",
+                "role": "assistant",
+                "status": "completed",
+                "content": [{
+                    "type": "output_text",
+                    "text": tagged_completion_json(
+                        r#"{"claim":"continue","next_step":"decide whether social supplementation is required"}"#
+                    ),
+                    "annotations": []
+                }]
+            }
+        ],
+        "usage": {
+            "input_tokens": 14,
+            "output_tokens": 82,
+            "total_tokens": 96
+        }
+    })
+    .to_string();
+    let (base_url, rx, handle) = spawn_sequence_server(
+        "application/json",
+        vec![
+            openai_responses_continue_response(domain_plan, "continue to hosted discovery"),
+            hosted_discovery,
+            openai_responses_continue_response(supplement, "continue to final delivery"),
+            json!({
+                "id": "resp-final-blocked",
+                "object": "response",
+                "status": "completed",
+                "output": [{
+                    "type": "message",
+                    "id": "msg-final-blocked",
+                    "role": "assistant",
+                    "status": "completed",
+                    "content": [{
+                        "type": "output_text",
+                        "text": format!(
+                            "{final_delivery}\n{}",
+                            tagged_completion_json(&format!(
+                                r#"{{"claim":"blocked","blocked_reason":"{blocked_reason}"}}"#
+                            ))
+                        ),
+                        "annotations": []
+                    }]
+                }],
+                "usage": {"input_tokens": 14, "output_tokens": 82, "total_tokens": 96}
+            })
+            .to_string(),
+            json!({
+                "id": "resp-search-completion-blocked",
+                "object": "response",
+                "status": "completed",
+                "output": [{
+                    "type": "message",
+                    "id": "msg-search-completion-blocked",
+                    "role": "assistant",
+                    "status": "completed",
+                    "content": [{
+                        "type": "output_text",
+                        "text": tagged_completion_json(&format!(
+                            r#"{{"claim":"blocked","blocked_reason":"{blocked_reason}"}}"#
+                        )),
+                        "annotations": []
+                    }]
+                }],
+                "usage": {"input_tokens": 14, "output_tokens": 82, "total_tokens": 96}
+            })
+            .to_string(),
+        ],
+    );
+    let mut selected = live_selected_worker_agent(base_url, freehand_config::ProviderType::OpenAi);
+    selected.provider.protocol = ConfigProviderProtocol::Responses;
+    selected.provider.default_model = "gpt-5.6-sol".to_owned();
+    let mut request = live_request(false);
+    request.execution_profile = LiveReasonExecutionProfile::SourcedSearch;
+    request.prompt = "Find current technology news with verified sources.".to_owned();
+
+    let outcome = run_worker_live_reason_turn(&selected, request)
+        .expect("typed hosted discovery must advance beyond hosted stage");
+    let _first_request = rx.recv().expect("domain-plan request");
+    let second_request = rx.recv().expect("hosted-discovery request");
+    let third_request = rx.recv().expect("supplement-decision request");
+    let fourth_request = rx.recv().expect("final-delivery request");
+    let _fifth_request = rx.recv().expect("completion request");
+    handle.join().expect("join provider");
+
+    assert!(
+        http_request_body_json(&second_request)["tools"]
+            .as_array()
+            .is_some_and(|tools| tools.iter().any(|tool| tool["type"] == "web_search"))
+    );
+    assert!(
+        !http_request_body_json(&third_request)["tools"]
+            .as_array()
+            .is_some_and(|tools| tools.iter().any(|tool| tool["type"] == "web_search"))
+    );
+    assert!(fourth_request.contains("Emit the final search delivery schema"));
+    let evidence = outcome
+        .turn
+        .search_evidence
+        .as_ref()
+        .expect("carried search evidence");
+    assert!(evidence.deliveries.iter().any(|delivery| matches!(
+        delivery,
+        SearchEvidenceDelivery::Discovery(discovery)
+            if discovery.discovery_channel
+                == freehand_contracts::SearchDiscoveryChannel::HostedWebSearch
+    )));
+    assert!(evidence.deliveries.iter().any(|delivery| matches!(
+        delivery,
+        SearchEvidenceDelivery::SupplementDecision(decision) if !decision.required
+    )));
+    assert_eq!(
+        outcome
+            .turn
+            .terminal_event
+            .as_ref()
+            .map(|event| event.status.clone()),
+        Some(TerminalStatus::Blocked)
+    );
+}
+
+#[test]
+fn sourced_search_blocks_when_camo_round_returns_without_typed_verification() {
+    let domain_plan = r#"<freehand_search_delivery>
+{"schema":"search_evidence.domain_plan.v1","delivery_id":"plan-news-camo-001","domain":"news","preferred_source_kinds":["official_publication","mainstream_news"],"social_platform_priority":["weibo","x"],"minimum_verified_sources":2,"policy_version":"2026-08-15"}
+</freehand_search_delivery>"#;
+    let hosted_discovery = json!({
+        "id": "resp-hosted-camo",
+        "object": "response",
+        "status": "completed",
+        "output": [
+            {
+                "type": "web_search_call",
+                "id": "ws-hosted-camo",
+                "status": "completed",
+                "action": {
+                    "type": "search",
+                    "query": "current technology news"
+                },
+                "results": [{
+                    "id": "src-news-1",
+                    "title": "Technology News",
+                    "url": "https://example.com/technology-news",
+                    "snippet": "Latest technology coverage"
+                }]
+            },
+            {
+                "type": "message",
+                "id": "msg-hosted-camo",
+                "role": "assistant",
+                "status": "completed",
+                "content": [{
+                    "type": "output_text",
+                    "text": tagged_completion_json(
+                        r#"{"claim":"continue","next_step":"verify the discovered source with camo"}"#
+                    ),
+                    "annotations": []
+                }]
+            }
+        ],
+        "usage": {
+            "input_tokens": 14,
+            "output_tokens": 82,
+            "total_tokens": 96
+        }
+    })
+    .to_string();
+    let (base_url, rx, handle) = spawn_sequence_server(
+        "application/json",
+        vec![
+            openai_responses_continue_response(domain_plan, "continue to hosted discovery"),
+            hosted_discovery,
+            openai_responses_complete_response("camo verification was not observed"),
+        ],
+    );
+    let mut selected = live_selected_worker_agent(base_url, freehand_config::ProviderType::OpenAi);
+    selected.provider.protocol = ConfigProviderProtocol::Responses;
+    selected.provider.default_model = "gpt-5.6-sol".to_owned();
+    let mut request = live_request(false);
+    request.execution_profile = LiveReasonExecutionProfile::SourcedSearch;
+    request.prompt = "Find current technology news with verified sources.".to_owned();
+
+    let outcome = run_worker_live_reason_turn(&selected, request)
+        .expect("missing camo verification must close the sourced-search turn");
+    let first_request = rx.recv().expect("domain-plan request");
+    let second_request = rx.recv().expect("hosted-discovery request");
+    let third_request = rx.recv().expect("camo-verification request");
+    handle.join().expect("join provider");
+
+    assert_eq!(outcome.rounds, 3);
+    assert_eq!(
+        outcome
+            .turn
+            .terminal_event
+            .as_ref()
+            .map(|event| event.status.clone()),
+        Some(TerminalStatus::Blocked)
+    );
+    assert!(
+        outcome
+            .turn
+            .terminal_event
+            .as_ref()
+            .is_some_and(|event| event.summary.contains("camo verification evidence"))
+    );
+    assert!(
+        !http_request_body_json(&first_request)["tools"]
+            .as_array()
+            .is_some_and(|tools| tools.iter().any(|tool| tool["type"] == "web_search")),
+        "domain plan round must not expose hosted web_search"
+    );
+    assert!(
+        http_request_body_json(&second_request)["tools"]
+            .as_array()
+            .is_some_and(|tools| tools.iter().any(|tool| tool["type"] == "web_search"))
+    );
+    assert!(
+        !http_request_body_json(&third_request)["tools"]
+            .as_array()
+            .is_some_and(|tools| tools.iter().any(|tool| tool["type"] == "web_search")),
+        "camo verification round must not expose hosted web_search"
+    );
+    assert_eq!(
+        outcome
+            .turn
+            .search_evidence
+            .as_ref()
+            .map(|evidence| evidence.status),
+        Some(SearchEvidenceTurnStatus::CamoVerificationRequired)
+    );
+}
+
+#[test]
 fn live_bridge_does_not_mix_search_only_hosted_tool_with_master_functions() {
     let mut descriptor = provider_descriptor(
         &live_selected_agent_with_protocol(
@@ -11862,7 +12259,7 @@ fn provider_web_search_test_fails_when_provider_does_not_observe_hosted_search()
 }
 
 #[test]
-fn clean_search_worker_profile_exposes_hosted_search_without_function_tools() {
+fn clean_search_worker_profile_exposes_hosted_search_with_camo_only() {
     let mut agent = live_selected_agent_with_protocol(
         "http://127.0.0.1:1".to_owned(),
         freehand_config::ProviderType::OpenAi,
@@ -11872,18 +12269,20 @@ fn clean_search_worker_profile_exposes_hosted_search_without_function_tools() {
     let descriptor = provider_descriptor(&agent.provider).expect("descriptor");
     let registry = BuiltinToolRegistry::reasonix_aligned();
 
-    assert!(
-        LiveReasonExecutionRole::Worker
-            .tool_definitions(&registry, LiveReasonExecutionProfile::CleanSearch, None)
-            .is_empty()
+    let clean_search_tools = LiveReasonExecutionRole::Worker.tool_definitions(
+        &registry,
+        LiveReasonExecutionProfile::CleanSearch,
+        None,
     );
+    assert_eq!(clean_search_tools.len(), 1);
+    assert_eq!(clean_search_tools[0].name, "camo");
     assert_eq!(
         LiveReasonExecutionRole::Worker.tool_schema_fingerprint(
             &registry,
             LiveReasonExecutionProfile::CleanSearch,
             None
         ),
-        "clean-search:no-function-tools"
+        "clean-search:camo"
     );
     assert_eq!(
         LiveReasonExecutionRole::Worker
@@ -11970,11 +12369,14 @@ fn clean_search_worker_request_uses_hosted_search_without_local_instruction_scan
         handle.join().expect("join provider");
         let body = http_request_body_json(&raw_request);
         let tools = body["tools"].as_array().expect("tools array");
-        assert_eq!(tools.len(), 1);
-        assert_eq!(tools[0]["type"], json!("web_search"));
-        assert_eq!(tools[0]["external_web_access"], json!(true));
-        assert!(tools[0].get("name").is_none());
-        assert!(tools[0].get("parameters").is_none());
+        assert_eq!(tools.len(), 2);
+        assert_eq!(tools[0]["type"], json!("function"));
+        assert_eq!(tools[0]["name"], json!("camo"));
+        assert!(tools[0]["parameters"].is_object());
+        assert_eq!(tools[1]["type"], json!("web_search"));
+        assert_eq!(tools[1]["external_web_access"], json!(true));
+        assert!(tools[1].get("name").is_none());
+        assert!(tools[1].get("parameters").is_none());
         let body_text = body.to_string();
         assert!(body_text.contains("execution_profile=clean_search"));
         assert!(body_text.contains("No local workspace instruction capability was loaded"));
@@ -15781,4 +16183,9 @@ fn runtime_agent_activity_merge_preserves_active_truth_and_saturates_count() {
         .status,
         RuntimeAgentActivityStatus::Waiting
     );
+}
+
+#[test]
+fn debug_clean_search_requires_worker_workspace_is_false() {
+    assert!(!LiveReasonExecutionProfile::CleanSearch.requires_worker_workspace());
 }

@@ -494,11 +494,11 @@ Configured Worker ids: `{configured_worker_list}`.\n\
             "Master task orchestration policy:\n",
             "- Role: you are the master agent. You own the user conversation, task decomposition, worker coordination, review, and final user-facing answer.\n",
             "- Master local tool surface: `ls`, `read_file`, `grep`, `glob`, `write_file`, `edit_file`, `multi_edit`, and `delete_range` operate only inside the current selected session cwd after canonical/symlink workspace locking. Use them directly for local repository analysis or local artifact creation when that cwd is the requested workspace.\n",
-            "- Master network tool surface: `web_fetch` fetches known HTTP/HTTPS URLs and returns bounded readable text. It is not a search engine; use it for concrete authoritative pages from the task/context. `camo` fetches and verifies web page content through a managed browser; use it to verify URLs discovered by hosted web_search before citing them as evidence. Do not claim broad web search unless hosted web_search is declared in this provider request.\n",
+            "- Master network tool surface: `web_fetch` fetches one known HTTP/HTTPS URL via plain HTTP and returns bounded readable text. Use it when the URL is already known and the page does not need browser rendering. It is not a search engine. `camo` drives a managed browser: `camo fetch-page <url>` loads a page with full JS rendering, then `camo get-readable` extracts readable content. Use it when the target page requires JavaScript rendering, or when you need to verify that a URL discovered by hosted web_search actually contains the claimed information before citing it as evidence. Do not use camo for static pages that `web_fetch` can handle directly; do not use `web_fetch` for pages that need browser rendering.\n",
             "- Master framework tool surface: local workspace tools, `web_fetch` for known URLs, `camo` for URL verification after search, `task` for Task Center/Worker lifecycle, and `timer` for durable wakeups. Do not invent a Freehand function tool named `web_search`; provider-hosted `web_search` is a provider-native capability only when the selected provider/protocol declares it. Do not call shell/bash, browser, todo_write, complete_step, readlink, pwd, cat, find, python, or any unlisted function tool.\n",
             "- Do not dispatch when: the request is conversational, explanatory, or small enough to complete inside the current selected session cwd with the local workspace tools.\n",
             "- Dispatch when: work targets a different cwd/repository than the current selected session cwd, needs isolated context, has independent evidence gathering, can run concurrently, is long-running, or should be resumable outside your main context.\n",
-            "- Web/network routing: first use your own `web_fetch` for known URLs. If provider-hosted `web_search` is declared in this provider request, use it as provider-native search to discover candidate URLs, then use `camo` to fetch and verify each relevant URL before using its content as evidence. For broad/current web search on a provider that cannot mix hosted search with function tools, create/assign a Worker task with `execution_profile=\"clean_search\"`. Finish blocked only when neither Master nor any configured Worker/provider route has the required search capability.\n",
+            "- Web/network tool selection: (1) URL already known + static page → `web_fetch`. (2) URL already known + needs JS rendering → `camo` (`fetch-page` then `get-readable`). (3) Need broad search → hosted `web_search` if declared in this request, then verify top relevant results by calling `camo` on each candidate URL before citing its content. (4) Need broad search but hosted search unavailable → create/assign Worker task with `execution_profile=\"clean_search\"`. Never fabricate data from search snippets alone without verifying at least the key source through camo or web_fetch. Do not call shell/bash, todo_write, complete_step, readlink, pwd, cat, find, python, or any unlisted function tool.\n",
             "- Workspace boundary: for a different repository/workspace, create or reuse a worker resource, create a task with the correct existing target_cwd, assign it to one configured Worker, then let that production Worker runner claim and execute it.\n",
             "- Path duty before dispatch: for any user-supplied path, identify whether it is absolute or starts with ~. Treat ~ as the user's home path from the request context, not as the Master's runtime workspace. Prefer an expanded absolute path when known, but leading-~/symlink aliases are valid target_cwd values only when they resolve to an existing repository/workspace. Do not pass glob patterns, broad search paths, or not-yet-created output directories as target_cwd. If the task tool returns target_cwd_path_diagnostic, use it before asking the user: symlink_ancestors are valid aliases, nearest_existing_canonical is resolved parent truth, and missing_suffix is the unresolved leaf.\n",
             "- Symlink duty before dispatch: when a user path may include symlinks, instruct the Worker to check the path itself and each parent component for symlinks, resolve the canonical path, and report both the requested path and canonical path. The task goal/acceptance must preserve the original user-facing path and require canonical-path evidence.\n",
@@ -724,8 +724,8 @@ pub(crate) fn runtime_prompt_segment_token_budget(content: &str) -> u32 {
 #[cfg(test)]
 mod tests {
     use super::{
-        search_evidence_contract_guidance, search_evidence_contract_segment,
-        worker_execution_guidance,
+        master_task_orchestration_guidance, search_evidence_contract_guidance,
+        search_evidence_contract_segment, worker_execution_guidance,
     };
     use freehand_contracts::ContextSegmentKind;
 
@@ -794,5 +794,31 @@ mod tests {
         assert_eq!(segment.segment_id.as_str(), "search-evidence-contract");
         assert_eq!(segment.kind, ContextSegmentKind::CompletionContract);
         assert!(segment.content.contains("search_evidence.domain_plan.v1"));
+    }
+
+    #[test]
+    fn master_guidance_mentions_camo_for_search_verification() {
+        let guidance = master_task_orchestration_guidance(&["worker-a".to_owned()], None);
+
+        assert!(
+            guidance.contains("`camo`"),
+            "master guidance must mention camo as an available tool"
+        );
+        assert!(
+            guidance.contains("camo fetch-page"),
+            "master guidance must include camo usage commands"
+        );
+        assert!(
+            guidance.contains("web_fetch"),
+            "master guidance must mention web_fetch for tool selection"
+        );
+        assert!(
+            guidance.contains("hosted `web_search`"),
+            "master guidance must mention hosted web_search"
+        );
+        assert!(
+            guidance.contains("Never fabricate"),
+            "master guidance must prohibit fabricating from snippets without verification"
+        );
     }
 }
