@@ -10457,9 +10457,7 @@ fn execute_registry_tool_call(
                 Some(BuiltinToolExecutionScope::Workspace) => workspace_root
                     .map(Path::to_path_buf)
                     .unwrap_or_else(|| runtime_home.to_path_buf()),
-                Some(BuiltinToolExecutionScope::Framework)
-                    if tool_name == "timer" || tool_name == "camo" =>
-                {
+                Some(BuiltinToolExecutionScope::Framework) if tool_name == "timer" => {
                     runtime_home.to_path_buf()
                 }
                 Some(BuiltinToolExecutionScope::Network) => runtime_home.to_path_buf(),
@@ -10567,7 +10565,7 @@ fn master_capability_boundary_result(
             tool_call,
             ToolResultStatus::Failed,
             format!(
-                "Master capability boundary: `{}` is not available to the Master live tool surface. The Master may use local workspace tools (`ls`, `read_file`, `grep`, `glob`, `write_file`, `edit_file`, `multi_edit`, `delete_range`), network tool `web_fetch`, plus `task` and `timer`; shell, browser, broad web_search, todo_write, and complete_step are not available. For a different cwd, isolated long-running work, or parallel work, create a Worker task with task({{\"op\":\"create\", \"target_cwd\":\"<existing repository cwd>\", \"dispatch\":{{\"mode\":\"none\"}}}}), then task({{\"op\":\"assign\", \"agent_id\":\"{worker}\"}}). If a configured Worker has the needed capability, dispatch instead of blocking. No file content was read or written by this rejected Master call.",
+                "Master capability boundary: `{}` is not available to the Master live tool surface. The Master may use local workspace tools (`ls`, `read_file`, `grep`, `glob`, `write_file`, `edit_file`, `multi_edit`, `delete_range`), network tool `web_fetch`, plus `task` and `timer`; shell, browser, broad web_search, todo_write, and complete_step are not available. Configured Workers have `camo` (browser-verification tool for JS-rendered pages). For a different cwd, isolated long-running work, or parallel work, create a Worker task with task({{\"op\":\"create\", \"target_cwd\":\"<existing repository cwd>\", \"dispatch\":{{\"mode\":\"none\"}}}}), then task({{\"op\":\"assign\", \"agent_id\":\"{worker}\"}}). If a configured Worker has the needed capability, dispatch instead of blocking. No file content was read or written by this rejected Master call.",
                 tool_call.tool_call.tool_name
             ),
         ),

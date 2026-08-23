@@ -410,6 +410,7 @@ fn worker_capability_guidance() -> String {
     format!(
         "Configured Worker capability surface from the actual worker-safe tool schema: {worker_tools}. \
 Workers can inspect/edit their locked task workspace with path tools and can fetch known HTTP/HTTPS URLs with `web_fetch`. \
+Workers also have `camo`, a managed browser tool for fetching JS-rendered pages and verifying URL content. \
 Workers do not receive `task`, `timer`, or shell. Worker tasks may use `execution_profile=\"workspace\"` for cwd-bound work or `execution_profile=\"clean_search\"` for provider-hosted broad search without function tools. If your own Master surface cannot complete a slice directly but a Worker has the needed cwd/network/provider-search capability, create and assign a Worker task instead of declaring the user request blocked."
     )
 }
