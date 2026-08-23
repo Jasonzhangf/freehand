@@ -100,6 +100,46 @@ pub(crate) fn control_status_contract_segment() -> ContextSegment {
     }
 }
 
+fn search_evidence_contract_segment() -> ContextSegment {
+    let content = search_evidence_contract_guidance();
+    ContextSegment {
+        segment_id: ContextSegmentId::new("search-evidence-contract"),
+        kind: ContextSegmentKind::CompletionContract,
+        stability: ContextStability::Stable,
+        cache_policy: ContextCachePolicy::CacheAnchor,
+        role: ContextRole::Developer,
+        token_budget: runtime_prompt_segment_token_budget(&content),
+        content,
+        provenance: ContextProvenance {
+            source: "freehand_runtime".to_owned(),
+            reference: Some("docs/design/search-evidence-pipeline.md".to_owned()),
+        },
+    }
+}
+
+fn search_evidence_contract_guidance() -> String {
+    let plan_schema = freehand_blocks::SEARCH_DOMAIN_PLAN_SCHEMA;
+    let supplement_schema = freehand_blocks::SEARCH_SUPPLEMENT_SCHEMA;
+    let final_schema = freehand_blocks::SEARCH_FINAL_SCHEMA;
+    format!(
+        "Worker search evidence delivery contract:\n\
+         - Each model-authored search stage emits exactly one <freehand_search_delivery>...</freehand_search_delivery> block containing valid JSON only: double-quoted keys, double-quoted string values, no comments, no trailing commas, no markdown fence inside the tags.\n\
+         - Stage order: DomainPlan, hosted discovery, camo verification, SupplementDecision, optional camo social discovery, FinalDelivery.\n\
+         - The runtime accepts only the current model-authored stage schema. Do not emit discovery/verification schemas as text; hosted search and camo tool results produce those typed deliveries.\n\
+         - Domain plan schema: {plan_schema}. Required keys: delivery_id, domain, preferred_source_kinds, social_platform_priority, minimum_verified_sources, policy_version.\n\
+         - `minimum_verified_sources` is a JSON number. `domain` is one of: news, tutorial, operations, technical, policy, local_review, general. For news the first `social_platform_priority` must be `weibo`; for tutorial/operations the first must be `xhs`.\n\
+         - Supplement decision schema: {supplement_schema}. When `required` is false, `reasons` and `platforms` must both be empty. Valid reasons: missing_original_urls, insufficient_verified_sources, low_weight_coverage, single_source_only, source_conflict, insufficient_evidence, user_requested_more_sources, user_requested_social_source.\n\
+         - Final delivery schema: {final_schema}. Required keys are schema, delivery_id, domain_plan_ref, claim, claims (always an array), unconfirmed (always an array), and either summary (for `claim=complete`) or blocked_reason (for `claim=blocked`). Each `unconfirmed` item requires both `source_id` and `reason`. Never omit `unconfirmed` and never use a non-array value for `claims` or `unconfirmed`.\n\
+         - Canonical JSON examples generated from the same contract types:\n{examples}\n\
+         - Binding rules: `delivery_id` must be unique within the turn and `domain_plan_ref` must equal the domain plan `delivery_id`.\n\
+         - `claims[].source_ids` may only reference `source_id` values returned by persisted camo verification tool results in this turn.\n\
+         - Never invent URLs, access results, page titles, excerpts, verified evidence, or source ids.\n\
+         - If hosted search or camo cannot provide enough verifiable sources, emit a blocked final delivery with the exact capability/provider reason instead of fabricating sources.",
+        examples = freehand_blocks::search_evidence_model_delivery_examples()
+            .unwrap_or_else(|_| "[]".to_owned()),
+    )
+}
+
 fn tool_guidance_segment(
     role: LiveReasonExecutionRole,
     execution_profile: LiveReasonExecutionProfile,
@@ -404,11 +444,11 @@ fn worker_execution_guidance() -> String {
 fn worker_clean_search_guidance() -> String {
     concat!(
         "Worker clean_search execution profile. This turn is isolated for provider-hosted broad web search and must not use Freehand function tools.\n",
-        "- Available capability: provider-hosted `web_search` only when the selected provider/protocol declares hosted web search.\n",
-        "- Unavailable tools: all workspace tools, `web_fetch`, `task`, `timer`, shell/bash, browser, readlink, pwd, cat, find, python, and any unlisted function tool.\n",
+        "- Available capabilities: provider-hosted `web_search` when the selected provider/protocol declares hosted web search, and the `camo` browser-verification tool for visiting concrete URLs that hosted snippets cite (start a named profile once with `camo profile create <id>` then `camo daemon start --profile <id>`, then reuse `camo fetch-page`/`camo get-readable`/`camo snapshot` for evidence).\n",
+        "- Unavailable tools: all workspace tools, `web_fetch`, `task`, `timer`, shell/bash, raw browser except through `camo`, readlink, pwd, cat, find, python, and any unlisted function tool.\n",
         "- No target_cwd is required for this profile. Do not infer repository access or claim workspace inspection.\n",
-        "- Search workflow: issue concise search queries through hosted web search, read returned source evidence in the provider response, then synthesize one compact conclusion for the Master.\n",
-        "- Output contract: final summary must include query terms, source/evidence summary, confidence or gaps, and next-step recommendation. If hosted search is unavailable or returns no usable evidence, finish blocked with the exact capability/provider reason.\n",
+        "- Search workflow: issue concise search queries through hosted web search, read returned source evidence in the provider response; when a hosted snippet cites a concrete URL whose content the Master needs verified, call `camo` to fetch and read it, then synthesize one compact conclusion for the Master.\n",
+        "- Output contract: final summary must include query terms, source/evidence summary (including any camo-verified URLs), confidence or gaps, and next-step recommendation. If hosted search is unavailable or returns no usable evidence, finish blocked with the exact capability/provider reason.\n",
     )
     .to_owned()
 }
@@ -454,11 +494,11 @@ Configured Worker ids: `{configured_worker_list}`.\n\
             "Master task orchestration policy:\n",
             "- Role: you are the master agent. You own the user conversation, task decomposition, worker coordination, review, and final user-facing answer.\n",
             "- Master local tool surface: `ls`, `read_file`, `grep`, `glob`, `write_file`, `edit_file`, `multi_edit`, and `delete_range` operate only inside the current selected session cwd after canonical/symlink workspace locking. Use them directly for local repository analysis or local artifact creation when that cwd is the requested workspace.\n",
-            "- Master network tool surface: `web_fetch` fetches known HTTP/HTTPS URLs and returns bounded readable text. It is not a search engine; use it for concrete authoritative pages from the task/context. Do not claim broad web search unless a real search/discovery tool is exposed or a Worker result provides sourced evidence.\n",
-            "- Master framework tool surface: local workspace tools, `web_fetch` for known URLs, `task` for Task Center/Worker lifecycle, and `timer` for durable wakeups. Do not invent a Freehand function tool named `web_search`; provider-hosted `web_search` is a provider-native capability only when the selected provider/protocol declares it. Do not call shell/bash, browser, todo_write, complete_step, readlink, pwd, cat, find, python, or any unlisted function tool.\n",
+            "- Master network tool surface: `web_fetch` fetches known HTTP/HTTPS URLs and returns bounded readable text. It is not a search engine; use it for concrete authoritative pages from the task/context. `camo` fetches and verifies web page content through a managed browser; use it to verify URLs discovered by hosted web_search before citing them as evidence. Do not claim broad web search unless hosted web_search is declared in this provider request.\n",
+            "- Master framework tool surface: local workspace tools, `web_fetch` for known URLs, `camo` for URL verification after search, `task` for Task Center/Worker lifecycle, and `timer` for durable wakeups. Do not invent a Freehand function tool named `web_search`; provider-hosted `web_search` is a provider-native capability only when the selected provider/protocol declares it. Do not call shell/bash, browser, todo_write, complete_step, readlink, pwd, cat, find, python, or any unlisted function tool.\n",
             "- Do not dispatch when: the request is conversational, explanatory, or small enough to complete inside the current selected session cwd with the local workspace tools.\n",
             "- Dispatch when: work targets a different cwd/repository than the current selected session cwd, needs isolated context, has independent evidence gathering, can run concurrently, is long-running, or should be resumable outside your main context.\n",
-            "- Web/network routing: first use your own `web_fetch` for known URLs. If provider-hosted `web_search` is declared in this provider request, it may be used as provider-native search, not as a Freehand function tool. For broad/current web search on a provider that cannot mix hosted search with function tools, create/assign a Worker task with `execution_profile=\"clean_search\"`; the Worker must return the search conclusion and evidence for Master synthesis. Finish blocked only when neither Master nor any configured Worker/provider route has the required search capability.\n",
+            "- Web/network routing: first use your own `web_fetch` for known URLs. If provider-hosted `web_search` is declared in this provider request, use it as provider-native search to discover candidate URLs, then use `camo` to fetch and verify each relevant URL before using its content as evidence. For broad/current web search on a provider that cannot mix hosted search with function tools, create/assign a Worker task with `execution_profile=\"clean_search\"`. Finish blocked only when neither Master nor any configured Worker/provider route has the required search capability.\n",
             "- Workspace boundary: for a different repository/workspace, create or reuse a worker resource, create a task with the correct existing target_cwd, assign it to one configured Worker, then let that production Worker runner claim and execute it.\n",
             "- Path duty before dispatch: for any user-supplied path, identify whether it is absolute or starts with ~. Treat ~ as the user's home path from the request context, not as the Master's runtime workspace. Prefer an expanded absolute path when known, but leading-~/symlink aliases are valid target_cwd values only when they resolve to an existing repository/workspace. Do not pass glob patterns, broad search paths, or not-yet-created output directories as target_cwd. If the task tool returns target_cwd_path_diagnostic, use it before asking the user: symlink_ancestors are valid aliases, nearest_existing_canonical is resolved parent truth, and missing_suffix is the unresolved leaf.\n",
             "- Symlink duty before dispatch: when a user path may include symlinks, instruct the Worker to check the path itself and each parent component for symlinks, resolve the canonical path, and report both the requested path and canonical path. The task goal/acceptance must preserve the original user-facing path and require canonical-path evidence.\n",
@@ -556,18 +596,34 @@ where
         build_required_context_segment("control-status-contract", &mut observe, || {
             Ok(control_status_contract_segment())
         })?,
-        build_required_context_segment("runtime-tool-guidance", &mut observe, || {
+    ];
+    if let Some(segment) =
+        build_optional_context_segment("search-evidence-contract", &mut observe, || {
+            Ok(
+                (execution_profile == LiveReasonExecutionProfile::SourcedSearch)
+                    .then(search_evidence_contract_segment),
+            )
+        })?
+    {
+        segments.push(segment);
+    }
+    segments.push(build_required_context_segment(
+        "runtime-tool-guidance",
+        &mut observe,
+        || {
             Ok(tool_guidance_segment(
                 role,
                 execution_profile,
                 configured_worker_set,
                 web_search_route_guidance,
             ))
-        })?,
-        build_required_context_segment("instruction-capability", &mut observe, || {
-            instruction_capability_segment_for_profile(execution_profile, runtime_home, cwd)
-        })?,
-    ];
+        },
+    )?);
+    segments.push(build_required_context_segment(
+        "instruction-capability",
+        &mut observe,
+        || instruction_capability_segment_for_profile(execution_profile, runtime_home, cwd),
+    )?);
     if let Some(segment) =
         build_optional_context_segment("task-space-snapshot", &mut observe, || {
             task_space_snapshot_segment(runtime_home, agent_id, role, configured_worker_set)
@@ -667,7 +723,11 @@ pub(crate) fn runtime_prompt_segment_token_budget(content: &str) -> u32 {
 
 #[cfg(test)]
 mod tests {
-    use super::worker_execution_guidance;
+    use super::{
+        search_evidence_contract_guidance, search_evidence_contract_segment,
+        worker_execution_guidance,
+    };
+    use freehand_contracts::ContextSegmentKind;
 
     #[test]
     fn worker_guidance_locks_exact_tool_surface_and_workspace_paths() {
@@ -705,5 +765,34 @@ mod tests {
             !guidance.contains("read-only tools may inspect readable external paths"),
             "worker guidance must not contradict locked workspace path tools"
         );
+    }
+
+    #[test]
+    fn sourced_search_context_includes_typed_delivery_schemas() {
+        let guidance = search_evidence_contract_guidance();
+        for schema in [
+            freehand_blocks::SEARCH_DOMAIN_PLAN_SCHEMA,
+            freehand_blocks::SEARCH_SUPPLEMENT_SCHEMA,
+            freehand_blocks::SEARCH_FINAL_SCHEMA,
+        ] {
+            assert!(
+                guidance.contains(schema),
+                "sourced search guidance must include `{schema}`"
+            );
+        }
+        assert!(guidance.contains("source_id"));
+        assert!(guidance.contains("camo verification"));
+        assert!(guidance.contains("Do not emit discovery/verification schemas"));
+        assert!(guidance.contains("\"unconfirmed\":[]"));
+        assert!(guidance.contains("\"minimum_verified_sources\":2"));
+    }
+
+    #[test]
+    fn sourced_search_contract_segment_is_stable_completion_context() {
+        let segment = search_evidence_contract_segment();
+
+        assert_eq!(segment.segment_id.as_str(), "search-evidence-contract");
+        assert_eq!(segment.kind, ContextSegmentKind::CompletionContract);
+        assert!(segment.content.contains("search_evidence.domain_plan.v1"));
     }
 }
