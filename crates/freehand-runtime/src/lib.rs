@@ -91,12 +91,11 @@ use freehand_account_config::{
 use freehand_blocks::{
     CompactionTriggerAction, CompletionClaim, CompletionDecision, CompletionSchemaIssue,
     CompletionSchemaRejection, CompletionSubmission, RewritePolicyThresholds,
-    ToolDisplayProjection, project_tool_call_display,
     SearchEvidenceModelStage, SearchEvidenceSchemaRejection, SearchEvidenceSchemaRejectionCategory,
-    completion_schema_rejection_feedback, parse_completion_submission_block,
-    parse_search_evidence_delivery_block, search_evidence_schema_rejection_feedback,
-    strip_completion_submission_block, validate_completion_submission,
-    validate_search_evidence_model_stage,
+    ToolDisplayProjection, completion_schema_rejection_feedback, parse_completion_submission_block,
+    parse_search_evidence_delivery_block, project_tool_call_display,
+    search_evidence_schema_rejection_feedback, strip_completion_submission_block,
+    validate_completion_submission, validate_search_evidence_model_stage,
 };
 pub use freehand_blocks::{ToolDisplayKind, ToolDisplayOutcome, classify_tool_display_kind};
 #[cfg(test)]
@@ -10458,7 +10457,9 @@ fn execute_registry_tool_call(
                 Some(BuiltinToolExecutionScope::Workspace) => workspace_root
                     .map(Path::to_path_buf)
                     .unwrap_or_else(|| runtime_home.to_path_buf()),
-                Some(BuiltinToolExecutionScope::Framework) if tool_name == "timer" => {
+                Some(BuiltinToolExecutionScope::Framework)
+                    if tool_name == "timer" || tool_name == "camo" =>
+                {
                     runtime_home.to_path_buf()
                 }
                 Some(BuiltinToolExecutionScope::Network) => runtime_home.to_path_buf(),
