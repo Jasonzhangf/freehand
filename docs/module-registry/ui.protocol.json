@@ -13,6 +13,7 @@
       "status": "active",
       "owned_paths": [
         "crates/freehand-ui-protocol/Cargo.toml",
+        "crates/freehand-ui-protocol/generated/adp-protocol.schema.json",
         "crates/freehand-ui-protocol/src/adp_descriptor.rs",
         "crates/freehand-ui-protocol/src/adp_wire.rs",
         "crates/freehand-ui-protocol/src/bin/export-adp-protocol.rs",
@@ -30,8 +31,8 @@
         "freehand-contracts",
         "freehand-control",
         "freehand-debug",
+        "freehand-ui-protocol",
         "third_party.serde",
-        "third_party.serde-json",
         "third_party.thiserror",
         "third_party.tokio"
       ],
@@ -46,5 +47,14 @@
       ]
     }
   ],
-  "declared_edges": []
+  "declared_edges": [
+    {"edge_id":"ui.protocol.library.import_freehand-blocks","from_module_id":"ui.protocol.library","to_module_id":"freehand-blocks","import_name":"freehand_blocks"},
+    {"edge_id":"ui.protocol.library.import_freehand-contracts","from_module_id":"ui.protocol.library","to_module_id":"freehand-contracts","import_name":"freehand_contracts"},
+    {"edge_id":"ui.protocol.library.import_freehand-control","from_module_id":"ui.protocol.library","to_module_id":"freehand-control","import_name":"freehand_control"},
+    {"edge_id":"ui.protocol.library.import_freehand-debug","from_module_id":"ui.protocol.library","to_module_id":"freehand-debug","import_name":"freehand_debug"},
+    {"edge_id":"ui.protocol.library.import_self-package","from_module_id":"ui.protocol.library","to_module_id":"freehand-ui-protocol","import_name":"freehand_ui_protocol"},
+    {"edge_id":"ui.protocol.library.import_third-party-serde","from_module_id":"ui.protocol.library","to_module_id":"third_party.serde","import_name":"serde"},
+    {"edge_id":"ui.protocol.library.import_third-party-thiserror","from_module_id":"ui.protocol.library","to_module_id":"third_party.thiserror","import_name":"thiserror"},
+    {"edge_id":"ui.protocol.library.import_third-party-tokio","from_module_id":"ui.protocol.library","to_module_id":"third_party.tokio","import_name":"tokio"}
+  ]
 }

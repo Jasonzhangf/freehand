@@ -13,6 +13,7 @@ Generated from `docs/mainline-calls/reason.persistence.json`. Do not edit by han
 - session.restore
 - session.append_turn_to_turn
 - session.list_persisted
+- session.list_persisted_page
 
 ## Request Mainline
 
@@ -151,6 +152,7 @@ Generated from `docs/mainline-calls/reason.persistence.json`. Do not edit by han
 | 15 | `ReasonPersistence::create_session_metadata / ReasonPersistence::rename_session / ReasonPersistence::archive_session / ReasonPersistence::restore_session / ReasonPersistence::delete_session` | `crates/freehand-reason/src/persistence.rs` | persist shared session display metadata mutations without mutating turn transcript truth | session id plus metadata mutation intent | updated session metadata sidecar | runtime UI command dispatch | persistence owner |  |  |  | bound |
 | 16 | `ReasonPersistence::rollback_latest_session_turn` | `crates/freehand-reason/src/persistence.rs` | append latest-logical-turn rollback marker and advance effective cursor/projection state without deleting raw turn files | session id | rollback marker with target turn, previous effective head, and restored user text | runtime UI command dispatch | persistence owner |  |  |  | bound |
 | 18 | `ReasonPersistence::list_persisted_sessions` | `crates/freehand-reason/src/persistence.rs` | expose derived persisted session index rows and session metadata sidecar truth for UI-safe list/search projection without reading provider raw ledgers or treating worker transcripts as global sessions | session index sidecar plus metadata sidecar | persisted session index/metadata rows for runtime UI projection | runtime.ui-command-dispatch QuerySessionList / QuerySessionSearch | persistence owner | session | ui_projection | session.list_persisted | bound |
+| 18p | `ReasonPersistence::list_persisted_sessions_page` | `crates/freehand-reason/src/persistence.rs` | maintain the versioned session summary index and return one ordered metadata-only page with an opaque cursor; unavailable poisoned sessions stay explicit facts without blocking other rows | archived space plus latest/older request plus summary index/metadata truth | bounded ReasonSessionListPage with page facts and unavailable ids | runtime.ui-command-dispatch QuerySessionListPage | persistence owner | session | ui_projection | session.list_persisted_page | bound |
 
 ## Sync Status Against Mainline Call
 
@@ -159,4 +161,5 @@ Generated from `docs/mainline-calls/reason.persistence.json`. Do not edit by han
 - live Anthropic `reason-live` path now persists start/output/rejection/terminal events plus provider raw debug bodies/events through `ReasonPersistence`
 - generated wiki must be regenerated from `docs/mainline-calls/reason.persistence.json` when this function-map truth changes
 - session.list_persisted is bound through ReasonPersistence::list_persisted_sessions and load_session_metadata for UI-safe list/search projections
+- session.list_persisted_page is bound through ReasonPersistence::list_persisted_sessions_page and load_or_migrate_session_summary_index for metadata-only cursor paging
 - reserved raw turn ids and retained-offset partial UI restore are covered by reason/runtime stale lifecycle tests

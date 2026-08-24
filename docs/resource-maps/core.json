@@ -315,7 +315,8 @@
         "append_turn",
         "append_turn_to_turn",
         "restore",
-        "list_persisted"
+        "list_persisted",
+        "list_persisted_page"
       ],
       "projections": [
         "ui_session_list",
@@ -832,6 +833,15 @@
       "source_resource": "session",
       "target_resource": "ui_projection",
       "effect": "read persisted session index and metadata sidecars for UI-safe session list/search projection without making UI or worker transcripts top-level session truth",
+      "mainline_call_doc": "docs/mainline-calls/reason.persistence.json",
+      "binding_status": "bound"
+    },
+    {
+      "operation_id": "session.list_persisted_page",
+      "owner_feature_id": "reason.persistence",
+      "source_resource": "session",
+      "target_resource": "ui_projection",
+      "effect": "read one reason-owned ordered session summary page with an opaque cursor, preserving metadata-only rows and explicit unavailable-session facts without restoring full transcripts",
       "mainline_call_doc": "docs/mainline-calls/reason.persistence.json",
       "binding_status": "bound"
     },
@@ -1779,6 +1789,17 @@
       "call_table_step": "18",
       "file_path": "crates/freehand-reason/src/persistence.rs",
       "symbol_path": "ReasonPersistence::list_persisted_sessions",
+      "binding_status": "bound"
+    },
+    {
+      "edge_id": "reason.persistence#18p",
+      "operation_id": "session.list_persisted_page",
+      "source_resource": "session",
+      "target_resource": "ui_projection",
+      "mainline_call_doc": "docs/mainline-calls/reason.persistence.json",
+      "call_table_step": "18p",
+      "file_path": "crates/freehand-reason/src/persistence.rs",
+      "symbol_path": "ReasonPersistence::list_persisted_sessions_page",
       "binding_status": "bound"
     },
     {

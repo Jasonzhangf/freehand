@@ -168,6 +168,14 @@ pub(crate) const UI_COMMAND_DESCRIPTORS: &[UiCommandDescriptor] = &[
         exposure: UiAdpCommandExposure::Public,
     },
     UiCommandDescriptor {
+        serde_name: "QuerySessionListPage",
+        semantic_kind: "query_session_list_page",
+        frame_class: UiCommandFrameClass::Query,
+        target_owner_feature: "ui.protocol",
+        target_owner_module: "crates/freehand-ui-protocol",
+        exposure: UiAdpCommandExposure::Public,
+    },
+    UiCommandDescriptor {
         serde_name: "QuerySessionTurns",
         semantic_kind: "query_session_turns",
         frame_class: UiCommandFrameClass::Query,
@@ -601,6 +609,9 @@ pub(crate) fn command_descriptor(command: &UiCommand) -> &'static UiCommandDescr
         UiCommand::QuerySessionList => command_descriptor_by_serde_name("QuerySessionList"),
         UiCommand::QueryArchivedSessionList => {
             command_descriptor_by_serde_name("QueryArchivedSessionList")
+        }
+        UiCommand::QuerySessionListPage { .. } => {
+            command_descriptor_by_serde_name("QuerySessionListPage")
         }
         UiCommand::QuerySessionTurns { .. } => {
             command_descriptor_by_serde_name("QuerySessionTurns")

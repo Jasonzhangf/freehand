@@ -8,6 +8,7 @@
   - `session.restore`
   - `session.append_turn_to_turn`
   - `session.list_persisted`
+  - `session.list_persisted_page`
 - owner entry symbols:
   - `ReasonPersistence::record_turn_started`
   - `ReasonPersistence::record_provider_output_applied`
@@ -38,6 +39,7 @@
   - `session.restore`
   - `session.append_turn_to_turn`
   - `session.list_persisted`
+  - `session.list_persisted_page`
 - forbidden shortcuts:
   - UI projection must not synthesize persisted sessions from turn-only or worker sessions.
   - Session truth must not be recovered from provider raw ledgers or UI sidecars.
@@ -192,6 +194,7 @@
 | 17 | `ReasonPersistence::restore_turn_snapshots_for_ui` | `crates/freehand-reason/src/persistence.rs` | restore selected transcript snapshots from authoritative turn files, rebuild exact per-round UI snapshots from reason ledger when authoritative snapshot truth is absent or missing earlier observed rounds, and allow inactive surviving authoritative snapshots only with an explicit partial-transcript warning when the ledger is empty or retained at an unusable sequence offset | authoritative turn snapshots + reason ledger rows + rollback markers | exact per-round UI snapshots with rolled-back logical turns filtered, or inactive partial snapshots carrying `reason_persistence_partial_ui_restore`; active incomplete snapshots still fail, including retained-offset ledgers | selected `QuerySessionTurns` / rollback refresh | persistence owner | bound |
 | 17a | `ReasonPersistence::restore_turn_snapshots_page_for_ui` | `crates/freehand-reason/src/persistence.rs` | select bounded newest or strictly older effective UI snapshots for selected-session incremental transcript restore | session id + validated latest/older page request | bounded ordered turn page plus has-older and owner-issued oldest/newest cursor facts, or explicit invalid limit/cursor/recovery error | runtime `QuerySessionTurnsPage` bridge | persistence owner | bound |
 | 18 | `ReasonPersistence::list_persisted_sessions` | `crates/freehand-reason/src/persistence.rs` | expose derived persisted session index rows and session metadata sidecar truth for UI-safe list/search projection without reading provider raw ledgers or treating worker transcripts as global sessions | session index sidecar plus metadata sidecar | persisted session index/metadata rows for runtime UI projection | runtime.ui-command-dispatch `QuerySessionList` / `QuerySessionSearch` | persistence owner | bound |
+| 18p | `ReasonPersistence::list_persisted_sessions_page` / `load_or_migrate_session_summary_index` | `crates/freehand-reason/src/persistence.rs` | maintain the versioned session summary index and return one ordered metadata-only page with an opaque cursor; unavailable poisoned sessions stay explicit facts without blocking other rows | archived space + latest/older request + summary index/metadata truth | bounded `ReasonSessionListPage` with page facts and unavailable ids | runtime.ui-command-dispatch `QuerySessionListPage` | persistence owner | bound |
 
 ## Metadata / Request Isolation Notes
 

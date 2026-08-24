@@ -52,6 +52,7 @@ pub struct TurnProjectionInput {
 pub enum UiQueryResult {
     Turn(Option<UiTurnProjection>),
     SessionList(UiSessionListProjection),
+    SessionListPage(UiSessionListPageProjection),
     SessionTurns(UiSessionTranscriptProjection),
     SessionTurnsPage(UiSessionTranscriptPageProjection),
     SessionSearch(UiSessionSearchProjection),

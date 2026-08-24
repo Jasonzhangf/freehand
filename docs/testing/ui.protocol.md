@@ -83,6 +83,7 @@ The config-status projection also carries a Relay-backed Agent URL for non-loopb
   - tool-result continuation projection marks a turn as `ToolResultContinuation` so UI clients do not infer continuation waits from completed/failed tool cards
   - selected-session transcript refresh preserves same-turn nonterminal live-only provider/model waiting and tool activity projections already present in protocol state, while terminal refresh clears stale live waiting truth
   - session list active identity is latest-nonterminal-only: a latest terminal turn keeps its terminal status/summary but cannot keep `UiSessionSummary.active_turn_id` populated, and a later nonterminal model wait can become active again
+  - `QuerySessionListPage` accepts a valid Latest wire roundtrip and valid Older cursor; protocol rejects limits outside `1..=100`, Latest cursors, and Older requests without a cursor before runtime dispatch
   - tool-call projection stays lifecycle-aware: requested tool calls remain `waiting` until a matching `ReasonReq05ToolResultReentry` marks the activity `completed`, or failed terminal truth marks still-waiting activities `failed`
   - tool display projection is attached to `UiToolActivity` from the `tool.display` parser owner and is preserved in public conversation tool summaries
   - public tool summaries preserve `UiToolActivity.detail` alongside structured display fields, so failed tool results expose the actual owner-projected execution error instead of only tool parameters
@@ -105,6 +106,7 @@ The config-status projection also carries a Relay-backed Agent URL for non-loopb
   - submit command selected-cwd validation and JSON roundtrip mapping
   - submit metadata attachment validation covers image-only submit, missing base64, and unsupported/empty fields
   - session management command validation covers empty title, empty session id, empty cwd, rollback empty session id, and explicit owner-routing to `reason.persistence`
+  - paged session-list validation covers positive Latest/Older wire roundtrips and reverse invalid limit/cursor cases
   - session transcript replacement coverage proves runtime can refresh one effective session transcript after rollback without UI-local deletion
   - explicit cancel and latest-active cancel owner-routing mapping
   - checkpoint rewind ingress validation and owner-routing mapping

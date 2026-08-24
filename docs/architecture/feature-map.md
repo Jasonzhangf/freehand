@@ -1241,6 +1241,7 @@ Non-violation pending items live in `docs/architecture/architecture-gaps.md`. Ea
   - task query DTO validation and runtime-query-port shape tests
   - subscription selector and match tests
   - public turn projection tests
+  - paged session list command validation positive/reverse tests
   - client-specific projection gating tests
   - debug-state projection and receiver-drain tests
 - required_module_black_box_tests:
@@ -1424,6 +1425,7 @@ Non-violation pending items live in `docs/architecture/architecture-gaps.md`. Ea
   - `cargo test -p freehand-cli`
 - required_white_box_tests:
   - session snapshot render/load tests
+  - session summary page order, cursor, metadata-only, archive, and unavailable-session tests
   - persistence cursor serialization tests
   - reason-ledger sequence ordering tests
   - snapshot-plus-tail recovery tests
@@ -1670,6 +1672,7 @@ Non-violation pending items live in `docs/architecture/architecture-gaps.md`. Ea
   - resume-turn unsupported dispatch tests
   - runtime task query bridge tests
   - runtime ui-state projection update tests
+  - runtime paged session list bridge avoids full transcript restore
   - Worker-selected identity, Master-only command rejection, and typed activity
     projection merge tests
 - required_module_black_box_tests:

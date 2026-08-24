@@ -31,6 +31,7 @@
   - stable `worker`, `worker-2`, and `worker-3` identities render as Worker 1, Worker 2, and Worker 3 independent of Master row order
   - each independent Agent host labels its direct-session group from owner-backed `ConfigStatus.agent_name`; Worker hosts must never render the literal `Master` label for their own namespace
   - WebUI global session lists consume only persisted user sessions; Worker/subagent temporary sessions are allowed only inside the owning 主控会话 Header/session tree from TaskBoard 权威真源
+  - WebUI Home/drawer history consumes bounded `QuerySessionListPage` truth, exposes 加载更早 only when the owner page reports `has_older`, rejects stale responses, treats unavailable summaries as explicit facts without consuming other rows, and never proves deletion from partial list absence
   - app boundary renders a compact session rail with separate new-conversation and new-task affordances; new task requires a visible target cwd, while new conversation does not require cwd
   - app boundary renders protocol-owned debug query projection
   - app boundary renders slave-card visibility only for WebUI
@@ -127,6 +128,7 @@
     `renderDiagnosticLogRow`, and `refreshDiagnosticsStatus`
   - Android update route smoke for env/sidecar manifest JSON, explicit missing-sidecar failure, and explicit missing-APK 404
   - WebUI JS asset smoke locks ADP WebSocket command/query usage, protocol_version stamping, first-frame handshake gating, generated `adpQueryOf`/`adpCommandOf`/`adpSubscribeOf` constructor usage, rejects `fetch` as a live path, and requires `EventSource` only for latest-turn SSE display refresh
+  - WebUI JS asset smoke locks `refreshSessions` to `QuerySessionListPage` Latest limit 24, `loadOlderSessionListPage` to the owner-issued Older cursor, request-sequence staleness rejection, idle prefetch buffering, and `加载更早` visibility/disabled state
   - WebUI ADP subscription accepted/等待中 status rendering smoke
   - WebUI ADP failure frame visible-card/status smoke, with user-facing 连接/服务 wording instead of raw `ADP`
   - WebUI ADP request timeout visible-failure smoke

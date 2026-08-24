@@ -153,7 +153,8 @@ use freehand_reason::{
     CompactionPolicyRequest, PersistedSessionIndexEntry, PersistedSessionMetadataEntry,
     ProviderRawLedgerWrite, ProviderRawScenePosition, ReasonPersistence, ReasonPersistenceError,
     ReasonResp04CompletionSchemaRejected, ReasonResp05ModelContinuationWaiting,
-    ReasonResp06SearchEvidenceSchemaRejected, ReasonRewriteRuntime, ReasonTurnEngine,
+    ReasonResp06SearchEvidenceSchemaRejected, ReasonRewriteRuntime, ReasonSessionLatestStatus,
+    ReasonSessionListCursor, ReasonSessionListPageRequest, ReasonTurnEngine,
     ReasonTurnPageDirection, ReasonTurnPageRequest, RewriteRuntimeState, SessionHistory,
     SessionRollbackMarker, TurnRecord, TurnStartInput,
 };
@@ -189,19 +190,20 @@ use freehand_ui_protocol::{
     UiModelRouteUpdate, UiModelTransportActivity, UiModelTransportKind,
     UiModelWeightedRouteProjection, UiModelWeightedRouteUpdate, UiProtocolState,
     UiProviderConfigSummaryProjection, UiProviderConfigUpdate, UiQueryAccessScope, UiQueryResult,
-    UiRuntimeQueryPort, UiSchedulerTickCommand, UiSessionMetadataProjection,
-    UiSessionSearchChildProjection, UiSessionSearchProjection, UiSessionSearchResultProjection,
-    UiSessionTranscriptPageProjection, UiSessionTurnsPageDirection, UiSessionTurnsPageInfo,
-    UiSubmitMetadata, UiTaskAgentCreateCommand, UiTaskAssignCommand, UiTaskBoardProjection,
-    UiTaskClaimCommand, UiTaskCreateCommand, UiTaskDispatchCommand,
-    UiTaskEventInboxEntryProjection, UiTaskEventInboxProjection, UiTaskHistoryProjection,
-    UiTaskLedgerEventProjection, UiTaskListProjection, UiTaskReviewCommand,
-    UiTaskReviewRejectionCommand, UiTaskSnapshotProjection, UiTimerEventProjection,
-    UiTimerListProjection, UiTimerProjection, UiTimerRepeatCommand, UiTimerScheduleCommand,
-    UiToolRegistryProjection, UiToolRegistryToolProjection, UiTurnProjection,
-    UiTurnTimingProjection, UiWorkerControlCommand, UiWorkerControlEventProjection,
-    UiWorkerControlProjection, checkpoint_projection_from_runtime_summary,
-    turn_projection_for_client, turn_projection_from_events,
+    UiRuntimeQueryPort, UiSchedulerTickCommand, UiSessionListPageDirection, UiSessionListPageInfo,
+    UiSessionListPageProjection, UiSessionMetadataProjection, UiSessionSearchChildProjection,
+    UiSessionSearchProjection, UiSessionSearchResultProjection, UiSessionTranscriptPageProjection,
+    UiSessionTurnsPageDirection, UiSessionTurnsPageInfo, UiSubmitMetadata,
+    UiTaskAgentCreateCommand, UiTaskAssignCommand, UiTaskBoardProjection, UiTaskClaimCommand,
+    UiTaskCreateCommand, UiTaskDispatchCommand, UiTaskEventInboxEntryProjection,
+    UiTaskEventInboxProjection, UiTaskHistoryProjection, UiTaskLedgerEventProjection,
+    UiTaskListProjection, UiTaskReviewCommand, UiTaskReviewRejectionCommand,
+    UiTaskSnapshotProjection, UiTimerEventProjection, UiTimerListProjection, UiTimerProjection,
+    UiTimerRepeatCommand, UiTimerScheduleCommand, UiToolRegistryProjection,
+    UiToolRegistryToolProjection, UiTurnProjection, UiTurnTimingProjection, UiWorkerControlCommand,
+    UiWorkerControlEventProjection, UiWorkerControlProjection,
+    checkpoint_projection_from_runtime_summary, turn_projection_for_client,
+    turn_projection_from_events,
 };
 use serde_json::{Map, Value, json};
 use thiserror::Error;
@@ -416,6 +418,7 @@ impl LiveReasonExecutionRole {
         registry: &BuiltinToolRegistry,
         execution_profile: LiveReasonExecutionProfile,
         search_stage: Option<SourcedSearchRoundStage>,
+        web_fetch_recovery: bool,
     ) -> Vec<ProviderToolDefinition> {
         if execution_profile == LiveReasonExecutionProfile::CleanSearch {
             return registry
@@ -425,18 +428,25 @@ impl LiveReasonExecutionRole {
                 .collect();
         }
         if execution_profile == LiveReasonExecutionProfile::SourcedSearch {
-            if !matches!(
-                search_stage,
-                Some(SourcedSearchRoundStage::CamoVerification)
-                    | Some(SourcedSearchRoundStage::SocialDiscovery)
-            ) {
-                return Vec::new();
+            if web_fetch_recovery {
+                return registry
+                    .worker_implemented_definitions()
+                    .into_iter()
+                    .filter(|definition| definition.name == "web_fetch")
+                    .collect();
             }
-            return registry
-                .worker_implemented_definitions()
-                .into_iter()
-                .filter(|definition| definition.name == "camo")
-                .collect();
+            return match search_stage {
+                Some(SourcedSearchRoundStage::HostedDiscovery) => Vec::new(),
+                Some(SourcedSearchRoundStage::CamoVerification)
+                | Some(SourcedSearchRoundStage::SocialDiscovery) => {
+                    return registry
+                        .worker_implemented_definitions()
+                        .into_iter()
+                        .filter(|definition| definition.name == "camo")
+                        .collect();
+                }
+                _ => return Vec::new(),
+            };
         }
         match self {
             Self::Master => registry.master_implemented_definitions(),
@@ -449,6 +459,7 @@ impl LiveReasonExecutionRole {
         descriptor: &ProviderDescriptor,
         execution_profile: LiveReasonExecutionProfile,
         search_stage: Option<SourcedSearchRoundStage>,
+        web_fetch_recovery: bool,
     ) -> Vec<ProviderHostedToolDefinition> {
         let allow_hosted_search = match (self, execution_profile) {
             (Self::Master, LiveReasonExecutionProfile::Workspace) => descriptor
@@ -461,6 +472,7 @@ impl LiveReasonExecutionRole {
             (Self::Worker, LiveReasonExecutionProfile::SourcedSearch) => {
                 descriptor.capabilities.web_search.is_hosted()
                     && search_stage == Some(SourcedSearchRoundStage::HostedDiscovery)
+                    && !web_fetch_recovery
             }
             (Self::Worker, LiveReasonExecutionProfile::Workspace) => descriptor
                 .capabilities
@@ -483,10 +495,16 @@ impl LiveReasonExecutionRole {
         registry: &BuiltinToolRegistry,
         execution_profile: LiveReasonExecutionProfile,
         search_stage: Option<SourcedSearchRoundStage>,
+        web_fetch_recovery: bool,
     ) -> String {
         if execution_profile == LiveReasonExecutionProfile::CleanSearch {
             let names = self
-                .tool_definitions(registry, execution_profile, search_stage)
+                .tool_definitions(
+                    registry,
+                    execution_profile,
+                    search_stage,
+                    web_fetch_recovery,
+                )
                 .into_iter()
                 .map(|definition| definition.name)
                 .collect::<Vec<_>>()
@@ -498,7 +516,7 @@ impl LiveReasonExecutionRole {
             };
         }
         if execution_profile == LiveReasonExecutionProfile::SourcedSearch {
-            return format!("sourced-search:{search_stage:?}");
+            return format!("sourced-search:{search_stage:?}:recovery={web_fetch_recovery}");
         }
         match self {
             Self::Master => registry.master_implemented_schema_fingerprint(),
@@ -717,6 +735,38 @@ where
         on_task_list_projection,
     )
 }
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+enum SourcedSearchRecoveryAttempt {
+    WebFetch,
+    Exhausted,
+}
+
+fn sourced_search_recovery_attempt(
+    turn: &TurnRecord,
+    executed_tool_call_ids: &[String],
+) -> SourcedSearchRecoveryAttempt {
+    if !matches!(
+        sourced_search_round_stage(turn),
+        SourcedSearchRoundStage::HostedDiscovery
+            | SourcedSearchRoundStage::CamoVerification
+            | SourcedSearchRoundStage::SocialDiscovery
+    ) {
+        return SourcedSearchRecoveryAttempt::Exhausted;
+    }
+    let attempted_web_fetch = turn.tool_calls.iter().any(|tool_call| {
+        tool_call.tool_call.tool_name.as_str() == "web_fetch"
+            && executed_tool_call_ids
+                .contains(&tool_call.tool_call.tool_call_id.as_str().to_owned())
+    });
+    if attempted_web_fetch {
+        SourcedSearchRecoveryAttempt::Exhausted
+    } else {
+        SourcedSearchRecoveryAttempt::WebFetch
+    }
+}
+
+const SOURCED_SEARCH_RECOVERY_GUIDANCE: &str = "Hosted discovery or camo verification produced no typed evidence. Try one concrete HTTP/HTTPS URL with web_fetch; if that also fails or yields no usable source, emit the blocked final delivery schema.";
 
 pub fn run_live_reason_turn_with_hooks<FB, FD, FT>(
     selected: &SelectedAgentConfig,
@@ -1195,9 +1245,48 @@ where
     let mut tool_exchanges: Vec<ProviderToolExchange> = Vec::new();
     let mut executed_tool_call_ids = Vec::<String>::new();
     let tool_registry = BuiltinToolRegistry::reasonix_aligned();
+    let mut web_fetch_recovery_next = false;
 
     'reason_loop: loop {
         ensure_live_not_cancelled(&request)?;
+        let web_fetch_recovery = web_fetch_recovery_next;
+        web_fetch_recovery_next = false;
+        if request.execution_profile == LiveReasonExecutionProfile::SourcedSearch
+            && turns.last().is_some_and(|previous| {
+                sourced_search_recovery_attempt(previous, &executed_tool_call_ids)
+                    == SourcedSearchRecoveryAttempt::Exhausted
+                    && matches!(
+                        sourced_search_round_stage(previous),
+                        SourcedSearchRoundStage::HostedDiscovery
+                            | SourcedSearchRoundStage::CamoVerification
+                            | SourcedSearchRoundStage::SocialDiscovery
+                    )
+            })
+        {
+            let previous = turns
+                .last_mut()
+                .expect("sourced-search recovery checked the latest turn");
+            engine.block_turn(
+                previous,
+                "hosted discovery, camo verification, and web_fetch recovery produced no usable typed source",
+            );
+            drain_broadcasts(&receiver, &mut broadcasts, &mut on_broadcast);
+            drain_debug_events(&debug_receiver, &mut on_debug);
+            persistence
+                .record_turn_closed(&history, previous, schema_rejections.len() as u32)
+                .map_err(|err| RuntimeLiveBridgeError::ReasonPersistenceFailed(err.to_string()))?;
+            return Ok(LiveReasonTurnOutcome {
+                turn: previous.clone(),
+                turns,
+                broadcasts,
+                rounds: round,
+                schema_rejections,
+                search_schema_rejections,
+                tool_executions,
+                restore_status,
+                restored_closed_turns,
+            });
+        }
         if let Some(resolution) = record_master_live_safe_point(
             role,
             &request,
@@ -1250,8 +1339,12 @@ where
                     sourced_search_round_stage,
                 )
             });
-        let tool_schema_fingerprint =
-            role.tool_schema_fingerprint(&tool_registry, request.execution_profile, search_stage);
+        let tool_schema_fingerprint = role.tool_schema_fingerprint(
+            &tool_registry,
+            request.execution_profile,
+            search_stage,
+            web_fetch_recovery,
+        );
         let mut turn = engine
             .start_turn(
                 &mut history,
@@ -1300,12 +1393,17 @@ where
         } else {
             Vec::new()
         };
-        semantic_request.tools =
-            role.tool_definitions(&tool_registry, request.execution_profile, search_stage);
+        semantic_request.tools = role.tool_definitions(
+            &tool_registry,
+            request.execution_profile,
+            search_stage,
+            web_fetch_recovery,
+        );
         semantic_request.hosted_tools = role.hosted_tool_definitions(
             &active_provider_descriptor,
             request.execution_profile,
             search_stage,
+            web_fetch_recovery,
         );
         semantic_request.tool_choice = None;
         semantic_request.tool_exchanges = tool_exchanges.clone();
@@ -2572,37 +2670,52 @@ where
                     | SourcedSearchRoundStage::CamoVerification
                     | SourcedSearchRoundStage::SocialDiscovery
             ) {
-                next_prompt = match stage {
-                    SourcedSearchRoundStage::HostedDiscovery => {
-                        "Hosted discovery is validated. Emit the supplement decision schema based on verified-source coverage."
-                            .to_owned()
+                match sourced_search_recovery_attempt(&turn, &executed_tool_call_ids) {
+                    SourcedSearchRecoveryAttempt::WebFetch => {
+                        next_prompt = SOURCED_SEARCH_RECOVERY_GUIDANCE.to_owned();
+                        web_fetch_recovery_next = true;
+                        carryover_segments = next_round_segments(
+                            &request.prompt,
+                            &public_provider_text,
+                            Some(SOURCED_SEARCH_RECOVERY_GUIDANCE),
+                            LiveRoundContext {
+                                role,
+                                execution_profile: request.execution_profile,
+                                configured_worker_set,
+                                web_search_route_guidance: Some(web_search_route_guidance.as_str()),
+                                runtime_home: &request.runtime_home,
+                                cwd: request.cwd.as_deref(),
+                                agent_id: &agent_id,
+                            },
+                        )?;
+                        turns.push(turn);
+                        continue 'reason_loop;
                     }
-                    SourcedSearchRoundStage::CamoVerification => {
-                        "Use camo to verify every usable discovered URL, one source at a time. Return typed tool calls; do not claim verification in text."
-                            .to_owned()
+                    SourcedSearchRecoveryAttempt::Exhausted => {
+                        let missing_delivery = "hosted discovery, camo verification, and web_fetch recovery produced no usable typed source";
+                        engine.block_turn(&mut turn, missing_delivery);
+                        drain_broadcasts(&receiver, &mut broadcasts, &mut on_broadcast);
+                        drain_debug_events(&debug_receiver, &mut on_debug);
+                        ensure_live_not_cancelled(&request)?;
+                        persistence
+                            .record_turn_closed(&history, &turn, schema_rejections.len() as u32)
+                            .map_err(|err| {
+                                RuntimeLiveBridgeError::ReasonPersistenceFailed(err.to_string())
+                            })?;
+                        turns.push(turn.clone());
+                        return Ok(LiveReasonTurnOutcome {
+                            turn,
+                            turns,
+                            broadcasts,
+                            rounds: round,
+                            schema_rejections,
+                            search_schema_rejections,
+                            tool_executions,
+                            restore_status,
+                            restored_closed_turns,
+                        });
                     }
-                    SourcedSearchRoundStage::SocialDiscovery => {
-                        "Use the exposed camo social search capability for the required supplement, then return its typed result."
-                            .to_owned()
-                    }
-                    _ => unreachable!("sourced search stage was checked above"),
-                };
-                carryover_segments = next_round_segments(
-                    &request.prompt,
-                    &public_provider_text,
-                    None,
-                    LiveRoundContext {
-                        role,
-                        execution_profile: request.execution_profile,
-                        configured_worker_set,
-                        web_search_route_guidance: Some(web_search_route_guidance.as_str()),
-                        runtime_home: &request.runtime_home,
-                        cwd: request.cwd.as_deref(),
-                        agent_id: &agent_id,
-                    },
-                )?;
-                turns.push(turn);
-                continue 'reason_loop;
+                }
             }
         }
         if let Some(resolution) = attention_resolution_after_provider.take() {
@@ -4266,6 +4379,52 @@ impl RuntimeCommandDispatcher {
     ) -> Result<Option<UiQueryResult>, UiCommandDispatchPortError> {
         let state = self.state.lock().expect("lock runtime dispatcher state");
         match command {
+            UiCommand::QuerySessionListPage { archived, page } => {
+                let Some(runtime_home) = state
+                    .config
+                    .live
+                    .as_ref()
+                    .map(|live| live.runtime_home.clone())
+                else {
+                    return Ok(None);
+                };
+                let reason_agent_id = state.config.reason_agent_id.clone();
+                let request = session_list_page_request_from_ui(*archived, page)?;
+                drop(state);
+                let persistence = ReasonPersistence::new(runtime_home, reason_agent_id.clone());
+                let metadata = persistence.load_session_metadata().map_err(|error| {
+                    UiCommandDispatchPortError::DispatchFailed(format!(
+                        "failed to refresh persisted session metadata: {error}"
+                    ))
+                })?;
+                self.ui_state
+                    .lock()
+                    .expect("lock ui state")
+                    .set_session_metadata_entries(metadata.into_iter().map(session_metadata_to_ui));
+                let page = persistence
+                    .list_persisted_sessions_page(&request)
+                    .map_err(|error| {
+                        UiCommandDispatchPortError::DispatchFailed(format!(
+                            "failed to read persisted session list page: {error}"
+                        ))
+                    })?;
+                Ok(Some(UiQueryResult::SessionListPage(
+                    UiSessionListPageProjection {
+                        sessions: page
+                            .sessions
+                            .into_iter()
+                            .map(session_summary_to_ui)
+                            .collect(),
+                        page: UiSessionListPageInfo {
+                            has_older: page.has_older,
+                            next_cursor: page
+                                .next_cursor
+                                .map(|cursor| serde_json::to_string(&cursor).unwrap_or_default()),
+                            unavailable_sessions: page.unavailable_sessions,
+                        },
+                    },
+                )))
+            }
             UiCommand::QuerySessionList | UiCommand::QueryArchivedSessionList => {
                 let Some(runtime_home) = state
                     .config
@@ -7641,6 +7800,58 @@ fn refresh_persisted_sessions_for_ui_query(
         ui.replace_persisted_turn_projections_without_publish(&session_id, session_projections);
     }
     Ok(())
+}
+
+fn session_list_page_request_from_ui(
+    archived: bool,
+    page: &freehand_ui_protocol::UiSessionListPageRequest,
+) -> Result<ReasonSessionListPageRequest, UiCommandDispatchPortError> {
+    let cursor = match (&page.direction, &page.cursor) {
+        (UiSessionListPageDirection::Latest, None) => None,
+        (UiSessionListPageDirection::Older, Some(cursor)) => Some(
+            serde_json::from_str::<ReasonSessionListCursor>(cursor).map_err(|error| {
+                UiCommandDispatchPortError::DispatchFailed(format!(
+                    "invalid session list page cursor: {error}"
+                ))
+            })?,
+        ),
+        _ => {
+            return Err(UiCommandDispatchPortError::DispatchFailed(
+                "session list page direction and cursor do not match".to_owned(),
+            ));
+        }
+    };
+    Ok(ReasonSessionListPageRequest {
+        archived,
+        cursor,
+        limit: page.limit,
+    })
+}
+
+fn session_summary_to_ui(
+    summary: freehand_reason::PersistedSessionSummary,
+) -> freehand_ui_protocol::UiSessionSummary {
+    freehand_ui_protocol::UiSessionSummary {
+        session_id: summary.session_id,
+        activity_unix_seconds: summary.activity_unix_seconds,
+        title: summary.title,
+        archived: summary.archived,
+        cwd: summary.cwd,
+        latest_turn_id: summary.latest_turn_id,
+        active_turn_id: summary.active_turn_id,
+        turn_count: summary.turn_count,
+        latest_status: reason_session_latest_status_string(summary.latest_status),
+        latest_summary: summary.latest_summary,
+    }
+}
+
+fn reason_session_latest_status_string(status: ReasonSessionLatestStatus) -> String {
+    match status {
+        ReasonSessionLatestStatus::Empty => "empty".to_owned(),
+        ReasonSessionLatestStatus::WaitingModel => "waiting_model".to_owned(),
+        ReasonSessionLatestStatus::ToolRunning => "tool_running".to_owned(),
+        ReasonSessionLatestStatus::Terminal(status) => format!("{status:?}").to_lowercase(),
+    }
 }
 
 fn queryable_reason_agent_ids(config: &RuntimeCommandDispatcherConfig) -> Vec<AgentId> {

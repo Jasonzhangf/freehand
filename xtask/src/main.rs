@@ -297,6 +297,10 @@ fn run_gates_check() -> Result<(), String> {
     verify_cli_live_turn_boundary(&root)?;
     verify_provider_reason_live_bridge_boundary(&root)?;
     verify_reason_context_planner_boundary(&root)?;
+    verify_ui_protocol_boundary(&root)?;
+    verify_reason_persistence_boundary(&root)?;
+    verify_runtime_ui_command_dispatch_boundary(&root)?;
+    verify_app_webui_session_paging_boundary(&root)?;
     verify_search_evidence_schema_conformance(&root)?;
     verify_dependency_graph(&root)?;
     verify_task_status_single_writer(&root)?;
@@ -1129,6 +1133,145 @@ fn verify_registered_rust_module_edges(
         return Err(format!("{feature_id} declares unused import edges: {ids}"));
     }
     Ok(())
+}
+
+fn verify_ui_protocol_boundary(root: &Path) -> Result<(), String> {
+    let registry_path = "docs/module-registry/ui.protocol.json";
+    let registry = read_relay_module_registry(root, registry_path)?;
+    if registry.schema_version != 1
+        || registry.registry_id != "ui.protocol.modules"
+        || registry.feature_id != "ui.protocol"
+        || registry.status != "active"
+        || registry.coverage_roots != ["crates/freehand-ui-protocol"]
+        || registry.modules.len() != 1
+    {
+        return Err("ui.protocol module registry identity/shape is invalid".to_owned());
+    }
+    let module = &registry.modules[0];
+    if module.module_id != "ui.protocol.library" || module.status != "active" {
+        return Err("ui.protocol library identity is invalid".to_owned());
+    }
+    verify_registered_rust_module_edges(root, &registry, module, "ui.protocol")?;
+    verify_registered_module_verification_map(
+        root,
+        "ui.protocol",
+        registry_path,
+        "docs/verification-maps/ui.protocol.json",
+        &[
+            "ui.protocol.unit",
+            "ui.protocol.clippy",
+            "ui.protocol.architecture",
+        ],
+    )
+}
+
+fn verify_reason_persistence_boundary(root: &Path) -> Result<(), String> {
+    let registry_path = "docs/module-registry/reason.persistence.json";
+    let registry = read_relay_module_registry(root, registry_path)?;
+    if registry.schema_version != 1
+        || registry.registry_id != "reason.persistence.modules"
+        || registry.feature_id != "reason.persistence"
+        || registry.status != "active"
+        || registry.modules.len() != 1
+    {
+        return Err("reason.persistence module registry identity/shape is invalid".to_owned());
+    }
+    let module = &registry.modules[0];
+    if module.module_id != "reason.persistence.library"
+        || module.owner_feature_id != "reason.persistence"
+        || module.status != "active"
+        || module.owned_paths.len() != 5
+    {
+        return Err("reason.persistence library identity/paths is invalid".to_owned());
+    }
+    verify_registered_rust_module_edges(root, &registry, module, "reason.persistence")?;
+    verify_registered_module_verification_map(
+        root,
+        "reason.persistence",
+        registry_path,
+        "docs/verification-maps/reason.persistence.json",
+        &[
+            "reason.persistence.unit",
+            "reason.persistence.session-page",
+            "reason.persistence.clippy",
+            "reason.persistence.mainline",
+            "reason.persistence.architecture",
+        ],
+    )
+}
+
+fn verify_runtime_ui_command_dispatch_boundary(root: &Path) -> Result<(), String> {
+    let registry_path = "docs/module-registry/runtime.ui-command-dispatch.json";
+    let registry = read_relay_module_registry(root, registry_path)?;
+    if registry.schema_version != 1
+        || registry.registry_id != "runtime.ui-command-dispatch.modules"
+        || registry.feature_id != "runtime.ui-command-dispatch"
+        || registry.status != "active"
+        || registry.coverage_roots != ["crates/freehand-runtime/src/lib.rs"]
+        || registry.modules.len() != 1
+    {
+        return Err(
+            "runtime.ui-command-dispatch module registry identity/shape is invalid".to_owned(),
+        );
+    }
+    let module = &registry.modules[0];
+    if module.module_id != "runtime.ui-command-dispatch.bridge"
+        || module.owner_feature_id != "runtime.ui-command-dispatch"
+        || module.status != "active"
+        || module.owned_paths != ["crates/freehand-runtime/src/lib.rs"]
+    {
+        return Err("runtime.ui-command-dispatch bridge identity/path is invalid".to_owned());
+    }
+    verify_registered_rust_module_edges(root, &registry, module, "runtime.ui-command-dispatch")?;
+    verify_registered_module_verification_map(
+        root,
+        "runtime.ui-command-dispatch",
+        registry_path,
+        "docs/verification-maps/runtime.ui-command-dispatch.json",
+        &[
+            "runtime.ui-command-dispatch.unit",
+            "runtime.ui-command-dispatch.session-page",
+            "runtime.ui-command-dispatch.clippy",
+            "runtime.ui-command-dispatch.mainline",
+            "runtime.ui-command-dispatch.architecture",
+        ],
+    )
+}
+
+fn verify_app_webui_session_paging_boundary(root: &Path) -> Result<(), String> {
+    let registry_path = "docs/module-registry/app.webui-smoke.json";
+    let registry = read_relay_module_registry(root, registry_path)?;
+    if registry.schema_version != 1
+        || registry.registry_id != "app.webui-smoke.modules"
+        || registry.feature_id != "app.webui-smoke"
+        || registry.status != "active"
+        || registry.modules.len() != 1
+    {
+        return Err("app.webui-smoke module registry identity/shape is invalid".to_owned());
+    }
+    let module = &registry.modules[0];
+    if module.module_id != "app.webui-smoke.session-paging-surface"
+        || module.owner_feature_id != "app.webui-smoke"
+        || module.status != "active"
+        || module.owned_paths.len() != 4
+    {
+        return Err("app.webui-smoke paging surface identity/paths is invalid".to_owned());
+    }
+    verify_registered_rust_module_edges(root, &registry, module, "app.webui-smoke")?;
+    verify_registered_module_verification_map(
+        root,
+        "app.webui-smoke",
+        registry_path,
+        "docs/verification-maps/app.webui-smoke.json",
+        &[
+            "app.webui-smoke.unit",
+            "app.webui-smoke.syntax",
+            "app.webui-smoke.clippy",
+            "app.webui-smoke.browser",
+            "app.webui-smoke.mainline",
+            "app.webui-smoke.architecture",
+        ],
+    )
 }
 
 fn module_dependency_import_name(dependency: &str) -> Option<String> {

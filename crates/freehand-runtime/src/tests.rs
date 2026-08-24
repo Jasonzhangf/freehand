@@ -702,6 +702,114 @@ fn runtime_session_list_refreshes_current_agent_persistence_without_cross_agent_
 }
 
 #[test]
+fn runtime_session_list_page_avoids_full_transcript_restore() {
+    let runtime_home = temp_runtime_home();
+    let selected = live_selected_agent(
+        "http://127.0.0.1:1".to_owned(),
+        freehand_config::ProviderType::Anthropic,
+    );
+    let runtime = RuntimeCommandDispatcher::from_selected_agent_with_live(
+        &selected,
+        runtime_home.clone(),
+        false,
+    )
+    .expect("runtime bootstrap");
+    let agent_id = AgentId::new(selected.name.clone());
+    let persistence = ReasonPersistence::new(runtime_home.clone(), agent_id.clone());
+    persistence
+        .create_session_metadata(
+            SessionId::new("page-metadata-session"),
+            Some("Metadata page".to_owned()),
+            None,
+        )
+        .expect("persist metadata-only page session");
+    let poisoned_session = SessionId::new("page-poison-session");
+    persistence
+        .create_session_metadata(poisoned_session.clone(), Some("Poisoned".to_owned()), None)
+        .expect("persist poisoned page session");
+
+    let turns_dir = runtime_home
+        .join("state")
+        .join("turns")
+        .join(agent_id.as_str())
+        .join(poisoned_session.as_str())
+        .join("turns");
+    fs::create_dir_all(&turns_dir).expect("create poisoned turns directory");
+    fs::write(turns_dir.join("runtime-turn-1.json"), "{not-json")
+        .expect("write poisoned authoritative snapshot");
+    fs::write(
+        runtime_home
+            .join("state")
+            .join("turns")
+            .join(agent_id.as_str())
+            .join(poisoned_session.as_str())
+            .join("session-history.json"),
+        "{\"schema_version\":1}",
+    )
+    .expect("write poisoned history marker");
+    fs::write(
+        runtime_home
+            .join("state")
+            .join("turns")
+            .join(agent_id.as_str())
+            .join(poisoned_session.as_str())
+            .join("session-cursor.json"),
+        "{\"schema_version\":1,\"latest_turn_id\":\"runtime-turn-1\",\"active_turn_id\":null,\"last_applied_reason_seq\":1}",
+    )
+    .expect("write poisoned cursor fixture");
+
+    let legacy_index_path = runtime_home
+        .join("cache")
+        .join("session-index")
+        .join(format!("{}.json", agent_id.as_str()));
+    fs::write(
+        &legacy_index_path,
+        format!(
+            r#"[{{"agent_id":"{}","session_id":"{}","latest_turn_id":"runtime-turn-1","active_turn_id":null,"latest_terminal_summary":null}}]"#,
+            agent_id.as_str(),
+            poisoned_session.as_str()
+        ),
+    )
+    .expect("write legacy index fixture");
+    let summary_index_path = runtime_home
+        .join("cache")
+        .join("session-index")
+        .join(format!("{}-summaries.json", agent_id.as_str()));
+    if summary_index_path.is_file() {
+        fs::remove_file(&summary_index_path)
+            .expect("remove bootstrap summary for migration fixture");
+    }
+
+    let result = runtime
+        .query_runtime(&UiCommand::QuerySessionListPage {
+            archived: false,
+            page: freehand_ui_protocol::UiSessionListPageRequest {
+                direction: freehand_ui_protocol::UiSessionListPageDirection::Latest,
+                cursor: None,
+                limit: 1,
+            },
+        })
+        .expect("runtime paged query")
+        .expect("runtime-owned page");
+    match result {
+        UiQueryResult::SessionListPage(page) => {
+            assert_eq!(page.page.unavailable_sessions.len(), 1);
+            assert_eq!(page.page.unavailable_sessions[0], poisoned_session);
+            assert_eq!(
+                page.sessions
+                    .iter()
+                    .map(|summary| summary.session_id.as_str())
+                    .collect::<Vec<_>>(),
+                vec!["page-metadata-session"]
+            );
+        }
+        other => panic!("unexpected session list page result: {other:?}"),
+    }
+
+    fs::remove_dir_all(runtime_home).expect("cleanup");
+}
+
+#[test]
 fn live_bridge_restores_same_session_history_into_follow_up_provider_request() {
     let runtime_home = temp_runtime_home();
     let session_id = SessionId::new("runtime-session-history");
@@ -7528,6 +7636,26 @@ fn openai_responses_continue_response(visible_text: &str, next_step: &str) -> St
     .to_string()
 }
 
+fn openai_responses_function_call_response(
+    call_id: &str,
+    tool_name: &str,
+    arguments: Value,
+) -> String {
+    json!({
+        "id": format!("resp-{call_id}"),
+        "object": "response",
+        "status": "completed",
+        "output": [{
+            "type": "function_call",
+            "call_id": call_id,
+            "name": tool_name,
+            "arguments": arguments.to_string()
+        }],
+        "usage": {"input_tokens": 14, "output_tokens": 18, "total_tokens": 32}
+    })
+    .to_string()
+}
+
 fn status_stop_single_response(visible_text: &str) -> String {
     let status = r#"<<<freehand_status>>>
 {"schema_version":1,"status":{"simple_question":true}}
@@ -11705,20 +11833,35 @@ fn live_bridge_derives_hosted_web_search_for_configured_provider_native_protocol
     );
     assert_eq!(
         LiveReasonExecutionRole::Master
-            .hosted_tool_definitions(&responses, LiveReasonExecutionProfile::Workspace, None)
+            .hosted_tool_definitions(
+                &responses,
+                LiveReasonExecutionProfile::Workspace,
+                None,
+                false
+            )
             .len(),
         1
     );
     assert_eq!(
         LiveReasonExecutionRole::Worker
-            .hosted_tool_definitions(&responses, LiveReasonExecutionProfile::Workspace, None)
+            .hosted_tool_definitions(
+                &responses,
+                LiveReasonExecutionProfile::Workspace,
+                None,
+                false
+            )
             .len(),
         1,
         "worker Workspace profile must expose hosted web search when provider supports function-tool mixing"
     );
     assert_eq!(
         LiveReasonExecutionRole::Worker
-            .hosted_tool_definitions(&responses, LiveReasonExecutionProfile::CleanSearch, None)
+            .hosted_tool_definitions(
+                &responses,
+                LiveReasonExecutionProfile::CleanSearch,
+                None,
+                false
+            )
             .len(),
         1
     );
@@ -11731,7 +11874,12 @@ fn live_bridge_derives_hosted_web_search_for_configured_provider_native_protocol
     );
     assert!(
         LiveReasonExecutionRole::Master
-            .hosted_tool_definitions(&disabled, LiveReasonExecutionProfile::Workspace, None)
+            .hosted_tool_definitions(
+                &disabled,
+                LiveReasonExecutionProfile::Workspace,
+                None,
+                false
+            )
             .is_empty()
     );
 
@@ -11760,22 +11908,37 @@ fn live_bridge_derives_hosted_web_search_for_configured_provider_native_protocol
     );
     assert_eq!(
         LiveReasonExecutionRole::Master
-            .hosted_tool_definitions(&messages, LiveReasonExecutionProfile::Workspace, None)
+            .hosted_tool_definitions(
+                &messages,
+                LiveReasonExecutionProfile::Workspace,
+                None,
+                false
+            )
             .len(),
         1
     );
 }
 
 #[test]
-fn sourced_search_blocks_when_hosted_round_returns_no_typed_discovery() {
+fn sourced_search_attempts_web_fetch_before_blocking_missing_hosted_discovery() {
     let domain_plan = r#"<freehand_search_delivery>
 {"schema":"search_evidence.domain_plan.v1","delivery_id":"plan-news-001","domain":"news","preferred_source_kinds":["official_publication","mainstream_news"],"social_platform_priority":["weibo","x"],"minimum_verified_sources":2,"policy_version":"2026-08-15"}
 </freehand_search_delivery>"#;
+    let (web_fetch_url, web_fetch_rx, web_fetch_handle) = spawn_status_sequence_server(vec![(
+        500,
+        "text/plain",
+        "web fetch recovery unavailable".to_owned(),
+    )]);
     let (base_url, rx, handle) = spawn_sequence_server(
         "application/json",
         vec![
             openai_responses_continue_response(domain_plan, "continue to hosted discovery"),
             openai_responses_complete_response("hosted search was not observed"),
+            openai_responses_function_call_response(
+                "call-web-fetch-recovery",
+                "web_fetch",
+                json!({"url":format!("{web_fetch_url}/unavailable"),"domain_plan_ref":"plan-news-001"}),
+            ),
         ],
     );
     let mut selected = live_selected_worker_agent(base_url, freehand_config::ProviderType::OpenAi);
@@ -11789,6 +11952,7 @@ fn sourced_search_blocks_when_hosted_round_returns_no_typed_discovery() {
         .expect("missing hosted discovery must close the sourced-search turn");
     let first_request = rx.recv().expect("domain-plan request");
     let second_request = rx.recv().expect("hosted-discovery request");
+    let third_request = rx.recv().expect("web-fetch recovery request");
     handle.join().expect("join provider");
 
     assert!(
@@ -11801,7 +11965,33 @@ fn sourced_search_blocks_when_hosted_round_returns_no_typed_discovery() {
             .as_array()
             .is_some_and(|tools| tools.iter().any(|tool| tool["type"] == "web_search"))
     );
-    assert_eq!(outcome.rounds, 2);
+    assert!(
+        http_request_body_json(&third_request)["tools"]
+            .as_array()
+            .is_some_and(|tools| tools.iter().any(|tool| tool["name"] == "web_fetch")),
+        "missing hosted discovery must attempt web_fetch before blocking"
+    );
+    assert!(
+        !http_request_body_json(&third_request)["tools"]
+            .as_array()
+            .is_some_and(|tools| tools.iter().any(|tool| tool["type"] == "web_search"))
+    );
+    let _web_fetch_request = web_fetch_rx.recv().expect("web fetch recovery attempt");
+    web_fetch_handle.join().expect("join web fetch fixture");
+    assert!(
+        outcome
+            .turn
+            .tool_calls
+            .iter()
+            .any(|tool_call| tool_call.tool_call.tool_name.as_str() == "web_fetch"),
+        "hosted recovery must execute a typed web_fetch call"
+    );
+    assert!(outcome.turn.tool_results.iter().any(|tool_result| {
+        tool_result.tool_result.tool_call_id.as_str() == "call-web-fetch-recovery"
+            && tool_result.tool_result.status == ToolResultStatus::Failed
+            && tool_result.tool_result.output.contains("HTTP 500")
+    }));
+    assert_eq!(outcome.rounds, 3);
     assert_eq!(
         outcome
             .turn
@@ -11815,7 +12005,7 @@ fn sourced_search_blocks_when_hosted_round_returns_no_typed_discovery() {
             .turn
             .terminal_event
             .as_ref()
-            .is_some_and(|event| event.summary.contains("typed hosted discovery"))
+            .is_some_and(|event| event.summary.contains("web_fetch recovery"))
     );
     assert_eq!(
         outcome
@@ -11980,7 +12170,7 @@ fn sourced_search_with_typed_hosted_discovery_advances_to_supplement_decision() 
 }
 
 #[test]
-fn sourced_search_blocks_when_camo_round_returns_without_typed_verification() {
+fn sourced_search_attempts_web_fetch_before_blocking_missing_camo_verification() {
     let domain_plan = r#"<freehand_search_delivery>
 {"schema":"search_evidence.domain_plan.v1","delivery_id":"plan-news-camo-001","domain":"news","preferred_source_kinds":["official_publication","mainstream_news"],"social_platform_priority":["weibo","x"],"minimum_verified_sources":2,"policy_version":"2026-08-15"}
 </freehand_search_delivery>"#;
@@ -12025,12 +12215,22 @@ fn sourced_search_blocks_when_camo_round_returns_without_typed_verification() {
         }
     })
     .to_string();
+    let (web_fetch_url, web_fetch_rx, web_fetch_handle) = spawn_status_sequence_server(vec![(
+        500,
+        "text/plain",
+        "web fetch camo recovery unavailable".to_owned(),
+    )]);
     let (base_url, rx, handle) = spawn_sequence_server(
         "application/json",
         vec![
             openai_responses_continue_response(domain_plan, "continue to hosted discovery"),
             hosted_discovery,
             openai_responses_complete_response("camo verification was not observed"),
+            openai_responses_function_call_response(
+                "call-web-fetch-camo-recovery",
+                "web_fetch",
+                json!({"url":format!("{web_fetch_url}/unavailable"),"domain_plan_ref":"plan-news-camo-001"}),
+            ),
         ],
     );
     let mut selected = live_selected_worker_agent(base_url, freehand_config::ProviderType::OpenAi);
@@ -12045,9 +12245,31 @@ fn sourced_search_blocks_when_camo_round_returns_without_typed_verification() {
     let first_request = rx.recv().expect("domain-plan request");
     let second_request = rx.recv().expect("hosted-discovery request");
     let third_request = rx.recv().expect("camo-verification request");
+    let fourth_request = rx.recv().expect("web-fetch recovery request");
     handle.join().expect("join provider");
 
-    assert_eq!(outcome.rounds, 3);
+    assert!(
+        http_request_body_json(&fourth_request)["tools"]
+            .as_array()
+            .is_some_and(|tools| tools.iter().any(|tool| tool["name"] == "web_fetch")),
+        "missing camo verification must attempt web_fetch before blocking"
+    );
+    let _web_fetch_request = web_fetch_rx.recv().expect("web fetch recovery attempt");
+    web_fetch_handle.join().expect("join web fetch fixture");
+    assert!(
+        outcome
+            .turn
+            .tool_calls
+            .iter()
+            .any(|tool_call| tool_call.tool_call.tool_name.as_str() == "web_fetch"),
+        "camo recovery must execute a typed web_fetch call"
+    );
+    assert!(outcome.turn.tool_results.iter().any(|tool_result| {
+        tool_result.tool_result.tool_call_id.as_str() == "call-web-fetch-camo-recovery"
+            && tool_result.tool_result.status == ToolResultStatus::Failed
+            && tool_result.tool_result.output.contains("HTTP 500")
+    }));
+    assert_eq!(outcome.rounds, 4);
     assert_eq!(
         outcome
             .turn
@@ -12061,7 +12283,7 @@ fn sourced_search_blocks_when_camo_round_returns_without_typed_verification() {
             .turn
             .terminal_event
             .as_ref()
-            .is_some_and(|event| event.summary.contains("camo verification evidence"))
+            .is_some_and(|event| event.summary.contains("web_fetch recovery"))
     );
     assert!(
         !http_request_body_json(&first_request)["tools"]
@@ -12105,12 +12327,22 @@ fn live_bridge_does_not_mix_search_only_hosted_tool_with_master_functions() {
 
     assert!(
         LiveReasonExecutionRole::Master
-            .hosted_tool_definitions(&descriptor, LiveReasonExecutionProfile::Workspace, None)
+            .hosted_tool_definitions(
+                &descriptor,
+                LiveReasonExecutionProfile::Workspace,
+                None,
+                false
+            )
             .is_empty()
     );
     assert_eq!(
         LiveReasonExecutionRole::Worker
-            .hosted_tool_definitions(&descriptor, LiveReasonExecutionProfile::CleanSearch, None)
+            .hosted_tool_definitions(
+                &descriptor,
+                LiveReasonExecutionProfile::CleanSearch,
+                None,
+                false
+            )
             .len(),
         1
     );
@@ -12273,6 +12505,7 @@ fn clean_search_worker_profile_exposes_hosted_search_with_camo_only() {
         &registry,
         LiveReasonExecutionProfile::CleanSearch,
         None,
+        false,
     );
     assert_eq!(clean_search_tools.len(), 1);
     assert_eq!(clean_search_tools[0].name, "camo");
@@ -12280,26 +12513,42 @@ fn clean_search_worker_profile_exposes_hosted_search_with_camo_only() {
         LiveReasonExecutionRole::Worker.tool_schema_fingerprint(
             &registry,
             LiveReasonExecutionProfile::CleanSearch,
-            None
+            None,
+            false
         ),
         "clean-search:camo"
     );
     assert_eq!(
         LiveReasonExecutionRole::Worker
-            .hosted_tool_definitions(&descriptor, LiveReasonExecutionProfile::CleanSearch, None)
+            .hosted_tool_definitions(
+                &descriptor,
+                LiveReasonExecutionProfile::CleanSearch,
+                None,
+                false
+            )
             .len(),
         1
     );
 
     assert!(
         LiveReasonExecutionRole::Worker
-            .tool_definitions(&registry, LiveReasonExecutionProfile::Workspace, None)
+            .tool_definitions(
+                &registry,
+                LiveReasonExecutionProfile::Workspace,
+                None,
+                false
+            )
             .iter()
             .any(|tool| tool.name == "read_file")
     );
     assert_eq!(
         LiveReasonExecutionRole::Worker
-            .hosted_tool_definitions(&descriptor, LiveReasonExecutionProfile::Workspace, None)
+            .hosted_tool_definitions(
+                &descriptor,
+                LiveReasonExecutionProfile::Workspace,
+                None,
+                false
+            )
             .len(),
         1,
         "worker Workspace profile must expose hosted web search when provider supports function-tool mixing"

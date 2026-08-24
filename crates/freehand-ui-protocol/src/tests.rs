@@ -1445,6 +1445,76 @@ fn session_turn_page_command_validates_direction_cursor_and_limit() {
 }
 
 #[test]
+fn session_list_page_command_validates_direction_cursor_and_limit() {
+    let latest = UiCommand::QuerySessionListPage {
+        archived: false,
+        page: UiSessionListPageRequest {
+            direction: UiSessionListPageDirection::Latest,
+            cursor: None,
+            limit: 24,
+        },
+    };
+    validate_command(&latest).expect("latest list page");
+    let latest_wire = serde_json::to_string(&latest).expect("latest wire");
+    let latest_roundtrip: UiCommand = serde_json::from_str(&latest_wire).expect("latest roundtrip");
+    assert_eq!(latest, latest_roundtrip);
+
+    let older = UiCommand::QuerySessionListPage {
+        archived: false,
+        page: UiSessionListPageRequest {
+            direction: UiSessionListPageDirection::Older,
+            cursor: Some(
+                r#"{"last_activity_unix_seconds":200,"last_session_id":"session-a"}"#.to_owned(),
+            ),
+            limit: 24,
+        },
+    };
+    validate_command(&older).expect("older list page");
+    let older_wire = serde_json::to_string(&older).expect("older wire");
+    let older_roundtrip: UiCommand = serde_json::from_str(&older_wire).expect("older roundtrip");
+    assert_eq!(older, older_roundtrip);
+
+    let oversized = UiCommand::QuerySessionListPage {
+        archived: false,
+        page: UiSessionListPageRequest {
+            direction: UiSessionListPageDirection::Latest,
+            cursor: None,
+            limit: 101,
+        },
+    };
+    assert_eq!(
+        validate_command(&oversized).expect_err("list page limit"),
+        UiProtocolError::InvalidSessionListPageLimit
+    );
+
+    let latest_with_cursor = UiCommand::QuerySessionListPage {
+        archived: false,
+        page: UiSessionListPageRequest {
+            direction: UiSessionListPageDirection::Latest,
+            cursor: Some("cursor".to_owned()),
+            limit: 1,
+        },
+    };
+    assert_eq!(
+        validate_command(&latest_with_cursor).expect_err("latest cursor"),
+        UiProtocolError::InvalidSessionListPageCursor
+    );
+
+    let older_without_cursor = UiCommand::QuerySessionListPage {
+        archived: false,
+        page: UiSessionListPageRequest {
+            direction: UiSessionListPageDirection::Older,
+            cursor: None,
+            limit: 1,
+        },
+    };
+    assert_eq!(
+        validate_command(&older_without_cursor).expect_err("older cursor"),
+        UiProtocolError::InvalidSessionListPageCursor
+    );
+}
+
+#[test]
 fn session_search_query_is_runtime_owned_and_validated() {
     let command = UiCommand::QuerySessionSearch {
         query: "roadmap".to_owned(),

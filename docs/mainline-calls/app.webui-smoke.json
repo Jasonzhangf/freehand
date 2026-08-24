@@ -390,9 +390,9 @@
     },
     {
       "step": "11h",
-      "symbol_path": "internalRuntimeSessionId / topLevelPersistedSessions / renderMobileHomeDashboard / mobileHomeHistorySessions / compareSessionSummaryForDisplay / sessionSummaryTimeRank / taskKeepsSessionLifecycleRunning / activeSessionsForHome / renderMobileHomeActiveList / renderMobileHomeSessionList / mobileHomeHistorySessionNode / mobileHomeSessionButton / mobileHomeSessionMeta / mobileHomeSessionTimeLabel / renderHomeDashboardSurface / createHomeDashboardModel / createHomeSessionRow / renderToolsRegistrySurface / renderTimerDashboardSurface / createAdpClient / renderSettingsNavigation / openSettingsPage",
+    "symbol_path": "internalRuntimeSessionId / topLevelPersistedSessions / renderMobileHomeDashboard / mobileHomeHistorySessions / taskKeepsSessionLifecycleRunning / activeSessionsForHome / renderMobileHomeActiveList / renderMobileHomeSessionList / mobileHomeHistorySessionNode / mobileHomeSessionButton / mobileHomeSessionMeta / mobileHomeSessionTimeLabel / renderSettingsNavigation / openSettingsPage",
       "file_path": "apps/freehand-server/assets/webui/legacy-monolith.js",
-      "responsibility": "implement Phase 1 mobile UI tree presentation only: exclude internal 运行时 sessions from global session projections, render the home dashboard as exactly two page sections, 正在运行 plus persisted 历史会话, with running/static list classes, disjoint running/history session ids, every live session visible without a fixed cap, and no drawer or floating session overlay as the main session list; keep Timer and New Session as corner-entry surfaces outside the home body, split Home/Tools/Timer rendering into own surface modules plus a dedicated ADP client shell, and render a settings root whose first level is only 模型, 智能体运行时, 连接, 可观测性, 外观, and 关于 while 模型服务配置, provider switching and strategy, 模型组, token usage, skills, memory, MCP, env vars, 运行时 dirs, daemon connection, Worker capability, Android update/permissions, and logs remain child pages or rows",
+    "responsibility": "implement Phase 1 mobile UI tree presentation only: exclude internal 运行时 sessions from global session projections, render the home dashboard as exactly two page sections, 正在运行 plus persisted 历史会话, preserve owner-backed activity order without client sorting, keep running/history ids disjoint, show every live session without a fixed cap, and use no drawer or floating session overlay as the main session list; keep Timer and New Session as corner-entry surfaces outside the home body, split Home/Tools/Timer rendering into own surface modules plus a dedicated ADP client shell, and render a settings root whose first level is only 模型, 智能体运行时, 连接, 可观测性, 外观, and 关于 while model/provider/model-group/observability/connection/Android/log details remain child pages or rows",
       "input_semantic": "SessionList projection plus selected-session/task projections plus settings nav/back click state",
       "output_semantic": "global session list without worker-task, master-lifecycle, or master-timer entries; mobile home 正在运行 list excluding blocked-only stale lifecycle sessions; mobile home persisted 历史会话 list ordered by display time with no duplicate ids from the running list; no absolute/fixed session tree overlay; modular Home/Tools/Timer surface modules plus ADP client shell; settings root without provider/model/运行时/detail controls, duplicate implementation audit tree, or extra settings status card; drilldown pages with small hollow green 权威真源, orange partial, and red placeholder status markers",
       "caller": "WebUI shell",
@@ -678,6 +678,17 @@
       "binding_status": "bound"
     },
     {
+      "step": "11r",
+      "symbol_path": "refreshSessions / appendSessionListPage / loadOlderSessionListPage / scheduleSessionListPrefetch / renderSessions",
+      "file_path": "apps/freehand-server/assets/webui/legacy-monolith.js",
+      "responsibility": "query the owner-backed Latest session-list page with limit 24, append explicit Older pages through the returned cursor, prefetch only when idle, expose 加载更早, preserve request ordering, filter top-level persisted sessions without timestamp/sort inference, and keep partial list absence from proving deletion; explicit delete receipts remain deletion evidence until refresh",
+      "input_semantic": "UiSessionListPageProjection, operator load/prefetch/delete intent, and current page state",
+      "output_semantic": "bounded Home/drawer history projection with an explicit older control, stale-response rejection, unavailable-session facts not blocking other rows, and no full transcript restore for listing",
+      "caller": "WebUI startup/foreground/session mutation callbacks",
+      "callee": "QuerySessionListPage through generated ADP constructors",
+      "binding_status": "bound"
+    },
+    {
       "step": "11i-module-timer-view",
       "symbol_path": "renderTimerDashboardSurface",
       "file_path": "apps/freehand-server/assets/webui/surfaces/timer-dashboard/view.js",
@@ -814,6 +825,7 @@
     "WebUI 工具面板 now queries QueryToolRegistry, renders owner projection rows and guidance, proves no local web_search function row, and keeps session-specific tool turns in conversation rendering instead of this registry/设置 surface",
     "WebUI 搜索面板 now queries QuerySessionSearch, renders owner persisted session rows plus nested 工作器子项 matches, and keeps global session history free of worker/subagent temporary sessions",
     "generated wiki must be regenerated from `docs/mainline-calls/app.webui-smoke.json` when this function-map truth changes",
+    "global session history now consumes bounded QuerySessionListPage projections and does not infer ordering or deletion from client-side timestamps or partial absence",
     "WebUI 取消 button and Escape key now send CancelTurn through protocol command ingress instead of only clearing local input",
     "WebUI cancel path now covers the submit-in-flight window with CancelLatestActiveTurn",
     "scripts/verify-webui-stop-continue-online.mjs proves fixed-session provider retry renders before 取消, cancellation materializes ADP cancelled truth and clears browser live state before retry backoff completes, the cancelled card remains visible, a later prompt appends a distinct Success turn in the same persisted session, and no random persisted session id is created",

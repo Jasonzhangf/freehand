@@ -38,9 +38,11 @@ use thiserror::Error;
 
 pub use persistence::{
     ActiveTurnSnapshot, PersistedSessionIndexEntry, PersistedSessionMetadataEntry,
-    PersistedSessionView, ProviderRawLedgerRow, ProviderRawLedgerWrite, ProviderRawScenePosition,
-    ReasonLedgerPayload, ReasonLedgerRow, ReasonPersistence, ReasonPersistenceCursor,
-    ReasonPersistenceError, ReasonTurnPage, ReasonTurnPageDirection, ReasonTurnPageRequest,
+    PersistedSessionSummary, PersistedSessionSummaryIndex, PersistedSessionView,
+    ProviderRawLedgerRow, ProviderRawLedgerWrite, ProviderRawScenePosition, ReasonLedgerPayload,
+    ReasonLedgerRow, ReasonPersistence, ReasonPersistenceCursor, ReasonPersistenceError,
+    ReasonSessionLatestStatus, ReasonSessionListCursor, ReasonSessionListPage,
+    ReasonSessionListPageRequest, ReasonTurnPage, ReasonTurnPageDirection, ReasonTurnPageRequest,
     RestoredReasonSession, SessionRollbackMarker,
 };
 pub use rewrite_runtime::{

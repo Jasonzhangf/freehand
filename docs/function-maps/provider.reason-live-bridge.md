@@ -95,6 +95,11 @@
   cwd, forbids `shell`/`bash`/`readlink`/`pwd`/`cat`/`find` guesses, and gives
   first-call path patterns such as `ls` before `read_file`; Worker capability
   guidance also names `web_fetch` for known HTTP/HTTPS URLs
+- sourced-search hosted/camo/social failure enters exactly one recovery round;
+  that round removes hosted search and normal camo tools and exposes only
+  concrete-URL `web_fetch`. A successful fetch is discovery evidence, not
+  verification, and still requires camo; a failed or unusable recovery writes
+  Blocked immediately without another provider round.
 - runtime emits provider-request lifecycle debug snapshots through `debug.core` without provider payload text
 - provider-core `ProviderLiveExecutor` runs concrete HTTP/SSE executor requests through raw-capable callbacks owned by the adapter crates so runtime can capture debug-only provider raw bodies/events before semantic parsing
 - stream mode applies outputs incrementally through the executor callback path before the provider response completes
@@ -139,6 +144,8 @@
 - completed/blocked schema writes terminal truth through `ReasonTurnEngine::submit_completion`
 - terminal turns are materialized through `ReasonPersistence::record_turn_closed`
 - schema retry exhaustion writes blocked terminal truth through `ReasonTurnEngine::block_turn`
+- sourced-search recovery exhaustion also writes blocked terminal truth through
+  `ReasonTurnEngine::block_turn` only after the one-shot `web_fetch` attempt has failed or produced no usable source
 - runtime drains both reason-owned and runtime-owned debug snapshots through one shared `DebugHub` hook path
 - bridge returns final turn truth, all round turns, captured broadcast events, schema rejection ledger, tool execution count, restore status, and live-output summary without leaking wire DTOs
 - runtime callers project the final turn into `UiProtocolState` from one shared runtime owner path

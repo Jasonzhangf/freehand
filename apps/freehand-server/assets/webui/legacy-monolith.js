@@ -256,6 +256,12 @@ const state = {
   turn: null,
   sessions: [],
   sessionListLoaded: false,
+  sessionListNextCursor: null,
+  sessionListHasOlder: false,
+  sessionListOlderInFlight: false,
+  sessionListRequestSequence: 0,
+  sessionListPendingPages: [],
+  sessionListDeletedIds: new Set(),
   selectedSessionIds: new Set(),
   selectedSessionId: initialSelectedSessionId,
   selectedCwd: initialSelectedCwd,
@@ -4269,21 +4275,19 @@ async function startNewTask(options = {}) {
 }
 
 function setSessionList(projection) {
-  state.sessions = topLevelPersistedSessions((projection && projection.sessions) || []);
-  state.sessionListLoaded = true;
-  const knownSessionIds = new Set(state.sessions.map((session) => session.session_id));
-  for (const sessionId of Array.from(state.selectedSessionIds)) {
-    if (!knownSessionIds.has(sessionId)) {
-      state.selectedSessionIds.delete(sessionId);
+  for (const sessionId of state.sessionListDeletedIds) {
+    state.selectedSessionIds.delete(sessionId);
+    if (state.selectedSessionId === sessionId) {
+      setSelectedSessionId(null);
     }
   }
-  if (
-    state.selectedSessionId &&
-    !isDraftSessionId(state.selectedSessionId) &&
-    !sessionTruthAllowsSessionId(state.selectedSessionId)
-  ) {
-    setSelectedSessionId(null);
-  }
+  state.sessions = topLevelPersistedSessions((projection && projection.sessions) || [])
+    .filter((session) => !state.sessionListDeletedIds.has(session.session_id));
+  state.sessionListLoaded = true;
+  state.sessionListHasOlder = !!(projection && projection.page && projection.page.has_older);
+  state.sessionListNextCursor =
+    (projection && projection.page && projection.page.next_cursor) || null;
+  state.sessionListPendingPages = [];
   if (state.sessions.length === 0 && !state.draftSessionId && !state.submitInFlight && !state.pendingUserInput) {
     clearLocalConversationTruth();
   } else if (state.turn && !sessionTruthAllowsTurn(state.turn)) {
@@ -4365,6 +4369,7 @@ async function deleteSelectedSessions() {
     for (const sessionId of sessionIds) {
       dispatchWebUiEdge("home.delete_session", { session_id: sessionId });
       await adpCommand(adpCommandOf("DeleteSession", { session_id: sessionId }));
+      state.sessionListDeletedIds.add(sessionId);
     }
     const deletedSelected = sessionIds.includes(state.selectedSessionId);
     state.selectedSessionIds.clear();
@@ -4597,6 +4602,12 @@ function sessionTruthAllowsSessionId(sessionId) {
     return true;
   }
   if (!state.sessionListLoaded) {
+    return true;
+  }
+  if (state.sessionListDeletedIds.has(sessionId)) {
+    return false;
+  }
+  if (state.sessionListHasOlder || state.sessionListPendingPages.length > 0) {
     return true;
   }
   return (
@@ -6093,6 +6104,19 @@ function renderSessions() {
   }
   sessionList.replaceChildren();
   renderSessionBulkToolbar();
+  if (state.sessionListPendingPages.length > 0 || state.sessionListHasOlder) {
+    const older = document.createElement("button");
+    older.type = "button";
+    older.className = "session-list-older";
+    older.textContent = state.sessionListOlderInFlight ? "加载中..." : "加载更早";
+    older.disabled = state.sessionListOlderInFlight;
+    older.addEventListener("click", () => {
+      loadOlderSessionListPage().catch((error) => {
+        setCommandStatus(`加载更早会话失败：${error.message}`, { stickyMs: 8000 });
+      });
+    });
+    sessionList.appendChild(older);
+  }
   if (state.sessions.length === 0) {
     if (state.draftSessionId) {
       renderDraftSessionItem();
@@ -6180,7 +6204,7 @@ function mobileHomeHistorySessions(activeSessions = activeSessionsForHome()) {
   );
   return (state.sessions || [])
     .filter((session) => session && session.session_id && !activeSessionIds.has(session.session_id))
-    .sort(compareSessionSummaryForDisplay);
+    ;
 }
 
 function mobileHomeHistoryBuckets(sessions) {
@@ -6197,7 +6221,7 @@ function mobileHomeHistoryBuckets(sessions) {
 }
 
 function mobileHomeHistoryBucketId(session, nowMs = Date.now()) {
-  const rank = sessionSummaryTimeRank(session);
+  const rank = Number(session && session.activity_unix_seconds) * 1000;
   if (!Number.isFinite(rank) || rank < 1000000000000) {
     return "older";
   }
@@ -6208,35 +6232,6 @@ function mobileHomeHistoryBucketId(session, nowMs = Date.now()) {
   }
   const weekStart = todayStart - 6 * 24 * 60 * 60 * 1000;
   return rank >= weekStart ? "week" : "older";
-}
-
-function compareSessionSummaryForDisplay(left, right) {
-  const leftTime = sessionSummaryTimeRank(left);
-  const rightTime = sessionSummaryTimeRank(right);
-  if (leftTime !== rightTime) {
-    return rightTime - leftTime;
-  }
-  return `${right && right.session_id || ""}`.localeCompare(`${left && left.session_id || ""}`);
-}
-
-function sessionSummaryTimeRank(session) {
-  const latestTurn = latestSessionTurnMatching(session && session.session_id);
-  const turnCreatedAt = timestampToMilliseconds(latestTurn && latestTurn.created_at) || 0;
-  if (turnCreatedAt) {
-    return turnCreatedAt;
-  }
-  const id = `${(session && session.session_id) || ""}`;
-  const stamp = id.match(/(20\d{12})/);
-  if (stamp) {
-    const raw = stamp[1];
-    const iso = `${raw.slice(0, 4)}-${raw.slice(4, 6)}-${raw.slice(6, 8)}T${raw.slice(8, 10)}:${raw.slice(10, 12)}:${raw.slice(12, 14)}Z`;
-    const parsed = Date.parse(iso);
-    if (Number.isFinite(parsed)) {
-      return parsed;
-    }
-  }
-  const turnOrdinal = turnOrderKey(session && session.latest_turn_id).ordinal || 0;
-  return turnOrdinal;
 }
 
 function activeSessionsForHome() {
@@ -6251,9 +6246,7 @@ function activeSessionsForHome() {
   if (selectedObservation && selectedObservation.sessionId) {
     bySession.set(selectedObservation.sessionId, selectedObservation);
   }
-  return Array.from(bySession.values()).sort((left, right) =>
-    compareSessionSummaryForDisplay(sessionSummaryById(left.sessionId), sessionSummaryById(right.sessionId))
-  );
+  return Array.from(bySession.values());
 }
 
 
@@ -6306,6 +6299,7 @@ async function deleteSessionFromHome(sessionId) {
   setCommandStatus("正在移除会话...", { stickyMs: 5000 });
   try {
     await adpCommand(adpCommandOf("DeleteSession", { session_id: sessionId }));
+    state.sessionListDeletedIds.add(sessionId);
     state.selectedSessionIds.delete(sessionId);
     if (state.selectedSessionId === sessionId) {
       setSelectedSessionId(null);
@@ -6336,13 +6330,11 @@ function mobileHomeSessionMeta(session) {
 }
 
 function mobileHomeSessionTimeLabel(session) {
-  const latestTurn = latestSessionTurnMatching(session && session.session_id);
-  const createdAt = timestampToMilliseconds(latestTurn && latestTurn.created_at);
+  const createdAt = Number(session && session.activity_unix_seconds) * 1000;
   if (createdAt) {
     return localChatTimeLabel(createdAt);
   }
-  const rank = sessionSummaryTimeRank(session);
-  return rank > 1000000000000 ? localChatTimeLabel(rank) : "时间未知";
+  return "时间未知";
 }
 
 function renderSettingsDiagnostics() {
@@ -9296,9 +9288,90 @@ async function refreshTurn() {
 }
 
 async function refreshSessions() {
-  const result = await adpQuery(adpQueryOf("QuerySessionList"));
-  setSessionList(variantPayload(result, "SessionList") || { sessions: [] });
+  const requestSequence = state.sessionListRequestSequence + 1;
+  state.sessionListRequestSequence = requestSequence;
+  const result = await adpQuery(adpQueryOf("QuerySessionListPage", {
+    archived: false,
+    page: { direction: "Latest", limit: 24 },
+  }));
+  if (state.sessionListRequestSequence !== requestSequence) {
+    return;
+  }
+  const projection = variantPayload(result, "SessionListPage") || {
+    sessions: [],
+    page: { has_older: false, next_cursor: null, unavailable_sessions: [] },
+  };
+  setSessionList(projection);
   renderAll();
+  scheduleSessionListPrefetch();
+}
+
+function scheduleSessionListPrefetch() {
+  if (
+    !state.sessionListHasOlder ||
+    state.sessionListOlderInFlight ||
+    typeof window.requestIdleCallback !== "function"
+  ) {
+    return;
+  }
+  window.requestIdleCallback(() => {
+    loadOlderSessionListPage({ prefetch: true }).catch(() => {});
+  });
+}
+
+async function loadOlderSessionListPage(options = {}) {
+  if (state.sessionListOlderInFlight) {
+    return;
+  }
+  const pendingCount = state.sessionListPendingPages.length;
+  if (!options.prefetch && pendingCount > 0) {
+    const pending = state.sessionListPendingPages.flat();
+    state.sessionListPendingPages = [];
+    appendSessionListPage(pending);
+    renderAll();
+    return;
+  }
+  if (!state.sessionListHasOlder || !state.sessionListNextCursor) {
+    return;
+  }
+  state.sessionListOlderInFlight = true;
+  renderSessions();
+  try {
+    const result = await adpQuery(adpQueryOf("QuerySessionListPage", {
+      archived: false,
+      page: {
+        direction: "Older",
+        cursor: state.sessionListNextCursor,
+        limit: 24,
+      },
+    }));
+    const projection = variantPayload(result, "SessionListPage");
+    if (!projection) {
+      return;
+    }
+    if (options.prefetch) {
+      state.sessionListPendingPages.push(topLevelPersistedSessions(projection.sessions || []));
+      state.sessionListHasOlder = !!projection.page?.has_older;
+      state.sessionListNextCursor = projection.page?.next_cursor || null;
+      return;
+    }
+    appendSessionListPage(topLevelPersistedSessions(projection.sessions || []));
+    state.sessionListHasOlder = !!projection.page?.has_older;
+    state.sessionListNextCursor = projection.page?.next_cursor || null;
+  } finally {
+    state.sessionListOlderInFlight = false;
+    renderAll();
+  }
+}
+
+function appendSessionListPage(sessions) {
+  const known = new Set(state.sessions.map((session) => session.session_id));
+  state.sessions = [
+    ...state.sessions,
+    ...topLevelPersistedSessions(sessions).filter(
+      (session) => !known.has(session.session_id),
+    ),
+  ];
 }
 
 async function refreshSelectedSession() {

@@ -139,6 +139,10 @@ pub enum UiProtocolError {
     InvalidTurnPageLimit,
     #[error("session turn page cursor is invalid")]
     InvalidTurnPageCursor,
+    #[error("session list page limit must be between 1 and 100")]
+    InvalidSessionListPageLimit,
+    #[error("session list page cursor is invalid")]
+    InvalidSessionListPageCursor,
 }
 
 #[derive(Debug, Error, PartialEq, Eq)]

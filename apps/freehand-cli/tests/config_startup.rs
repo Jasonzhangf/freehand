@@ -475,6 +475,7 @@ fn spawn_adp_session_mock_server() -> (String, thread::JoinHandle<()>) {
                                 result: UiQueryResult::SessionList(UiSessionListProjection {
                                     sessions: vec![UiSessionSummary {
                                         session_id: SessionId::new("cli-session"),
+                                        activity_unix_seconds: 1,
                                         title: None,
                                         archived: false,
                                         cwd: Some("/tmp/cli-session".to_owned()),

@@ -409,6 +409,22 @@ body.theme-dark .inspector-block {
   background: rgba(255, 255, 255, 0.34);
 }
 
+.session-list-older {
+  width: 100%;
+  min-height: 30px;
+  margin-bottom: 6px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: transparent;
+  color: var(--text-soft);
+  cursor: pointer;
+}
+
+.session-list-older:disabled {
+  cursor: default;
+  opacity: 0.65;
+}
+
 .session-row {
   display: grid;
   grid-template-columns: auto minmax(0, 1fr);

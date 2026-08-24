@@ -1,0 +1,18 @@
+{
+  "schema_version": 1,
+  "verification_map_id": "app.webui-smoke.verification",
+  "feature_id": "app.webui-smoke",
+  "status": "active",
+  "module_registry": "docs/module-registry/app.webui-smoke.json",
+  "function_map": "docs/function-maps/app.webui-smoke.md",
+  "mainline_call_map": "docs/mainline-calls/app.webui-smoke.json",
+  "test_design": "docs/testing/app.webui-smoke.md",
+  "gates": [
+    {"gate_id":"app.webui-smoke.unit","kind":"test","command":"cargo test -p freehand-server --lib webui -- --nocapture","binding_status":"active"},
+    {"gate_id":"app.webui-smoke.syntax","kind":"build","command":"node --check apps/freehand-server/assets/webui/legacy-monolith.js","binding_status":"active"},
+    {"gate_id":"app.webui-smoke.clippy","kind":"lint","command":"cargo clippy -p freehand-server --all-targets -- -D warnings","binding_status":"active"},
+    {"gate_id":"app.webui-smoke.browser","kind":"project-blackbox","command":"node scripts/verify-webui-mobile-ui-tree-online.mjs","binding_status":"active"},
+    {"gate_id":"app.webui-smoke.mainline","kind":"architecture","command":"cargo run -p xtask -- mainlines check","binding_status":"active"},
+    {"gate_id":"app.webui-smoke.architecture","kind":"architecture","command":"cargo run -p xtask -- gates check","binding_status":"active"}
+  ]
+}

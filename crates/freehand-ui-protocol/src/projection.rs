@@ -241,6 +241,7 @@ pub(crate) fn session_list_projection(
                 turn_order_key(&left.turn_id).cmp(&turn_order_key(&right.turn_id))
             });
             let latest = session_turns.last().copied();
+            let activity_unix_seconds = latest.and_then(|turn| turn.created_at).unwrap_or(0);
             let active_turn_id = latest_active_turn_id.and_then(|turn_id| {
                 session_turns
                     .iter()
@@ -258,6 +259,7 @@ pub(crate) fn session_list_projection(
                 .or_else(|| latest.and_then(|turn| turn.cwd.clone()));
             UiSessionSummary {
                 session_id: metadata.session_id.clone(),
+                activity_unix_seconds,
                 title: metadata.title.clone(),
                 archived: metadata.archived,
                 cwd,

@@ -99,6 +99,10 @@ pub enum UiCommand {
     },
     QuerySessionList,
     QueryArchivedSessionList,
+    QuerySessionListPage {
+        archived: bool,
+        page: UiSessionListPageRequest,
+    },
     QuerySessionTurns {
         session_id: SessionId,
     },
@@ -634,6 +638,7 @@ pub struct UiPublicTurnProjection {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct UiSessionSummary {
     pub session_id: SessionId,
+    pub activity_unix_seconds: u64,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub title: Option<String>,
     #[serde(default)]
@@ -650,6 +655,34 @@ pub struct UiSessionSummary {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct UiSessionListProjection {
     pub sessions: Vec<UiSessionSummary>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum UiSessionListPageDirection {
+    Latest,
+    Older,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct UiSessionListPageRequest {
+    pub direction: UiSessionListPageDirection,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub cursor: Option<String>,
+    pub limit: usize,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct UiSessionListPageInfo {
+    pub has_older: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub next_cursor: Option<String>,
+    pub unavailable_sessions: Vec<SessionId>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct UiSessionListPageProjection {
+    pub sessions: Vec<UiSessionSummary>,
+    pub page: UiSessionListPageInfo,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

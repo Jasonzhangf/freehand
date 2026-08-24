@@ -917,6 +917,17 @@
       "binding_status": "bound"
     },
     {
+      "step": "38",
+      "symbol_path": "UiCommand::QuerySessionListPage / UiSessionListPageRequest / UiSessionListPageInfo / UiSessionListPageProjection / validate_command",
+      "file_path": "crates/freehand-ui-protocol/src/dto.rs / crates/freehand-ui-protocol/src/validate.rs",
+      "responsibility": "define bounded metadata-only session-list page DTOs, expose the public ADP query descriptor, and validate limit plus latest/older cursor rules before runtime dispatch",
+      "input_semantic": "archived flag plus Latest/older direction, optional owner cursor, and 1..=100 limit",
+      "output_semantic": "validated paged session-list intent routed to runtime.ui-command-dispatch; owner supplies ordered summaries and unavailable-session facts",
+      "caller": "WebUI/ADP query transport",
+      "callee": "runtime.ui-command-dispatch",
+      "binding_status": "bound"
+    },
+    {
       "step": "18a",
       "symbol_path": "UI_COMMAND_DESCRIPTORS / command_descriptor / adp_protocol_manifest / adp_protocol_webui_module",
       "file_path": "crates/freehand-ui-protocol/src/adp_wire.rs",
@@ -974,6 +985,7 @@
     "Search dashboard query/result DTOs are landed and locked by `cargo test -p freehand-ui-protocol session_search -- --nocapture --test-threads=1`; protocol-state local query rejection proves runtime/reason owners supply the search projection",
     "Diagnostics query/result DTOs are landed and locked by cargo test -p freehand-ui-protocol diagnostics_query -- --nocapture; protocol-state local query rejection proves runtime/debug owners supply the diagnostics projection.",
     "CompactSessionContext mutation command DTO is landed, owner-routed to reason.rewrite-policy, validated for non-empty session id, and locked by compact_session_context_roundtrips_through_wire_and_validates plus runtime_compact_session_context_hold_when_no_provider_summary_payload and runtime_compact_session_context_rejects_missing_recovery_truth_explicitly; runtime/reason.rewrite-policy owners supply the policy/rewrite outcome and the dispatch receipt never fabricates a rewrite result",
-    "PullAccountConfig/PushAccountConfig command DTOs and UiAccountConfigSyncProjection are landed in dto.rs, exposed through the ADP descriptor, and consumed by the WebUI Settings connectivity card; protocol-state local queries reject runtime-owned sync state"
+    "PullAccountConfig/PushAccountConfig command DTOs and UiAccountConfigSyncProjection are landed in dto.rs, exposed through the ADP descriptor, and consumed by the WebUI Settings connectivity card; protocol-state local queries reject runtime-owned sync state",
+    "QuerySessionListPage DTOs and ADP descriptor are landed with positive wire roundtrip plus reverse validation for oversized limits, Latest cursors, and Older requests without a cursor; runtime/reason owners supply page truth"
   ]
 }

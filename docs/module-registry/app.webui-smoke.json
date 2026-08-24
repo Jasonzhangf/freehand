@@ -1,0 +1,37 @@
+{
+  "schema_version": 1,
+  "registry_id": "app.webui-smoke.modules",
+  "feature_id": "app.webui-smoke",
+  "status": "active",
+  "coverage_roots": [
+    "apps/freehand-server/assets/webui.css",
+    "apps/freehand-server/assets/webui/generated/adp-protocol.js",
+    "apps/freehand-server/assets/webui/legacy-monolith.js",
+    "apps/freehand-server/src/assets.rs"
+  ],
+  "modules": [
+    {
+      "module_id": "app.webui-smoke.session-paging-surface",
+      "owner_feature_id": "app.webui-smoke",
+      "status": "active",
+      "owned_paths": [
+        "apps/freehand-server/assets/webui.css",
+        "apps/freehand-server/assets/webui/generated/adp-protocol.js",
+        "apps/freehand-server/assets/webui/legacy-monolith.js",
+        "apps/freehand-server/src/assets.rs"
+      ],
+      "allowed_dependencies": [
+        "rust.std",
+        "third_party.axum"
+      ],
+      "forbidden_dependencies": [
+        "freehand-config",
+        "freehand-reason",
+        "freehand-runtime"
+      ]
+    }
+  ],
+  "declared_edges": [
+    {"edge_id":"app.webui-smoke.session-paging-surface.import_third-party-axum","from_module_id":"app.webui-smoke.session-paging-surface","to_module_id":"third_party.axum","import_name":"axum"}
+  ]
+}

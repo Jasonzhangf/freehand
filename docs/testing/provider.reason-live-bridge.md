@@ -183,6 +183,7 @@
     concurrency/flow-control guidance, task tool workflow, and the
     cross-workspace sample without adding extra task/deep-research tools
   - clean_search Worker profile carries hosted `web_search` only, omits function tools, and avoids local AGENTS/skill scanning
+  - sourced-search hosted-discovery failure and camo-verification failure each enter exactly one recovery provider round; that request contains only `web_fetch`, omits hosted `web_search` and normal function tools, and a failed HTTP fetch produces paired failed tool-result truth before immediate Blocked
   - structured task execution fact results are rendered from Task Center event semantics before re-entering provider context
   - provider raw ledger path poisoning returns explicit `RuntimeLiveBridgeError::ReasonPersistenceFailed`
   - reason-turn provider-output apply failure returns explicit dispatch failure when the reason owner rejects mutation
@@ -191,6 +192,7 @@
   - CLI can prove real provider -> reason -> tool -> reason -> persistence from the app boundary
   - daemon can prove HTTP command ingress -> runtime live bridge -> provider -> reason -> persistence -> UI query/SSE projection
   - daemon can prove provider-hosted OpenAI Responses search declaration/observation without using `web_fetch` as a broad-search substitute
+  - `cargo test -p freehand-runtime sourced_search_attempts_web_fetch -- --nocapture --test-threads=1` proves the one-shot hosted/camo-to-web-fetch recovery surface, failed tool result, immediate Blocked terminal, and absence of an extra post-recovery round
 - fixtures / replay inputs / runtime evidence paths:
   - `crates/freehand-provider-anthropic/fixtures/minimonth_messages_single.json`
   - `crates/freehand-provider-anthropic/fixtures/minimonth_messages_stream.sse`
