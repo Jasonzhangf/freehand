@@ -1,4 +1,4 @@
-.PHONY: provision-openminis-source build fmt clippy test mainlines gates relay-deployment-smoke relay-local-online relay-account-config-smoke launchd-guard-offline launchd-guard-online launchd-guards ci verify-webui-online verify-webui-release-online release install-global install-symlink install-launchd install-launchdS install-worker-launchd install-worker-launchdS restart-launchd restart-launchdS restart-worker-launchd restart-worker-launchdS uninstall-launchd uninstall-launchdS uninstall-worker-launchd uninstall-worker-launchdS launchd-status launchd-statusS worker-launchd-status worker-launchd-statusS launchd-logs launchd-logsS worker-launchd-logs worker-launchd-logsS hooks
+.PHONY: provision-openminis-source build fmt clippy test mainlines gates relay-deployment-smoke relay-local-online relay-account-config-smoke launchd-guard-offline launchd-guard-online launchd-guards ci verify-webui-online verify-webui-surface-motion-online verify-webui-release-online release install-global install-symlink install-launchd install-launchdS install-worker-launchd install-worker-launchdS restart-launchd restart-launchdS restart-worker-launchd restart-worker-launchdS uninstall-launchd uninstall-launchdS uninstall-worker-launchd uninstall-worker-launchdS launchd-status launchd-statusS worker-launchd-status worker-launchd-statusS launchd-logs launchd-logsS worker-launchd-logs worker-launchd-logsS hooks
 .PHONY: dev pre-push-fast nightly
 
 # Build/test tiers (from fastest to slowest):
@@ -77,10 +77,13 @@ pre-push-fast: provision-openminis-source
 
 ci: provision-openminis-source build fmt clippy test mainlines gates relay-deployment-smoke relay-local-online relay-account-config-smoke launchd-guards
 
-nightly: ci verify-webui-online verify-webui-release-online
+nightly: ci verify-webui-online verify-webui-surface-motion-online verify-webui-release-online
 
 verify-webui-online:
 	scripts/verify-webui-online.sh
+
+verify-webui-surface-motion-online:
+	node scripts/verify-webui-surface-motion-online.mjs
 
 verify-webui-release-online:
 	scripts/verify-webui-release-online.sh

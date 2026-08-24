@@ -10,6 +10,7 @@ import { chooseNewTaskDirectory as chooseNewTaskDirectoryFromSurface, openNewSes
 import { setSelectedSessionId as setSelectedSessionIdInSurface, clearConversationForSessionSwitch as clearConversationForSessionSwitchInSurface, switchConversationSession as switchConversationSessionInSurface } from "./surfaces/session-detail/index.js?v=__WEBUI_ASSET_VERSION__";
 import { HISTORICAL_FAILURE_RECOVERED, historicalFailureRecoveredLifecycle, historicalFailureRecoveredRows, historicalRecoveryProjectionChanged, recoveredHistoricalWorkerFailureTurnIds } from "./surfaces/session-detail/recovery.js?v=__WEBUI_ASSET_VERSION__";
 import { createAdpClient, settleAdpResponseFrame } from "./app-shell/adp-client.js?v=__WEBUI_ASSET_VERSION__";
+import { bindAnimatedDialogCancel, closeAnimatedDialog, openAnimatedDialog } from "./app-shell/dialog-motion.js?v=__WEBUI_ASSET_VERSION__";
 import { adpCommandOf, adpQueryOf, adpSubscribeOf } from "./generated/adp-protocol.js?v=__WEBUI_ASSET_VERSION__";
 
 export const classifyLayoutShape = window.__freehandLayout.classifyLayoutShape;
@@ -533,21 +534,24 @@ function closeVisibleNavigationSurface() {
     return true;
   }
   if (sessionSearchDialog && sessionSearchDialog.open) {
-    sessionSearchDialog.close();
-    dispatchWebUiEdge("root.open_home");
-    renderAll();
+    closeAnimatedDialog(sessionSearchDialog, () => {
+      dispatchWebUiEdge("root.open_home");
+      renderAll();
+    });
     return true;
   }
   if (toolsDashboardDialog && toolsDashboardDialog.open) {
-    toolsDashboardDialog.close();
-    dispatchWebUiEdge("root.open_home");
-    renderAll();
+    closeAnimatedDialog(toolsDashboardDialog, () => {
+      dispatchWebUiEdge("root.open_home");
+      renderAll();
+    });
     return true;
   }
   if (timerDashboardDialog && timerDashboardDialog.open) {
-    timerDashboardDialog.close();
-    dispatchWebUiEdge("root.open_home");
-    renderAll();
+    closeAnimatedDialog(timerDashboardDialog, () => {
+      dispatchWebUiEdge("root.open_home");
+      renderAll();
+    });
     return true;
   }
   if (state.sessionTreeOpen) {
@@ -8073,16 +8077,14 @@ function openSessionSearchResult(sessionId) {
   if (!sessionId) {
     return;
   }
-  sessionSearchDialog?.close();
+  closeAnimatedDialog(sessionSearchDialog);
   closeMobileDrawer();
   switchConversationSession(sessionId, { edgeId: "search.open_result", payload: { session_id: sessionId } });
 }
 
 async function openSessionSearchDashboard() {
   dispatchWebUiEdge("home.open_search");
-  if (sessionSearchDialog && typeof sessionSearchDialog.showModal === "function" && !sessionSearchDialog.open) {
-    sessionSearchDialog.showModal();
-  }
+  openAnimatedDialog(sessionSearchDialog);
   window.setTimeout(() => sessionSearchInput?.focus(), 0);
   renderSessionSearchDashboard();
 }
@@ -10030,8 +10032,7 @@ if (openTimerDashboardButton) {
 }
 if (timerDashboardCloseButton) {
   timerDashboardCloseButton.addEventListener("click", () => {
-    timerDashboardDialog?.close();
-    dispatchWebUiEdge("root.open_home");
+    closeAnimatedDialog(timerDashboardDialog, () => dispatchWebUiEdge("root.open_home"));
   });
 }
 if (timerDashboardRefreshButton) {
@@ -10056,8 +10057,7 @@ if (openToolsDashboardButton) {
 }
 if (toolsDashboardCloseButton) {
   toolsDashboardCloseButton.addEventListener("click", () => {
-    toolsDashboardDialog?.close();
-    dispatchWebUiEdge("root.open_home");
+    closeAnimatedDialog(toolsDashboardDialog, () => dispatchWebUiEdge("root.open_home"));
   });
 }
 if (toolsDashboardRefreshButton) {
@@ -10067,8 +10067,7 @@ if (toolsDashboardRefreshButton) {
 }
 if (sessionSearchCloseButton) {
   sessionSearchCloseButton.addEventListener("click", () => {
-    sessionSearchDialog?.close();
-    dispatchWebUiEdge("root.open_home");
+    closeAnimatedDialog(sessionSearchDialog, () => dispatchWebUiEdge("root.open_home"));
   });
 }
 if (sessionSearchForm) {
@@ -10239,6 +10238,19 @@ if (closeDetailDrawerButton) {
 if (mobileDrawerScrim) {
   mobileDrawerScrim.addEventListener("click", closeMobileOverlays);
 }
+bindAnimatedDialogCancel(newSessionDialog, closeNewSessionDialog);
+bindAnimatedDialogCancel(timerDashboardDialog, () => {
+  dispatchWebUiEdge("root.open_home");
+  renderAll();
+});
+bindAnimatedDialogCancel(toolsDashboardDialog, () => {
+  dispatchWebUiEdge("root.open_home");
+  renderAll();
+});
+bindAnimatedDialogCancel(sessionSearchDialog, () => {
+  dispatchWebUiEdge("root.open_home");
+  renderAll();
+});
 if (newSessionForm) {
   newSessionForm.addEventListener("change", (event) => {
     if (event.target && event.target.name === "new-session-kind") {

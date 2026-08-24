@@ -1,6 +1,14 @@
 * { box-sizing: border-box; }
 
 :root {
+  --surface-open-duration: 210ms;
+  --surface-close-duration: 150ms;
+  --surface-open-ease: cubic-bezier(0.22, 1, 0.36, 1);
+  --surface-close-ease: ease;
+  --surface-scale-from: 0.96;
+}
+
+:root {
   --mobile-agent-bg: #f5f5f5;
   --mobile-agent-panel: #ffffff;
   --mobile-agent-panel-soft: #fafafa;
@@ -31,6 +39,23 @@ body {
 button,
 textarea {
   font: inherit;
+}
+
+button:focus-visible,
+a:focus-visible,
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible {
+  outline: 2px solid var(--master);
+  outline-offset: 2px;
+}
+
+body.theme-dark button:focus-visible,
+body.theme-dark a:focus-visible,
+body.theme-dark input:focus-visible,
+body.theme-dark select:focus-visible,
+body.theme-dark textarea:focus-visible {
+  outline-color: var(--logo-green);
 }
 
 .app-shell {
@@ -3224,6 +3249,114 @@ body.theme-dark .debug-toggle.is-active {
   font-size: 12px;
 }
 
+.new-session-dialog,
+.timer-dashboard-dialog,
+.tools-dashboard-dialog,
+.session-search-dialog {
+  opacity: 0;
+}
+
+.new-session-dialog[open],
+.timer-dashboard-dialog[open],
+.tools-dashboard-dialog[open],
+.session-search-dialog[open],
+.new-session-dialog.is-closing,
+.timer-dashboard-dialog.is-closing,
+.tools-dashboard-dialog.is-closing,
+.session-search-dialog.is-closing {
+  opacity: 1;
+}
+
+.new-session-dialog[open],
+.timer-dashboard-dialog[open],
+.tools-dashboard-dialog[open],
+.session-search-dialog[open] {
+  transition: opacity var(--surface-open-duration) var(--surface-open-ease);
+}
+
+.new-session-dialog.is-closing,
+.timer-dashboard-dialog.is-closing,
+.tools-dashboard-dialog.is-closing,
+.session-search-dialog.is-closing {
+  transition: opacity var(--surface-close-duration) var(--surface-close-ease);
+}
+
+.new-session-dialog[open]::backdrop,
+.timer-dashboard-dialog[open]::backdrop,
+.tools-dashboard-dialog[open]::backdrop,
+.session-search-dialog[open]::backdrop {
+  transition: background var(--surface-open-duration) var(--surface-open-ease), backdrop-filter var(--surface-open-duration) var(--surface-open-ease);
+}
+
+.new-session-dialog.is-closing::backdrop,
+.timer-dashboard-dialog.is-closing::backdrop,
+.tools-dashboard-dialog.is-closing::backdrop,
+.session-search-dialog.is-closing::backdrop {
+  background: rgba(8, 12, 11, 0);
+  backdrop-filter: blur(0);
+  transition: background var(--surface-close-duration) var(--surface-close-ease), backdrop-filter var(--surface-close-duration) var(--surface-close-ease);
+}
+
+.new-session-dialog[open] .new-session-panel,
+.timer-dashboard-dialog[open] .timer-dashboard-panel,
+.tools-dashboard-dialog[open] .tools-dashboard-panel,
+.session-search-dialog[open] .session-search-panel {
+  transform: scale(var(--surface-scale-from));
+  opacity: 0;
+}
+
+.new-session-dialog[open].is-open .new-session-panel,
+.timer-dashboard-dialog[open].is-open .timer-dashboard-panel,
+.tools-dashboard-dialog[open].is-open .tools-dashboard-panel,
+.session-search-dialog[open].is-open .session-search-panel,
+.new-session-dialog.is-closing .new-session-panel,
+.timer-dashboard-dialog.is-closing .timer-dashboard-panel,
+.tools-dashboard-dialog.is-closing .tools-dashboard-panel,
+.session-search-dialog.is-closing .session-search-panel {
+  transform: scale(1);
+  opacity: 1;
+  transition: transform var(--surface-open-duration) var(--surface-open-ease), opacity var(--surface-open-duration) var(--surface-open-ease);
+}
+
+.new-session-dialog.is-closing .new-session-panel,
+.timer-dashboard-dialog.is-closing .timer-dashboard-panel,
+.tools-dashboard-dialog.is-closing .tools-dashboard-panel,
+.session-search-dialog.is-closing .session-search-panel {
+  transform: scale(0.97);
+  opacity: 0;
+  transition: transform var(--surface-close-duration) var(--surface-close-ease), opacity var(--surface-close-duration) var(--surface-close-ease);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .new-session-dialog,
+  .timer-dashboard-dialog,
+  .tools-dashboard-dialog,
+  .session-search-dialog,
+  .new-session-dialog[open]::backdrop,
+  .timer-dashboard-dialog[open]::backdrop,
+  .tools-dashboard-dialog[open]::backdrop,
+  .session-search-dialog[open]::backdrop,
+  .new-session-dialog[open] .new-session-panel,
+  .timer-dashboard-dialog[open] .timer-dashboard-panel,
+  .tools-dashboard-dialog[open] .tools-dashboard-panel,
+  .session-search-dialog[open] .session-search-panel,
+  .new-session-dialog.is-closing,
+  .timer-dashboard-dialog.is-closing,
+  .tools-dashboard-dialog.is-closing,
+  .session-search-dialog.is-closing,
+  .new-session-dialog.is-closing::backdrop,
+  .timer-dashboard-dialog.is-closing::backdrop,
+  .tools-dashboard-dialog.is-closing::backdrop,
+  .session-search-dialog.is-closing::backdrop,
+  .new-session-dialog.is-closing .new-session-panel,
+  .timer-dashboard-dialog.is-closing .timer-dashboard-panel,
+  .tools-dashboard-dialog.is-closing .tools-dashboard-panel,
+  .session-search-dialog.is-closing .session-search-panel {
+    transition: none !important;
+    transform: none !important;
+  }
+}
+
 .new-session-dialog {
   width: min(520px, calc(100vw - 28px));
   border: 0;
@@ -3833,6 +3966,15 @@ body[data-mobile-drawer="sessions"] .sidebar,
 body[data-mobile-drawer="settings"] .inspector {
   transition: transform 180ms ease;
   transform: translateX(0);
+}
+
+body[data-layout-shape="phone_portrait"] .sidebar,
+body[data-layout-shape="tall_phone"] .sidebar,
+body[data-layout-shape="tablet_portrait"] .sidebar,
+body[data-layout-shape="phone_portrait"] .inspector,
+body[data-layout-shape="tall_phone"] .inspector,
+body[data-layout-shape="tablet_portrait"] .inspector {
+  transition: transform var(--surface-open-duration) var(--surface-open-ease);
 }
 
 body[data-layout-shape="phone_portrait"] .workspace,

@@ -1,9 +1,8 @@
 import { adpQueryOf } from "../../generated/adp-protocol.js?v=__WEBUI_ASSET_VERSION__";
+import { openAnimatedDialog } from "../../app-shell/dialog-motion.js?v=__WEBUI_ASSET_VERSION__";
 export async function openToolsRegistrySurface(context) {
   context.dispatchEdge('root.open_tools');
-  if (context.dom.dialog && typeof context.dom.dialog.showModal === 'function' && !context.dom.dialog.open) {
-    context.dom.dialog.showModal();
-  }
+  openAnimatedDialog(context.dom.dialog);
   context.renderToolsDashboard();
   await context.refreshToolsDashboard();
 }

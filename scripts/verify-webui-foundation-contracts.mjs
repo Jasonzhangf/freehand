@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { readFile } from 'node:fs/promises';
+import { readFile, readdir } from 'node:fs/promises';
 
 import {
   SharedUiStateKind,
@@ -15,6 +15,11 @@ import {
 import {
   settleAdpResponseFrame,
 } from '../apps/freehand-server/assets/webui/app-shell/adp-client.js';
+import {
+  bindAnimatedDialogCancel,
+  closeAnimatedDialog,
+  openAnimatedDialog,
+} from '../apps/freehand-server/assets/webui/app-shell/dialog-motion.js';
 
 const root = new URL('../', import.meta.url);
 const bootstrap = await readFile(
@@ -33,6 +38,15 @@ const legacyWebui = await readFile(
   new URL('apps/freehand-server/assets/webui/legacy-monolith.js', root),
   'utf8',
 );
+const webuiCss = await readFile(
+  new URL('apps/freehand-server/assets/webui.css', root),
+  'utf8',
+);
+const serverAssets = await readFile(
+  new URL('apps/freehand-server/src/assets.rs', root),
+  'utf8',
+);
+const makefile = await readFile(new URL('Makefile', root), 'utf8');
 const onlineVerifier = await readFile(
   new URL('scripts/verify-webui-mobile-ui-tree-online.mjs', root),
   'utf8',
@@ -120,6 +134,182 @@ assert.match(legacyWebui, /!Array\.isArray\(sessions\)/);
 assert.match(onlineVerifier, /async function productionAssetVersion\(\)/);
 assert.doesNotMatch(onlineVerifier, /const assetVersion = ['"][^'"]+['"]/);
 assert.match(onlineVerifier, /runningHomeClearsSharedActiveState/);
+assert.match(webuiCss, /--surface-open-duration:\s*210ms/);
+assert.match(webuiCss, /--surface-close-duration:\s*150ms/);
+assert.match(webuiCss, /--surface-scale-from:\s*0\.96/);
+assert.match(webuiCss, /@media \(prefers-reduced-motion: reduce\)/);
+assert.match(webuiCss, /transition: none !important/);
+assert.match(serverAssets, /"webui\/app-shell\/dialog-motion\.js"/);
+assert.match(serverAssets, /20260824-webui-surface-motion/);
+
+{
+  const moduleRegistry = JSON.parse(await readFile(
+    new URL('docs/module-registry/app.webui-smoke.json', root),
+    'utf8',
+  ));
+  const verificationMap = JSON.parse(await readFile(
+    new URL('docs/verification-maps/app.webui-smoke.json', root),
+    'utf8',
+  ));
+
+  assert.equal(moduleRegistry.schema_version, 1);
+  assert.equal(moduleRegistry.registry_id, 'app.webui-smoke.modules');
+  assert.equal(moduleRegistry.feature_id, 'app.webui-smoke');
+  assert.equal(moduleRegistry.status, 'active');
+  assert.deepEqual(moduleRegistry.coverage_roots, ['apps/freehand-server']);
+  assert.ok(moduleRegistry.modules.every(({ status }) => status === 'active'));
+
+  const ownedPaths = moduleRegistry.modules.flatMap(({ owned_paths }) => owned_paths);
+  assert.equal(new Set(ownedPaths).size, ownedPaths.length);
+  assert.deepEqual(ownedPaths.sort(), (await listRepositoryFiles('apps/freehand-server')).sort());
+  assert.deepEqual(
+    moduleRegistry.declared_edges,
+    [{
+      edge_id: 'app.webui-smoke.server-boundary_to_presentation-shell',
+      from_module_id: 'app.webui-smoke.server-boundary',
+      to_module_id: 'app.webui-smoke.presentation-shell',
+      import_name: 'asset_response embedded served assets',
+    }],
+  );
+
+  assert.equal(verificationMap.schema_version, 1);
+  assert.equal(verificationMap.verification_map_id, 'app.webui-smoke.verification');
+  assert.equal(verificationMap.feature_id, 'app.webui-smoke');
+  assert.equal(verificationMap.status, 'active');
+  assert.equal(verificationMap.module_registry, 'docs/module-registry/app.webui-smoke.json');
+  assert.equal(verificationMap.function_map, 'docs/function-maps/app.webui-smoke.md');
+  assert.equal(verificationMap.mainline_call_map, 'docs/mainline-calls/app.webui-smoke.json');
+  assert.equal(verificationMap.test_design, 'docs/testing/app.webui-smoke.md');
+
+  const activeGates = new Map(verificationMap.gates.map((gate) => [gate.gate_id, gate]));
+  for (const [gateId, expectedCommandPart] of [
+    ['app.webui-smoke.foundation-contracts', 'node scripts/verify-webui-foundation-contracts.mjs'],
+    ['app.webui-smoke.unit', 'cargo test -p freehand-server'],
+    ['app.webui-smoke.clippy', 'cargo clippy -p freehand-server'],
+    ['app.webui-smoke.architecture', 'cargo run -p xtask -- gates check'],
+    ['app.webui-smoke.surface-motion-online', 'node scripts/verify-webui-surface-motion-online.mjs'],
+  ]) {
+    const gate = activeGates.get(gateId);
+    assert.ok(gate, `missing ${gateId}`);
+    assert.equal(gate.binding_status, 'active');
+    assert.match(gate.command, new RegExp(expectedCommandPart.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')));
+  }
+  assert.match(makefile, /^\.PHONY:.*verify-webui-surface-motion-online(?:\s|$)/m);
+  assert.match(
+    makefile,
+    /^nightly: ci verify-webui-online verify-webui-surface-motion-online verify-webui-release-online$/m,
+  );
+}
+
+function dialogStub({ initiallyOpen = false } = {}) {
+  const classes = new Set();
+  return {
+    open: initiallyOpen,
+    closeCount: 0,
+    showModalCount: 0,
+    listeners: {},
+    classList: {
+      add: (name) => classes.add(name),
+      remove: (name) => classes.delete(name),
+      contains: (name) => classes.has(name),
+    },
+    showModal() {
+      this.showModalCount += 1;
+      this.open = true;
+    },
+    close() {
+      if (!this.open) return;
+      this.open = false;
+      this.closeCount += 1;
+    },
+    addEventListener(name, handler) {
+      this.listeners[name] = handler;
+    },
+  };
+}
+
+function windowStub() {
+  let nextId = 1;
+  return {
+    timeouts: [],
+    clearedTimeoutIds: [],
+    animationFrames: [],
+    setTimeout(callback, delayMs) {
+      const timeoutId = nextId++;
+      this.timeouts.push({ timeoutId, callback, delayMs, cancelled: false });
+      return timeoutId;
+    },
+    clearTimeout(timeoutId) {
+      this.clearedTimeoutIds.push(timeoutId);
+      const timeout = this.timeouts.find((entry) => entry.timeoutId === timeoutId);
+      if (timeout) timeout.cancelled = true;
+    },
+    requestAnimationFrame(callback) {
+      this.animationFrames.push(callback);
+      return this.animationFrames.length;
+    },
+  };
+}
+
+{
+  const dialog = dialogStub();
+  const animationWindow = windowStub();
+  assert.equal(openAnimatedDialog(dialog, animationWindow), true);
+  assert.equal(dialog.showModalCount, 1);
+  animationWindow.animationFrames[0]();
+  assert.equal(dialog.classList.contains('is-open'), true);
+
+  const closeCallbacks = [];
+  closeAnimatedDialog(dialog, () => closeCallbacks.push('closed'), animationWindow);
+  assert.equal(dialog.classList.contains('is-closing'), true);
+  assert.deepEqual(animationWindow.timeouts.map(({ delayMs }) => delayMs), [150]);
+  if (!animationWindow.timeouts[0].cancelled) animationWindow.timeouts[0].callback();
+  assert.equal(dialog.closeCount, 1);
+  assert.deepEqual(closeCallbacks, ['closed']);
+}
+
+{
+  const dialog = dialogStub({ initiallyOpen: true });
+  const animationWindow = windowStub();
+  const closeCallbacks = [];
+  openAnimatedDialog(dialog, animationWindow);
+  closeAnimatedDialog(dialog, () => closeCallbacks.push('stale-close'), animationWindow);
+  openAnimatedDialog(dialog, animationWindow);
+  assert.deepEqual(animationWindow.clearedTimeoutIds, [animationWindow.timeouts[0].timeoutId]);
+  if (!animationWindow.timeouts[0].cancelled) animationWindow.timeouts[0].callback();
+  assert.equal(dialog.open, true);
+  assert.equal(dialog.closeCount, 0);
+  assert.deepEqual(closeCallbacks, []);
+  animationWindow.animationFrames.at(-1)();
+  assert.equal(dialog.classList.contains('is-open'), true);
+}
+
+{
+  const dialog = dialogStub({ initiallyOpen: true });
+  const animationWindow = windowStub();
+  const closeCallbacks = [];
+  closeAnimatedDialog(dialog, () => closeCallbacks.push('close'), animationWindow);
+  closeAnimatedDialog(dialog, () => closeCallbacks.push('duplicate'), animationWindow);
+  assert.equal(animationWindow.timeouts.length, 1);
+  animationWindow.timeouts[0].callback();
+  assert.deepEqual(closeCallbacks, ['close']);
+  assert.equal(dialog.closeCount, 1);
+}
+
+{
+  const dialog = dialogStub({ initiallyOpen: true });
+  const animationWindow = windowStub();
+  const observed = [];
+  bindAnimatedDialogCancel(
+    dialog,
+    () => observed.push('surface-close'),
+    animationWindow,
+  );
+  dialog.listeners.cancel({ preventDefault: () => observed.push('native-cancel') });
+  animationWindow.timeouts[0].callback();
+  assert.deepEqual(observed, ['native-cancel', 'surface-close']);
+  assert.equal(dialog.closeCount, 1);
+}
 
 function settlementState(requestId, callbacks) {
   return {
@@ -308,6 +498,21 @@ assert.throws(
   ),
   /requires onAction/,
 );
+
+async function listRepositoryFiles(relativeRoot) {
+  const directoryUrl = new URL(`${relativeRoot}/`, root);
+  const entries = await readdir(directoryUrl, { withFileTypes: true });
+  const files = [];
+  for (const entry of entries) {
+    const relativePath = `${relativeRoot}/${entry.name}`;
+    if (entry.isDirectory()) {
+      files.push(...await listRepositoryFiles(relativePath));
+    } else if (entry.isFile()) {
+      files.push(relativePath);
+    }
+  }
+  return files.sort();
+}
 
 console.log(JSON.stringify({
   ok: true,

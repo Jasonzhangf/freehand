@@ -1,0 +1,108 @@
+{
+  "schema_version": 1,
+  "registry_id": "app.webui-smoke.modules",
+  "feature_id": "app.webui-smoke",
+  "status": "active",
+  "coverage_roots": [
+    "apps/freehand-server"
+  ],
+  "modules": [
+    {
+      "module_id": "app.webui-smoke.server-boundary",
+      "owner_feature_id": "app.webui-smoke",
+      "status": "active",
+      "owned_paths": [
+        "apps/freehand-server/Cargo.toml",
+        "apps/freehand-server/src/assets.rs",
+        "apps/freehand-server/src/lib.rs",
+        "apps/freehand-server/src/main.rs",
+        "apps/freehand-server/src/page.rs"
+      ],
+      "allowed_dependencies": [
+        "rust.std",
+        "third_party.axum",
+        "third_party.futures-util",
+        "third_party.reqwest",
+        "third_party.serde",
+        "third_party.serde-json",
+        "third_party.tokio",
+        "third_party.tokio-tungstenite",
+        "freehand-contracts",
+        "freehand-ui-protocol"
+      ],
+      "forbidden_dependencies": [
+        "freehand-config",
+        "freehand-node",
+        "freehand-provider-core",
+        "freehand-provider-openai",
+        "freehand-provider-anthropic",
+        "freehand-reason",
+        "freehand-runtime"
+      ]
+    },
+    {
+      "module_id": "app.webui-smoke.presentation-shell",
+      "owner_feature_id": "app.webui-smoke",
+      "status": "active",
+      "owned_paths": [
+        "apps/freehand-server/assets/mocks/.DS_Store",
+        "apps/freehand-server/assets/theme.css",
+        "apps/freehand-server/assets/theme.js",
+        "apps/freehand-server/assets/webui.css",
+        "apps/freehand-server/assets/webui.js",
+        "apps/freehand-server/assets/webui/app-shell/adp-client.js",
+        "apps/freehand-server/assets/webui/app-shell/dialog-motion.js",
+        "apps/freehand-server/assets/webui/app-shell/edge-registry.js",
+        "apps/freehand-server/assets/webui/app-shell/layout-shape.js",
+        "apps/freehand-server/assets/webui/app-shell/route-controller.js",
+        "apps/freehand-server/assets/webui/app-shell/shared-states/index.js",
+        "apps/freehand-server/assets/webui/app-shell/shared-states/model.js",
+        "apps/freehand-server/assets/webui/app-shell/shared-states/view.js",
+        "apps/freehand-server/assets/webui/app-shell/surface-registry.js",
+        "apps/freehand-server/assets/webui/bootstrap.js",
+        "apps/freehand-server/assets/webui/generated/adp-protocol.js",
+        "apps/freehand-server/assets/webui/legacy-monolith.js",
+        "apps/freehand-server/assets/webui/surfaces/home-dashboard/controls.js",
+        "apps/freehand-server/assets/webui/surfaces/home-dashboard/index.js",
+        "apps/freehand-server/assets/webui/surfaces/home-dashboard/model.js",
+        "apps/freehand-server/assets/webui/surfaces/home-dashboard/view.js",
+        "apps/freehand-server/assets/webui/surfaces/new-session/controls.js",
+        "apps/freehand-server/assets/webui/surfaces/new-session/index.js",
+        "apps/freehand-server/assets/webui/surfaces/session-detail/controls.js",
+        "apps/freehand-server/assets/webui/surfaces/session-detail/index.js",
+        "apps/freehand-server/assets/webui/surfaces/session-detail/recovery.js",
+        "apps/freehand-server/assets/webui/surfaces/session-search/index.js",
+        "apps/freehand-server/assets/webui/surfaces/session-search/view.js",
+        "apps/freehand-server/assets/webui/surfaces/settings/diagnostics.js",
+        "apps/freehand-server/assets/webui/surfaces/settings/index.js",
+        "apps/freehand-server/assets/webui/surfaces/settings/view.js",
+        "apps/freehand-server/assets/webui/surfaces/timer-dashboard/controls.js",
+        "apps/freehand-server/assets/webui/surfaces/timer-dashboard/index.js",
+        "apps/freehand-server/assets/webui/surfaces/timer-dashboard/view.js",
+        "apps/freehand-server/assets/webui/surfaces/tools-registry/controls.js",
+        "apps/freehand-server/assets/webui/surfaces/tools-registry/index.js",
+        "apps/freehand-server/assets/webui/surfaces/tools-registry/view.js"
+      ],
+      "allowed_dependencies": [
+        "browser.dom",
+        "browser.css-custom-properties",
+        "browser.es-modules",
+        "app.webui-smoke.server-boundary.served-assets"
+      ],
+      "forbidden_dependencies": [
+        "provider-wire-crates",
+        "reason-session-truth",
+        "runtime-config-files",
+        "browser-local-session-or-task-truth"
+      ]
+    }
+  ],
+  "declared_edges": [
+    {
+      "edge_id": "app.webui-smoke.server-boundary_to_presentation-shell",
+      "from_module_id": "app.webui-smoke.server-boundary",
+      "to_module_id": "app.webui-smoke.presentation-shell",
+      "import_name": "asset_response embedded served assets"
+    }
+  ]
+}

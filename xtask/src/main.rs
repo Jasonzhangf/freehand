@@ -2729,7 +2729,7 @@ fn verify_ci_cd_gate_commands(root: &Path) -> Result<(), String> {
         fs::read_to_string(root.join("Makefile")).map_err(|err| format!("read Makefile: {err}"))?;
     require_contains(
         &makefile,
-        ".PHONY: provision-openminis-source build fmt clippy test mainlines gates relay-deployment-smoke relay-local-online relay-account-config-smoke launchd-guard-offline launchd-guard-online launchd-guards ci verify-webui-online verify-webui-release-online release install-global install-symlink install-launchd install-launchdS install-worker-launchd install-worker-launchdS restart-launchd restart-launchdS restart-worker-launchd restart-worker-launchdS uninstall-launchd uninstall-launchdS uninstall-worker-launchd uninstall-worker-launchdS launchd-status launchd-statusS worker-launchd-status worker-launchd-statusS launchd-logs launchd-logsS worker-launchd-logs worker-launchd-logsS hooks",
+        ".PHONY: provision-openminis-source build fmt clippy test mainlines gates relay-deployment-smoke relay-local-online relay-account-config-smoke launchd-guard-offline launchd-guard-online launchd-guards ci verify-webui-online verify-webui-surface-motion-online verify-webui-release-online release install-global install-symlink install-launchd install-launchdS install-worker-launchd install-worker-launchdS restart-launchd restart-launchdS restart-worker-launchd restart-worker-launchdS uninstall-launchd uninstall-launchdS uninstall-worker-launchd uninstall-worker-launchdS launchd-status launchd-statusS worker-launchd-status worker-launchd-statusS launchd-logs launchd-logsS worker-launchd-logs worker-launchd-logsS hooks",
         "Makefile",
     )?;
     require_contains(
@@ -6986,7 +6986,7 @@ mod tests {
             | CiFixtureMode::CiWorkflowMissingLaunchdGate
             | CiFixtureMode::LaunchdMissingEnvBind
             | CiFixtureMode::LaunchdRepoRootWorkdir => {
-                ".PHONY: provision-openminis-source build fmt clippy test mainlines gates relay-deployment-smoke relay-local-online relay-account-config-smoke launchd-guard-offline launchd-guard-online launchd-guards ci verify-webui-online verify-webui-release-online release install-global install-symlink install-launchd install-launchdS install-worker-launchd install-worker-launchdS restart-launchd restart-launchdS restart-worker-launchd restart-worker-launchdS uninstall-launchd uninstall-launchdS uninstall-worker-launchd uninstall-worker-launchdS launchd-status launchd-statusS worker-launchd-status worker-launchd-statusS launchd-logs launchd-logsS worker-launchd-logs worker-launchd-logsS hooks\n\
+                ".PHONY: provision-openminis-source build fmt clippy test mainlines gates relay-deployment-smoke relay-local-online relay-account-config-smoke launchd-guard-offline launchd-guard-online launchd-guards ci verify-webui-online verify-webui-surface-motion-online verify-webui-release-online release install-global install-symlink install-launchd install-launchdS install-worker-launchd install-worker-launchdS restart-launchd restart-launchdS restart-worker-launchd restart-worker-launchdS uninstall-launchd uninstall-launchdS uninstall-worker-launchd uninstall-worker-launchdS launchd-status launchd-statusS worker-launchd-status worker-launchd-statusS launchd-logs launchd-logsS worker-launchd-logs worker-launchd-logsS hooks\n\
 provision-openminis-source:\n\tscripts/provision-openminis-source.sh\n\
 build:\n\tcargo build --workspace\n\
 fmt:\n\tcargo fmt --check\n\
@@ -7002,6 +7002,7 @@ launchd-guard-online:\n\tbash scripts/verify-launchd-restart-guard-online.sh\n\
 launchd-guards: launchd-guard-offline launchd-guard-online\n\
 ci: provision-openminis-source build fmt clippy test mainlines gates relay-deployment-smoke relay-local-online relay-account-config-smoke launchd-guards\n\
 verify-webui-online:\n\tscripts/verify-webui-online.sh\n\
+verify-webui-surface-motion-online:\n\tnode scripts/verify-webui-new-session-online.mjs\n\
 verify-webui-release-online:\n\tscripts/verify-webui-release-online.sh\n\
 release:\n\tscripts/release.sh\n\
 install-global:\n\tscripts/install-global.sh\n\

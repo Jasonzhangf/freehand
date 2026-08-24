@@ -5,7 +5,7 @@ use axum::response::{IntoResponse, Response};
 /// Single source of truth for the WebUI cache-busting version. Asset files and
 /// the page template reference `__WEBUI_ASSET_VERSION__`; the server stamps
 /// this value at serve time, so bumping the version is a one-line change here.
-pub const WEBUI_ASSET_VERSION: &str = "20260817-cache-hit-rate-normalized-total";
+pub const WEBUI_ASSET_VERSION: &str = "20260824-webui-surface-motion";
 
 const WEBUI_ASSET_VERSION_TOKEN: &str = "__WEBUI_ASSET_VERSION__";
 
@@ -71,6 +71,11 @@ const WEBUI_SURFACE_REGISTRY_JS: Asset = Asset {
 const WEBUI_ADP_CLIENT_JS: Asset = Asset {
     content_type: "application/javascript; charset=utf-8",
     body: include_str!("../assets/webui/app-shell/adp-client.js"),
+};
+
+const WEBUI_DIALOG_MOTION_JS: Asset = Asset {
+    content_type: "application/javascript; charset=utf-8",
+    body: include_str!("../assets/webui/app-shell/dialog-motion.js"),
 };
 
 const WEBUI_SHARED_STATES_JS: Asset = Asset {
@@ -208,6 +213,7 @@ pub fn asset_response(path: &str) -> Result<Response, StatusCode> {
         "webui/app-shell/route-controller.js" => &WEBUI_ROUTE_CONTROLLER_JS,
         "webui/app-shell/surface-registry.js" => &WEBUI_SURFACE_REGISTRY_JS,
         "webui/app-shell/adp-client.js" => &WEBUI_ADP_CLIENT_JS,
+        "webui/app-shell/dialog-motion.js" => &WEBUI_DIALOG_MOTION_JS,
         "webui/app-shell/shared-states/index.js" => &WEBUI_SHARED_STATES_JS,
         "webui/app-shell/shared-states/model.js" => &WEBUI_SHARED_STATES_MODEL_JS,
         "webui/app-shell/shared-states/view.js" => &WEBUI_SHARED_STATES_VIEW_JS,

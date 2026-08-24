@@ -2328,6 +2328,11 @@ mod tests {
         assert!(webui_css_body.contains(".settings-status-marker.partial"));
         assert!(webui_css_body.contains("border-color: var(--running)"));
         assert!(webui_css_body.contains(".settings-status-legend"));
+        assert!(webui_css_body.contains("--surface-open-duration: 210ms"));
+        assert!(webui_css_body.contains("--surface-close-duration: 150ms"));
+        assert!(webui_css_body.contains("button:focus-visible"));
+        assert!(webui_css_body.contains(".new-session-dialog.is-closing .new-session-panel"));
+        assert!(webui_css_body.contains("@media (prefers-reduced-motion: reduce)"));
         assert!(webui_css_body.contains(".timer-dashboard-dialog"));
         assert!(webui_css_body.contains(".timer-form-grid"));
         assert!(webui_css_body.contains(".timer-dashboard-list"));
@@ -2614,6 +2619,8 @@ mod tests {
             ("app-shell/shared-states/model.js", "createSharedStateModel"),
             ("app-shell/shared-states/view.js", "renderSharedState"),
             ("app-shell/surface-registry.js", "surfaceContracts"),
+            ("app-shell/dialog-motion.js", "openAnimatedDialog"),
+            ("app-shell/dialog-motion.js", "closeAnimatedDialog"),
         ] {
             let response = client
                 .get(format!("{}/assets/webui/{}", server.base_url, asset))

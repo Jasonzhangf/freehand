@@ -666,11 +666,12 @@ Non-violation pending items live in `docs/architecture/architecture-gaps.md`. Ea
 ### `app.webui-smoke`
 
 - owner: `apps/freehand-server`
-- allowed_paths: `apps/freehand-server/**`, `crates/freehand-ui-protocol/**`, `scripts/verify-webui-foundation-contracts.mjs`, `scripts/verify-webui-mobile-ui-tree-online.mjs`, `scripts/verify-webui-image-attachment-online.mjs`, `docs/function-maps/**`, `docs/testing/**`, `docs/design/**`, `docs/goals/**`, `docs/mainline-calls/**`, `docs/wiki/**`, `docs/resource-maps/core.json`
+- allowed_paths: `apps/freehand-server/**`, `crates/freehand-ui-protocol/**`, `scripts/verify-webui-foundation-contracts.mjs`, `scripts/verify-webui-mobile-ui-tree-online.mjs`, `scripts/verify-webui-image-attachment-online.mjs`, `scripts/verify-webui-surface-motion-online.mjs`, `docs/function-maps/**`, `docs/testing/**`, `docs/design/**`, `docs/goals/**`, `docs/mainline-calls/**`, `docs/wiki/**`, `docs/resource-maps/core.json`, `docs/module-registry/app.webui-smoke.json`, `docs/verification-maps/app.webui-smoke.json`
 - forbidden_paths: `crates/freehand-runtime/**`, `crates/freehand-reason/**`, `crates/freehand-node/**`, `crates/freehand-config/**`, `crates/freehand-provider-*/**` except consuming already-owned UI protocol projections
 - required_checks:
   - `cargo test -p freehand-server`
   - `node scripts/verify-webui-foundation-contracts.mjs`
+  - `make verify-webui-surface-motion-online` when a browser-enabled runtime is available; the same target is locked into `make nightly`
   - `cargo run -p xtask -- mainlines check`
   - `cargo run -p xtask -- gates check`
 - required_white_box_tests:

@@ -1,3 +1,5 @@
+import { closeAnimatedDialog, openAnimatedDialog } from '../../app-shell/dialog-motion.js?v=__WEBUI_ASSET_VERSION__';
+
 export function selectedNewSessionKind(context) {
   const checked = context.dom.form
     ? context.dom.form.querySelector('input[name="new-session-kind"]:checked')
@@ -37,7 +39,7 @@ export function openNewSessionSurface(kind = 'conversation', context) {
     context.dom.cwdInput.value = context.selectedWorkspaceCwd();
   }
   syncNewSessionDialogMode(context);
-  context.dom.dialog.showModal();
+  openAnimatedDialog(context.dom.dialog);
   window.setTimeout(() => {
     if (context.state.newSessionKind === 'task') {
       (context.dom.browseButton || context.dom.cwdInput || context.dom.confirmButton)?.focus();
@@ -49,7 +51,13 @@ export function openNewSessionSurface(kind = 'conversation', context) {
 
 export function closeNewSessionSurface(context) {
   if (context.dom.dialog && context.dom.dialog.open) {
-    context.dom.dialog.close();
+    closeAnimatedDialog(context.dom.dialog, () => {
+      if (context.state.route === 'new_session') {
+        context.dispatchEdge('root.open_home');
+        context.renderAll();
+      }
+    });
+    return;
   }
   if (context.state.route === 'new_session') {
     context.dispatchEdge('root.open_home');

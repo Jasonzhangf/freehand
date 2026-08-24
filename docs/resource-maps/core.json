@@ -2046,6 +2046,17 @@
       "binding_status": "bound"
     },
     {
+      "edge_id": "app.webui-smoke#10-foundation-dialog-motion",
+      "operation_id": "ui_projection.render_surface_contract",
+      "source_resource": "ui_projection",
+      "target_resource": "ui_surface",
+      "mainline_call_doc": "docs/mainline-calls/app.webui-smoke.json",
+      "call_table_step": "10-foundation-dialog-motion",
+      "file_path": "apps/freehand-server/assets/webui/app-shell/dialog-motion.js",
+      "symbol_path": "openAnimatedDialog / closeAnimatedDialog / bindAnimatedDialogCancel",
+      "binding_status": "bound"
+    },
+    {
       "edge_id": "app.webui-smoke#11g",
       "operation_id": "ui_projection.post_android_turn_finished_notification",
       "source_resource": "ui_projection",
