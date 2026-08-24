@@ -1,0 +1,91 @@
+{
+  "schema_version": 1,
+  "registry_id": "app.cli-live-turn.modules",
+  "feature_id": "app.cli-live-turn",
+  "status": "active",
+  "coverage_roots": [
+    "apps/freehand-cli"
+  ],
+  "modules": [
+    {
+      "module_id": "app.cli.shared-boundary",
+      "owner_feature_id": "app.cli-live-turn",
+      "status": "active",
+      "owned_paths": [
+        "apps/freehand-cli/Cargo.toml",
+        "apps/freehand-cli/src/main.rs",
+        "apps/freehand-cli/tests/config_startup.rs"
+      ],
+      "allowed_dependencies": [
+        "rust.std",
+        "freehand-blocks",
+        "freehand-config",
+        "freehand-contracts",
+        "freehand-reason",
+        "freehand-runtime",
+        "freehand-task",
+        "freehand-ui-protocol",
+        "third_party.futures-util",
+        "third_party.tokio",
+        "third_party.tokio-tungstenite"
+      ],
+      "forbidden_dependencies": []
+    }
+  ],
+  "declared_edges": [
+    {
+      "edge_id": "app.cli.shared-boundary.import_freehand-blocks",
+      "from_module_id": "app.cli.shared-boundary",
+      "to_module_id": "freehand-blocks",
+      "import_name": "freehand_blocks"
+    },
+    {
+      "edge_id": "app.cli.shared-boundary.import_freehand-config",
+      "from_module_id": "app.cli.shared-boundary",
+      "to_module_id": "freehand-config",
+      "import_name": "freehand_config"
+    },
+    {
+      "edge_id": "app.cli.shared-boundary.import_freehand-contracts",
+      "from_module_id": "app.cli.shared-boundary",
+      "to_module_id": "freehand-contracts",
+      "import_name": "freehand_contracts"
+    },
+    {
+      "edge_id": "app.cli.shared-boundary.import_freehand-runtime",
+      "from_module_id": "app.cli.shared-boundary",
+      "to_module_id": "freehand-runtime",
+      "import_name": "freehand_runtime"
+    },
+    {
+      "edge_id": "app.cli.shared-boundary.import_freehand-task",
+      "from_module_id": "app.cli.shared-boundary",
+      "to_module_id": "freehand-task",
+      "import_name": "freehand_task"
+    },
+    {
+      "edge_id": "app.cli.shared-boundary.import_freehand-ui-protocol",
+      "from_module_id": "app.cli.shared-boundary",
+      "to_module_id": "freehand-ui-protocol",
+      "import_name": "freehand_ui_protocol"
+    },
+    {
+      "edge_id": "app.cli.shared-boundary.import_third-party-futures-util",
+      "from_module_id": "app.cli.shared-boundary",
+      "to_module_id": "third_party.futures-util",
+      "import_name": "futures_util"
+    },
+    {
+      "edge_id": "app.cli.shared-boundary.import_third-party-tokio",
+      "from_module_id": "app.cli.shared-boundary",
+      "to_module_id": "third_party.tokio",
+      "import_name": "tokio"
+    },
+    {
+      "edge_id": "app.cli.shared-boundary.import_third-party-tokio-tungstenite",
+      "from_module_id": "app.cli.shared-boundary",
+      "to_module_id": "third_party.tokio-tungstenite",
+      "import_name": "tokio_tungstenite"
+    }
+  ]
+}
