@@ -4,7 +4,7 @@
   "feature_id": "runtime.ui-command-dispatch",
   "status": "active",
   "coverage_roots": [
-    "crates/freehand-runtime/src/lib.rs"
+    "crates/freehand-runtime/src/session_paging.rs"
   ],
   "modules": [
     {
@@ -12,27 +12,14 @@
       "owner_feature_id": "runtime.ui-command-dispatch",
       "status": "active",
       "owned_paths": [
-        "crates/freehand-runtime/src/lib.rs"
+        "crates/freehand-runtime/src/session_paging.rs"
       ],
       "allowed_dependencies": [
         "rust.std",
-        "freehand-account-config",
-        "freehand-blocks",
-        "freehand-config",
         "freehand-contracts",
-        "freehand-control",
-        "freehand-debug",
-        "freehand-metadata",
-        "freehand-node",
-        "freehand-provider-core",
-        "freehand-provider-executors",
         "freehand-reason",
-        "freehand-task",
-        "freehand-tools",
         "freehand-ui-protocol",
-        "third_party.chrono",
-        "third_party.serde-json",
-        "third_party.thiserror"
+        "third_party.serde-json"
       ],
       "forbidden_dependencies": [
         "freehand-provider-anthropic",
@@ -42,22 +29,9 @@
     }
   ],
   "declared_edges": [
-    {"edge_id":"runtime.ui-command-dispatch.bridge.import_freehand-account-config","from_module_id":"runtime.ui-command-dispatch.bridge","to_module_id":"freehand-account-config","import_name":"freehand_account_config"},
-    {"edge_id":"runtime.ui-command-dispatch.bridge.import_freehand-blocks","from_module_id":"runtime.ui-command-dispatch.bridge","to_module_id":"freehand-blocks","import_name":"freehand_blocks"},
-    {"edge_id":"runtime.ui-command-dispatch.bridge.import_freehand-config","from_module_id":"runtime.ui-command-dispatch.bridge","to_module_id":"freehand-config","import_name":"freehand_config"},
     {"edge_id":"runtime.ui-command-dispatch.bridge.import_freehand-contracts","from_module_id":"runtime.ui-command-dispatch.bridge","to_module_id":"freehand-contracts","import_name":"freehand_contracts"},
-    {"edge_id":"runtime.ui-command-dispatch.bridge.import_freehand-control","from_module_id":"runtime.ui-command-dispatch.bridge","to_module_id":"freehand-control","import_name":"freehand_control"},
-    {"edge_id":"runtime.ui-command-dispatch.bridge.import_freehand-debug","from_module_id":"runtime.ui-command-dispatch.bridge","to_module_id":"freehand-debug","import_name":"freehand_debug"},
-    {"edge_id":"runtime.ui-command-dispatch.bridge.import_freehand-metadata","from_module_id":"runtime.ui-command-dispatch.bridge","to_module_id":"freehand-metadata","import_name":"freehand_metadata"},
-    {"edge_id":"runtime.ui-command-dispatch.bridge.import_freehand-node","from_module_id":"runtime.ui-command-dispatch.bridge","to_module_id":"freehand-node","import_name":"freehand_node"},
-    {"edge_id":"runtime.ui-command-dispatch.bridge.import_freehand-provider-core","from_module_id":"runtime.ui-command-dispatch.bridge","to_module_id":"freehand-provider-core","import_name":"freehand_provider_core"},
-    {"edge_id":"runtime.ui-command-dispatch.bridge.import_freehand-provider-executors","from_module_id":"runtime.ui-command-dispatch.bridge","to_module_id":"freehand-provider-executors","import_name":"freehand_provider_executors"},
     {"edge_id":"runtime.ui-command-dispatch.bridge.import_freehand-reason","from_module_id":"runtime.ui-command-dispatch.bridge","to_module_id":"freehand-reason","import_name":"freehand_reason"},
-    {"edge_id":"runtime.ui-command-dispatch.bridge.import_freehand-task","from_module_id":"runtime.ui-command-dispatch.bridge","to_module_id":"freehand-task","import_name":"freehand_task"},
-    {"edge_id":"runtime.ui-command-dispatch.bridge.import_freehand-tools","from_module_id":"runtime.ui-command-dispatch.bridge","to_module_id":"freehand-tools","import_name":"freehand_tools"},
     {"edge_id":"runtime.ui-command-dispatch.bridge.import_freehand-ui-protocol","from_module_id":"runtime.ui-command-dispatch.bridge","to_module_id":"freehand-ui-protocol","import_name":"freehand_ui_protocol"},
-    {"edge_id":"runtime.ui-command-dispatch.bridge.import_third-party-chrono","from_module_id":"runtime.ui-command-dispatch.bridge","to_module_id":"third_party.chrono","import_name":"chrono"},
-    {"edge_id":"runtime.ui-command-dispatch.bridge.import_third-party-serde-json","from_module_id":"runtime.ui-command-dispatch.bridge","to_module_id":"third_party.serde-json","import_name":"serde_json"},
-    {"edge_id":"runtime.ui-command-dispatch.bridge.import_third-party-thiserror","from_module_id":"runtime.ui-command-dispatch.bridge","to_module_id":"third_party.thiserror","import_name":"thiserror"}
+    {"edge_id":"runtime.ui-command-dispatch.bridge.import_third-party-serde-json","from_module_id":"runtime.ui-command-dispatch.bridge","to_module_id":"third_party.serde-json","import_name":"serde_json"}
   ]
 }

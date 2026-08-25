@@ -33,6 +33,12 @@
       "binding_status": "active"
     },
     {
+      "gate_id": "app.runtime-daemon.three-worker-online",
+      "kind": "project-blackbox",
+      "command": "bash scripts/verify-master-three-worker-e2e-online.sh",
+      "binding_status": "active"
+    },
+    {
       "gate_id": "app.runtime-daemon.architecture",
       "kind": "architecture",
       "command": "cargo run -p xtask -- gates check",

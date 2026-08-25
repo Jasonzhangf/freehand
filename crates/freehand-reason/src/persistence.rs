@@ -288,7 +288,7 @@ pub enum ReasonPersistenceError {
 }
 
 const MAX_REASON_TURN_PAGE_LIMIT: usize = 100;
-const MAX_SESSION_LIST_PAGE_LIMIT: usize = 100;
+pub const MAX_SESSION_LIST_PAGE_LIMIT: usize = 100;
 const SESSION_SUMMARY_INDEX_SCHEMA_VERSION: u32 = 1;
 
 pub struct ReasonPersistence {

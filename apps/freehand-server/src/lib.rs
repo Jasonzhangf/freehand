@@ -2644,7 +2644,7 @@ mod tests {
         let adp_protocol_body = adp_protocol.text().await.expect("adp-protocol body");
         assert!(adp_protocol_body.contains("export function adpQueryOf"));
         assert!(adp_protocol_body.contains("export function adpCommandOf"));
-        assert!(adp_protocol_body.contains("\"protocol_version\": 3"));
+        assert!(adp_protocol_body.contains("\"protocol_version\": 4"));
         assert!(adp_protocol_body.contains("QueryConfigStatus"));
         assert!(adp_protocol_body.contains("CreateSession"));
 

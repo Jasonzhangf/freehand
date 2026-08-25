@@ -878,6 +878,7 @@ fn verify_provider_reason_live_bridge_boundary(root: &Path) -> Result<(), String
                 "crates/freehand-runtime/Cargo.toml",
                 "crates/freehand-runtime/src/lib.rs",
                 "crates/freehand-runtime/src/live_context.rs",
+                "crates/freehand-runtime/src/tests.rs",
             ]
         || registry.modules.len() != 1
     {
@@ -894,6 +895,7 @@ fn verify_provider_reason_live_bridge_boundary(root: &Path) -> Result<(), String
                 "crates/freehand-runtime/Cargo.toml",
                 "crates/freehand-runtime/src/lib.rs",
                 "crates/freehand-runtime/src/live_context.rs",
+                "crates/freehand-runtime/src/tests.rs",
             ]
     {
         return Err("provider.reason-live-bridge live-bridge identity/paths is invalid".to_owned());
@@ -1207,7 +1209,7 @@ fn verify_runtime_ui_command_dispatch_boundary(root: &Path) -> Result<(), String
         || registry.registry_id != "runtime.ui-command-dispatch.modules"
         || registry.feature_id != "runtime.ui-command-dispatch"
         || registry.status != "active"
-        || registry.coverage_roots != ["crates/freehand-runtime/src/lib.rs"]
+        || registry.coverage_roots != ["crates/freehand-runtime/src/session_paging.rs"]
         || registry.modules.len() != 1
     {
         return Err(
@@ -1218,7 +1220,7 @@ fn verify_runtime_ui_command_dispatch_boundary(root: &Path) -> Result<(), String
     if module.module_id != "runtime.ui-command-dispatch.bridge"
         || module.owner_feature_id != "runtime.ui-command-dispatch"
         || module.status != "active"
-        || module.owned_paths != ["crates/freehand-runtime/src/lib.rs"]
+        || module.owned_paths != ["crates/freehand-runtime/src/session_paging.rs"]
     {
         return Err("runtime.ui-command-dispatch bridge identity/path is invalid".to_owned());
     }
@@ -1245,7 +1247,7 @@ fn verify_app_webui_session_paging_boundary(root: &Path) -> Result<(), String> {
         || registry.registry_id != "app.webui-smoke.modules"
         || registry.feature_id != "app.webui-smoke"
         || registry.status != "active"
-        || registry.modules.len() != 1
+        || registry.modules.len() != 2
     {
         return Err("app.webui-smoke module registry identity/shape is invalid".to_owned());
     }
@@ -1253,9 +1255,56 @@ fn verify_app_webui_session_paging_boundary(root: &Path) -> Result<(), String> {
     if module.module_id != "app.webui-smoke.session-paging-surface"
         || module.owner_feature_id != "app.webui-smoke"
         || module.status != "active"
-        || module.owned_paths.len() != 4
+        || module.owned_paths
+            != [
+                "apps/freehand-server/assets/webui.css",
+                "apps/freehand-server/assets/webui/generated/adp-protocol.js",
+                "apps/freehand-server/assets/webui/legacy-monolith.js",
+                "apps/freehand-server/assets/webui/surfaces/timer-dashboard/view.js",
+                "apps/freehand-server/src/lib.rs",
+                "apps/freehand-server/src/assets.rs",
+            ]
     {
         return Err("app.webui-smoke paging surface identity/paths is invalid".to_owned());
+    }
+    let verifiers = &registry.modules[1];
+    if verifiers.module_id != "app.webui-smoke.online-verifiers"
+        || verifiers.owner_feature_id != "app.webui-smoke"
+        || verifiers.status != "active"
+        || verifiers.owned_paths
+            != [
+                "scripts/lib/adp-verifier-client.mjs",
+                "scripts/lib/adp-verifier-client.test.mjs",
+                "scripts/verify-model-group-ui-online.mjs",
+                "scripts/verify-provider-hosted-web-search-online.mjs",
+                "scripts/verify-provider-recovery-webui-online.mjs",
+                "scripts/verify-provider-registry-ui-online.mjs",
+                "scripts/verify-provider-web-search-settings-ui-online.mjs",
+                "scripts/verify-web-fetch-tool-online.mjs",
+                "scripts/verify-webui-ambiguous-submit-recovery.mjs",
+                "scripts/verify-webui-diagnostics-online.mjs",
+                "scripts/verify-webui-image-attachment-online.mjs",
+                "scripts/verify-webui-live-tool-render-online.mjs",
+                "scripts/verify-webui-mobile-ui-tree-online.mjs",
+                "scripts/verify-webui-new-session-online.mjs",
+                "scripts/verify-webui-path-diagnostic-online.mjs",
+                "scripts/verify-webui-session-restore-error-exit-online.mjs",
+                "scripts/verify-webui-session-search-online.mjs",
+                "scripts/verify-webui-stop-continue-online.mjs",
+                "scripts/verify-webui-timer-dashboard-online.mjs",
+                "scripts/verify-webui-tools-registry-online.mjs",
+                "scripts/verify-worker-recovered-history-online.mjs",
+                "scripts/webui_verify_online.mjs",
+            ]
+    {
+        return Err("app.webui-smoke online verifier identity/paths is invalid".to_owned());
+    }
+    for path in &verifiers.owned_paths {
+        if !root.join(path).is_file() {
+            return Err(format!(
+                "app.webui-smoke owns missing verifier path `{path}`"
+            ));
+        }
     }
     verify_registered_rust_module_edges(root, &registry, module, "app.webui-smoke")?;
     verify_registered_module_verification_map(
@@ -1266,8 +1315,11 @@ fn verify_app_webui_session_paging_boundary(root: &Path) -> Result<(), String> {
         &[
             "app.webui-smoke.unit",
             "app.webui-smoke.syntax",
+            "app.webui-smoke.verifier-syntax",
+            "app.webui-smoke.verifier-adp-client",
             "app.webui-smoke.clippy",
             "app.webui-smoke.browser",
+            "app.webui-smoke.session-paging-online",
             "app.webui-smoke.mainline",
             "app.webui-smoke.architecture",
         ],
@@ -3259,7 +3311,7 @@ fn verify_ci_cd_gate_commands(root: &Path) -> Result<(), String> {
         fs::read_to_string(root.join("Makefile")).map_err(|err| format!("read Makefile: {err}"))?;
     require_contains(
         &makefile,
-        ".PHONY: provision-openminis-source build fmt clippy test mainlines gates relay-deployment-smoke relay-local-online relay-account-config-smoke launchd-guard-offline launchd-guard-online launchd-guards ci verify-webui-online verify-webui-release-online release install-global install-symlink install-launchd install-launchdS install-worker-launchd install-worker-launchdS restart-launchd restart-launchdS restart-worker-launchd restart-worker-launchdS uninstall-launchd uninstall-launchdS uninstall-worker-launchd uninstall-worker-launchdS launchd-status launchd-statusS worker-launchd-status worker-launchd-statusS launchd-logs launchd-logsS worker-launchd-logs worker-launchd-logsS hooks",
+        ".PHONY: provision-openminis-source build fmt clippy test mainlines gates session-paging-online relay-deployment-smoke relay-local-online relay-account-config-smoke launchd-guard-offline launchd-guard-online launchd-guards ci verify-webui-online verify-webui-release-online release install-global install-symlink install-launchd install-launchdS install-worker-launchd install-worker-launchdS restart-launchd restart-launchdS restart-worker-launchd restart-worker-launchdS uninstall-launchd uninstall-launchdS uninstall-worker-launchd uninstall-worker-launchdS launchd-status launchd-statusS worker-launchd-status worker-launchd-statusS launchd-logs launchd-logsS worker-launchd-logs worker-launchd-logsS hooks",
         "Makefile",
     )?;
     require_contains(
@@ -3268,11 +3320,21 @@ fn verify_ci_cd_gate_commands(root: &Path) -> Result<(), String> {
         "Makefile",
     )?;
     require_contains(&makefile, "test: provision-openminis-source", "Makefile")?;
+    require_contains(
+        &makefile,
+        "RUST_TEST_THREADS=1 cargo test --workspace",
+        "Makefile workspace test execution contract",
+    )?;
     require_contains(&makefile, "gates: provision-openminis-source", "Makefile")?;
     require_contains(
         &makefile,
         "mainlines:\n\tcargo run -p xtask -- mainlines check",
         "Makefile",
+    )?;
+    require_contains(
+        &makefile,
+        "session-paging-online:\n\tset -a && . \"$${HOME}/.freehand/daemonS.env\" && set +a && \\\n\tFREEHAND_NEW_SESSION_BASE_URL=\"http://100.66.1.82:4042/\" \\\n\tFREEHAND_NEW_SESSION_ADP_URL=\"ws://100.66.1.82:4042/adp\" \\\n\tnode scripts/verify-webui-new-session-online.mjs",
+        "Makefile session paging online gate",
     )?;
     require_contains(
         &makefile,
@@ -5631,6 +5693,7 @@ fn verify_daemon_module_registry(
         "app.runtime-daemon.clippy",
         "app.runtime-daemon.launchd-offline",
         "app.runtime-daemon.launchd-online",
+        "app.runtime-daemon.three-worker-online",
         "app.runtime-daemon.architecture",
     ] {
         let gate = verification
@@ -6146,12 +6209,12 @@ fn verify_adp_protocol_artifacts(root: &Path) -> Result<(), String> {
 
     require_contains(
         &expected_json_body,
-        "\"protocol_version\": 3",
+        "\"protocol_version\": 4",
         "crates/freehand-ui-protocol/generated/adp-protocol.schema.json",
     )?;
     require_contains(
         &expected_json_body,
-        "\"handshake_capability\": \"adp.v3.handshake\"",
+        "\"handshake_capability\": \"adp.v4.handshake\"",
         "crates/freehand-ui-protocol/generated/adp-protocol.schema.json",
     )?;
     require_contains(
@@ -7560,14 +7623,15 @@ mod tests {
             | CiFixtureMode::CiWorkflowMissingLaunchdGate
             | CiFixtureMode::LaunchdMissingEnvBind
             | CiFixtureMode::LaunchdRepoRootWorkdir => {
-                ".PHONY: provision-openminis-source build fmt clippy test mainlines gates relay-deployment-smoke relay-local-online relay-account-config-smoke launchd-guard-offline launchd-guard-online launchd-guards ci verify-webui-online verify-webui-release-online release install-global install-symlink install-launchd install-launchdS install-worker-launchd install-worker-launchdS restart-launchd restart-launchdS restart-worker-launchd restart-worker-launchdS uninstall-launchd uninstall-launchdS uninstall-worker-launchd uninstall-worker-launchdS launchd-status launchd-statusS worker-launchd-status worker-launchd-statusS launchd-logs launchd-logsS worker-launchd-logs worker-launchd-logsS hooks\n\
+                ".PHONY: provision-openminis-source build fmt clippy test mainlines gates session-paging-online relay-deployment-smoke relay-local-online relay-account-config-smoke launchd-guard-offline launchd-guard-online launchd-guards ci verify-webui-online verify-webui-release-online release install-global install-symlink install-launchd install-launchdS install-worker-launchd install-worker-launchdS restart-launchd restart-launchdS restart-worker-launchd restart-worker-launchdS uninstall-launchd uninstall-launchdS uninstall-worker-launchd uninstall-worker-launchdS launchd-status launchd-statusS worker-launchd-status worker-launchd-statusS launchd-logs launchd-logsS worker-launchd-logs worker-launchd-logsS hooks\n\
 provision-openminis-source:\n\tscripts/provision-openminis-source.sh\n\
 build:\n\tcargo build --workspace\n\
 fmt:\n\tcargo fmt --check\n\
 clippy:\n\tcargo clippy --workspace --all-targets -- -D warnings\n\
-test: provision-openminis-source\n\tcargo test --workspace\n\
+test: provision-openminis-source\n\tRUST_TEST_THREADS=1 cargo test --workspace\n\
 mainlines:\n\tcargo run -p xtask -- mainlines check\n\
 gates: provision-openminis-source\n\tcargo run -p xtask -- gates check\n\
+session-paging-online:\n\tset -a && . \"$${HOME}/.freehand/daemonS.env\" && set +a && \\\n\tFREEHAND_NEW_SESSION_BASE_URL=\"http://100.66.1.82:4042/\" \\\n\tFREEHAND_NEW_SESSION_ADP_URL=\"ws://100.66.1.82:4042/adp\" \\\n\tnode scripts/verify-webui-new-session-online.mjs\n\
 relay-deployment-smoke:\n\tscripts/verify-relay-deployment-smoke.sh\n\
 relay-local-online:\n\tscripts/verify-remote-relay-local-online.sh\n\
 relay-account-config-smoke:\n\tscripts/verify-relay-account-config-smoke.sh\n\
@@ -7591,14 +7655,15 @@ uninstall-launchdS:\n\tscripts/uninstall-launchd.sh uninstallS\n\
 uninstall-worker-launchdS:\n\tscripts/uninstall-launchd.sh uninstallWorkerS\n"
             }
             CiFixtureMode::MakeCiMissingMainlines => {
-                ".PHONY: provision-openminis-source build fmt clippy test gates ci verify-webui-online verify-webui-release-online release install-global install-symlink install-launchd install-launchdS install-worker-launchd install-worker-launchdS restart-launchd restart-launchdS restart-worker-launchd restart-worker-launchdS uninstall-launchd uninstall-launchdS uninstall-worker-launchd uninstall-worker-launchdS launchd-status launchd-statusS worker-launchd-status worker-launchd-statusS launchd-logs launchd-logsS worker-launchd-logs worker-launchd-logsS hooks\n\
+                ".PHONY: provision-openminis-source build fmt clippy test gates session-paging-online ci verify-webui-online verify-webui-release-online release install-global install-symlink install-launchd install-launchdS install-worker-launchd install-worker-launchdS restart-launchd restart-launchdS restart-worker-launchd restart-worker-launchdS uninstall-launchd uninstall-launchdS uninstall-worker-launchd uninstall-worker-launchdS launchd-status launchd-statusS worker-launchd-status worker-launchd-statusS launchd-logs launchd-logsS worker-launchd-logs worker-launchd-logsS hooks\n\
 provision-openminis-source:\n\tscripts/provision-openminis-source.sh\n\
 build:\n\tcargo build --workspace\n\
 fmt:\n\tcargo fmt --check\n\
 clippy:\n\tcargo clippy --workspace --all-targets -- -D warnings\n\
-test: provision-openminis-source\n\tcargo test --workspace\n\
+test: provision-openminis-source\n\tRUST_TEST_THREADS=1 cargo test --workspace\n\
 gates: provision-openminis-source\n\tcargo run -p xtask -- gates check\n\
-ci: provision-openminis-source build fmt clippy test gates\n\
+session-paging-online:\n\t. \"$${HOME}/.freehand/daemonS.env\" && \\\n\tFREEHAND_NEW_SESSION_BASE_URL=\"http://100.66.1.82:4042/\" \\\n\tFREEHAND_NEW_SESSION_ADP_URL=\"ws://100.66.1.82:4042/adp\" \\\n\tnode scripts/verify-webui-new-session-online.mjs\n\
+ci: provision-openminis-source build fmt clippy test gates session-paging-online\n\
 verify-webui-online:\n\tscripts/verify-webui-online.sh\n\
 verify-webui-release-online:\n\tscripts/verify-webui-release-online.sh\n\
 release:\n\tscripts/release.sh\n\

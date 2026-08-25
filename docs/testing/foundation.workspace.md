@@ -8,8 +8,8 @@
   - workspace scaffold exists
   - required architecture docs exist
   - required hooks and CI files exist
-- `make ci` is the canonical full local gate and includes mainline freshness before architecture gates
-- `make dev` and `make pre-push-fast` are manual inner-loop tiers that never replace `make ci`; `make nightly` adds webui online verifiers, and `make release` reruns `make ci` before staging artifacts
+- `make ci` is the canonical full local gate and includes mainline freshness before architecture gates; workspace tests run with `RUST_TEST_THREADS=1` because runtime provider fixture channels are not safe to share across concurrently scheduled test threads
+- `make dev` and `make pre-push-fast` are manual inner-loop tiers that never replace `make ci`; `make nightly` adds operator-provisioned S-profile session-paging plus webui online verifiers, and `make release` reruns `make ci` before staging artifacts
 - pre-push, CI, and release paths consume the same full gate instead of drifting into partial gate stacks
   - release script runs full regression, Rust release build, Android JVM regression, Android release build, extracts APK version truth, and stages APK plus `update.json` artifacts
   - Android release artifact packaging disables Android release lint checks in Gradle config; release regression truth is `make ci` plus Android JVM tests, not the failing Android Lint Vital task
@@ -115,6 +115,7 @@
 - project black-box impact:
   - full workspace `make ci` gate smoke, including `cargo run -p xtask -- mainlines check`
   - `cargo run -p xtask -- gates check` invokes `verify_webui_foundation_contracts`, so WebUI foundation schema drift blocks the canonical project gate
+  - `cargo run -p xtask -- gates check` invokes `verify_app_webui_session_paging_boundary`; `make nightly` explicitly executes the operator-provisioned S-profile session-paging online verifier after the reproducible CI gates
   - `scripts/release.sh` stages host and Android release artifacts plus `dist/android/update.json` under `dist/`; the manifest carries the APK signer certificate SHA-256 digest and Relay staging preserves it
   - `scripts/verify-dual-path-update.sh` validates manifest and downloaded APK version, SHA-256, byte size, and signer certificate identity on both explicit endpoints
   - `bash -n apps/freehand-relay-server/deploy/claw-deploy.sh` validates the Claw deployment evidence script before any external deployment

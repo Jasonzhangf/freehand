@@ -5,6 +5,7 @@ mod lifecycle_wait;
 mod live_context;
 mod master_runner;
 mod path_diagnostics;
+mod session_paging;
 mod timer_store;
 mod turn_projection;
 mod worker_runner;
@@ -42,6 +43,10 @@ pub use master_runner::{
     ProductionMasterRunner, ProductionMasterRunnerError, ProductionMasterTickOutcome,
 };
 pub(crate) use path_diagnostics::{expand_leading_tilde_path, path_resolution_diagnostic_text};
+pub(crate) use session_paging::{
+    internal_runtime_session_id, session_list_page_request_from_ui, session_summary_to_ui,
+    visible_session_list_page,
+};
 pub(crate) use timer_store::{
     DueTimerSchedule, TimerScheduleMode, TimerScheduleRequest, TimerStore,
     claim_due_timer_schedule, complete_due_timer_schedule, fail_due_timer_schedule,
@@ -153,8 +158,7 @@ use freehand_reason::{
     CompactionPolicyRequest, PersistedSessionIndexEntry, PersistedSessionMetadataEntry,
     ProviderRawLedgerWrite, ProviderRawScenePosition, ReasonPersistence, ReasonPersistenceError,
     ReasonResp04CompletionSchemaRejected, ReasonResp05ModelContinuationWaiting,
-    ReasonResp06SearchEvidenceSchemaRejected, ReasonRewriteRuntime, ReasonSessionLatestStatus,
-    ReasonSessionListCursor, ReasonSessionListPageRequest, ReasonTurnEngine,
+    ReasonResp06SearchEvidenceSchemaRejected, ReasonRewriteRuntime, ReasonTurnEngine,
     ReasonTurnPageDirection, ReasonTurnPageRequest, RewriteRuntimeState, SessionHistory,
     SessionRollbackMarker, TurnRecord, TurnStartInput,
 };
@@ -190,9 +194,9 @@ use freehand_ui_protocol::{
     UiModelRouteUpdate, UiModelTransportActivity, UiModelTransportKind,
     UiModelWeightedRouteProjection, UiModelWeightedRouteUpdate, UiProtocolState,
     UiProviderConfigSummaryProjection, UiProviderConfigUpdate, UiQueryAccessScope, UiQueryResult,
-    UiRuntimeQueryPort, UiSchedulerTickCommand, UiSessionListPageDirection, UiSessionListPageInfo,
-    UiSessionListPageProjection, UiSessionMetadataProjection, UiSessionSearchChildProjection,
-    UiSessionSearchProjection, UiSessionSearchResultProjection, UiSessionTranscriptPageProjection,
+    UiRuntimeQueryPort, UiSchedulerTickCommand, UiSessionListPageInfo, UiSessionListPageProjection,
+    UiSessionMetadataProjection, UiSessionSearchChildProjection, UiSessionSearchProjection,
+    UiSessionSearchResultProjection, UiSessionTranscriptPageProjection,
     UiSessionTurnsPageDirection, UiSessionTurnsPageInfo, UiSubmitMetadata,
     UiTaskAgentCreateCommand, UiTaskAssignCommand, UiTaskBoardProjection, UiTaskClaimCommand,
     UiTaskCreateCommand, UiTaskDispatchCommand, UiTaskEventInboxEntryProjection,
@@ -3999,8 +4003,6 @@ struct RuntimeCommandDispatcherState {
     account_config_mirror_error: Option<String>,
 }
 
-type PersistedSessionFingerprint = (Option<TurnId>, Option<TurnId>);
-
 #[derive(Clone)]
 struct ActiveRuntimeTurn {
     turn_id: TurnId,
@@ -4029,7 +4031,6 @@ struct PreparedLiveSubmit {
 pub struct RuntimeCommandDispatcher {
     ui_state: Arc<Mutex<UiProtocolState>>,
     state: Mutex<RuntimeCommandDispatcherState>,
-    persisted_session_fingerprints: Mutex<BTreeMap<SessionId, PersistedSessionFingerprint>>,
 }
 
 impl RuntimeCommandDispatcher {
@@ -4315,7 +4316,6 @@ impl RuntimeCommandDispatcher {
         }
         let dispatcher = Self {
             ui_state,
-            persisted_session_fingerprints: Mutex::new(BTreeMap::new()),
             state: Mutex::new(RuntimeCommandDispatcherState {
                 config,
                 execution_role,
@@ -4401,13 +4401,11 @@ impl RuntimeCommandDispatcher {
                     .lock()
                     .expect("lock ui state")
                     .set_session_metadata_entries(metadata.into_iter().map(session_metadata_to_ui));
-                let page = persistence
-                    .list_persisted_sessions_page(&request)
-                    .map_err(|error| {
-                        UiCommandDispatchPortError::DispatchFailed(format!(
-                            "failed to read persisted session list page: {error}"
-                        ))
-                    })?;
+                let page = visible_session_list_page(&persistence, request).map_err(|error| {
+                    UiCommandDispatchPortError::DispatchFailed(format!(
+                        "failed to read persisted session list page: {error}"
+                    ))
+                })?;
                 Ok(Some(UiQueryResult::SessionListPage(
                     UiSessionListPageProjection {
                         sessions: page
@@ -4419,41 +4417,18 @@ impl RuntimeCommandDispatcher {
                             has_older: page.has_older,
                             next_cursor: page
                                 .next_cursor
-                                .map(|cursor| serde_json::to_string(&cursor).unwrap_or_default()),
+                                .map(|cursor| {
+                                    serde_json::to_string(&cursor).map_err(|error| {
+                                        UiCommandDispatchPortError::DispatchFailed(format!(
+                                            "failed to serialize session list cursor: {error}"
+                                        ))
+                                    })
+                                })
+                                .transpose()?,
                             unavailable_sessions: page.unavailable_sessions,
                         },
                     },
                 )))
-            }
-            UiCommand::QuerySessionList | UiCommand::QueryArchivedSessionList => {
-                let Some(runtime_home) = state
-                    .config
-                    .live
-                    .as_ref()
-                    .map(|live| live.runtime_home.clone())
-                else {
-                    return Ok(None);
-                };
-                let reason_agent_id = state.config.reason_agent_id.clone();
-                let reason_node_id = reason_node_id_for_config(&state.config);
-                drop(state);
-                let mut fingerprints = self
-                    .persisted_session_fingerprints
-                    .lock()
-                    .expect("lock persisted session fingerprints");
-                refresh_persisted_sessions_for_ui_query(
-                    &runtime_home,
-                    &reason_agent_id,
-                    &reason_node_id,
-                    &self.ui_state,
-                    &mut fingerprints,
-                )?;
-                self.ui_state
-                    .lock()
-                    .expect("lock ui state")
-                    .query(command)
-                    .map(Some)
-                    .map_err(|error| UiCommandDispatchPortError::DispatchFailed(error.to_string()))
             }
             UiCommand::QuerySessionSearch { query, limit } => {
                 let Some(live) = state.config.live.as_ref() else {
@@ -7728,132 +7703,6 @@ fn restore_session_turns_page_for_ui_query(
     Ok(None)
 }
 
-fn refresh_persisted_sessions_for_ui_query(
-    runtime_home: &Path,
-    reason_agent_id: &AgentId,
-    master_node_id: &str,
-    ui_state: &Arc<Mutex<UiProtocolState>>,
-    fingerprints: &mut BTreeMap<SessionId, PersistedSessionFingerprint>,
-) -> Result<(), UiCommandDispatchPortError> {
-    let persistence = ReasonPersistence::new(runtime_home.to_path_buf(), reason_agent_id.clone());
-    let metadata = persistence.load_session_metadata().map_err(|error| {
-        UiCommandDispatchPortError::DispatchFailed(format!(
-            "failed to refresh persisted session metadata: {error}"
-        ))
-    })?;
-    let mut ui = ui_state.lock().expect("lock ui state");
-    ui.set_session_metadata_entries(metadata.into_iter().map(session_metadata_to_ui));
-    drop(ui);
-    let sessions = persistence.list_persisted_sessions().map_err(|error| {
-        UiCommandDispatchPortError::DispatchFailed(format!(
-            "failed to refresh persisted session index: {error}"
-        ))
-    })?;
-    let mut persisted_projections = Vec::new();
-    let mut refreshed_sessions = Vec::new();
-    for session in sessions {
-        let fingerprint = (
-            session.latest_turn_id.clone(),
-            session.active_turn_id.clone(),
-        );
-        if fingerprints.get(&session.session_id) == Some(&fingerprint) {
-            continue;
-        }
-        let turns = match persistence.restore_turn_snapshots_for_ui(&session.session_id) {
-            Ok(turns) => turns,
-            Err(
-                ReasonPersistenceError::MissingRecoveryTruth(_)
-                | ReasonPersistenceError::JsonParseFailed(_)
-                | ReasonPersistenceError::InvalidCursorCoherence(_)
-                | ReasonPersistenceError::InvalidLedgerCoherence(_)
-                | ReasonPersistenceError::LedgerSequenceGap { .. },
-            ) => {
-                // A single poisoned/incomplete ledger must not block the whole
-                // UI refresh for every other session. The daemon-side restore
-                // already tolerates the same set of recoverable ledger errors.
-                continue;
-            }
-            Err(error) => {
-                return Err(UiCommandDispatchPortError::DispatchFailed(format!(
-                    "failed to refresh persisted session turns: {error}"
-                )));
-            }
-        };
-        refreshed_sessions.push(session.session_id.clone());
-        fingerprints.insert(session.session_id.clone(), fingerprint);
-        for turn in turns {
-            persisted_projections.push(project_runtime_turn_history(
-                reason_agent_id,
-                master_node_id,
-                std::slice::from_ref(&turn),
-                None,
-            ));
-        }
-    }
-    let mut ui = ui_state.lock().expect("lock ui state");
-    for session_id in refreshed_sessions {
-        let session_projections = persisted_projections
-            .iter()
-            .filter(|projection| projection.session_id == session_id)
-            .cloned()
-            .collect::<Vec<_>>();
-        ui.replace_persisted_turn_projections_without_publish(&session_id, session_projections);
-    }
-    Ok(())
-}
-
-fn session_list_page_request_from_ui(
-    archived: bool,
-    page: &freehand_ui_protocol::UiSessionListPageRequest,
-) -> Result<ReasonSessionListPageRequest, UiCommandDispatchPortError> {
-    let cursor = match (&page.direction, &page.cursor) {
-        (UiSessionListPageDirection::Latest, None) => None,
-        (UiSessionListPageDirection::Older, Some(cursor)) => Some(
-            serde_json::from_str::<ReasonSessionListCursor>(cursor).map_err(|error| {
-                UiCommandDispatchPortError::DispatchFailed(format!(
-                    "invalid session list page cursor: {error}"
-                ))
-            })?,
-        ),
-        _ => {
-            return Err(UiCommandDispatchPortError::DispatchFailed(
-                "session list page direction and cursor do not match".to_owned(),
-            ));
-        }
-    };
-    Ok(ReasonSessionListPageRequest {
-        archived,
-        cursor,
-        limit: page.limit,
-    })
-}
-
-fn session_summary_to_ui(
-    summary: freehand_reason::PersistedSessionSummary,
-) -> freehand_ui_protocol::UiSessionSummary {
-    freehand_ui_protocol::UiSessionSummary {
-        session_id: summary.session_id,
-        activity_unix_seconds: summary.activity_unix_seconds,
-        title: summary.title,
-        archived: summary.archived,
-        cwd: summary.cwd,
-        latest_turn_id: summary.latest_turn_id,
-        active_turn_id: summary.active_turn_id,
-        turn_count: summary.turn_count,
-        latest_status: reason_session_latest_status_string(summary.latest_status),
-        latest_summary: summary.latest_summary,
-    }
-}
-
-fn reason_session_latest_status_string(status: ReasonSessionLatestStatus) -> String {
-    match status {
-        ReasonSessionLatestStatus::Empty => "empty".to_owned(),
-        ReasonSessionLatestStatus::WaitingModel => "waiting_model".to_owned(),
-        ReasonSessionLatestStatus::ToolRunning => "tool_running".to_owned(),
-        ReasonSessionLatestStatus::Terminal(status) => format!("{status:?}").to_lowercase(),
-    }
-}
-
 fn queryable_reason_agent_ids(config: &RuntimeCommandDispatcherConfig) -> Vec<AgentId> {
     let mut agent_ids = Vec::<AgentId>::new();
     push_unique_agent_id(&mut agent_ids, config.reason_agent_id.clone());
@@ -8029,13 +7878,6 @@ fn worker_parent_session_map(
         );
     }
     Ok(map)
-}
-
-fn internal_runtime_session_id(session_id: &SessionId) -> bool {
-    let id = session_id.as_str();
-    id.starts_with("worker-task-")
-        || id.starts_with("master-lifecycle-")
-        || id.starts_with("master-timer-")
 }
 
 fn session_search_match(

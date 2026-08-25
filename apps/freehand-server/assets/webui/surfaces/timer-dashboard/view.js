@@ -40,8 +40,12 @@ function renderTimerSourceOptions(context) {
   internal.value = '';
   internal.textContent = '内部唤醒';
   input.appendChild(internal);
+  const isInternalRuntimeSessionId = (sessionId) =>
+    sessionId.startsWith('worker-task-')
+    || sessionId.startsWith('master-lifecycle-')
+    || sessionId.startsWith('master-timer-');
   context.state.sessions.forEach((session) => {
-    if (!session || !session.session_id || context.internalRuntimeSessionId(session.session_id)) return;
+    if (!session || !session.session_id || isInternalRuntimeSessionId(session.session_id)) return;
     const option = document.createElement('option');
     option.value = session.session_id;
     option.textContent = context.compactSentence(session.title || session.session_id, 80);

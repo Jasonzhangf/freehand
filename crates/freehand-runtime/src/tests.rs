@@ -24,6 +24,28 @@ use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 static TEST_COUNTER: AtomicU64 = AtomicU64::new(0);
 
+fn active_session_list_page_command() -> UiCommand {
+    UiCommand::QuerySessionListPage {
+        archived: false,
+        page: freehand_ui_protocol::UiSessionListPageRequest {
+            direction: freehand_ui_protocol::UiSessionListPageDirection::Latest,
+            cursor: None,
+            limit: 100,
+        },
+    }
+}
+
+fn archived_session_list_page_command() -> UiCommand {
+    UiCommand::QuerySessionListPage {
+        archived: true,
+        page: freehand_ui_protocol::UiSessionListPageRequest {
+            direction: freehand_ui_protocol::UiSessionListPageDirection::Latest,
+            cursor: None,
+            limit: 100,
+        },
+    }
+}
+
 fn runtime() -> RuntimeCommandDispatcher {
     RuntimeCommandDispatcher::new(RuntimeCommandDispatcherConfig {
         session_id: SessionId::new("runtime-session"),
@@ -608,17 +630,23 @@ fn live_bootstrap_restores_all_persisted_sessions_into_ui_state() {
     .expect("runtime bootstrap");
 
     let session_list = runtime
-        .ui_state()
-        .lock()
-        .expect("lock ui")
-        .query(&UiCommand::QuerySessionList)
-        .expect("session list query");
+        .query_runtime(&active_session_list_page_command())
+        .expect("runtime session list query")
+        .expect("runtime-owned session list");
     match session_list {
-        UiQueryResult::SessionList(list) => {
+        UiQueryResult::SessionListPage(list) => {
+            assert_eq!(list.sessions.len(), 2);
             assert!(
-                list.sessions.is_empty(),
-                "turn-only persisted sessions stay out of the metadata-owned session list"
+                list.sessions
+                    .iter()
+                    .any(|row| row.session_id.as_str() == "runtime-session-agent-live")
             );
+            assert!(
+                list.sessions
+                    .iter()
+                    .any(|row| row.session_id.as_str() == "runtime-session-other")
+            );
+            assert!(list.sessions.iter().all(|row| row.turn_count == 1));
         }
         other => panic!("unexpected session list query: {other:?}"),
     }
@@ -679,11 +707,11 @@ fn runtime_session_list_refreshes_current_agent_persistence_without_cross_agent_
         .expect("persist foreign background session");
 
     let result = runtime
-        .query_runtime(&UiCommand::QuerySessionList)
+        .query_runtime(&active_session_list_page_command())
         .expect("runtime query")
         .expect("runtime-owned session list");
     match result {
-        UiQueryResult::SessionList(list) => {
+        UiQueryResult::SessionListPage(list) => {
             assert!(
                 list.sessions
                     .iter()
@@ -805,6 +833,152 @@ fn runtime_session_list_page_avoids_full_transcript_restore() {
         }
         other => panic!("unexpected session list page result: {other:?}"),
     }
+
+    fs::remove_dir_all(runtime_home).expect("cleanup");
+}
+
+#[test]
+fn runtime_session_list_page_skips_internal_only_pages_without_empty_ui_page() {
+    let runtime_home = temp_runtime_home();
+    let selected = live_selected_agent(
+        "http://127.0.0.1:1".to_owned(),
+        freehand_config::ProviderType::Anthropic,
+    );
+    let runtime = RuntimeCommandDispatcher::from_selected_agent_with_live(
+        &selected,
+        runtime_home.clone(),
+        false,
+    )
+    .expect("runtime bootstrap");
+    let persistence =
+        ReasonPersistence::new(runtime_home.clone(), AgentId::new(selected.name.clone()));
+    for index in 0..120 {
+        persistence
+            .create_session_metadata(
+                SessionId::new(format!("master-lifecycle-z-{index:03}")),
+                None,
+                None,
+            )
+            .expect("persist internal session");
+    }
+    for index in 1..=3 {
+        persistence
+            .create_session_metadata(SessionId::new(format!("aaa-visible-{index}")), None, None)
+            .expect("persist visible session");
+    }
+
+    let latest = runtime
+        .query_runtime(&UiCommand::QuerySessionListPage {
+            archived: false,
+            page: freehand_ui_protocol::UiSessionListPageRequest {
+                direction: freehand_ui_protocol::UiSessionListPageDirection::Latest,
+                cursor: None,
+                limit: 2,
+            },
+        })
+        .expect("latest query")
+        .expect("latest page");
+    let UiQueryResult::SessionListPage(latest) = latest else {
+        panic!("unexpected latest page")
+    };
+    assert_eq!(
+        latest
+            .sessions
+            .iter()
+            .map(|row| row.session_id.as_str())
+            .collect::<Vec<_>>(),
+        vec!["aaa-visible-3", "aaa-visible-2"]
+    );
+    assert!(latest.page.has_older);
+    let cursor = latest.page.next_cursor.expect("visible cursor");
+
+    let older = runtime
+        .query_runtime(&UiCommand::QuerySessionListPage {
+            archived: false,
+            page: freehand_ui_protocol::UiSessionListPageRequest {
+                direction: freehand_ui_protocol::UiSessionListPageDirection::Older,
+                cursor: Some(cursor),
+                limit: 2,
+            },
+        })
+        .expect("older query")
+        .expect("older page");
+    let UiQueryResult::SessionListPage(older) = older else {
+        panic!("unexpected older page")
+    };
+    assert_eq!(
+        older
+            .sessions
+            .iter()
+            .map(|row| row.session_id.as_str())
+            .collect::<Vec<_>>(),
+        vec!["aaa-visible-1"]
+    );
+    assert!(!older.page.has_older);
+
+    fs::remove_dir_all(runtime_home).expect("cleanup");
+}
+
+#[test]
+fn runtime_rejects_invalid_session_list_cursor_without_projection() {
+    let runtime_home = temp_runtime_home();
+    let selected = live_selected_agent(
+        "http://127.0.0.1:1".to_owned(),
+        freehand_config::ProviderType::Anthropic,
+    );
+    let runtime = RuntimeCommandDispatcher::from_selected_agent_with_live(
+        &selected,
+        runtime_home.clone(),
+        false,
+    )
+    .expect("runtime bootstrap");
+
+    let error = runtime
+        .query_runtime(&UiCommand::QuerySessionListPage {
+            archived: false,
+            page: freehand_ui_protocol::UiSessionListPageRequest {
+                direction: freehand_ui_protocol::UiSessionListPageDirection::Older,
+                cursor: Some("{invalid-json".to_owned()),
+                limit: 2,
+            },
+        })
+        .expect_err("invalid session list cursor must fail");
+    let UiCommandDispatchPortError::DispatchFailed(message) = error else {
+        panic!("unexpected session list cursor error: {error:?}");
+    };
+    assert!(message.contains("invalid session list page cursor"));
+
+    fs::remove_dir_all(runtime_home).expect("cleanup");
+}
+
+#[test]
+fn runtime_rejects_zero_session_list_limit_without_projection_or_panic() {
+    let runtime_home = temp_runtime_home();
+    let selected = live_selected_agent(
+        "http://127.0.0.1:1".to_owned(),
+        freehand_config::ProviderType::Anthropic,
+    );
+    let runtime = RuntimeCommandDispatcher::from_selected_agent_with_live(
+        &selected,
+        runtime_home.clone(),
+        false,
+    )
+    .expect("runtime bootstrap");
+
+    let error = runtime
+        .query_runtime(&UiCommand::QuerySessionListPage {
+            archived: false,
+            page: freehand_ui_protocol::UiSessionListPageRequest {
+                direction: freehand_ui_protocol::UiSessionListPageDirection::Latest,
+                cursor: None,
+                limit: 0,
+            },
+        })
+        .expect_err("zero session list limit must fail before paging arithmetic");
+    let UiCommandDispatchPortError::DispatchFailed(message) = error else {
+        panic!("unexpected session list limit error: {error:?}");
+    };
+    assert!(message.contains("session list page limit must be between 1 and 100"));
 
     fs::remove_dir_all(runtime_home).expect("cleanup");
 }
@@ -1526,13 +1700,11 @@ fn runtime_query_session_turns_projects_background_provider_retry_from_error_cen
         other => panic!("unexpected session query result: {other:?}"),
     }
     let session_list = runtime
-        .ui_state()
-        .lock()
-        .expect("lock ui")
-        .query(&UiCommand::QuerySessionList)
-        .expect("session list query");
+        .query_runtime(&active_session_list_page_command())
+        .expect("runtime session list query")
+        .expect("runtime-owned session list");
     match session_list {
-        UiQueryResult::SessionList(list) => {
+        UiQueryResult::SessionListPage(list) => {
             let summary = list
                 .sessions
                 .iter()
@@ -1636,13 +1808,11 @@ fn runtime_query_session_turns_does_not_reactivate_terminal_error_center_retry()
         other => panic!("unexpected session query result: {other:?}"),
     }
     let session_list = runtime
-        .ui_state()
-        .lock()
-        .expect("lock ui")
-        .query(&UiCommand::QuerySessionList)
-        .expect("session list query");
+        .query_runtime(&active_session_list_page_command())
+        .expect("runtime session list query")
+        .expect("runtime-owned session list");
     match session_list {
-        UiQueryResult::SessionList(list) => {
+        UiQueryResult::SessionListPage(list) => {
             let summary = list
                 .sessions
                 .iter()
@@ -1782,13 +1952,11 @@ fn runtime_query_session_turns_does_not_reactivate_historical_retry_before_later
         other => panic!("unexpected session query result: {other:?}"),
     }
     let session_list = runtime
-        .ui_state()
-        .lock()
-        .expect("lock ui")
-        .query(&UiCommand::QuerySessionList)
-        .expect("session list query");
+        .query_runtime(&active_session_list_page_command())
+        .expect("runtime session list query")
+        .expect("runtime-owned session list");
     match session_list {
-        UiQueryResult::SessionList(list) => {
+        UiQueryResult::SessionListPage(list) => {
             let summary = list
                 .sessions
                 .iter()
@@ -2235,13 +2403,11 @@ fn runtime_dispatches_session_crud_into_shared_ui_projection() {
     runtime.dispatch(rename).expect("rename dispatch");
 
     match runtime
-        .ui_state()
-        .lock()
-        .expect("lock ui")
-        .query(&UiCommand::QuerySessionList)
-        .expect("session list")
+        .query_runtime(&active_session_list_page_command())
+        .expect("runtime session list query")
+        .expect("runtime-owned session list")
     {
-        UiQueryResult::SessionList(list) => {
+        UiQueryResult::SessionListPage(list) => {
             assert_eq!(list.sessions.len(), 1);
             assert_eq!(list.sessions[0].session_id, session_id);
             assert_eq!(list.sessions[0].title.as_deref(), Some("Renamed"));
@@ -2256,13 +2422,11 @@ fn runtime_dispatches_session_crud_into_shared_ui_projection() {
     .expect("archive envelope");
     runtime.dispatch(archive).expect("archive dispatch");
     match runtime
-        .ui_state()
-        .lock()
-        .expect("lock ui")
-        .query(&UiCommand::QueryArchivedSessionList)
-        .expect("archived list")
+        .query_runtime(&archived_session_list_page_command())
+        .expect("runtime archived session list query")
+        .expect("runtime-owned archived session list")
     {
-        UiQueryResult::SessionList(list) => {
+        UiQueryResult::SessionListPage(list) => {
             assert_eq!(list.sessions.len(), 1);
             assert_eq!(list.sessions[0].session_id, session_id);
             assert!(list.sessions[0].archived);
@@ -2276,13 +2440,11 @@ fn runtime_dispatches_session_crud_into_shared_ui_projection() {
     .expect("restore envelope");
     runtime.dispatch(restore).expect("restore dispatch");
     match runtime
-        .ui_state()
-        .lock()
-        .expect("lock ui")
-        .query(&UiCommand::QuerySessionList)
-        .expect("active list")
+        .query_runtime(&active_session_list_page_command())
+        .expect("runtime active session list query")
+        .expect("runtime-owned active session list")
     {
-        UiQueryResult::SessionList(list) => {
+        UiQueryResult::SessionListPage(list) => {
             assert_eq!(list.sessions.len(), 1);
             assert_eq!(list.sessions[0].session_id, session_id);
             assert!(!list.sessions[0].archived);
@@ -4944,13 +5106,11 @@ fn live_bootstrap_closes_stale_toolpending_without_lifecycle_owner() {
     );
 
     match runtime
-        .ui_state()
-        .lock()
-        .expect("lock ui")
-        .query(&UiCommand::QuerySessionList)
-        .expect("session list")
+        .query_runtime(&active_session_list_page_command())
+        .expect("runtime session list query")
+        .expect("runtime-owned session list")
     {
-        UiQueryResult::SessionList(list) => {
+        UiQueryResult::SessionListPage(list) => {
             let summary = list
                 .sessions
                 .iter()

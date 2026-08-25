@@ -97,8 +97,6 @@ pub enum UiCommand {
     QueryTurn {
         turn_id: TurnId,
     },
-    QuerySessionList,
-    QueryArchivedSessionList,
     QuerySessionListPage {
         archived: bool,
         page: UiSessionListPageRequest,
@@ -650,11 +648,6 @@ pub struct UiSessionSummary {
     pub turn_count: usize,
     pub latest_status: String,
     pub latest_summary: Option<String>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct UiSessionListProjection {
-    pub sessions: Vec<UiSessionSummary>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

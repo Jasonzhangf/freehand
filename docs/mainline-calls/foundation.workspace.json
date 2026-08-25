@@ -1523,6 +1523,17 @@
       "binding_status": "bound"
     },
     {
+      "step": "19ab",
+      "symbol_path": "verify_app_webui_session_paging_boundary",
+      "file_path": "xtask/src/main.rs",
+      "responsibility": "validate the active app.webui-smoke module registry, complete verifier path ownership, executable session-paging verification gate, and source import edges",
+      "input_semantic": "app.webui-smoke module registry, feature map, verification map, and Makefile",
+      "output_semantic": "pass/fail with ownership, edge, or gate diagnostics",
+      "caller": "run_gates_check",
+      "callee": "filesystem and registered Rust import scanner",
+      "binding_status": "bound"
+    },
+    {
       "step": "19u",
       "symbol_path": "crate::symbol_resolves_in_files",
       "file_path": "xtask/src/main.rs",
@@ -5448,6 +5459,7 @@
     }
   ],
   "sync_status": [
-    "OpenMinis migration lifecycle, pinned-source/CI, topology, exact target/operation binding, JSON evidence, owner-feature legacy scan-root registry/coverage, and legacy-retirement gates are code-bound with positive/negative tests"
+    "OpenMinis migration lifecycle, pinned-source/CI, topology, exact target/operation binding, JSON evidence, owner-feature legacy scan-root registry/coverage, and legacy-retirement gates are code-bound with positive/negative tests",
+    "session-paging-online is an operator-provisioned nightly project-blackbox target; make ci remains reproducible without a personal S-profile endpoint or credential environment"
   ]
 }

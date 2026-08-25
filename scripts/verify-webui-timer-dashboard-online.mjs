@@ -2,6 +2,7 @@ import { spawn } from 'node:child_process';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
+import { adpVerifierRequest, requireSessionListPage } from './lib/adp-verifier-client.mjs';
 
 const repo = process.cwd();
 const chromePath = process.env.FREEHAND_WEBUI_CHROME ||
@@ -9,10 +10,11 @@ const chromePath = process.env.FREEHAND_WEBUI_CHROME ||
 const debugPort = Number.parseInt(process.env.FREEHAND_WEBUI_TIMER_DEBUG_PORT || '9257', 10);
 const baseUrl = normalizedBaseUrl(process.env.FREEHAND_WEBUI_TIMER_BASE_URL || 'http://127.0.0.1:4042/');
 const adpUrl = process.env.FREEHAND_WEBUI_TIMER_ADP_URL || adpUrlFromBaseUrl(baseUrl);
+const adpAuthToken = process.env.FREEHAND_ADP_AUTH_TOKEN || '';
 const runStamp = new Date().toISOString().replace(/[-:.]/g, '').slice(0, 15);
 const runId = `webui-timer-dashboard-${runStamp}-${process.pid}`;
 const artifactDir = path.join(repo, 'artifacts', 'webui-online', runId);
-const assetVersion = '20260726-stale-lifecycle-reconcile';
+const assetVersion = '20260824-session-list-page';
 const marker = `timer-dashboard-online-proof-${runStamp}-${process.pid}`;
 const wakePrompt = `Inspect current framework truth for ${marker}, then decide the next Master action.`;
 const createdTimerIds = new Set();
@@ -27,7 +29,7 @@ let summary = null;
 try {
   await waitHealth();
   await assertProductionPageReachable();
-  const beforeSessions = sessionListPayload(await adpQuery('QuerySessionList'));
+  const beforeSessions = await activeSessionListPage();
   const before = timerListPayload(await adpQuery({ QueryTimerList: { include_terminal: true } }));
   await fs.writeFile(path.join(artifactDir, 'session-list-before.json'), JSON.stringify(beforeSessions, null, 2));
   await fs.writeFile(path.join(artifactDir, 'timer-list-before.json'), JSON.stringify(before, null, 2));
@@ -150,7 +152,7 @@ try {
   await captureScreenshot(cdp, 'timer-dashboard-cancelled.png');
 
   const afterCancel = timerListPayload(await adpQuery({ QueryTimerList: { include_terminal: true } }));
-  const afterSessions = sessionListPayload(await adpQuery('QuerySessionList'));
+  const afterSessions = await activeSessionListPage();
   await fs.writeFile(path.join(artifactDir, 'timer-list-after-cancel.json'), JSON.stringify(afterCancel, null, 2));
   await fs.writeFile(path.join(artifactDir, 'session-list-after.json'), JSON.stringify(afterSessions, null, 2));
   const cancelledTimer = afterCancel.timers.find((candidate) => candidate.timer_id === scheduledTimer.timer_id);
@@ -305,15 +307,11 @@ function timerListPayload(result) {
 }
 
 function sessionListPayload(result) {
-  const payload = result?.SessionList || result?.session_list || result;
-  return {
-    sessions: Array.isArray(payload?.sessions) ? payload.sessions : [],
-    archived: Array.isArray(payload?.archived) ? payload.archived : [],
-  };
+  return requireSessionListPage(result);
 }
 
 function sessionIds(list) {
-  return (list.sessions || [])
+  return list.sessions
     .map((session) => session.session_id || '')
     .filter(Boolean)
     .sort();
@@ -323,46 +321,29 @@ async function adpQuery(query) {
   return await adpRequest('query', 'query', query, 30_000);
 }
 
+async function activeSessionListPage() {
+  const result = await adpRequest('query', 'query', {
+    QuerySessionListPage: {
+      archived: false,
+      page: { direction: 'Latest', cursor: null, limit: 100 },
+    },
+  }, 30_000);
+  return sessionListPayload(result);
+}
+
 async function adpCommand(command, timeoutMs = 30_000) {
   return await adpRequest('command', 'command', command, timeoutMs);
 }
 
 function adpRequest(kind, payloadKey, payload, timeoutMs) {
-  const socket = new WebSocket(adpUrl);
-  const requestId = `${kind}-${Date.now()}-${Math.random().toString(36).slice(2)}`;
-  return new Promise((resolve, reject) => {
-    const timer = setTimeout(() => {
-      socket.close();
-      reject(new Error(`ADP ${kind} timeout`));
-    }, timeoutMs);
-    socket.addEventListener('open', () => {
-      socket.send(JSON.stringify({ kind, request_id: requestId, [payloadKey]: payload }));
-    });
-    socket.addEventListener('message', (event) => {
-      const message = JSON.parse(event.data);
-      if (message.request_id !== requestId) {
-        return;
-      }
-      clearTimeout(timer);
-      socket.close();
-      if (message.kind === 'failure') {
-        reject(new Error(message.failure?.message || message.failure?.code || 'ADP failure'));
-        return;
-      }
-      if (message.kind === 'query_result') {
-        resolve(message.result);
-        return;
-      }
-      if (message.kind === 'command_receipt') {
-        resolve(message.receipt);
-        return;
-      }
-      reject(new Error(`unexpected ADP ${kind} response: ${message.kind}`));
-    });
-    socket.addEventListener('error', () => {
-      clearTimeout(timer);
-      reject(new Error(`ADP ${kind} socket error`));
-    });
+  return adpVerifierRequest({
+    url: adpUrl,
+    authToken: adpAuthToken,
+    kind,
+    payloadKey,
+    payload,
+    timeoutMs,
+    clientName: 'freehand-timer-dashboard-verifier',
   });
 }
 

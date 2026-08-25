@@ -4281,7 +4281,7 @@ function setSessionList(projection) {
       setSelectedSessionId(null);
     }
   }
-  state.sessions = topLevelPersistedSessions((projection && projection.sessions) || [])
+  state.sessions = ((projection && projection.sessions) || [])
     .filter((session) => !state.sessionListDeletedIds.has(session.session_id));
   state.sessionListLoaded = true;
   state.sessionListHasOlder = !!(projection && projection.page && projection.page.has_older);
@@ -4297,17 +4297,6 @@ function setSessionList(projection) {
   if (selected) {
     syncSelectedCwdFromProjection(selected);
   }
-}
-
-function internalRuntimeSessionId(sessionId) {
-  const id = `${sessionId || ""}`.trim();
-  return id.startsWith("worker-task-") || id.startsWith("master-lifecycle-") || id.startsWith("master-timer-");
-}
-
-function topLevelPersistedSessions(sessions) {
-  return (sessions || []).filter((session) =>
-    session && session.session_id && !session.temporary && !internalRuntimeSessionId(session.session_id)
-  );
 }
 
 function selectedManagedSessionIds() {
@@ -4338,7 +4327,7 @@ function clearSessionSelection() {
 function selectAllSessions() {
   state.selectedSessionIds.clear();
   state.sessions.forEach((session) => {
-    if (session && session.session_id && !isDraftSessionId(session.session_id) && !internalRuntimeSessionId(session.session_id)) {
+    if (session && session.session_id && !isDraftSessionId(session.session_id)) {
       state.selectedSessionIds.add(session.session_id);
     }
   });
@@ -4815,12 +4804,6 @@ function applyAdpQueryResult(result) {
       setCommandStatus(`调试查询失败：${error.message}`);
       });
     }
-    return;
-  }
-  const sessionListResult = variantPayload(result, "SessionList");
-  if (sessionListResult !== undefined) {
-    setSessionList(sessionListResult);
-    renderAll();
     return;
   }
   const sessionTurns = variantPayload(result, "SessionTurns");
@@ -7875,7 +7858,6 @@ function timerDashboardSurfaceContext() {
       sourceSessionInput: timerSourceSessionInput,
     },
     currentSourceSessionId: currentTimerSourceSessionId,
-    internalRuntimeSessionId,
     compactSentence,
     statusLabel,
     formatUnixTime,
@@ -7897,7 +7879,7 @@ function timerDashboardSurfaceContext() {
 
 function currentTimerSourceSessionId() {
   const selected = selectedParentSessionSummary() || sessionSummaryForSelected();
-  if (selected && selected.session_id && !internalRuntimeSessionId(selected.session_id)) {
+  if (selected && selected.session_id) {
     return selected.session_id;
   }
   return "";
@@ -9297,10 +9279,7 @@ async function refreshSessions() {
   if (state.sessionListRequestSequence !== requestSequence) {
     return;
   }
-  const projection = variantPayload(result, "SessionListPage") || {
-    sessions: [],
-    page: { has_older: false, next_cursor: null, unavailable_sessions: [] },
-  };
+  const projection = requireSessionListPageProjection(result, "refresh sessions");
   setSessionList(projection);
   renderAll();
   scheduleSessionListPrefetch();
@@ -9315,7 +9294,9 @@ function scheduleSessionListPrefetch() {
     return;
   }
   window.requestIdleCallback(() => {
-    loadOlderSessionListPage({ prefetch: true }).catch(() => {});
+    loadOlderSessionListPage({ prefetch: true }).catch((error) => {
+      setCommandStatus(`会话列表加载失败: ${error.message}`, { stickyMs: 8000 });
+    });
   });
 }
 
@@ -9345,32 +9326,37 @@ async function loadOlderSessionListPage(options = {}) {
         limit: 24,
       },
     }));
-    const projection = variantPayload(result, "SessionListPage");
-    if (!projection) {
-      return;
-    }
+    const projection = requireSessionListPageProjection(result, "load older sessions");
     if (options.prefetch) {
-      state.sessionListPendingPages.push(topLevelPersistedSessions(projection.sessions || []));
-      state.sessionListHasOlder = !!projection.page?.has_older;
-      state.sessionListNextCursor = projection.page?.next_cursor || null;
+      state.sessionListPendingPages.push(projection.sessions);
+      state.sessionListHasOlder = projection.page.has_older;
+      state.sessionListNextCursor = projection.page.next_cursor;
       return;
     }
-    appendSessionListPage(topLevelPersistedSessions(projection.sessions || []));
-    state.sessionListHasOlder = !!projection.page?.has_older;
-    state.sessionListNextCursor = projection.page?.next_cursor || null;
+    appendSessionListPage(projection.sessions);
+    state.sessionListHasOlder = projection.page.has_older;
+    state.sessionListNextCursor = projection.page.next_cursor;
   } finally {
     state.sessionListOlderInFlight = false;
     renderAll();
   }
 }
 
+function requireSessionListPageProjection(result, operation) {
+  const projection = variantPayload(result, "SessionListPage");
+  if (!projection || !Array.isArray(projection.sessions) || !projection.page ||
+      typeof projection.page.has_older !== "boolean" ||
+      (projection.page.next_cursor !== null && typeof projection.page.next_cursor !== "string")) {
+    throw new Error(`${operation} returned malformed SessionListPage projection`);
+  }
+  return projection;
+}
+
 function appendSessionListPage(sessions) {
   const known = new Set(state.sessions.map((session) => session.session_id));
   state.sessions = [
     ...state.sessions,
-    ...topLevelPersistedSessions(sessions).filter(
-      (session) => !known.has(session.session_id),
-    ),
+    ...sessions.filter((session) => !known.has(session.session_id)),
   ];
 }
 

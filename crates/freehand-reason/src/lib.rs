@@ -37,13 +37,13 @@ use serde_json::json;
 use thiserror::Error;
 
 pub use persistence::{
-    ActiveTurnSnapshot, PersistedSessionIndexEntry, PersistedSessionMetadataEntry,
-    PersistedSessionSummary, PersistedSessionSummaryIndex, PersistedSessionView,
-    ProviderRawLedgerRow, ProviderRawLedgerWrite, ProviderRawScenePosition, ReasonLedgerPayload,
-    ReasonLedgerRow, ReasonPersistence, ReasonPersistenceCursor, ReasonPersistenceError,
-    ReasonSessionLatestStatus, ReasonSessionListCursor, ReasonSessionListPage,
-    ReasonSessionListPageRequest, ReasonTurnPage, ReasonTurnPageDirection, ReasonTurnPageRequest,
-    RestoredReasonSession, SessionRollbackMarker,
+    ActiveTurnSnapshot, MAX_SESSION_LIST_PAGE_LIMIT, PersistedSessionIndexEntry,
+    PersistedSessionMetadataEntry, PersistedSessionSummary, PersistedSessionSummaryIndex,
+    PersistedSessionView, ProviderRawLedgerRow, ProviderRawLedgerWrite, ProviderRawScenePosition,
+    ReasonLedgerPayload, ReasonLedgerRow, ReasonPersistence, ReasonPersistenceCursor,
+    ReasonPersistenceError, ReasonSessionLatestStatus, ReasonSessionListCursor,
+    ReasonSessionListPage, ReasonSessionListPageRequest, ReasonTurnPage, ReasonTurnPageDirection,
+    ReasonTurnPageRequest, RestoredReasonSession, SessionRollbackMarker,
 };
 pub use rewrite_runtime::{
     CompactionPolicyOutcome, CompactionPolicyRequest, CompactionRewritePayload,

@@ -1152,10 +1152,12 @@ mod tests {
     }
 
     fn sample_remote_daemon_registry() -> RemoteDaemonRegistryConfig {
+        static CONFIG_SEQUENCE: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
         let unique = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .expect("clock")
-            .as_nanos();
+            .as_nanos()
+            + u128::from(CONFIG_SEQUENCE.fetch_add(1, std::sync::atomic::Ordering::Relaxed));
         let path = std::env::temp_dir().join(format!(
             "freehand-node-remote-daemon-directory-{}-{unique}.toml",
             std::process::id()

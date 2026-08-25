@@ -2,9 +2,9 @@ use crate::adp_wire::{UiProjection, UiQueryResult, UiSubscriptionEvent};
 use crate::dto::*;
 use crate::projection::{
     empty_checkpoint_snapshot, fail_waiting_tool_activities, merge_hosted_search_activities,
-    preserve_live_activity_on_nonterminal_refresh, session_list_projection,
-    session_transcript_projection, terminal_text_projection, tool_activity_detail_from_result,
-    tool_activity_status_from_result, turn_is_nonterminal, turn_is_terminal, upsert_tool_activity,
+    preserve_live_activity_on_nonterminal_refresh, session_transcript_projection,
+    terminal_text_projection, tool_activity_detail_from_result, tool_activity_status_from_result,
+    turn_is_nonterminal, upsert_tool_activity,
 };
 use freehand_blocks::{project_tool_call_display, project_tool_result_display};
 use freehand_contracts::SearchEvidenceTurnDelivery;
@@ -261,48 +261,6 @@ impl UiProtocolState {
             preserve_live_activity_on_nonterminal_refresh(latest, previous);
         }
         projections
-    }
-
-    pub fn merge_persisted_turn_projections_without_publish(
-        &mut self,
-        projections: impl IntoIterator<Item = UiTurnProjection>,
-    ) {
-        for projection in projections {
-            let should_replace =
-                !self.turns.contains_key(&projection.turn_id) || turn_is_terminal(&projection);
-            if should_replace {
-                self.turns.insert(projection.turn_id.clone(), projection);
-            }
-        }
-    }
-
-    pub fn replace_persisted_turn_projections_without_publish(
-        &mut self,
-        session_id: &SessionId,
-        projections: impl IntoIterator<Item = UiTurnProjection>,
-    ) {
-        let projections = projections.into_iter().collect::<Vec<_>>();
-        let persisted_ids = projections
-            .iter()
-            .map(|projection| projection.turn_id.clone())
-            .collect::<std::collections::BTreeSet<_>>();
-        self.turns.retain(|turn_id, projection| {
-            projection.session_id != *session_id
-                || persisted_ids.contains(turn_id)
-                || !turn_is_terminal(projection)
-        });
-        self.merge_persisted_turn_projections_without_publish(projections);
-        if self
-            .latest_active_turn_id
-            .as_ref()
-            .is_some_and(|turn_id| !self.turns.contains_key(turn_id))
-        {
-            self.latest_active_turn_id = self
-                .turns
-                .values()
-                .rfind(|projection| !turn_is_terminal(projection))
-                .map(|projection| projection.turn_id.clone());
-        }
     }
 
     pub fn set_session_cwd(&mut self, session_id: SessionId, cwd: impl Into<String>) {
@@ -728,22 +686,6 @@ impl UiProtocolState {
             }
             UiCommand::QueryTurn { turn_id } => {
                 Ok(UiQueryResult::Turn(self.turns.get(turn_id).cloned()))
-            }
-            UiCommand::QuerySessionList => Ok(UiQueryResult::SessionList(session_list_projection(
-                &self.turns,
-                &self.session_cwds,
-                &self.session_metadata,
-                self.latest_active_turn_id.as_ref(),
-                false,
-            ))),
-            UiCommand::QueryArchivedSessionList => {
-                Ok(UiQueryResult::SessionList(session_list_projection(
-                    &self.turns,
-                    &self.session_cwds,
-                    &self.session_metadata,
-                    self.latest_active_turn_id.as_ref(),
-                    true,
-                )))
             }
             UiCommand::QuerySessionTurns { session_id } => {
                 Ok(UiQueryResult::SessionTurns(session_transcript_projection(

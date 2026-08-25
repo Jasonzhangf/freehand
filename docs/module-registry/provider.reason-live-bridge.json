@@ -6,7 +6,8 @@
   "coverage_roots": [
     "crates/freehand-runtime/Cargo.toml",
     "crates/freehand-runtime/src/lib.rs",
-    "crates/freehand-runtime/src/live_context.rs"
+    "crates/freehand-runtime/src/live_context.rs",
+    "crates/freehand-runtime/src/tests.rs"
   ],
   "modules": [
     {
@@ -16,7 +17,8 @@
       "owned_paths": [
         "crates/freehand-runtime/Cargo.toml",
         "crates/freehand-runtime/src/lib.rs",
-        "crates/freehand-runtime/src/live_context.rs"
+        "crates/freehand-runtime/src/live_context.rs",
+        "crates/freehand-runtime/src/tests.rs"
       ],
       "allowed_dependencies": [
         "rust.std",

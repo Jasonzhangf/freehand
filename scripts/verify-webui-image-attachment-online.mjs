@@ -101,10 +101,11 @@ async function runProof(sessionId) {
   hook.prepareAttachmentProofSession(sessionId);
   hook.setAdpQueryForTest(async (query) => {
     const name = typeof query === 'string' ? query : Object.keys(query || {})[0] || '';
-    if (name === 'QuerySessionList') {
+    if (name === 'QuerySessionListPage') {
       return {
-        SessionList: {
+        SessionListPage: {
           sessions: [{ session_id: sessionId, title: 'Image attachment proof', archived: false }],
+          page: { has_older: false, next_cursor: null, unavailable_sessions: [] },
         },
       };
     }
