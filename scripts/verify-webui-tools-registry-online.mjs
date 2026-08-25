@@ -15,7 +15,7 @@ const adpAuthToken = process.env.FREEHAND_ADP_AUTH_TOKEN || '';
 const runStamp = new Date().toISOString().replace(/[-:.]/g, '').slice(0, 15);
 const runId = `webui-tools-registry-${runStamp}-${process.pid}`;
 const artifactDir = path.join(repo, 'artifacts', 'webui-online', runId);
-const assetVersion = '20260824-session-list-page';
+const assetVersion = '20260825-session-terminal-cursor';
 
 await fs.mkdir(artifactDir, { recursive: true });
 

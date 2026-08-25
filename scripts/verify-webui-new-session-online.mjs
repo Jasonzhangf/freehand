@@ -15,7 +15,7 @@ const debugPort = Number.parseInt(process.env.FREEHAND_NEW_SESSION_DEBUG_PORT ||
 const conversationSessionId = process.env.FREEHAND_NEW_CONVERSATION_SESSION_ID || 'webui-new-conversation-fixed';
 const taskSessionId = process.env.FREEHAND_NEW_TASK_SESSION_ID || 'webui-new-task-fixed';
 const taskCwd = process.env.FREEHAND_NEW_TASK_CWD || repo;
-const assetVersion = '20260824-session-list-page';
+const assetVersion = '20260825-session-terminal-cursor';
 const runId = `webui-new-session-${Date.now()}`;
 const artifactDir = path.join(repo, 'artifacts', 'webui-online', runId);
 
@@ -121,18 +121,30 @@ try {
       .map((row) => row.dataset.sessionId || ''),
     buttonText: document.querySelector('button.session-list-older')?.innerText || '',
     buttonDisabled: document.querySelector('button.session-list-older')?.disabled ?? true,
+    buttonPresent: !!document.querySelector('button.session-list-older'),
   }));
-  await evalInPage(cdp, () => document.querySelector('button.session-list-older')?.click());
-  const afterOlderLoad = await waitForFunction(cdp, (beforeCount) => {
-    const sessionIds = Array.from(document.querySelectorAll('.session-item.session-row'))
-      .map((row) => row.dataset.sessionId || '');
-    if (sessionIds.length <= beforeCount) return null;
-    return {
-      sessionIds,
-      buttonText: document.querySelector('button.session-list-older')?.innerText || '',
-      buttonDisabled: document.querySelector('button.session-list-older')?.disabled ?? false,
-    };
-  }, 30_000, 'older session page appended', beforeOlderLoad.sessionIds.length);
+  let afterOlderLoad;
+  let ownerTerminalPage = null;
+  if (beforeOlderLoad.buttonPresent && !beforeOlderLoad.buttonDisabled) {
+    await evalInPage(cdp, () => document.querySelector('button.session-list-older')?.click());
+    afterOlderLoad = await waitForFunction(cdp, (beforeCount) => {
+      const sessionIds = Array.from(document.querySelectorAll('.session-item.session-row'))
+        .map((row) => row.dataset.sessionId || '');
+      if (sessionIds.length <= beforeCount) return null;
+      return {
+        appended: true,
+        sessionIds,
+        buttonText: document.querySelector('button.session-list-older')?.innerText || '',
+        buttonDisabled: document.querySelector('button.session-list-older')?.disabled ?? true,
+      };
+    }, 30_000, 'older session page appended', beforeOlderLoad.sessionIds.length);
+  } else {
+    ownerTerminalPage = await activeSessionListPage();
+    if (ownerTerminalPage.page.has_older !== false) {
+      throw new Error(`owner reports has_older but WebUI omitted the button: ${JSON.stringify(ownerTerminalPage.page)}`);
+    }
+    afterOlderLoad = { appended: false, ...beforeOlderLoad };
+  }
   await fs.writeFile(
     path.join(artifactDir, 'session-list-older-dom.json'),
     JSON.stringify({ before: beforeOlderLoad, after: afterOlderLoad }, null, 2),
@@ -168,6 +180,7 @@ try {
     taskDom,
     beforeOlderLoad,
     afterOlderLoad,
+    sessionPagingMode: afterOlderLoad.appended ? 'older-page' : 'terminal-single-page',
     bodyState,
     checks: {
       assetVersionServed: true,
@@ -179,9 +192,10 @@ try {
       taskCreatedThroughOwnerTruth: !!taskOwnerRow && taskOwnerRow.archived !== true && taskOwnerRow.cwd === taskCwd,
       taskSelectedInUi: taskDom.selectedSession === taskSessionId,
       taskCwdProjectedInUi: taskDom.selectedCwd === taskCwd || bodyState.selectedCwd === taskCwd,
-      olderPageLoadedInUi: beforeOlderLoad.buttonText === '加载更早'
-        && beforeOlderLoad.buttonDisabled === false
-        && afterOlderLoad.sessionIds.length > beforeOlderLoad.sessionIds.length,
+      olderPageHandledInUi: afterOlderLoad.appended === true
+        || (afterOlderLoad.appended === false
+          && beforeOlderLoad.buttonPresent === false
+          && ownerTerminalPage.page.has_older === false),
       noTopLevelWorkerSessions: topLevelWorkerRows.length === 0,
       noHorizontalOverflow: bodyState.noHorizontalOverflow === true,
     },

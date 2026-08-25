@@ -14,7 +14,7 @@ const debugPort = Number.parseInt(process.env.FREEHAND_SESSION_SEARCH_DEBUG_PORT
 const fixedSessionId = process.env.FREEHAND_SESSION_SEARCH_SESSION_ID || 'webui-session-search-fixed';
 const queryToken = process.env.FREEHAND_SESSION_SEARCH_QUERY || `session-search-proof-${fixedSessionId}`;
 const fixedTitle = `Session 搜索 Proof ${queryToken}`;
-const assetVersion = '20260824-session-list-page';
+const assetVersion = '20260825-session-terminal-cursor';
 const runId = `webui-session-search-${Date.now()}`;
 const artifactDir = path.join(repo, 'artifacts', 'webui-online', runId);
 

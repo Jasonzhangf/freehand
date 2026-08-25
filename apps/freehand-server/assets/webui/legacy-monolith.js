@@ -9346,7 +9346,9 @@ function requireSessionListPageProjection(result, operation) {
   const projection = variantPayload(result, "SessionListPage");
   if (!projection || !Array.isArray(projection.sessions) || !projection.page ||
       typeof projection.page.has_older !== "boolean" ||
-      (projection.page.next_cursor !== null && typeof projection.page.next_cursor !== "string")) {
+      projection.page.next_cursor !== undefined &&
+      projection.page.next_cursor !== null &&
+      typeof projection.page.next_cursor !== "string") {
     throw new Error(`${operation} returned malformed SessionListPage projection`);
   }
   return projection;

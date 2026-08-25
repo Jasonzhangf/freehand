@@ -17,7 +17,7 @@ const debugPort = Number.parseInt(process.env.FREEHAND_MODEL_GROUP_UI_DEBUG_PORT
 const chromePath =
   process.env.FREEHAND_MODEL_GROUP_UI_CHROME ||
   '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
-const assetVersion = '20260824-session-list-page';
+const assetVersion = '20260825-session-terminal-cursor';
 const runId = `model-group-ui-${Date.now()}`;
 const artifactDir = path.join(repo, 'artifacts', 'webui-online', runId);
 const testGroupId = process.env.FREEHAND_MODEL_GROUP_UI_GROUP_ID || `ui.verify.${Date.now()}`;

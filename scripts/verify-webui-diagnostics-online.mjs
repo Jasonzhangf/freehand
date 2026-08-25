@@ -13,7 +13,7 @@ const adpUrl = process.env.FREEHAND_WEBUI_DIAGNOSTICS_ADP_URL || adpUrlFromBaseU
 const adpAuthToken = process.env.FREEHAND_ADP_AUTH_TOKEN || '';
 const runId = `webui-诊断-${Date.now()}`;
 const artifactDir = path.join(repo, 'artifacts', 'webui-online', runId);
-const assetVersion = '20260824-session-list-page';
+const assetVersion = '20260825-session-terminal-cursor';
 const forbiddenPattern = /\/Users\/|\/Volumes\/|authorization|api_key|apikey|x-api-key|bearer |pair_token|secret|provider request|provider payload/i;
 
 await fs.mkdir(artifactDir, { recursive: true });
