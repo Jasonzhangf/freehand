@@ -2,7 +2,7 @@
 <html lang="zh-CN">
 <head>
   <meta charset="utf-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
   <title>Freehand Interactive Code Map</title>
   <style>
     :root {
@@ -200,6 +200,49 @@
       label { flex: 1 1 240px; }
       .inspector { max-height: none; }
     }
+    @media (max-width: 900px) {
+      html, body { overscroll-behavior-y: contain; }
+      body { padding-top: env(safe-area-inset-top); padding-bottom: max(18px, env(safe-area-inset-bottom)); }
+      header { padding-top: calc(20px + env(safe-area-inset-top)); }
+      header, .layout, footer { padding-left: 12px; padding-right: 12px; }
+      h1 { font-size: clamp(24px, 7vw, 32px); }
+      .controls { gap: 10px; margin-top: 14px; }
+      label, select, input[type="search"], button { width: 100%; }
+      select, input[type="search"] { min-width: 0; min-height: 46px; font-size: 16px; }
+      button { min-height: 46px; font-size: 16px; }
+      .canvas-shell { display: none; }
+      #mobile-map { display: block; margin-bottom: 16px; }
+      .mobile-toolbar { display: grid; grid-auto-flow: column; grid-auto-columns: minmax(112px, 1fr); gap: 8px; overflow-x: auto; scroll-snap-type: x mandatory; -webkit-overflow-scrolling: touch; padding: 0 2px 6px; }
+      .mobile-page-btn {
+        scroll-snap-align: center;
+        border: 1px solid var(--line);
+        background: var(--node);
+        color: inherit;
+        border-radius: 7px;
+        min-height: 48px;
+        padding: 8px 9px;
+        display: grid;
+        align-content: center;
+        justify-items: start;
+        text-align: left;
+      }
+      .mobile-page-btn[aria-current="true"] { border-color: var(--accent); background: var(--accent-soft); color: var(--accent); font-weight: 650; }
+      .mobile-cards { display: grid; gap: 9px; margin-top: 10px; }
+      .mobile-node {
+        width: 100%; min-height: 72px; border-radius: 8px; text-align: left;
+        border: 1px solid var(--line); background: var(--node); color: inherit;
+        padding: 11px 12px; display: grid; align-content: start; gap: 4px;
+      }
+      .mobile-node strong { font-size: 15.5px; line-height: 1.3; overflow-wrap: anywhere; }
+      .mobile-node span { color: var(--muted); font-size: 12px; overflow-wrap: anywhere; }
+      .mobile-node.selected { border-color: var(--accent); background: var(--accent-soft); }
+      .mobile-node.flow { border-color: var(--flow); }
+      .mobile-node.dimmed { opacity: .28; }
+      .mini-node { min-height: 44px; padding: 8px 0; }
+      .flow-step { min-height: 44px; padding: 10px 6px; }
+      .inspector { padding: 16px; border-radius: 8px; }
+      footer { padding-bottom: max(24px, calc(20px + env(safe-area-inset-bottom))); }
+    }
   </style>
 </head>
 
@@ -216,6 +259,8 @@
   </header>
 
   <main class="layout">
+    <section id="mobile-map" class="canvas-shell" aria-label="手机代码模块列表" hidden>
+    </section>
     <section class="canvas-shell" aria-label="代码模块图">
       <svg id="graph" viewBox="0 0 1220 720" role="group">
         <title id="graph-title">Freehand module relationship graph</title>
@@ -250,6 +295,7 @@
       const edgeEls = new Map();
       let selectedId = "";
       let activeFlow = "";
+      let mobileQuery = "";
 
       const positions = {
         "android-client": [0, 0], "webui-server": [1, 0], "ui-protocol": [2, 0],
@@ -395,6 +441,9 @@
       function clearHighlights() {
         nodeEls.forEach(el => el.classList.remove("selected", "flow", "dimmed"));
         edgeEls.forEach(el => el.classList.remove("connected", "flow-path", "dimmed"));
+        document.querySelectorAll("#mobile-map .mobile-node").forEach(el =>
+          el.classList.remove("selected", "flow", "dimmed")
+        );
       }
 
       function selectNode(id, announce = true) {
@@ -414,18 +463,31 @@
           const related = nodeId === id || node.upstream.includes(nodeId) || node.downstream.includes(nodeId);
           if (!related) el.classList.add("dimmed");
         });
+        document.querySelectorAll("#mobile-map .mobile-node").forEach(el => {
+          const nodeId = el.dataset.node;
+          if (nodeId !== id && !node.upstream.includes(nodeId) && !node.downstream.includes(nodeId)) el.classList.add("dimmed");
+        });
         renderNode(node);
+        document.querySelectorAll("#mobile-map .mobile-node").forEach(el => {
+          const nodeId = el.dataset.node;
+          el.classList.toggle("selected", nodeId === id);
+        });
         document.getElementById("status").textContent = announce ? `已选择 ${node.name}` : "";
       }
 
       function selectFlow(flowId) {
         activeFlow = flowId;
+        mobileQuery = "";
         selectedId = "";
         clearHighlights();
         const flow = flows.find(item => item.id === flowId);
         if (!flow) return;
         const sequence = flow.steps.map(step => step.node).filter(id => nodeEls.has(id));
         new Set(sequence).forEach(id => nodeEls.get(id).classList.add("flow"));
+        flow.steps.forEach(step => {
+          if (!nodesById.has(step.node)) return;
+          document.querySelector(`#mobile-map .mobile-node[data-node="${step.node}"]`)?.classList.add("flow");
+        });
         flow.steps.forEach((step, index) => {
           if (!index) return;
           const previous = flow.steps[index - 1];
@@ -434,6 +496,10 @@
             (edge.from === step.node && edge.to === previous.node)
           );
           if (match) edgeEls.get(match.id)?.classList.add("flow-path");
+        });
+        document.querySelectorAll("#mobile-map .mobile-node").forEach(el => {
+          const stepNode = el.dataset.node;
+          el.classList.toggle("flow", flow.steps.some(step => step.node === stepNode));
         });
         const steps = flow.steps.map((step, index) => {
           const name = nodesById.get(step.node)?.name || resources.find(item => item.id === step.node)?.name || step.node;
@@ -451,10 +517,12 @@
           }).join("")}</div>`)}
         `;
         document.getElementById("status").textContent = `已高亮 ${flow.name}`;
+        if (window.matchMedia("(max-width: 900px)").matches) renderMobileMap();
       }
 
       function applySearch(query) {
         const needle = query.trim().toLowerCase();
+        mobileQuery = needle;
         clearHighlights();
         selectedId = "";
         activeFlow = "";
@@ -469,8 +537,80 @@
           if (matched) matches += 1;
         });
         edgeEls.forEach(el => el.classList.add("dimmed"));
+        document.querySelectorAll("#mobile-map .mobile-node").forEach(el => {
+          const node = nodesById.get(el.dataset.node);
+          const matched = JSON.stringify(node).toLowerCase().includes(needle);
+          el.classList.toggle("dimmed", !matched);
+        });
+        if (needle && window.matchMedia("(max-width: 900px)").matches) {
+          const matchPage = mobilePages.findIndex(page => page.ids.some(id =>
+            JSON.stringify(nodesById.get(id)).toLowerCase().includes(needle)
+          ));
+          if (matchPage >= 0) activeMobilePage = matchPage;
+          renderMobileMap();
+        }
         document.getElementById("detail").innerHTML = `<p class="panel-title">搜索</p><span class="kind">${matches} matching primary nodes</span><p>匹配范围包括角色、owner、路径、子模块、测试与项目映射。</p>`;
         document.getElementById("status").textContent = `${matches} 个主节点匹配 “${query.trim()}”`;
+      }
+
+      const mobilePages = [
+        { title: "运行面", ids: ["android-client", "webui-server", "ui-protocol", "daemon-host", "relay-transport"] },
+        { title: "编排与推理", ids: ["runtime-bridge", "reason-engine", "provider-core"] },
+        { title: "Provider 与工具", ids: ["provider-openai", "provider-anthropic", "tools-registry"] },
+        { title: "任务与拓扑", ids: ["task-lifecycle", "node-topology", "config-core"] },
+        { title: "契约与观测", ids: ["contracts-core", "instructions-loader", "observability"] }
+      ];
+      let activeMobilePage = 0;
+
+      function renderMobileMap() {
+        const host = document.getElementById("mobile-map");
+        if (!host) return;
+        host.innerHTML = "";
+        const toolbar = document.createElement("div");
+        toolbar.className = "mobile-toolbar";
+        mobilePages.forEach((page, index) => {
+          const button = document.createElement("button");
+          button.type = "button";
+          button.className = "mobile-page-btn";
+          button.textContent = page.title;
+          button.setAttribute("aria-current", index === activeMobilePage ? "true" : "false");
+          button.addEventListener("click", () => {
+            activeMobilePage = index;
+            renderMobileMap();
+          });
+          toolbar.append(button);
+        });
+        const cards = document.createElement("div");
+        cards.className = "mobile-cards";
+        mobilePages[activeMobilePage].ids.forEach(id => {
+          const node = nodesById.get(id);
+          if (!node) throw new Error(`missing mobile map node: ${id}`);
+          const flow = activeFlow ? flows.find(item => item.id === activeFlow) : null;
+          const isFlowNode = Boolean(flow?.steps.some(step => step.node === id));
+          const button = document.createElement("button");
+          button.type = "button";
+          const matched = !mobileQuery || JSON.stringify(node).toLowerCase().includes(mobileQuery);
+          button.className = `mobile-node ${selectedId === id ? "selected" : ""} ${isFlowNode ? "flow" : ""} ${matched ? "" : "dimmed"}`;
+          button.dataset.node = id;
+          button.setAttribute("aria-label", `${node.name}: ${node.role}`);
+          button.innerHTML = `<strong>${escapeHtml(node.name)}</strong><span>${escapeHtml(node.kind)} · ${escapeHtml(node.ownerFeature.split(";")[0].trim())}</span>`;
+          button.addEventListener("click", () => selectNode(id));
+          cards.append(button);
+        });
+        host.append(toolbar, cards);
+      }
+
+      function syncMobileVisibility() {
+        const mobileHost = document.getElementById("mobile-map");
+        const desktopHost = document.querySelector(".layout > section[aria-label=\"代码模块图\"]");
+        if (window.matchMedia("(max-width: 900px)").matches) {
+          mobileHost.hidden = false;
+          desktopHost.hidden = true;
+          renderMobileMap();
+        } else {
+          mobileHost.hidden = true;
+          desktopHost.hidden = false;
+        }
       }
 
       function init() {
@@ -501,7 +641,9 @@
           clearHighlights();
           selectedId = "";
           activeFlow = "";
+          mobileQuery = "";
           renderOverview();
+          if (window.matchMedia("(max-width: 900px)").matches) renderMobileMap();
           document.getElementById("status").textContent = "视图已重置";
         });
         document.getElementById("detail").addEventListener("click", event => {
@@ -519,6 +661,8 @@
             }
           }
         });
+        window.addEventListener("resize", syncMobileVisibility, { passive: true });
+        syncMobileVisibility();
       }
 
       try { init(); }
