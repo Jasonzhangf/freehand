@@ -551,17 +551,23 @@ pub fn validate_social_supplement_decision_delivery(
 }
 
 pub fn validate_search_final_delivery(
-    plan: &SearchDomainPlanDelivery,
+    plan: Option<&SearchDomainPlanDelivery>,
     verified_sources: &[SearchVerificationDelivery],
     delivery: &SearchFinalDelivery,
 ) -> Result<(), SearchEvidenceValidationError> {
     require_schema(&delivery.schema, SEARCH_FINAL_SCHEMA)?;
     require_text(&delivery.delivery_id, "delivery_id")?;
-    if delivery.domain_plan_ref != plan.delivery_id {
-        return invalid_search_field("domain_plan_ref", "must reference the current domain plan");
-    }
     match delivery.claim {
         SearchFinalClaimStatus::Complete => {
+            let Some(plan) = plan else {
+                return invalid_search_field("domain_plan", "complete requires a domain plan");
+            };
+            if delivery.domain_plan_ref != plan.delivery_id {
+                return invalid_search_field(
+                    "domain_plan_ref",
+                    "must reference the current domain plan",
+                );
+            }
             require_text(delivery.summary.as_deref().unwrap_or_default(), "summary")?;
             if delivery.claims.is_empty() {
                 return invalid_search_field("claims", "must not be empty for complete");
@@ -599,6 +605,14 @@ pub fn validate_search_final_delivery(
             }
         }
         SearchFinalClaimStatus::Blocked => {
+            if let Some(plan) = plan
+                && delivery.domain_plan_ref != plan.delivery_id
+            {
+                return invalid_search_field(
+                    "domain_plan_ref",
+                    "must reference the current domain plan",
+                );
+            }
             require_text(
                 delivery.blocked_reason.as_deref().unwrap_or_default(),
                 "blocked_reason",
@@ -701,12 +715,18 @@ pub fn validate_search_evidence_stage_append(
                             }
                         }
                         None => {
-                            // Non-sourced hosted discovery carries no domain plan and must be
-                            // the first delivery in the turn evidence stream.
-                            if !existing.is_empty() {
+                            // Repeated provider-hosted observations are independent evidence
+                            // streams until a sourced domain plan enters the turn.
+                            let observation_only = existing.iter().all(|delivery| {
+                                matches!(delivery, SearchEvidenceDelivery::Discovery(discovery)
+                                    if discovery.domain_plan_ref.is_none()
+                                        && discovery.discovery_channel
+                                            == SearchDiscoveryChannel::HostedWebSearch)
+                            });
+                            if !observation_only {
                                 return invalid_search_field(
                                     "domain_plan_ref",
-                                    "non-sourced hosted discovery must be the first delivery",
+                                    "non-sourced hosted discoveries cannot follow sourced evidence",
                                 );
                             }
                         }
@@ -887,20 +907,25 @@ pub fn build_search_evidence_turn_delivery(
         validate_search_evidence_stage_append(&validated, delivery)?;
         validated.push(delivery.clone());
     }
-    let domain_plan = search_domain_plan(&deliveries)?.clone();
-    let supplement = search_supplement_decision(&deliveries)?;
-    ensure_all_usable_candidates_attempted(&deliveries)?;
-    if final_delivery.claim == SearchFinalClaimStatus::Complete && supplement.required {
-        for platform in &supplement.platforms {
-            if !deliveries.iter().any(|delivery| {
-                matches!(delivery, SearchEvidenceDelivery::Discovery(discovery)
-                    if discovery.discovery_channel == SearchDiscoveryChannel::CamoSocialSearch
-                        && discovery.candidates.iter().any(|candidate| candidate.platform == Some(*platform)))
-            }) {
-                return invalid_search_field(
-                    "social_discovery",
-                    format!("missing required `{platform:?}` social discovery"),
-                );
+    let domain_plan = search_domain_plan(&deliveries).ok().cloned();
+    let supplement = search_supplement_decision(&deliveries).ok();
+    if final_delivery.claim == SearchFinalClaimStatus::Complete {
+        ensure_all_usable_candidates_attempted(&deliveries)?;
+        if supplement
+            .as_ref()
+            .is_some_and(|supplement| supplement.required)
+        {
+            for platform in &supplement.as_ref().expect("checked above").platforms {
+                if !deliveries.iter().any(|delivery| {
+                    matches!(delivery, SearchEvidenceDelivery::Discovery(discovery)
+                        if discovery.discovery_channel == SearchDiscoveryChannel::CamoSocialSearch
+                            && discovery.candidates.iter().any(|candidate| candidate.platform == Some(*platform)))
+                }) {
+                    return invalid_search_field(
+                        "social_discovery",
+                        format!("missing required `{platform:?}` social discovery"),
+                    );
+                }
             }
         }
     }
@@ -915,7 +940,7 @@ pub fn build_search_evidence_turn_delivery(
             _ => None,
         })
         .collect::<Vec<_>>();
-    validate_search_final_delivery(&domain_plan, &verified_sources, &final_delivery)?;
+    validate_search_final_delivery(domain_plan.as_ref(), &verified_sources, &final_delivery)?;
     let (status, summary_ready, terminal) = match final_delivery.claim {
         SearchFinalClaimStatus::Complete => (SearchEvidenceTurnStatus::FinalValidated, true, None),
         SearchFinalClaimStatus::Blocked => (
@@ -933,7 +958,7 @@ pub fn build_search_evidence_turn_delivery(
         schema: SEARCH_TURN_SCHEMA.to_owned(),
         session_id,
         turn_id,
-        domain_plan: Some(domain_plan),
+        domain_plan,
         deliveries,
         verified_sources,
         unconfirmed,
@@ -3548,13 +3573,13 @@ mod tests {
             unconfirmed: Vec::new(),
             blocked_reason: None,
         };
-        validate_search_final_delivery(&news_plan(), &[verified_source()], &final_delivery)
+        validate_search_final_delivery(Some(&news_plan()), &[verified_source()], &final_delivery)
             .expect("valid final");
 
         let mut unknown = final_delivery;
         unknown.claims[0].source_ids = vec!["missing".to_owned()];
         assert_eq!(
-            validate_search_final_delivery(&news_plan(), &[verified_source()], &unknown),
+            validate_search_final_delivery(Some(&news_plan()), &[verified_source()], &unknown),
             Err(SearchEvidenceValidationError::InvalidSourceReference(
                 "missing".to_owned()
             ))
@@ -3604,6 +3629,61 @@ mod tests {
                     SearchEvidenceDelivery::SupplementDecision(no_supplement()),
                 ],
                 final_delivery,
+            )
+            .is_err()
+        );
+    }
+
+    #[test]
+    fn search_turn_delivery_accepts_no_plan_blocked_explanation_only() {
+        let discovery = SearchDiscoveryDelivery {
+            schema: SEARCH_DISCOVERY_SCHEMA.to_owned(),
+            delivery_id: "hosted-no-plan-blocked".to_owned(),
+            discovery_channel: SearchDiscoveryChannel::HostedWebSearch,
+            domain_plan_ref: None,
+            hosted_search_attempt: Some(freehand_contracts::SearchHostedAttempt {
+                tool_call_id: Some("hosted-call-1".to_owned()),
+                status: Some("completed".to_owned()),
+                result_count: Some(0),
+                query: "current technology news".to_owned(),
+                provider: "openai_responses".to_owned(),
+            }),
+            candidates: Vec::new(),
+        };
+        let explanation = "Two hosted searches completed but returned no original URLs.";
+        let make_final = |claim: SearchFinalClaimStatus| SearchFinalDelivery {
+            schema: SEARCH_FINAL_SCHEMA.to_owned(),
+            delivery_id: format!("final-{claim:?}"),
+            domain_plan_ref: "unused-without-plan".to_owned(),
+            claim,
+            summary: None,
+            claims: Vec::new(),
+            unconfirmed: Vec::new(),
+            blocked_reason: Some(explanation.to_owned()),
+        };
+        let turn = build_search_evidence_turn_delivery(
+            SessionId::new("session-no-plan"),
+            TurnId::new("turn-no-plan"),
+            vec![SearchEvidenceDelivery::Discovery(discovery)],
+            make_final(SearchFinalClaimStatus::Blocked),
+        )
+        .expect("explicit user-visible blocked explanation");
+        assert_eq!(turn.status, SearchEvidenceTurnStatus::Blocked);
+        assert_eq!(turn.terminal, Some(SearchEvidenceTerminal::Blocked));
+        assert_eq!(turn.blocked_reason.as_deref(), Some(explanation));
+        assert!(turn.domain_plan.is_none());
+
+        assert!(
+            build_search_evidence_turn_delivery(
+                SessionId::new("session-no-plan"),
+                TurnId::new("turn-no-plan-complete"),
+                Vec::new(),
+                SearchFinalDelivery {
+                    claim: SearchFinalClaimStatus::Complete,
+                    summary: Some("cannot complete without evidence".to_owned()),
+                    blocked_reason: None,
+                    ..make_final(SearchFinalClaimStatus::Complete)
+                },
             )
             .is_err()
         );

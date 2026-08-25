@@ -771,6 +771,8 @@ fn sourced_search_recovery_attempt(
 }
 
 const SOURCED_SEARCH_RECOVERY_GUIDANCE: &str = "Hosted discovery or camo verification produced no typed evidence. Try one concrete HTTP/HTTPS URL with web_fetch; if that also fails or yields no usable source, emit the blocked final delivery schema.";
+const SOURCED_SEARCH_FINALIZATION_ATTEMPT_CAP: usize = 2;
+const SOURCED_SEARCH_BLOCKED_FINAL_GUIDANCE: &str = "Search evidence is still incomplete after the concrete URL recovery attempt. Emit a blocked final delivery schema now with the observed search attempts, missing source evidence, and a clear user-visible explanation; do not claim completion.";
 
 pub fn run_live_reason_turn_with_hooks<FB, FD, FT>(
     selected: &SelectedAgentConfig,
@@ -1250,12 +1252,15 @@ where
     let mut executed_tool_call_ids = Vec::<String>::new();
     let tool_registry = BuiltinToolRegistry::reasonix_aligned();
     let mut web_fetch_recovery_next = false;
+    let mut sourced_search_finalization_attempts = 0usize;
+    let mut sourced_search_finalization_mode = false;
 
     'reason_loop: loop {
         ensure_live_not_cancelled(&request)?;
         let web_fetch_recovery = web_fetch_recovery_next;
         web_fetch_recovery_next = false;
         if request.execution_profile == LiveReasonExecutionProfile::SourcedSearch
+            && !sourced_search_finalization_mode
             && turns.last().is_some_and(|previous| {
                 sourced_search_recovery_attempt(previous, &executed_tool_call_ids)
                     == SourcedSearchRecoveryAttempt::Exhausted
@@ -1270,26 +1275,50 @@ where
             let previous = turns
                 .last_mut()
                 .expect("sourced-search recovery checked the latest turn");
-            engine.block_turn(
-                previous,
-                "hosted discovery, camo verification, and web_fetch recovery produced no usable typed source",
-            );
-            drain_broadcasts(&receiver, &mut broadcasts, &mut on_broadcast);
-            drain_debug_events(&debug_receiver, &mut on_debug);
-            persistence
-                .record_turn_closed(&history, previous, schema_rejections.len() as u32)
-                .map_err(|err| RuntimeLiveBridgeError::ReasonPersistenceFailed(err.to_string()))?;
-            return Ok(LiveReasonTurnOutcome {
-                turn: previous.clone(),
-                turns,
-                broadcasts,
-                rounds: round,
-                schema_rejections,
-                search_schema_rejections,
-                tool_executions,
-                restore_status,
-                restored_closed_turns,
-            });
+            sourced_search_finalization_attempts =
+                sourced_search_finalization_attempts.saturating_add(1);
+            if sourced_search_finalization_attempts > SOURCED_SEARCH_FINALIZATION_ATTEMPT_CAP {
+                engine.block_turn(
+                    previous,
+                    "hosted discovery, camo verification, and web_fetch recovery produced no usable typed source",
+                );
+                drain_broadcasts(&receiver, &mut broadcasts, &mut on_broadcast);
+                drain_debug_events(&debug_receiver, &mut on_debug);
+                persistence
+                    .record_turn_closed(&history, previous, schema_rejections.len() as u32)
+                    .map_err(|err| {
+                        RuntimeLiveBridgeError::ReasonPersistenceFailed(err.to_string())
+                    })?;
+                return Ok(LiveReasonTurnOutcome {
+                    turn: previous.clone(),
+                    turns,
+                    broadcasts,
+                    rounds: round,
+                    schema_rejections,
+                    search_schema_rejections,
+                    tool_executions,
+                    restore_status,
+                    restored_closed_turns,
+                });
+            }
+            next_prompt = SOURCED_SEARCH_BLOCKED_FINAL_GUIDANCE.to_owned();
+            carryover_segments = next_round_segments(
+                &request.prompt,
+                &strip_control_status_block(&strip_completion_submission_block(
+                    &collect_turn_text(previous),
+                )),
+                Some(SOURCED_SEARCH_BLOCKED_FINAL_GUIDANCE),
+                LiveRoundContext {
+                    role,
+                    execution_profile: request.execution_profile,
+                    configured_worker_set,
+                    web_search_route_guidance: Some(web_search_route_guidance.as_str()),
+                    runtime_home: &request.runtime_home,
+                    cwd: request.cwd.as_deref(),
+                    agent_id: &agent_id,
+                },
+            )?;
+            sourced_search_finalization_mode = true;
         }
         if let Some(resolution) = record_master_live_safe_point(
             role,
@@ -1338,10 +1367,14 @@ where
         let trace_id = derived_trace_id(&request.trace_id, round);
         let search_stage = (request.execution_profile == LiveReasonExecutionProfile::SourcedSearch)
             .then(|| {
-                turns.last().map_or(
-                    SourcedSearchRoundStage::DomainPlan,
-                    sourced_search_round_stage,
-                )
+                if sourced_search_finalization_mode {
+                    SourcedSearchRoundStage::FinalDelivery
+                } else {
+                    turns.last().map_or(
+                        SourcedSearchRoundStage::DomainPlan,
+                        sourced_search_round_stage,
+                    )
+                }
             });
         let tool_schema_fingerprint = role.tool_schema_fingerprint(
             &tool_registry,
@@ -2350,9 +2383,14 @@ where
         let provider_text = collect_turn_text(&turn);
         let public_provider_text =
             strip_control_status_block(&strip_completion_submission_block(&provider_text));
-        let model_search_stage = (request.execution_profile
-            == LiveReasonExecutionProfile::SourcedSearch)
-            .then(|| sourced_search_round_stage(&turn));
+        let model_search_stage =
+            (request.execution_profile == LiveReasonExecutionProfile::SourcedSearch).then(|| {
+                if sourced_search_finalization_mode {
+                    SourcedSearchRoundStage::FinalDelivery
+                } else {
+                    sourced_search_round_stage(&turn)
+                }
+            });
         if let Some(search_stage) = model_search_stage
             && matches!(
                 search_stage,
@@ -2566,6 +2604,7 @@ where
                                 .to_owned()
                         }
                         SourcedSearchRoundStage::Completion => {
+                            sourced_search_finalization_mode = false;
                             "Emit the Freehand completion schema matching the validated search delivery."
                                 .to_owned()
                         }
@@ -2666,7 +2705,9 @@ where
                 }
             }
         }
-        if request.execution_profile == LiveReasonExecutionProfile::SourcedSearch {
+        if request.execution_profile == LiveReasonExecutionProfile::SourcedSearch
+            && !sourced_search_finalization_mode
+        {
             let stage = sourced_search_round_stage(&turn);
             if matches!(
                 stage,
@@ -2697,27 +2738,51 @@ where
                     }
                     SourcedSearchRecoveryAttempt::Exhausted => {
                         let missing_delivery = "hosted discovery, camo verification, and web_fetch recovery produced no usable typed source";
-                        engine.block_turn(&mut turn, missing_delivery);
-                        drain_broadcasts(&receiver, &mut broadcasts, &mut on_broadcast);
-                        drain_debug_events(&debug_receiver, &mut on_debug);
-                        ensure_live_not_cancelled(&request)?;
-                        persistence
-                            .record_turn_closed(&history, &turn, schema_rejections.len() as u32)
-                            .map_err(|err| {
-                                RuntimeLiveBridgeError::ReasonPersistenceFailed(err.to_string())
-                            })?;
-                        turns.push(turn.clone());
-                        return Ok(LiveReasonTurnOutcome {
-                            turn,
-                            turns,
-                            broadcasts,
-                            rounds: round,
-                            schema_rejections,
-                            search_schema_rejections,
-                            tool_executions,
-                            restore_status,
-                            restored_closed_turns,
-                        });
+                        sourced_search_finalization_attempts =
+                            sourced_search_finalization_attempts.saturating_add(1);
+                        if sourced_search_finalization_attempts
+                            > SOURCED_SEARCH_FINALIZATION_ATTEMPT_CAP
+                        {
+                            engine.block_turn(&mut turn, missing_delivery);
+                            drain_broadcasts(&receiver, &mut broadcasts, &mut on_broadcast);
+                            drain_debug_events(&debug_receiver, &mut on_debug);
+                            ensure_live_not_cancelled(&request)?;
+                            persistence
+                                .record_turn_closed(&history, &turn, schema_rejections.len() as u32)
+                                .map_err(|err| {
+                                    RuntimeLiveBridgeError::ReasonPersistenceFailed(err.to_string())
+                                })?;
+                            turns.push(turn.clone());
+                            return Ok(LiveReasonTurnOutcome {
+                                turn,
+                                turns,
+                                broadcasts,
+                                rounds: round,
+                                schema_rejections,
+                                search_schema_rejections,
+                                tool_executions,
+                                restore_status,
+                                restored_closed_turns,
+                            });
+                        }
+                        next_prompt = SOURCED_SEARCH_BLOCKED_FINAL_GUIDANCE.to_owned();
+                        sourced_search_finalization_mode = true;
+                        carryover_segments = next_round_segments(
+                            &request.prompt,
+                            &public_provider_text,
+                            Some(SOURCED_SEARCH_BLOCKED_FINAL_GUIDANCE),
+                            LiveRoundContext {
+                                role,
+                                execution_profile: request.execution_profile,
+                                configured_worker_set,
+                                web_search_route_guidance: Some(web_search_route_guidance.as_str()),
+                                runtime_home: &request.runtime_home,
+                                cwd: request.cwd.as_deref(),
+                                agent_id: &agent_id,
+                            },
+                        )?;
+                        turns.push(turn);
+                        continue 'reason_loop;
                     }
                 }
             }

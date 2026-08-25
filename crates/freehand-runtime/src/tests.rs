@@ -12089,6 +12089,14 @@ fn sourced_search_attempts_web_fetch_before_blocking_missing_hosted_discovery() 
         "text/plain",
         "web fetch recovery unavailable".to_owned(),
     )]);
+    let blocked_explanation = "Hosted search and web_fetch recovery returned no usable source; no verified evidence is available.";
+    let blocked_completion =
+        format!(r#"{{"claim":"blocked","blocked_reason":"{blocked_explanation}"}}"#);
+    let final_delivery = format!(
+        r#"<freehand_search_delivery>
+{{"schema":"search_evidence.final.v1","delivery_id":"final-news-recovery-001","domain_plan_ref":"plan-news-001","claim":"blocked","claims":[],"unconfirmed":[],"blocked_reason":"{blocked_explanation}"}}
+</freehand_search_delivery>"#
+    );
     let (base_url, rx, handle) = spawn_sequence_server(
         "application/json",
         vec![
@@ -12099,6 +12107,50 @@ fn sourced_search_attempts_web_fetch_before_blocking_missing_hosted_discovery() 
                 "web_fetch",
                 json!({"url":format!("{web_fetch_url}/unavailable"),"domain_plan_ref":"plan-news-001"}),
             ),
+            json!({
+                "id": "resp-final-blocked",
+                "object": "response",
+                "status": "completed",
+                "output": [{
+                    "type": "message",
+                    "id": "msg-final-blocked",
+                    "role": "assistant",
+                    "status": "completed",
+                    "content": [{
+                        "type": "output_text",
+                        "text": format!(
+                            "{final_delivery}\n{}",
+                            tagged_completion_json(
+                                r#"{"claim":"continue","next_step":"emit matching completion"}"#,
+                            )
+                        ),
+                        "annotations": []
+                    }]
+                }],
+                "usage": {"input_tokens": 14, "output_tokens": 82, "total_tokens": 96}
+            })
+            .to_string(),
+            json!({
+                "id": "resp-search-completion-blocked",
+                "object": "response",
+                "status": "completed",
+                "output": [{
+                    "type": "message",
+                    "id": "msg-search-completion-blocked",
+                    "role": "assistant",
+                    "status": "completed",
+                    "content": [{
+                        "type": "output_text",
+                        "text": format!(
+                            "{blocked_explanation}\n{}",
+                            tagged_completion_json(&blocked_completion)
+                        ),
+                        "annotations": []
+                    }]
+                }],
+                "usage": {"input_tokens": 14, "output_tokens": 82, "total_tokens": 96}
+            })
+            .to_string(),
         ],
     );
     let mut selected = live_selected_worker_agent(base_url, freehand_config::ProviderType::OpenAi);
@@ -12109,10 +12161,14 @@ fn sourced_search_attempts_web_fetch_before_blocking_missing_hosted_discovery() 
     request.prompt = "Find current technology news with verified sources.".to_owned();
 
     let outcome = run_worker_live_reason_turn(&selected, request)
-        .expect("missing hosted discovery must close the sourced-search turn");
+        .expect("missing hosted discovery must end in a visible blocked final");
     let first_request = rx.recv().expect("domain-plan request");
     let second_request = rx.recv().expect("hosted-discovery request");
     let third_request = rx.recv().expect("web-fetch recovery request");
+    let fourth_request = rx.recv().expect("blocked final request");
+    let fifth_request = rx.recv().expect("blocked completion request");
+    let _web_fetch_request = web_fetch_rx.recv().expect("web fetch recovery attempt");
+    web_fetch_handle.join().expect("join web fetch fixture");
     handle.join().expect("join provider");
 
     assert!(
@@ -12136,22 +12192,39 @@ fn sourced_search_attempts_web_fetch_before_blocking_missing_hosted_discovery() 
             .as_array()
             .is_some_and(|tools| tools.iter().any(|tool| tool["type"] == "web_search"))
     );
-    let _web_fetch_request = web_fetch_rx.recv().expect("web fetch recovery attempt");
-    web_fetch_handle.join().expect("join web fetch fixture");
+    assert!(
+        fourth_request.contains("Emit a blocked final delivery schema"),
+        "after web_fetch exhaustion the model must emit a blocked final delivery"
+    );
+    assert!(
+        fifth_request.contains("Emit the Freehand completion schema"),
+        "blocked final delivery must continue to matching completion"
+    );
+    assert!(
+        !http_request_body_json(&fourth_request)["tools"]
+            .as_array()
+            .is_some_and(|tools| tools.iter().any(|tool| tool["type"] == "web_search"))
+    );
     assert!(
         outcome
-            .turn
-            .tool_calls
+            .turns
             .iter()
+            .flat_map(|turn| turn.tool_calls.iter())
             .any(|tool_call| tool_call.tool_call.tool_name.as_str() == "web_fetch"),
         "hosted recovery must execute a typed web_fetch call"
     );
-    assert!(outcome.turn.tool_results.iter().any(|tool_result| {
-        tool_result.tool_result.tool_call_id.as_str() == "call-web-fetch-recovery"
-            && tool_result.tool_result.status == ToolResultStatus::Failed
-            && tool_result.tool_result.output.contains("HTTP 500")
-    }));
-    assert_eq!(outcome.rounds, 3);
+    assert!(
+        outcome
+            .turns
+            .iter()
+            .flat_map(|turn| turn.tool_results.iter())
+            .any(|tool_result| {
+                tool_result.tool_result.tool_call_id.as_str() == "call-web-fetch-recovery"
+                    && tool_result.tool_result.status == ToolResultStatus::Failed
+                    && tool_result.tool_result.output.contains("HTTP 500")
+            })
+    );
+    assert_eq!(outcome.rounds, 5);
     assert_eq!(
         outcome
             .turn
@@ -12165,7 +12238,7 @@ fn sourced_search_attempts_web_fetch_before_blocking_missing_hosted_discovery() 
             .turn
             .terminal_event
             .as_ref()
-            .is_some_and(|event| event.summary.contains("web_fetch recovery"))
+            .is_some_and(|event| event.summary.contains(blocked_explanation))
     );
     assert_eq!(
         outcome
@@ -12173,7 +12246,7 @@ fn sourced_search_attempts_web_fetch_before_blocking_missing_hosted_discovery() 
             .search_evidence
             .as_ref()
             .map(|evidence| evidence.status),
-        Some(SearchEvidenceTurnStatus::DomainPlanValidated)
+        Some(SearchEvidenceTurnStatus::Blocked)
     );
 }
 
@@ -12380,6 +12453,40 @@ fn sourced_search_attempts_web_fetch_before_blocking_missing_camo_verification()
         "text/plain",
         "web fetch camo recovery unavailable".to_owned(),
     )]);
+    let blocked_explanation =
+        "Camo verification and web_fetch recovery returned no usable verified source.";
+    let final_delivery = format!(
+        r#"<freehand_search_delivery>
+{{"schema":"search_evidence.final.v1","delivery_id":"final-news-camo-001","domain_plan_ref":"plan-news-camo-001","claim":"blocked","claims":[],"unconfirmed":[],"blocked_reason":"{blocked_explanation}"}}
+</freehand_search_delivery>"#
+    );
+    let blocked_completion = json!({
+        "id": "resp-camo-blocked-completion",
+        "object": "response",
+        "status": "completed",
+        "output": [{
+            "type": "message",
+            "id": "msg-camo-blocked-completion",
+            "role": "assistant",
+            "status": "completed",
+            "content": [{
+                "type": "output_text",
+                "text": format!(
+                    "{}",
+                    tagged_completion_json(&format!(
+                        r#"{{"claim":"blocked","blocked_reason":"{blocked_explanation}"}}"#
+                    ))
+                ),
+                "annotations": []
+            }]
+        }],
+        "usage": {
+            "input_tokens": 14,
+            "output_tokens": 82,
+            "total_tokens": 96
+        }
+    })
+    .to_string();
     let (base_url, rx, handle) = spawn_sequence_server(
         "application/json",
         vec![
@@ -12391,6 +12498,9 @@ fn sourced_search_attempts_web_fetch_before_blocking_missing_camo_verification()
                 "web_fetch",
                 json!({"url":format!("{web_fetch_url}/unavailable"),"domain_plan_ref":"plan-news-camo-001"}),
             ),
+            openai_responses_complete_response("web_fetch recovery result returned"),
+            openai_responses_continue_response(&final_delivery, "emit matching completion"),
+            blocked_completion,
         ],
     );
     let mut selected = live_selected_worker_agent(base_url, freehand_config::ProviderType::OpenAi);
@@ -12401,35 +12511,191 @@ fn sourced_search_attempts_web_fetch_before_blocking_missing_camo_verification()
     request.prompt = "Find current technology news with verified sources.".to_owned();
 
     let outcome = run_worker_live_reason_turn(&selected, request)
-        .expect("missing camo verification must close the sourced-search turn");
+        .expect("missing camo verification must end in a visible blocked final");
     let first_request = rx.recv().expect("domain-plan request");
     let second_request = rx.recv().expect("hosted-discovery request");
     let third_request = rx.recv().expect("camo-verification request");
     let fourth_request = rx.recv().expect("web-fetch recovery request");
+    let fifth_request = rx.recv().expect("blocked final request");
+    let sixth_request = rx.recv().expect("blocked final retry request");
+    let seventh_request = rx.recv().expect("blocked completion request");
     handle.join().expect("join provider");
-
+    assert!(
+        !http_request_body_json(&first_request)["tools"]
+            .as_array()
+            .is_some_and(|tools| tools.iter().any(|tool| tool["type"] == "web_search")),
+        "domain plan round must not expose hosted web_search"
+    );
+    assert!(
+        http_request_body_json(&second_request)["tools"]
+            .as_array()
+            .is_some_and(|tools| tools.iter().any(|tool| tool["type"] == "web_search")),
+        "hosted discovery round must expose provider-hosted web_search"
+    );
+    assert!(
+        http_request_body_json(&third_request)["tools"]
+            .as_array()
+            .is_some_and(|tools| tools.iter().any(|tool| tool["name"] == "camo")),
+        "camo verification round must expose camo browser-verification"
+    );
+    assert!(
+        !http_request_body_json(&third_request)["tools"]
+            .as_array()
+            .is_some_and(|tools| tools.iter().any(|tool| tool["type"] == "web_search")),
+        "camo verification round must not re-expose hosted web_search"
+    );
     assert!(
         http_request_body_json(&fourth_request)["tools"]
             .as_array()
             .is_some_and(|tools| tools.iter().any(|tool| tool["name"] == "web_fetch")),
-        "missing camo verification must attempt web_fetch before blocking"
+        "missing camo verification must attempt web_fetch before finalization"
     );
     let _web_fetch_request = web_fetch_rx.recv().expect("web fetch recovery attempt");
     web_fetch_handle.join().expect("join web fetch fixture");
     assert!(
         outcome
-            .turn
-            .tool_calls
+            .turns
             .iter()
+            .flat_map(|turn| turn.tool_calls.iter())
             .any(|tool_call| tool_call.tool_call.tool_name.as_str() == "web_fetch"),
         "camo recovery must execute a typed web_fetch call"
     );
-    assert!(outcome.turn.tool_results.iter().any(|tool_result| {
-        tool_result.tool_result.tool_call_id.as_str() == "call-web-fetch-camo-recovery"
-            && tool_result.tool_result.status == ToolResultStatus::Failed
-            && tool_result.tool_result.output.contains("HTTP 500")
+    assert!(
+        outcome
+            .turns
+            .iter()
+            .flat_map(|turn| turn.tool_results.iter())
+            .any(|tool_result| {
+                tool_result.tool_result.tool_call_id.as_str() == "call-web-fetch-camo-recovery"
+                    && tool_result.tool_result.status == ToolResultStatus::Failed
+                    && tool_result.tool_result.output.contains("HTTP 500")
+            })
+    );
+    assert!(
+        fifth_request.contains("Emit a blocked final delivery schema"),
+        "after camo recovery exhaustion the model must emit a blocked final delivery"
+    );
+    assert!(
+        !http_request_body_json(&fifth_request)["tools"]
+            .as_array()
+            .is_some_and(|tools| tools.iter().any(|tool| tool["type"] == "web_search")),
+        "blocked final round must not expose hosted web_search"
+    );
+    assert!(
+        sixth_request.contains("Search evidence delivery rejected"),
+        "a malformed blocked final must receive bounded schema feedback"
+    );
+    assert!(
+        seventh_request.contains("Emit the Freehand completion schema"),
+        "blocked final delivery must continue to matching completion"
+    );
+    assert_eq!(outcome.rounds, 7);
+    assert_eq!(
+        outcome
+            .turn
+            .terminal_event
+            .as_ref()
+            .map(|event| event.status.clone()),
+        Some(TerminalStatus::Blocked)
+    );
+    assert!(outcome.turn.terminal_event.as_ref().is_some_and(|event| {
+        event
+            .summary
+            .contains("Camo verification and web_fetch recovery")
     }));
-    assert_eq!(outcome.rounds, 4);
+    assert_eq!(
+        outcome
+            .turn
+            .search_evidence
+            .as_ref()
+            .map(|evidence| evidence.status),
+        Some(SearchEvidenceTurnStatus::Blocked)
+    );
+}
+
+#[test]
+fn sourced_search_finalization_exits_after_cap_without_unbounded_recovery_rounds() {
+    let domain_plan = r#"<freehand_search_delivery>
+{"schema":"search_evidence.domain_plan.v1","delivery_id":"plan-news-cap-001","domain":"news","preferred_source_kinds":["official_publication","mainstream_news"],"social_platform_priority":["weibo","x"],"minimum_verified_sources":2,"policy_version":"2026-08-15"}
+</freehand_search_delivery>"#;
+    let (web_fetch_url, web_fetch_rx, web_fetch_handle) = spawn_status_sequence_server(vec![(
+        500,
+        "text/plain",
+        "web fetch cap recovery unavailable".to_owned(),
+    )]);
+    let (base_url, rx, handle) = spawn_sequence_server(
+        "application/json",
+        vec![
+            openai_responses_continue_response(domain_plan, "continue to hosted discovery"),
+            openai_responses_complete_response("hosted search was not observed"),
+            openai_responses_function_call_response(
+                "call-web-fetch-cap-recovery",
+                "web_fetch",
+                json!({"url":format!("{web_fetch_url}/unavailable"),"domain_plan_ref":"plan-news-cap-001"}),
+            ),
+            openai_responses_complete_response("no final delivery yet"),
+            openai_responses_complete_response("still no final delivery"),
+            openai_responses_complete_response("still no final delivery after cap"),
+        ],
+    );
+    let mut selected = live_selected_worker_agent(base_url, freehand_config::ProviderType::OpenAi);
+    selected.provider.protocol = ConfigProviderProtocol::Responses;
+    selected.provider.default_model = "gpt-5.6-sol".to_owned();
+    let mut request = live_request(false);
+    request.execution_profile = LiveReasonExecutionProfile::SourcedSearch;
+    request.prompt = "Find current technology news with verified sources.".to_owned();
+
+    let outcome = run_worker_live_reason_turn(&selected, request).expect("run must complete");
+    let first_request = rx.recv().expect("domain-plan request");
+    let second_request = rx.recv().expect("hosted-discovery request");
+    let third_request = rx.recv().expect("web-fetch recovery request");
+    let fourth_request = rx.recv().expect("finalization request one");
+    let fifth_request = rx.recv().expect("finalization request two");
+    let sixth_request = rx.recv().expect("cap block request");
+    handle.join().expect("join provider");
+    let _web_fetch_request = web_fetch_rx.recv().expect("web fetch recovery attempt");
+    web_fetch_handle.join().expect("join web fetch fixture");
+
+    assert!(
+        !http_request_body_json(&first_request)["tools"]
+            .as_array()
+            .is_some_and(|tools| tools.iter().any(|tool| tool["type"] == "web_search"))
+    );
+    assert!(
+        http_request_body_json(&second_request)["tools"]
+            .as_array()
+            .is_some_and(|tools| tools.iter().any(|tool| tool["type"] == "web_search"))
+    );
+    assert!(
+        http_request_body_json(&third_request)["tools"]
+            .as_array()
+            .is_some_and(|tools| tools.iter().any(|tool| tool["name"] == "web_fetch"))
+    );
+    assert!(
+        !http_request_body_json(&fourth_request)["tools"]
+            .as_array()
+            .is_some_and(|tools| tools.iter().any(|tool| tool["type"] == "web_search")),
+        "finalization round must not re-expose hosted search"
+    );
+    assert!(
+        fourth_request.contains("Emit a blocked final delivery schema"),
+        "finalization round one must ask for blocked final delivery"
+    );
+    assert!(
+        fifth_request.contains("Search evidence delivery rejected"),
+        "finalization round two must receive schema rejection feedback"
+    );
+    assert!(
+        sixth_request.contains("Search evidence delivery rejected"),
+        "cap block round must receive bounded schema rejection feedback"
+    );
+    assert!(
+        !http_request_body_json(&sixth_request)["tools"]
+            .as_array()
+            .is_some_and(|tools| tools.iter().any(|tool| tool["type"] == "web_search")),
+        "cap block round must not re-expose hosted search"
+    );
+    assert_eq!(outcome.rounds, 6);
     assert_eq!(
         outcome
             .turn
@@ -12443,24 +12709,7 @@ fn sourced_search_attempts_web_fetch_before_blocking_missing_camo_verification()
             .turn
             .terminal_event
             .as_ref()
-            .is_some_and(|event| event.summary.contains("web_fetch recovery"))
-    );
-    assert!(
-        !http_request_body_json(&first_request)["tools"]
-            .as_array()
-            .is_some_and(|tools| tools.iter().any(|tool| tool["type"] == "web_search")),
-        "domain plan round must not expose hosted web_search"
-    );
-    assert!(
-        http_request_body_json(&second_request)["tools"]
-            .as_array()
-            .is_some_and(|tools| tools.iter().any(|tool| tool["type"] == "web_search"))
-    );
-    assert!(
-        !http_request_body_json(&third_request)["tools"]
-            .as_array()
-            .is_some_and(|tools| tools.iter().any(|tool| tool["type"] == "web_search")),
-        "camo verification round must not expose hosted web_search"
+            .is_some_and(|event| event.summary.contains("3 attempts"))
     );
     assert_eq!(
         outcome
@@ -12468,7 +12717,12 @@ fn sourced_search_attempts_web_fetch_before_blocking_missing_camo_verification()
             .search_evidence
             .as_ref()
             .map(|evidence| evidence.status),
-        Some(SearchEvidenceTurnStatus::CamoVerificationRequired)
+        Some(SearchEvidenceTurnStatus::DomainPlanValidated)
+    );
+    assert_eq!(
+        outcome.search_schema_rejections.len(),
+        3,
+        "three missing final-delivery attempts must be recorded before cap block"
     );
 }
 
@@ -12804,6 +13058,93 @@ fn clean_search_worker_request_uses_hosted_search_without_local_instruction_scan
         drop(restore_cwd);
         fs::remove_dir_all(runtime_home).expect("cleanup runtime home");
         fs::remove_dir_all(local_workspace).expect("cleanup local workspace");
+    });
+}
+
+#[test]
+fn clean_search_accepts_multiple_hosted_discoveries_then_completion_unblocks() {
+    with_locked_cwd(|| {
+        let completion = tagged_completion_json(
+            r#"{"claim":"complete","completion_reason":"two hosted observations","evidence":"hosted observation only","summary":"search observations summarized","learned":"non-sourced completion unblocks","next_step":null}"#,
+        );
+        let response = json!({
+            "id": "resp-two-hosted",
+            "object": "response",
+            "status": "completed",
+            "output": [
+                {
+                    "type": "web_search_call",
+                    "id": "ws-hosted-1",
+                    "status": "completed",
+                    "action": {"type": "search", "query": "shenzhen technology"}
+                },
+                {
+                    "type": "web_search_call",
+                    "id": "ws-hosted-2",
+                    "status": "completed",
+                    "action": {"type": "search", "query": "shenzhen startup"}
+                },
+                {
+                    "type": "message",
+                    "id": "msg-hosted-two",
+                    "role": "assistant",
+                    "status": "completed",
+                    "content": [{
+                        "type": "output_text",
+                        "text": format!("hosted search observations\n{completion}"),
+                        "annotations": []
+                    }]
+                }
+            ],
+            "usage": {"input_tokens": 14, "output_tokens": 82, "total_tokens": 96}
+        })
+        .to_string();
+        let (base_url, rx, handle) = spawn_mock_server(200, "application/json", response);
+        let mut selected =
+            live_selected_worker_agent(base_url, freehand_config::ProviderType::OpenAi);
+        selected.provider.protocol = ConfigProviderProtocol::Responses;
+        selected.provider.default_model = "gpt-5.5".to_owned();
+        let request = LiveReasonTurnRequest {
+            runtime_home: temp_runtime_home(),
+            session_id: SessionId::new("clean-search-two-hosted"),
+            turn_id: TurnId::new("clean-search-two-hosted-turn"),
+            trace_id: TraceId::new("clean-search-two-hosted-trace"),
+            prompt: "Search multiple terms and present what hosted search returned.".to_owned(),
+            attachments: Vec::new(),
+            attachment_metadata: Vec::new(),
+            cwd: None,
+            execution_profile: LiveReasonExecutionProfile::CleanSearch,
+            stream: false,
+            cancel_token: None,
+        };
+
+        let outcome = run_worker_live_reason_turn(&selected, request)
+            .expect("clean search accepts repeated hosted observations");
+        let _raw_request = rx.recv().expect("provider request");
+        handle.join().expect("join provider");
+
+        let evidence = outcome
+            .turn
+            .search_evidence
+            .as_ref()
+            .expect("search evidence exists");
+        assert_eq!(evidence.deliveries.len(), 2);
+        assert!(evidence.deliveries.iter().all(|delivery| matches!(
+            delivery,
+            SearchEvidenceDelivery::Discovery(discovery)
+                if discovery.discovery_channel
+                    == freehand_contracts::SearchDiscoveryChannel::HostedWebSearch
+                    && discovery.domain_plan_ref.is_none()
+        )));
+        assert_eq!(
+            outcome
+                .turn
+                .terminal_event
+                .as_ref()
+                .map(|event| event.status.clone()),
+            Some(TerminalStatus::Success)
+        );
+        assert_eq!(outcome.rounds, 1);
     });
 }
 

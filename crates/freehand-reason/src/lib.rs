@@ -1491,38 +1491,51 @@ mod tests {
     }
 
     #[test]
-    fn non_sourced_hosted_discovery_streams_observation_only_and_completion_unblocks() {
+    fn repeated_non_sourced_hosted_discoveries_stream_observations_and_completion_unblocks() {
         let engine = ReasonTurnEngine::new();
         let mut history = session_history();
         let mut turn = engine
             .start_turn(&mut history, start_input())
             .expect("turn");
-        let discovery = freehand_contracts::SearchDiscoveryDelivery {
-            schema: "search_evidence.discovery.v1".to_owned(),
-            delivery_id: "hosted-non-sourced".to_owned(),
-            discovery_channel: freehand_contracts::SearchDiscoveryChannel::HostedWebSearch,
-            domain_plan_ref: None,
-            hosted_search_attempt: Some(freehand_contracts::SearchHostedAttempt {
-                tool_call_id: Some("srv-1".to_owned()),
-                status: Some("completed".to_owned()),
-                result_count: Some(3),
-                query: "shenzhen".to_owned(),
-                provider: "anthropic_messages".to_owned(),
-            }),
-            candidates: Vec::new(),
-        };
-        engine
-            .apply_search_evidence_stage_delivery(
-                &mut turn,
-                SearchEvidenceDelivery::Discovery(discovery),
-            )
-            .expect("non-sourced hosted discovery accepted");
+        let make_discovery =
+            |delivery_id: &str, tool_call_id: &str| freehand_contracts::SearchDiscoveryDelivery {
+                schema: "search_evidence.discovery.v1".to_owned(),
+                delivery_id: delivery_id.to_owned(),
+                discovery_channel: freehand_contracts::SearchDiscoveryChannel::HostedWebSearch,
+                domain_plan_ref: None,
+                hosted_search_attempt: Some(freehand_contracts::SearchHostedAttempt {
+                    tool_call_id: Some(tool_call_id.to_owned()),
+                    status: Some("completed".to_owned()),
+                    result_count: Some(3),
+                    query: "shenzhen".to_owned(),
+                    provider: "anthropic_messages".to_owned(),
+                }),
+                candidates: Vec::new(),
+            };
+        for (delivery_id, tool_call_id) in [
+            ("hosted-non-sourced-1", "srv-1"),
+            ("hosted-non-sourced-2", "srv-2"),
+        ] {
+            engine
+                .apply_search_evidence_stage_delivery(
+                    &mut turn,
+                    SearchEvidenceDelivery::Discovery(make_discovery(delivery_id, tool_call_id)),
+                )
+                .expect("repeated non-sourced hosted discoveries are observation-only");
+        }
         let evidence = turn.search_evidence.as_ref().expect("evidence");
         assert!(
             evidence.domain_plan.is_none(),
             "non-sourced hosted discovery must not synthesize a domain plan"
         );
-        assert_eq!(evidence.deliveries.len(), 1);
+        assert_eq!(evidence.deliveries.len(), 2);
+        assert!(evidence.deliveries.iter().all(|delivery| matches!(
+            delivery,
+            SearchEvidenceDelivery::Discovery(discovery)
+                if discovery.discovery_channel
+                    == freehand_contracts::SearchDiscoveryChannel::HostedWebSearch
+                    && discovery.domain_plan_ref.is_none()
+        )));
 
         // Without a domain plan, completion is unblocked and accepted.
         let submission = CompletionSubmission {
@@ -1539,6 +1552,38 @@ mod tests {
             .submit_completion(&mut turn, &submission)
             .expect("completion must not be blocked by sourced final gate");
         assert!(turn.terminal_event.is_some());
+    }
+
+    #[test]
+    fn sourced_hosted_still_requires_domain_plan_before_discovery() {
+        let engine = ReasonTurnEngine::new();
+        let mut history = session_history();
+        let mut turn = engine
+            .start_turn(&mut history, start_input())
+            .expect("turn");
+        let discovery = freehand_contracts::SearchDiscoveryDelivery {
+            schema: "search_evidence.discovery.v1".to_owned(),
+            delivery_id: "sourced-hosted-without-plan".to_owned(),
+            discovery_channel: freehand_contracts::SearchDiscoveryChannel::HostedWebSearch,
+            domain_plan_ref: Some("missing-domain-plan".to_owned()),
+            hosted_search_attempt: Some(freehand_contracts::SearchHostedAttempt {
+                tool_call_id: Some("srv-sourced".to_owned()),
+                status: Some("completed".to_owned()),
+                result_count: Some(1),
+                query: "news".to_owned(),
+                provider: "anthropic_messages".to_owned(),
+            }),
+            candidates: Vec::new(),
+        };
+        assert!(
+            engine
+                .apply_search_evidence_stage_delivery(
+                    &mut turn,
+                    SearchEvidenceDelivery::Discovery(discovery),
+                )
+                .is_err()
+        );
+        assert!(turn.search_evidence.is_none());
     }
 
     #[test]

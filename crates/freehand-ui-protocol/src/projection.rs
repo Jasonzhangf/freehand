@@ -160,7 +160,14 @@ pub(crate) fn tool_display_public_body(display: &ToolDisplayProjection) -> Optio
     if let Some(parameter_summary) = &display.parameter_summary
         && !parameter_summary.trim().is_empty()
     {
-        return Some(parameter_summary.clone());
+        let mut lines = vec![parameter_summary.clone()];
+        if display.kind == freehand_blocks::ToolDisplayKind::Search
+            && let Some(result_summary) = &display.result_summary
+            && !result_summary.trim().is_empty()
+        {
+            lines.push(format!("result: {result_summary}"));
+        }
+        return Some(lines.join("\n"));
     }
     if !display.summary.trim().is_empty() {
         return Some(display.summary.clone());

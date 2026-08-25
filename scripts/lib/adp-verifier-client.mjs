@@ -1,4 +1,5 @@
 const DEFAULT_TIMEOUT_MS = 20_000;
+const ADP_PROTOCOL_VERSION = 4;
 
 function closeSocket(socket) {
   try {
@@ -72,7 +73,7 @@ export async function adpVerifierRequest({
         }
         handshakeAccepted = true;
         socket.send(JSON.stringify({
-          protocol_version: 4,
+          protocol_version: ADP_PROTOCOL_VERSION,
           kind,
           request_id: requestId,
           [payloadKey]: payload,

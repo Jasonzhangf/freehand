@@ -98,8 +98,10 @@
 - sourced-search hosted/camo/social failure enters exactly one recovery round;
   that round removes hosted search and normal camo tools and exposes only
   concrete-URL `web_fetch`. A successful fetch is discovery evidence, not
-  verification, and still requires camo; a failed or unusable recovery writes
-  Blocked immediately without another provider round.
+  verification, and still requires camo. A failed or unusable recovery then
+  enters a visible blocked-finalization mode with at most two provider rounds
+  to emit the blocked search delivery; exhaustion writes Blocked truth rather
+  than retrying indefinitely.
 - runtime emits provider-request lifecycle debug snapshots through `debug.core` without provider payload text
 - provider-core `ProviderLiveExecutor` runs concrete HTTP/SSE executor requests through raw-capable callbacks owned by the adapter crates so runtime can capture debug-only provider raw bodies/events before semantic parsing
 - stream mode applies outputs incrementally through the executor callback path before the provider response completes
@@ -144,8 +146,10 @@
 - completed/blocked schema writes terminal truth through `ReasonTurnEngine::submit_completion`
 - terminal turns are materialized through `ReasonPersistence::record_turn_closed`
 - schema retry exhaustion writes blocked terminal truth through `ReasonTurnEngine::block_turn`
-- sourced-search recovery exhaustion also writes blocked terminal truth through
-  `ReasonTurnEngine::block_turn` only after the one-shot `web_fetch` attempt has failed or produced no usable source
+- sourced-search recovery exhaustion enters bounded blocked-finalization
+  guidance after the one-shot `web_fetch` attempt has failed or produced no
+  usable source; `ReasonTurnEngine::block_turn` runs when the blocked delivery
+  is still missing or invalid after the finalization cap
 - runtime drains both reason-owned and runtime-owned debug snapshots through one shared `DebugHub` hook path
 - bridge returns final turn truth, all round turns, captured broadcast events, schema rejection ledger, tool execution count, restore status, and live-output summary without leaking wire DTOs
 - runtime callers project the final turn into `UiProtocolState` from one shared runtime owner path

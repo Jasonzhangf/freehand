@@ -1666,7 +1666,7 @@ fn tool_activity_waits_until_matching_result_reentry() {
     assert_eq!(completed_tool.title, "Search text");
     assert_eq!(
         completed_tool.body,
-        "pattern=needle\nresult: result body rendered in public summary"
+        "pattern=needle\nresult: succeeded: needle\nresult: result body rendered in public summary"
     );
     assert_eq!(
         completed_tool
@@ -3802,6 +3802,76 @@ fn hosted_web_search_typed_discovery_projects_completed_tool_activity() {
     assert_eq!(display.outcome, ToolDisplayOutcome::Success);
     assert_eq!(display.target.as_deref(), Some("深圳近期天气预报 未来7天"));
     assert_eq!(display.result_summary.as_deref(), Some("10 result items"));
+}
+
+#[test]
+fn repeated_hosted_web_search_typed_discoveries_project_one_semantic_row_per_term() {
+    let mut search_evidence = hosted_search_evidence(SearchHostedAttempt {
+        tool_call_id: Some("srv-1".to_owned()),
+        status: Some("completed".to_owned()),
+        result_count: Some(2),
+        query: "shenzhen technology".to_owned(),
+        provider: "anthropic_messages".to_owned(),
+    });
+    search_evidence
+        .deliveries
+        .push(SearchEvidenceDelivery::Discovery(SearchDiscoveryDelivery {
+            schema: "search_evidence.discovery.v1".to_owned(),
+            delivery_id: "hosted-non-sourced-2".to_owned(),
+            discovery_channel: SearchDiscoveryChannel::HostedWebSearch,
+            domain_plan_ref: None,
+            hosted_search_attempt: Some(SearchHostedAttempt {
+                tool_call_id: Some("srv-2".to_owned()),
+                status: Some("completed".to_owned()),
+                result_count: Some(0),
+                query: "shenzhen startup".to_owned(),
+                provider: "anthropic_messages".to_owned(),
+            }),
+            candidates: Vec::new(),
+        }));
+
+    let mut projection = UiTurnProjection {
+        source: base_source(UiStreamKind::Turn),
+        session_id: SessionId::new("session-search-multi"),
+        turn_id: TurnId::new("turn-search-multi"),
+        created_at: None,
+        timing: None,
+        cwd: None,
+        user_text: Some("Search multiple terms.".to_owned()),
+        attachments: Vec::new(),
+        model_request: None,
+        reasoning: Vec::new(),
+        text: Vec::new(),
+        tool_calls: Vec::new(),
+        tool_activities: Vec::new(),
+        usage: Vec::new(),
+        usage_projection: None,
+        terminal_status: None,
+        terminal_text: None,
+        user_options: None,
+        errors: Vec::new(),
+        search_evidence: Some(search_evidence),
+        slave_substream_card: false,
+    };
+    merge_hosted_search_activities(
+        &mut projection.tool_activities,
+        projection.search_evidence.as_ref(),
+    );
+
+    assert_eq!(projection.tool_activities.len(), 2);
+    let public_items = public_conversation_items(&projection);
+    let tool_items = public_items
+        .iter()
+        .filter(|item| item.kind == UiConversationItemKind::ToolSummary)
+        .collect::<Vec<_>>();
+    assert_eq!(tool_items.len(), 2);
+    assert_eq!(tool_items[0].title, "Web search");
+    assert_eq!(tool_items[0].status, "completed");
+    assert!(tool_items[0].body.contains("query=shenzhen technology"));
+    assert_eq!(tool_items[1].title, "Web search");
+    assert_eq!(tool_items[1].status, "completed");
+    assert!(tool_items[1].body.contains("query=shenzhen startup"));
+    assert!(tool_items[1].body.contains("0 result items"));
 }
 
 #[test]

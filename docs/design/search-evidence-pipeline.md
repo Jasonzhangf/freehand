@@ -490,7 +490,7 @@ prompt 只负责：
 | hosted 结果缺原始 URL | `unusable_missing_url`，可补充或 blocked | 不能进入 verification，不能支撑 claim |
 | hosted 无任何可用候选 | 社交补充或 blocked | 不能 final complete |
 | camo 打不开 URL | `blocked/http_error/timeout`，进入 unconfirmed | 不能标 verified，不能凭记忆补正文 |
-| hosted/camo/social 阶段无 typed evidence | 一次具体 URL `web_fetch` recovery；仍失败则显式 Blocked | 不能跳过 recovery 直接 Blocked，也不能用 `web_fetch` 冒充 verified |
+| hosted/camo/social 阶段无 typed evidence | 一次具体 URL `web_fetch` recovery；仍失败则进入最多两轮 blocked-finalization，最终显式 Blocked | 不能跳过 recovery 直接 Blocked，也不能用 `web_fetch` 冒充 verified；不能无限重试 |
 | 页面正文无证据 | `not_verified`，进入 unconfirmed | 不能支撑 claim |
 | 来源冲突/过期 | 保留冲突/过期状态，进入 unconfirmed | 不能静默丢弃或按 verified 使用 |
 | verified source 数量不足 | 触发补充；无法补充时 blocked | 不能 final complete |
@@ -579,7 +579,7 @@ ADP 通过现有 selected-session turn query/subscribe 增量推送这些字段�
 - 反向：无 camo verification 的 source 必须拒绝。
 - 反向：hosted-only 候选标 verified 必须拒绝。
 - hosted `web_search` 先执行且每个可用候选都包含原始 URL；缺 URL 候选标 unusable。
-- sourced search 在 hosted/camo/social 阶段失败时，先尝试一次具体 URL `web_fetch`；recovery round 只能使用 `web_fetch`，失败后立即 Blocked。成功 `web_fetch` 进入 camo verification，不能直接 final complete。
+- sourced search 在 hosted/camo/social 阶段失败时，先尝试一次具体 URL `web_fetch`；recovery round 只能使用 `web_fetch`。失败后进入最多两轮 blocked-finalization，要求模型呈现带解释的 blocked final；仍缺失或非法时由 runtime 显式 Blocked。成功 `web_fetch` 进入 camo verification，不能直接 final complete。
 - camo typed verification 是唯一 verified 来源；`web_fetch`、模型文本、hosted snippet 都不能通过。
 - 新闻查询缺少微博补充优先级时 plan validator 拒绝；教程/操作缺少小红书时拒绝。
 - camo argv/schema 测试覆盖 `xhs`、`weibo`、`x` 命令。
