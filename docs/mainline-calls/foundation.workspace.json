@@ -1078,6 +1078,23 @@
       "why_shared": "target binding, evidence, and retirement scan roots share one canonical repository containment check"
     },
     {
+      "symbol": "crate::openminis_ui_migration::support::isolated_git_command",
+      "owner": "xtask/src/openminis_ui_migration/support.rs",
+      "purpose": "construct a repository-scoped git command without inherited hook git routing",
+      "allowed_callers": [
+        "crate::openminis_ui_migration::evidence::verify_openminis_ui_evidence_worktree",
+        "crate::openminis_ui_migration::evidence::verify_openminis_ui_report_revision",
+        "crate::openminis_ui_migration::pinned_source::git_stdout",
+        "crate::openminis_ui_migration::tests::common::commit_test_repository_baseline",
+        "crate::openminis_ui_migration::tests::common::run_test_git"
+      ],
+      "related_tests": [
+        "crate::openminis_ui_migration::tests::common::commit_test_repository_baseline",
+        "crate::openminis_ui_migration::tests::common::run_test_git"
+      ],
+      "why_shared": "pinned source, evidence, and test fixtures must use one git isolation boundary"
+    },
+    {
       "symbol": "crate::openminis_ui_migration::support::repository_relative_path",
       "owner": "xtask/src/openminis_ui_migration/support.rs",
       "purpose": "admit only normalized repository-relative manifest paths",
@@ -5443,6 +5460,42 @@
       "output_semantic": "module-qualified callee",
       "caller": "crate::openminis_ui_migration::evidence::verify_openminis_ui_evidence",
       "callee": "crate::openminis_ui_migration::evidence::provenance::verify_online_report_provenance",
+      "binding_status": "bound",
+      "graph_id": "openminis_ui_migration"
+    },
+    {
+      "step": "19edge316",
+      "symbol_path": "crate::openminis_ui_migration::support::isolated_git_command",
+      "file_path": "xtask/src/openminis_ui_migration/support.rs",
+      "responsibility": "register one exact direct Rust production call edge",
+      "input_semantic": "module-qualified caller",
+      "output_semantic": "module-qualified callee",
+      "caller": "crate::openminis_ui_migration::evidence::verify_openminis_ui_evidence_worktree",
+      "callee": "crate::openminis_ui_migration::support::isolated_git_command",
+      "binding_status": "bound",
+      "graph_id": "openminis_ui_migration"
+    },
+    {
+      "step": "19edge317",
+      "symbol_path": "crate::openminis_ui_migration::support::isolated_git_command",
+      "file_path": "xtask/src/openminis_ui_migration/support.rs",
+      "responsibility": "register one exact direct Rust production call edge",
+      "input_semantic": "module-qualified caller",
+      "output_semantic": "module-qualified callee",
+      "caller": "crate::openminis_ui_migration::evidence::verify_openminis_ui_report_revision",
+      "callee": "crate::openminis_ui_migration::support::isolated_git_command",
+      "binding_status": "bound",
+      "graph_id": "openminis_ui_migration"
+    },
+    {
+      "step": "19edge318",
+      "symbol_path": "crate::openminis_ui_migration::support::isolated_git_command",
+      "file_path": "xtask/src/openminis_ui_migration/support.rs",
+      "responsibility": "register one exact direct Rust production call edge",
+      "input_semantic": "module-qualified caller",
+      "output_semantic": "module-qualified callee",
+      "caller": "crate::openminis_ui_migration::pinned_source::git_stdout",
+      "callee": "crate::openminis_ui_migration::support::isolated_git_command",
       "binding_status": "bound",
       "graph_id": "openminis_ui_migration"
     },
