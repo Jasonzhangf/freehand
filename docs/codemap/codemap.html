@@ -1,0 +1,533 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Freehand Interactive Code Map</title>
+  <style>
+    :root {
+      color-scheme: light dark;
+      --page: #f5f4f0;
+      --surface: #ffffff;
+      --ink: #17202a;
+      --muted: #626b76;
+      --line: #d6d3cb;
+      --accent: #176d5c;
+      --accent-soft: rgba(23, 109, 92, .1);
+      --focus: #b45d17;
+      --flow: #7a3e9d;
+      --node: #fbfaf7;
+    }
+
+    @media (prefers-color-scheme: dark) {
+      :root {
+        --page: #151719;
+        --surface: #212428;
+        --ink: #ededea;
+        --muted: #a5aaaf;
+        --line: #42484e;
+        --accent: #69c2ab;
+        --accent-soft: rgba(105, 194, 171, .14);
+        --focus: #eda960;
+        --flow: #c79ae8;
+        --node: #272b30;
+      }
+    }
+
+    * { box-sizing: border-box; }
+    body {
+      margin: 0;
+      background: var(--page);
+      color: var(--ink);
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif;
+      font-size: 15px;
+      line-height: 1.5;
+    }
+    header {
+      padding: 28px max(24px, calc((100% - 1440px) / 2)) 18px;
+    }
+    .eyebrow {
+      margin: 0 0 4px;
+      color: var(--muted);
+      font-size: 13px;
+      letter-spacing: .08em;
+      text-transform: uppercase;
+    }
+    h1 {
+      margin: 0;
+      font-size: clamp(26px, 4vw, 40px);
+      font-weight: 600;
+      letter-spacing: 0;
+    }
+    .lede {
+      width: min(900px, 100%);
+      margin: 10px 0 0;
+      color: var(--muted);
+    }
+    .controls {
+      display: flex;
+      align-items: end;
+      gap: 16px;
+      flex-wrap: wrap;
+      margin-top: 22px;
+    }
+    label {
+      display: grid;
+      gap: 5px;
+      font-size: 13px;
+      color: var(--muted);
+    }
+    select, input[type="search"], button {
+      min-height: 38px;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      background: var(--surface);
+      color: inherit;
+      font: inherit;
+    }
+    select, input[type="search"] { padding: 0 10px; min-width: 230px; }
+    button { padding: 0 13px; cursor: pointer; }
+    button:hover { border-color: var(--accent); }
+    :is(select, input, button, svg g[role="button"]):focus-visible {
+      outline: 2px solid var(--focus);
+      outline-offset: 2px;
+    }
+    .layout {
+      display: grid;
+      grid-template-columns: minmax(0, 1fr) 370px;
+      gap: 18px;
+      align-items: start;
+      padding: 0 max(24px, calc((100% - 1440px) / 2)) 28px;
+    }
+    .canvas-shell, .inspector {
+      background: var(--surface);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+    }
+    .canvas-shell { overflow-x: auto; }
+    svg { display: block; width: 100%; height: auto; min-width: 1020px; }
+    .edge {
+      fill: none;
+      stroke: var(--line);
+      stroke-width: 1.6;
+      transition: opacity .18s ease, stroke .18s ease;
+    }
+    .edge.connected { stroke: var(--accent); stroke-width: 2.4px; }
+    .edge.flow-path { stroke: var(--flow); stroke-width: 3px; }
+    .edge.dimmed, .node.dimmed { opacity: .24; }
+    .node rect {
+      fill: var(--node);
+      stroke: var(--line);
+      stroke-width: 1px;
+      rx: 7px;
+      transition: fill .18s ease, stroke .18s ease, opacity .18s ease;
+    }
+    .node.selected rect { stroke: var(--accent); stroke-width: 2.5px; fill: var(--accent-soft); }
+    .node.flow rect { stroke: var(--flow); stroke-width: 2.5px; }
+    .node text { fill: var(--ink); pointer-events: none; }
+    .node .node-name { font-size: 15px; font-weight: 650; }
+    .node .node-kind { font-size: 11.5px; fill: var(--muted); }
+    .node:hover rect { stroke: var(--accent); }
+    .legend {
+      display: flex;
+      gap: 16px;
+      flex-wrap: wrap;
+      padding: 10px 14px;
+      border-top: 1px solid var(--line);
+      color: var(--muted);
+      font-size: 12.5px;
+    }
+    .legend span { display: inline-flex; align-items: center; gap: 6px; }
+    .swatch { width: 18px; height: 2px; background: var(--line); }
+    .swatch.connected { background: var(--accent); height: 3px; }
+    .swatch.flow { background: var(--flow); height: 3px; }
+    .inspector { padding: 20px; max-height: calc(100vh - 150px); overflow: auto; }
+    .panel-title { margin: 0 0 4px; font-size: 20px; line-height: 1.25; font-weight: 650; }
+    .kind {
+      display: inline-block;
+      margin-bottom: 14px;
+      padding: 3px 7px;
+      border-radius: 4px;
+      background: var(--accent-soft);
+      color: var(--accent);
+      font-size: 12px;
+    }
+    h2 { margin: 20px 0 7px; font-size: 13px; letter-spacing: .06em; text-transform: uppercase; color: var(--muted); }
+    p, li, code { overflow-wrap: anywhere; }
+    ul { margin: 0; padding-left: 20px; }
+    .link-list { display: grid; gap: 6px; justify-items: start; }
+    a { color: var(--accent); text-decoration-thickness: 1px; text-underline-offset: 2px; }
+    a:hover { color: var(--focus); }
+    .mini-node {
+      border: 0; min-height: 0; padding: 0; background: transparent;
+      cursor: pointer; color: var(--accent); font: inherit;
+    }
+    .mini-node::before { content: "→ "; color: var(--muted); }
+    details { margin-top: 16px; border-top: 1px solid var(--line); padding-top: 12px; }
+    summary { cursor: pointer; color: var(--muted); }
+    ol.flow-steps { padding-left: 0; list-style: none; counter-reset: flow; display: grid; gap: 3px; }
+    .flow-step {
+      width: 100%;
+      display: grid;
+      grid-template-columns: 28px 1fr;
+      gap: 8px;
+      align-items: start;
+      border: 0;
+      border-left: 3px solid transparent;
+      background: transparent;
+      min-height: 0;
+      padding: 6px;
+      cursor: pointer;
+      text-align: left;
+    }
+    .flow-step.active {
+      border-left-color: var(--flow);
+      background: color-mix(in srgb, var(--flow) 10%, transparent);
+    }
+    .flow-step::before {
+      counter-increment: flow;
+      content: counter(flow);
+      width: 22px; height: 22px; border-radius: 50%;
+      background: var(--accent-soft); color: var(--accent);
+      font-size: 12px; display: grid; place-items: center;
+    }
+    .status { margin: 12px 0 0; min-height: 20px; color: var(--muted); }
+    footer { padding: 0 24px 30px; color: var(--muted); font-size: 13px; }
+    @media (max-width: 980px) {
+      .layout { grid-template-columns: 1fr; }
+      header, .layout { padding-left: 16px; padding-right: 16px; }
+      .controls { align-items: stretch; }
+      label { flex: 1 1 240px; }
+      .inspector { max-height: none; }
+    }
+  </style>
+</head>
+
+<body>
+  <header>
+    <p class="eyebrow">Freehand / architecture evidence map</p>
+    <h1>交互式代码地图</h1>
+    <p class="lede">18 个首屏主节点覆盖运行面、编排核心、真源与治理。低层文件归入父模块；点击节点查看角色、上下游、影响、测试和源码证据。</p>
+    <div class="controls">
+      <label>端到端流程 <select id="flow-select"><option value="">选择一个流程</option></select></label>
+      <label>搜索模块、测试或文件 <input id="search" type="search" placeholder="例如：reason、relay、gradlew" autocomplete="off"></label>
+      <button id="reset" type="button">重置视图</button>
+    </div>
+  </header>
+
+  <main class="layout">
+    <section class="canvas-shell" aria-label="代码模块图">
+      <svg id="graph" viewBox="0 0 1220 720" role="group">
+        <title id="graph-title">Freehand module relationship graph</title>
+        <desc id="graph-desc">Eighteen primary architecture modules with call, data, configuration, transport and governance edges.</desc>
+        <g id="edges"></g>
+        <g id="nodes"></g>
+      </svg>
+      <div class="legend" aria-hidden="true">
+        <span><i class="swatch"></i> 普通关系</span>
+        <span><i class="swatch connected"></i> 当前节点关系</span>
+        <span><i class="swatch flow"></i> 端到端流程</span>
+      </div>
+    </section>
+    <aside class="inspector" aria-live="polite">
+      <div id="detail"></div>
+      <p class="status" id="status"></p>
+    </aside>
+  </main>
+
+  <footer>Source revision <span id="revision"></span>. Generated from codemap.json; codemap.lock records source hashes.</footer>
+  <script>
+    const DATA = {"schemaVersion":"freehand.codemap.v1","generatedAt":"2026-08-24T14:51:16Z","sourceRevision":{"branch":"feat/webui-ux-audit-transitions-20260824","commit":"03f79e1f01a87a38e87b8e616ec0dd1938f9cf8a","dirty":false},"constraints":{"primaryNodeLimit":20,"primaryNodeCount":18,"groupingRule":"First screen shows parent modules only; files remain evidence links inside each node."},"summary":{"role":"Freehand is a Rust-first agent runtime with typed contracts, provider adapters, durable reason/task truth, WebUI/Android/ACP surfaces, Relay transport, and architecture gates.","primaryFlow":"Client surface -> typed UI protocol -> runtime bridge -> reason engine -> provider adapter -> external model API; tool and task results re-enter the same owner-owned loop before projection."},"nodes":[{"id":"config-core","name":"Config & Registry","kind":"service","layer":"primary","ownerFeature":"config.core; config.account-config-sync","paths":["crates/freehand-config"],"role":"Owns TOML config parsing, validation, agent topology, provider/model selection, remote daemon registry, safe projections, and account-config sync.","upstream":["daemon-host","runtime-bridge","ui-protocol","node-topology"],"downstream":["runtime-bridge","node-topology","provider-core","ui-protocol"],"dataFlow":"Reads ~/.freehand/config.toml, compiles selected agent/provider/peer/remote-route truth, and exposes redacted projections to runtime and UI.","impact":"Invalid or mutated configuration stops bootstrap or marks changes restart-required; it never leaks credentials into UI payloads.","submodules":["load/parse/validate","agent topology","remote daemon registry","safe projection","account sync"],"sourceEvidence":[{"label":"default loader","path":"crates/freehand-config/src/lib.rs","symbol":"load_default_config","lines":[2052]},{"label":"parser","path":"crates/freehand-config/src/lib.rs","symbol":"parse_config","lines":[2343]},{"label":"validator","path":"crates/freehand-config/src/lib.rs","symbol":"validate_config","lines":[2351]}],"tests":["cargo test -p freehand-config -- --nocapture","cargo run -p xtask -- gates check"],"maps":["docs/function-maps/config.core.md","docs/testing/config.core.md","docs/mainline-calls/config.core.json"]},{"id":"contracts-core","name":"Shared Contracts","kind":"contract","layer":"primary","ownerFeature":"contracts.core","paths":["crates/freehand-contracts"],"role":"Defines cross-module IDs, typed request/context/provider/tool/error contracts, preview contracts, usage, and serialization truth.","upstream":[],"downstream":["reason-engine","provider-core","tools-registry","ui-protocol","runtime-bridge"],"dataFlow":"Carries semantic data between owners without allowing one module's internal control state to become another module's payload.","impact":"Contract drift breaks compilation or cross-crate replay; these types are the common language of every flow.","submodules":["IDs/errors","context segments","provider payload","tool arguments/previews","usage/replay"],"sourceEvidence":[{"label":"context segment","path":"crates/freehand-contracts/src/lib.rs","symbol":"ContextSegment","lines":[104]},{"label":"composed request","path":"crates/freehand-contracts/src/lib.rs","symbol":"ReasonReq02ContextComposedInput","lines":[126]},{"label":"request validators","path":"crates/freehand-contracts/src/lib.rs","symbol":"validate_reason_req01 / validate_reason_req02","lines":[650]}],"tests":["cargo test -p freehand-contracts -- --nocapture"],"maps":["docs/function-maps/contracts.core.md","docs/testing/contracts.core.md","docs/mainline-calls/contracts.core.json"]},{"id":"instructions-loader","name":"Instruction Loader","kind":"service","layer":"primary","ownerFeature":"instruction.capability-loader","paths":["crates/freehand-instructions"],"role":"Discovers, validates, compiles, fingerprints, and renders AGENTS/skill capability manifests before model-visible admission.","upstream":["workspace-gates"],"downstream":["runtime-bridge","reason-engine"],"dataFlow":"Scans declared instruction roots into a deterministic manifest; the context planner admits only rendered typed capability segments.","impact":"Prevents runtime/UI/provider crates from independently scanning or mutating instruction authoring surfaces.","submodules":["discovery","frontmatter parser","manifest writer","typed renderer"],"sourceEvidence":[{"label":"manifest compiler","path":"crates/freehand-instructions/src/lib.rs","symbol":"compile_instruction_capability_manifest","lines":[103]}],"tests":["cargo test -p freehand-instructions -- --nocapture","cargo test -p freehand-runtime live_bridge_admits_instruction_capability_manifest_as_typed_context -- --nocapture"],"maps":["docs/function-maps/instruction.capability-loader.md","docs/testing/instruction.capability-loader.md"]},{"id":"reason-engine","name":"Reason Turn Engine","kind":"service","layer":"primary","ownerFeature":"reason.turn; reason.persistence; reason.session-history","paths":["crates/freehand-reason"],"role":"Owns turn state, provider-output application, completion schema, tool re-entry, persistence, session history, and terminal projection.","upstream":["runtime-bridge","provider-core"],"downstream":["runtime-bridge","ui-protocol","observability","task-lifecycle"],"dataFlow":"Turn input becomes durable turn truth; provider/tool outputs are applied through typed gates until a valid terminal boundary.","impact":"This is the only owner allowed to mutate session/turn truth; app surfaces only consume projections.","submodules":["turn engine","persistence","session history","rewrite policy boundary"],"sourceEvidence":[{"label":"start turn","path":"crates/freehand-reason/src/lib.rs","symbol":"ReasonTurnEngine::start_turn","lines":[335]},{"label":"apply provider output","path":"crates/freehand-reason/src/lib.rs","symbol":"ReasonTurnEngine::apply_provider_output","lines":[450]},{"label":"terminal projection","path":"crates/freehand-reason/src/lib.rs","symbol":"ReasonTurnEngine::project_session","lines":[856]}],"tests":["cargo test -p freehand-reason -- --nocapture","cargo test -p freehand-runtime live_bridge -- --nocapture"],"maps":["docs/function-maps/reason.turn.md","docs/testing/reason.turn.md","docs/mainline-calls/reason.turn.json"]},{"id":"provider-core","name":"Provider Semantics","kind":"contract","layer":"primary","ownerFeature":"provider.semantic","paths":["crates/freehand-provider-core"],"role":"Defines provider-neutral requests, tools, hosted search, semantic events, errors, usage, and adapter mapping.","upstream":["runtime-bridge","reason-engine"],"downstream":["provider-openai","provider-anthropic","reason-engine"],"dataFlow":"Semantic request -> family-specific wire adapter -> provider events -> normalized semantic output/errors.","impact":"Keeps OpenAI and Anthropic wire formats out of runtime/reason while preserving raw event semantics.","submodules":["semantic request","adapter events","hosted search discovery","error classifier"],"sourceEvidence":[{"label":"request builder","path":"crates/freehand-provider-core/src/lib.rs","symbol":"build_semantic_request","lines":[422]},{"label":"event mapper","path":"crates/freehand-provider-core/src/lib.rs","symbol":"map_adapter_events","lines":[452]},{"label":"error classifier","path":"crates/freehand-provider-core/src/lib.rs","symbol":"classify_provider_error","lines":[462]}],"tests":["cargo test -p freehand-provider-core -- --nocapture"],"maps":["docs/function-maps/provider.semantic.md","docs/testing/provider.semantic.md"]},{"id":"provider-openai","name":"OpenAI Adapter","kind":"service","layer":"primary","ownerFeature":"provider.openai-adapter","paths":["crates/freehand-provider-openai"],"role":"Renders/parses Responses and Chat Completions wire formats and executes streaming/non-streaming OpenAI-compatible requests.","upstream":["provider-core"],"downstream":["external-model-api","reason-engine"],"dataFlow":"Semantic request -> OpenAI JSON/SSE; provider events return through provider-core normalization.","impact":"Wire drift is isolated here; runtime never sees provider DTO internals.","submodules":["Responses renderer/parser","Chat Completions fallback","executor","error classifier"],"sourceEvidence":[{"label":"request renderer","path":"crates/freehand-provider-openai/src/lib.rs","symbol":"OpenAiAdapter::render_request","lines":[394]},{"label":"response parser","path":"crates/freehand-provider-openai/src/lib.rs","symbol":"OpenAiAdapter::parse_response","lines":[455]},{"label":"single-shot executor","path":"crates/freehand-provider-openai/src/lib.rs","symbol":"OpenAiExecutor::execute_once","lines":[248]}],"tests":["cargo test -p freehand-provider-openai -- --nocapture"],"maps":["docs/function-maps/provider.openai-adapter.md","docs/testing/provider.openai-adapter.md"]},{"id":"provider-anthropic","name":"Anthropic Adapter","kind":"service","layer":"primary","ownerFeature":"provider.anthropic-adapter","paths":["crates/freehand-provider-anthropic"],"role":"Renders/parses Anthropic Messages requests and executes single-shot/streaming Anthropic-compatible traffic.","upstream":["provider-core"],"downstream":["external-model-api","reason-engine"],"dataFlow":"Semantic request -> Messages JSON/SSE; tool-use, usage, hosted search, and errors normalize through provider-core.","impact":"Keeps Anthropic protocol behavior in one owner and prevents semantic payload rewriting elsewhere.","submodules":["Messages renderer/parser","SSE parser","executor","hosted search"],"sourceEvidence":[{"label":"request renderer","path":"crates/freehand-provider-anthropic/src/lib.rs","symbol":"AnthropicAdapter::render_request","lines":[426]},{"label":"response parser","path":"crates/freehand-provider-anthropic/src/lib.rs","symbol":"AnthropicAdapter::parse_response","lines":[459]},{"label":"single-shot executor","path":"crates/freehand-provider-anthropic/src/lib.rs","symbol":"AnthropicExecutor::execute_once","lines":[277]}],"tests":["cargo test -p freehand-provider-anthropic -- --nocapture"],"maps":["docs/function-maps/provider.anthropic-adapter.md","docs/testing/provider.anthropic-adapter.md"]},{"id":"tools-registry","name":"Tool Registry & Execution","kind":"service","layer":"primary","ownerFeature":"tool.registry; tool.preview","paths":["crates/freehand-tools"],"role":"Owns built-in schemas, role-specific exposure, locked-workspace execution, previews, web fetch, and tool output semantics.","upstream":["runtime-bridge"],"downstream":["runtime-bridge","workspace-files","external-web"],"dataFlow":"Typed tool call -> schema/scope validation -> preview when mutable -> execution result paired back into the reason loop.","impact":"All built-in model tools execute here; app/reason code must not invent duplicate tool execution.","submodules":["schema registry","Master/Worker projection","locked path tools","preview parity","web_fetch"],"sourceEvidence":[{"label":"builtin specs","path":"crates/freehand-tools/src/lib.rs","symbol":"reasonix_aligned_builtin_specs","lines":[562]},{"label":"execute boundary","path":"crates/freehand-tools/src/lib.rs","symbol":"BuiltinToolRegistry::execute","lines":[388]},{"label":"preview boundary","path":"crates/freehand-tools/src/lib.rs","symbol":"BuiltinToolRegistry::preview","lines":[426]}],"tests":["cargo test -p freehand-tools -- --nocapture","node scripts/verify-webui-tools-registry-online.mjs"],"maps":["docs/function-maps/tool.registry.md","docs/testing/tool.registry.md"]},{"id":"runtime-bridge","name":"Runtime Orchestration","kind":"service","layer":"primary","ownerFeature":"provider.reason-live-bridge; runtime.ui-command-dispatch; runtime.master-worker-loop; runtime.checkpoint-rewind","paths":["crates/freehand-runtime"],"role":"Composes config/provider/reason/tool/task/node truth, dispatches UI commands, runs Master/Worker loops, retries provider work, and coordinates checkpoints.","upstream":["daemon-host","ui-protocol","config-core","instructions-loader"],"downstream":["reason-engine","provider-core","tools-registry","task-lifecycle","node-topology","observability"],"dataFlow":"Typed command -> owner dispatch -> live reason/tool loop -> durable task/turn/debug state -> protocol projections.","impact":"This is the central orchestration boundary; semantic helpers belong in owners, not here.","submodules":["live bridge","command dispatcher","Master scheduler","Worker runner","checkpoint/rewind"],"sourceEvidence":[{"label":"live turn entry","path":"crates/freehand-runtime/src/lib.rs","symbol":"run_live_reason_turn","lines":[628]},{"label":"provider loop","path":"crates/freehand-runtime/src/lib.rs","symbol":"run_live_provider_reason_turn","lines":[887]},{"label":"task tool route","path":"crates/freehand-runtime/src/lib.rs","symbol":"execute_task_tool","lines":[10834]}],"tests":["cargo test -p freehand-runtime live_bridge -- --nocapture","cargo test -p freehand-runtime task_tool_create_persists_and_queries_task -- --nocapture"],"maps":["docs/function-maps/provider.reason-live-bridge.md","docs/function-maps/runtime.ui-command-dispatch.md","docs/function-maps/runtime.master-worker-loop.md","docs/testing/provider.reason-live-bridge.md"]},{"id":"task-lifecycle","name":"Task & Agent Lifecycle","kind":"database","layer":"primary","ownerFeature":"task.orchestration; agent.lifecycle; worker.control","paths":["crates/freehand-task"],"role":"Owns durable tasks, assignments, executions, reviews, leases, AgentBoard snapshots, EventInbox, and worker controls.","upstream":["runtime-bridge"],"downstream":["runtime-bridge","ui-protocol","observability"],"dataFlow":"Task mutation -> ledger + snapshot -> scheduler/lifecycle projection; restart recovery rebuilds from authoritative files.","impact":"Task completion and Worker takeover decisions must read this owner, not UI text or process state alone.","submodules":["task ledger","review/approval","lease recovery","AgentBoard","EventInbox","worker control"],"sourceEvidence":[{"label":"runtime boot","path":"crates/freehand-task/src/lib.rs","symbol":"TaskRuntime::boot","lines":[848]},{"label":"create task","path":"crates/freehand-task/src/lib.rs","symbol":"TaskRuntime::create_task","lines":[937]},{"label":"lifecycle reducer","path":"crates/freehand-task/src/lib.rs","symbol":"TaskRuntime::apply_agent_lifecycle_event","lines":[2056]}],"tests":["cargo test -p freehand-task -- --nocapture"],"maps":["docs/function-maps/task.orchestration.md","docs/function-maps/agent.lifecycle.md","docs/testing/task.orchestration.md"]},{"id":"ui-protocol","name":"UI Protocol","kind":"contract","layer":"primary","ownerFeature":"ui.protocol","paths":["crates/freehand-ui-protocol"],"role":"Validates commands, separates ingress/query/subscribe, builds owner-routing envelopes, and projects UI state without owning business truth.","upstream":["webui-server","android-client","runtime-bridge"],"downstream":["runtime-bridge","webui-server","android-client"],"dataFlow":"UI command -> validation/envelope -> runtime; owner truth returns as typed query, subscription, or turn projection.","impact":"WebUI, Android, CLI, and headless tests share one protocol instead of local browser/session state.","submodules":["command validation","ADP descriptor/wire","state/query","subscription selector","projection"],"sourceEvidence":[{"label":"command validator","path":"crates/freehand-ui-protocol/src/validate.rs","symbol":"validate_command","lines":[11]},{"label":"dispatch envelope","path":"crates/freehand-ui-protocol/src/validate.rs","symbol":"build_command_dispatch_envelope","lines":[617]},{"label":"query boundary","path":"crates/freehand-ui-protocol/src/state.rs","symbol":"UiProtocolState::query","lines":[716]}],"tests":["cargo test -p freehand-ui-protocol -- --nocapture"],"maps":["docs/function-maps/ui.protocol.md","docs/testing/ui.protocol.md","docs/mainline-calls/ui.protocol.json"]},{"id":"webui-server","name":"WebUI Server Surface","kind":"service","layer":"primary","ownerFeature":"app.webui-smoke","paths":["apps/freehand-server"],"role":"Hosts protocol-driven WebUI assets, HTTP query/SSE mirrors, ADP WebSocket command/query/subscribe, health, and Android update routes.","upstream":["daemon-host","android-client","browser"],"downstream":["ui-protocol","runtime-bridge","android-client"],"dataFlow":"Static shell loads once; live state flows through versioned ADP WebSocket with SSE as a latest-turn display mirror.","impact":"The browser never owns session/task truth and cannot bypass runtime dispatch.","submodules":["router/assets","page shell","ADP transport","query port bridge","Android update route"],"sourceEvidence":[{"label":"router builder","path":"apps/freehand-server/src/lib.rs","symbol":"build_webui_router","lines":[78]},{"label":"listener","path":"apps/freehand-server/src/lib.rs","symbol":"serve_webui_listener","lines":[135]},{"label":"ADP socket","path":"apps/freehand-server/src/lib.rs","symbol":"handle_adp_socket","lines":[514]}],"tests":["cargo test -p freehand-server --lib webui -- --nocapture","node scripts/verify-webui-mobile-ui-tree-online.mjs","make verify-webui-online"],"maps":["docs/function-maps/app.webui-smoke.md","docs/testing/app.webui-smoke.md"]},{"id":"daemon-host","name":"Daemon Host & Services","kind":"service","layer":"primary","ownerFeature":"app.runtime-daemon","paths":["apps/freehand-daemon","scripts/install-launchd.sh","scripts/freehand-daemon-launchd.sh"],"role":"Selects Master/Worker/Relay modes, validates local ADP auth, hosts transports, supervises launchd lifetime, and wires runtime adapters.","upstream":["config-core","workspace-gates","launchd-services"],"downstream":["webui-server","runtime-bridge","relay-transport","task-lifecycle"],"dataFlow":"Env/config -> selected mode -> guarded process -> WebUI/ADP listener -> injected runtime dispatcher.","impact":"A daemon owns service lifetime only; business truth remains in reason/task/config owners.","submodules":["Master host","Worker host","remote Relay host","launchd wrapper","exit-code guard"],"sourceEvidence":[{"label":"entrypoint","path":"apps/freehand-daemon/src/main.rs","symbol":"main / run","lines":[24]},{"label":"Master mode","path":"apps/freehand-daemon/src/main.rs","symbol":"run_master_mode","lines":[150]},{"label":"Worker mode","path":"apps/freehand-daemon/src/main.rs","symbol":"run_worker_mode","lines":[307]}],"tests":["cargo test -p freehand-daemon run_master_mode_binds_after_validated_local_adp -- --nocapture","bash scripts/install-launchd.sh restartS","freehand-cliS adp-smoke"],"maps":["docs/function-maps/app.runtime-daemon.md","docs/testing/app.runtime-daemon.md"]},{"id":"relay-transport","name":"Relay Transport & Updates","kind":"service","layer":"primary","ownerFeature":"relay.transport","paths":["crates/freehand-relay","apps/freehand-relay-server"],"role":"Owns account auth, Agent directory/presence, control/data/error tunnels, HTTP/ADP proxy, update manifests, and APK bytes.","upstream":["android-client","daemon-host","config.account-config-sync"],"downstream":["daemon-host","webui-server","relay-store","relay-updates"],"dataFlow":"Authenticated control tunnel admits data/error channels; remote clients proxy to the selected daemon without rewriting payload semantics.","impact":"Relay is endpoint/account transport, not task/session truth; updates must preserve hash/signer identity.","submodules":["auth/store","directory/presence","tunnels","HTTP/ADP proxy","update artifact"],"sourceEvidence":[{"label":"persistent store","path":"crates/freehand-relay/src/store.rs","symbol":"RelayStore"},{"label":"service router","path":"crates/freehand-relay/src/service.rs","symbol":"RelayService::router","lines":[62]},{"label":"control admission","path":"crates/freehand-relay/src/websocket_tunnel.rs","symbol":"control_tunnel","lines":[42]},{"label":"data admission","path":"crates/freehand-relay/src/websocket_tunnel.rs","symbol":"data_tunnel","lines":[61]}],"tests":["cargo test -p freehand-relay --test relay_http_blackbox -- --nocapture","scripts/verify-dual-path-update.sh <daemon-manifest-url> <relay-manifest-url>"],"maps":["docs/function-maps/relay.transport.md","docs/testing/relay.transport.md"]},{"id":"node-topology","name":"Node Pairing & Directory","kind":"service","layer":"primary","ownerFeature":"node.master-slave","paths":["crates/freehand-node"],"role":"Compiles reciprocal Master/Worker topology, validates pairing, owns remote daemon directory snapshots and direct/Relay route selection.","upstream":["config-core"],"downstream":["runtime-bridge","daemon-host","relay-transport"],"dataFlow":"Config registry -> node directory -> selected route; pairing identity gates delegated task/direct-message traffic.","impact":"Topology is config-owned; runtime must not synthesize peer IDs or bypass route selection.","submodules":["local runtime","pairing","delegation projection","remote directory","route resolution"],"sourceEvidence":[{"label":"pairing boundary","path":"crates/freehand-node/src/lib.rs","symbol":"LocalNodeRuntime::pair_slave","lines":[505]},{"label":"directory publisher","path":"crates/freehand-node/src/lib.rs","symbol":"RemoteDaemonDirectory::publish_registry","lines":[120]},{"label":"route resolver","path":"crates/freehand-node/src/lib.rs","symbol":"RemoteDaemonDirectory::resolve_route","lines":[163]}],"tests":["cargo test -p freehand-node -- --nocapture"],"maps":["docs/function-maps/node.master-slave.md","docs/testing/node.master-slave.md"]},{"id":"android-client","name":"Android Client","kind":"client","layer":"primary","ownerFeature":"app.android-client","paths":["apps/freehand-android"],"role":"Thin WebView host plus connection profiles, APK update checks/downloads, file permissions, notifications, and Android Back bridge.","upstream":["webui-server","relay-transport"],"downstream":["webui-server","relay-updates"],"dataFlow":"Loads daemon-hosted WebUI at `?client=android-webview`; native code only bridges platform capabilities and installer handoff.","impact":"Product UI stays canonical WebUI; Android never recreates conversation/settings/update business logic.","submodules":["WebView host","connection config","APK updater","file access","notifications"],"sourceEvidence":[{"label":"activity startup","path":"apps/freehand-android/app/src/main/java/com/freehand/android/ui/MainActivity.kt","symbol":"MainActivity::onCreate","lines":[89]},{"label":"update check","path":"apps/freehand-android/app/src/main/java/com/freehand/android/ui/AndroidApkUpdater.kt","symbol":"AndroidApkUpdater::checkForUpdateAsync","lines":[35]},{"label":"installer intent","path":"apps/freehand-android/app/src/main/java/com/freehand/android/ui/AndroidApkUpdater.kt","symbol":"AndroidApkUpdater::buildInstallIntent","lines":[209]}],"tests":["./gradlew testDebugUnitTest --no-daemon","./gradlew assembleRelease -PfreehandVersionCode=<code> -PfreehandVersionName=<version> --no-daemon","apps/freehand-android/scripts/verify-device-ui.sh <adb-serial>"],"maps":["docs/function-maps/app.android-client.md","docs/testing/app.android-client.md"]},{"id":"workspace-gates","name":"Workspace Gates & Release","kind":"governance","layer":"primary","ownerFeature":"foundation.workspace","paths":["xtask","Makefile",".github/workflows","scripts"],"role":"Owns CI/build/release, resource-map/function-map/mainline gates, source-search boundaries, OpenMinis lifecycle evidence, and release/install scripts.","upstream":["source-tree"],"downstream":["daemon-host","android-client","relay-transport","codemap-artifacts"],"dataFlow":"Source/docs changes -> mainline/gate checks -> build/test/release artifacts -> install scripts -> live service/device verification.","impact":"Architecture and release claims require executable gate evidence; generated/runtime outputs are not implementation search truth.","submodules":["gate runner","mainline generator","CI/release workflows","install scripts","device/APK verifiers"],"sourceEvidence":[{"label":"xtask entry","path":"xtask/src/main.rs","symbol":"main / gates check","lines":[14]},{"label":"mainline check command","path":"xtask/src/main.rs","symbol":"mainlines check","lines":[914]},{"label":"release pipeline","path":"scripts/release.sh","symbol":"run_release","lines":[125]}],"tests":["make ci","cargo run -p xtask -- mainlines check","cargo run -p xtask -- gates check"],"maps":["docs/function-maps/foundation.workspace.md","docs/testing/foundation.workspace.md"]},{"id":"observability","name":"Metadata, Debug & Error Center","kind":"database","layer":"primary","ownerFeature":"metadata.core; debug.core; control.center; error.center","paths":["crates/freehand-metadata","crates/freehand-debug","crates/freehand-control"],"role":"Owns watermarked metadata admission, debug snapshots/sinks, control status parsing, and centralized error classification/recovery decisions.","upstream":["runtime-bridge","reason-engine","task-lifecycle"],"downstream":["ui-protocol","runtime-bridge","observability-ledgers"],"dataFlow":"Owner events -> typed metadata/debug/error contracts -> durable ledgers or UI-safe projections; request text never enters control metadata.","impact":"Control/debug/error state cannot leak into provider payload or be silently stripped from the error chain.","submodules":["metadata writer","debug hub","control hooks","error classifier","query projection"],"sourceEvidence":[{"label":"metadata center","path":"crates/freehand-metadata/src/lib.rs","symbol":"MetadataCenter","lines":[99]},{"label":"debug hub","path":"crates/freehand-debug/src/lib.rs","symbol":"DebugHub","lines":[111]},{"label":"error classifier","path":"crates/freehand-control/src/lib.rs","symbol":"classify_error_center_failure","lines":[181]}],"tests":["cargo test -p freehand-metadata -- --nocapture","cargo test -p freehand-debug -- --nocapture","cargo test -p freehand-control -- --nocapture"],"maps":["docs/function-maps/metadata.core.md","docs/function-maps/debug.core.md","docs/function-maps/error.center.md"]}],"edges":[{"id":"e-config-daemon","from":"config-core","to":"daemon-host","label":"selected agent + service config","kind":"configuration"},{"id":"e-config-runtime","from":"config-core","to":"runtime-bridge","label":"provider/model/peer selection","kind":"configuration"},{"id":"e-contracts-reason","from":"contracts-core","to":"reason-engine","label":"turn/context/tool contracts","kind":"type"},{"id":"e-contracts-provider","from":"contracts-core","to":"provider-core","label":"semantic request/response/errors","kind":"type"},{"id":"e-instructions-runtime","from":"instructions-loader","to":"runtime-bridge","label":"compiled instruction manifest","kind":"data"},{"id":"e-runtime-reason","from":"runtime-bridge","to":"reason-engine","label":"live turn start/apply/terminalize","kind":"call"},{"id":"e-runtime-provider","from":"runtime-bridge","to":"provider-core","label":"build semantic provider request","kind":"call"},{"id":"e-provider-openai","from":"provider-core","to":"provider-openai","label":"OpenAI wire adapter","kind":"call"},{"id":"e-provider-anthropic","from":"provider-core","to":"provider-anthropic","label":"Anthropic Messages wire adapter","kind":"call"},{"id":"e-openai-model","from":"provider-openai","to":"external-model-api","label":"HTTPS/SSE model traffic","kind":"network"},{"id":"e-anthropic-model","from":"provider-anthropic","to":"external-model-api","label":"Messages API traffic","kind":"network"},{"id":"e-runtime-tools","from":"runtime-bridge","to":"tools-registry","label":"execute built-in tool call","kind":"call"},{"id":"e-tools-workspace","from":"tools-registry","to":"workspace-files","label":"locked-cwd file access","kind":"filesystem"},{"id":"e-tools-web","from":"tools-registry","to":"external-web","label":"bounded web_fetch","kind":"network"},{"id":"e-runtime-task","from":"runtime-bridge","to":"task-lifecycle","label":"create/assign/claim/review/close","kind":"call"},{"id":"e-task-ui","from":"task-lifecycle","to":"ui-protocol","label":"TaskBoard/history projections","kind":"projection"},{"id":"e-runtime-node","from":"runtime-bridge","to":"node-topology","label":"pairing/delegation/route truth","kind":"call"},{"id":"e-node-relay","from":"node-topology","to":"relay-transport","label":"Relay endpoint candidate","kind":"routing"},{"id":"e-relay-daemon","from":"relay-transport","to":"daemon-host","label":"authenticated control/data tunnel","kind":"transport"},{"id":"e-daemon-webui","from":"daemon-host","to":"webui-server","label":"host HTTP/ADP listener","kind":"hosting"},{"id":"e-ui-server","from":"webui-server","to":"ui-protocol","label":"validate/project protocol frames","kind":"call"},{"id":"e-android-webui","from":"android-client","to":"webui-server","label":"load canonical Android WebUI","kind":"http"},{"id":"e-android-relay","from":"android-client","to":"relay-updates","label":"manifest + APK download","kind":"update"},{"id":"e-gates-release","from":"workspace-gates","to":"release-artifacts","label":"build/test/stage artifacts","kind":"release"},{"id":"e-runtime-observability","from":"runtime-bridge","to":"observability","label":"metadata/debug/error admission","kind":"control"}],"flows":[{"id":"flow-webui-request","name":"Browser/WebUI request cycle","steps":[{"node":"webui-server","action":"Serve shell and accept ADP WebSocket"},{"node":"ui-protocol","action":"Validate command/query/subscribe and build owner envelope"},{"node":"runtime-bridge","action":"Dispatch to live reason bridge"},{"node":"reason-engine","action":"Start durable turn"},{"node":"provider-core","action":"Build semantic request"},{"node":"provider-openai","action":"Render OpenAI wire; Anthropic path is symmetric"},{"node":"external-model-api","action":"Return text/tool/SSE events"},{"node":"reason-engine","action":"Apply output; tool calls re-enter runtime"},{"node":"tools-registry","action":"Execute/preview tool and pair result"},{"node":"ui-protocol","action":"Project terminal turn"},{"node":"webui-server","action":"Render canonical WebUI state"}],"evidence":["apps/freehand-server/src/lib.rs:514","crates/freehand-runtime/src/lib.rs:628","crates/freehand-reason/src/lib.rs:335"]},{"id":"flow-master-worker","name":"Master to Worker task lifecycle","steps":[{"node":"ui-protocol","action":"Submit user input or task mutation"},{"node":"runtime-bridge","action":"Master loop plans and calls task tool"},{"node":"task-lifecycle","action":"Create/assign durable task and emit EventInbox"},{"node":"daemon-host","action":"Worker service claims through configured topology"},{"node":"runtime-bridge","action":"Worker live loop executes provider/tools"},{"node":"task-lifecycle","action":"Record heartbeat/execution/review truth"},{"node":"task-lifecycle","action":"Master reviews/approves/closes or retries interrupted work"},{"node":"webui-server","action":"Render TaskBoard/AgentBoard/transcript projections"}],"evidence":["crates/freehand-runtime/src/lib.rs:10834","crates/freehand-task/src/lib.rs:937","docs/testing/task.orchestration.md:11"]},{"id":"flow-config-bootstrap","name":"Config bootstrap and settings mutation","steps":[{"node":"workspace-files","action":"Provide ~/.freehand/config.toml"},{"node":"config-core","action":"Parse/validate and select agent/provider/topology"},{"node":"daemon-host","action":"Bootstrap selected Master/Worker/Relay mode"},{"node":"node-topology","action":"Compile reciprocal peers and route candidates"},{"node":"runtime-bridge","action":"Wire selected provider and dispatcher"},{"node":"ui-protocol","action":"Settings mutations remain typed and restart-required"},{"node":"config-core","action":"Persist safe mutation without exposing credentials"}],"evidence":["crates/freehand-config/src/lib.rs:2052","apps/freehand-daemon/src/main.rs:150","crates/freehand-node/src/lib.rs:120"]},{"id":"flow-relay-access","name":"Relay remote access and update","steps":[{"node":"android-client","action":"Select direct or Relay daemon profile"},{"node":"relay-transport","action":"Authenticate and resolve account-scoped Agent"},{"node":"relay-transport","action":"Admit control tunnel, then data/error channels"},{"node":"daemon-host","action":"Proxy ADP/WebUI to selected local daemon"},{"node":"android-client","action":"Load WebUI through Relay or fetch update bundle"},{"node":"relay-updates","action":"Serve latest.json and signed APK bytes"}],"evidence":["crates/freehand-relay/src/service.rs:62","crates/freehand-relay/src/websocket_tunnel.rs:42","docs/testing/relay.transport.md:47"]},{"id":"flow-release-upgrade","name":"Gated release to Android upgrade path","steps":[{"node":"workspace-gates","action":"Run mainlines/gates/build/test/release checks"},{"node":"release-artifacts","action":"Stage binaries plus Android manifests/APK"},{"node":"daemon-host","action":"Install/stage files and restart selected services"},{"node":"webui-server","action":"Serve /android/update.json and APK"},{"node":"relay-updates","action":"Mirror dual-path latest.json/APK"},{"node":"android-client","action":"Compare manifest, verify hash/signer, request install"}],"evidence":["scripts/release.sh:125","scripts/install-launchd.sh:166","docs/testing/app.android-client.md:35"]}],"supportingResources":[{"id":"external-model-api","name":"External model APIs","kind":"external dependency","truth":"OpenAI-compatible and Anthropic Messages HTTPS/SSE endpoints","evidence":[{"path":"crates/freehand-provider-openai/src/lib.rs","symbol":"OpenAiExecutor"},{"path":"crates/freehand-provider-anthropic/src/lib.rs","symbol":"AnthropicExecutor"}]},{"id":"external-web","name":"External web targets","kind":"external dependency","truth":"HTTP(S) URLs admitted only by bounded web_fetch","evidence":[{"path":"crates/freehand-tools/src/lib.rs","symbol":"execute_web_fetch"}]},{"id":"workspace-files","name":"Runtime workspace & ledgers","kind":"database/filesystem","truth":"Locked task cwd plus ~/.freehand config/state/ledgers/cache","evidence":[{"path":"docs/runtime/runtime-directories.md","symbol":"runtime home"},{"path":"crates/freehand-tools/src/lib.rs","symbol":"with_workspace_root"}]},{"id":"relay-store","name":"Relay persistent store","kind":"database","truth":"~/.freehand/relay/store.json accounts, token hashes, presence, tunnels","evidence":[{"path":"crates/freehand-relay/src/store.rs","symbol":"RelayStore"}]},{"id":"relay-updates","name":"Relay update artifacts","kind":"service data","truth":"latest.json plus immutable freehand-android.apk under FREEHAND_RELAY_UPDATES_DIR","evidence":[{"path":"crates/freehand-relay/src/service.rs","symbol":"serve_updates_path"}]},{"id":"launchd-services","name":"launchd Freehand services","kind":"service","truth":"com.freehand.daemonS, relayS, and workerS guarded LaunchAgents","evidence":[{"path":"scripts/install-launchd.sh","symbol":"restartS"},{"path":"docs/testing/app.runtime-daemon.md","symbol":"supervise_launchd_lifetime"}]},{"id":"release-artifacts","name":"Release artifacts","kind":"build artifact","truth":"target/release binaries plus dist/android and dist/relay staged bundles","evidence":[{"path":"scripts/release.sh","symbol":"run_release"}]},{"id":"observability-ledgers","name":"Metadata/debug/error ledgers","kind":"database","truth":"Owner-controlled durable rows under ~/.freehand/ledgers and replays","evidence":[{"path":"crates/freehand-metadata/src/lib.rs","symbol":"MetadataCenter"},{"path":"crates/freehand-debug/src/lib.rs","symbol":"DebugHub"}]},{"id":"source-tree","name":"Repository source & maps","kind":"source truth","truth":"Current Git tree plus resource/function/mainline/testing maps","evidence":[{"path":"docs/resource-maps/core.json","symbol":"freehand.core-resource-map"}]}]};
+    (() => {
+      "use strict";
+      const svgNs = "http://www.w3.org/2000/svg";
+      const nodes = DATA.nodes || [];
+      const edges = DATA.edges || [];
+      const flows = DATA.flows || [];
+      const resources = DATA.supportingResources || [];
+      const nodesById = new Map(nodes.map(node => [node.id, node]));
+      const nodeEls = new Map();
+      const edgeEls = new Map();
+      let selectedId = "";
+      let activeFlow = "";
+
+      const positions = {
+        "android-client": [0, 0], "webui-server": [1, 0], "ui-protocol": [2, 0],
+        "daemon-host": [3, 0], "relay-transport": [4, 0], "workspace-gates": [5, 0],
+        "runtime-bridge": [0, 1], "reason-engine": [1, 1], "provider-core": [2, 1],
+        "provider-openai": [3, 1], "provider-anthropic": [4, 1], "tools-registry": [5, 1],
+        "task-lifecycle": [0, 2], "config-core": [1, 2], "contracts-core": [2, 2],
+        "instructions-loader": [3, 2], "observability": [4, 2], "node-topology": [5, 2]
+      };
+
+      const escapeHtml = value => String(value ?? "").replace(/[&<>"']/g, char => ({
+        "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;", "'": "&#39;"
+      })[char]);
+
+      const fileLink = (path, line) => {
+        const anchor = line ? `#L${line}` : "";
+        return `<a href="../../${escapeHtml(path)}${anchor}" target="_blank" rel="noopener">${escapeHtml(path)}${line ? ":" + line : ""}</a>`;
+      };
+
+      const element = (name, attributes = {}, text) => {
+        const el = document.createElementNS(svgNs, name);
+        for (const [key, value] of Object.entries(attributes)) el.setAttribute(key, value);
+        if (text !== undefined) el.textContent = text;
+        return el;
+      };
+
+      function wrappedText(parent, value, x, y, width, className) {
+        const words = String(value).split(/\s+/);
+        const lines = [];
+        let current = "";
+        for (const word of words) {
+          const candidate = current ? `${current} ${word}` : word;
+          if (candidate.length > width && current) { lines.push(current); current = word; }
+          else current = candidate;
+        }
+        if (current) lines.push(current);
+        lines.slice(0, 3).forEach((line, index) => {
+          parent.appendChild(element("text", { x, y: y + index * 19, class: className }, line));
+        });
+      }
+
+      const nodeCenter = id => {
+        if (!positions[id]) return null;
+        return { x: 110 + positions[id][0] * 200, y: 115 + positions[id][1] * 230 };
+      };
+
+      function renderEdges() {
+        const host = document.getElementById("edges");
+        for (const edge of edges) {
+          const from = nodeCenter(edge.from);
+          const to = nodeCenter(edge.to);
+          if (!from || !to) continue;
+          const bend = (to.x - from.x) * .38;
+          const path = element("path", {
+            d: `M ${from.x} ${from.y} C ${from.x + bend} ${from.y}, ${to.x - bend} ${to.y}, ${to.x} ${to.y}`,
+            class: "edge", "data-edge": edge.id
+          });
+          host.append(path);
+          edgeEls.set(edge.id, path);
+        }
+      }
+
+      function renderNodes() {
+        const host = document.getElementById("nodes");
+        for (const node of nodes) {
+          const pos = positions[node.id];
+          if (!pos) throw new Error(`missing graph position: ${node.id}`);
+          const x = 20 + pos[0] * 200;
+          const y = 40 + pos[1] * 230;
+          const group = element("g", {
+            class: "node", tabindex: 0, role: "button",
+            "data-node": node.id,
+            "aria-label": `${node.name}: ${node.role}`
+          });
+          group.append(element("rect", { x, y, width: 180, height: 150, rx: 7 }));
+          wrappedText(group, node.name, x + 15, y + 35, 17, "node-name");
+          group.appendChild(element("text", { x: x + 15, y: y + 122, class: "node-kind" }, `${node.kind} · ${node.ownerFeature.split(";")[0].trim()}`));
+          group.addEventListener("click", () => selectNode(node.id));
+          group.addEventListener("keydown", event => {
+            if (event.key === "Enter" || event.key === " ") { event.preventDefault(); selectNode(node.id); }
+          });
+          host.append(group);
+          nodeEls.set(node.id, group);
+        }
+      }
+
+      function section(title, value) {
+        if (!value || (Array.isArray(value) && !value.length)) return "";
+        return `<h2>${escapeHtml(title)}</h2><div>${value}</div>`;
+      }
+
+      function list(items) {
+        return `<ul>${items.map(item => `<li>${escapeHtml(item)}</li>`).join("")}</ul>`;
+      }
+
+      function linkList(paths) {
+        return `<div class="link-list">${paths.map(path => fileLink(path)).join("")}</div>`;
+      }
+
+      function evidenceList(evidence) {
+        return `<div class="link-list">${evidence.map(item => fileLink(item.path, item.lines?.[0])).join("")}</div>`;
+      }
+
+      function relatedNodes(ids) {
+        const valid = ids.filter(id => nodesById.has(id));
+        if (!valid.length) return "<p>无首屏主节点直接上游。</p>";
+        return `<div class="chip-list">${valid.map(id =>
+          `<button class="mini-node" type="button" data-select="${id}">${escapeHtml(nodesById.get(id).name)}</button>`
+        ).join("")}</div>`;
+      }
+
+      function renderOverview() {
+        document.getElementById("detail").innerHTML = `
+          <p class="panel-title">地图总览</p>
+          <span class="kind">18 primary nodes</span>
+          <p>${escapeHtml(DATA.summary.role)}</p>
+          ${section("主数据流", `<p>${escapeHtml(DATA.summary.primaryFlow)}</p>`)}
+          ${section("支撑资源", resources.map(resource =>
+            `<p><strong>${escapeHtml(resource.name)}</strong> · ${escapeHtml(resource.kind)}<br><span>${escapeHtml(resource.truth)}</span></p>`
+          ).join(""))}
+          <details><summary>验证口径</summary><p>每个节点保留 owner、source symbol、tests 与 project map 链接；codemap.lock 记录当前源码哈希。</p></details>
+        `;
+      }
+
+      function renderNode(node) {
+        document.getElementById("detail").innerHTML = `
+          <p class="panel-title">${escapeHtml(node.name)}</p>
+          <span class="kind">${escapeHtml(node.kind)} · ${escapeHtml(node.layer)}</span>
+          <p>${escapeHtml(node.role)}</p>
+          ${section("Owner", `<code>${escapeHtml(node.ownerFeature)}</code>`)}
+          ${section("路径", linkList(node.paths))}
+          ${section("上游调用者", relatedNodes(node.upstream))}
+          ${section("依赖 / 下游", relatedNodes(node.downstream))}
+          ${section("数据流", `<p>${escapeHtml(node.dataFlow)}</p>`)}
+          ${section("下游影响", `<p>${escapeHtml(node.impact)}</p>`)}
+          ${section("子模块分组", list(node.submodules))}
+          ${section("源码证据", evidenceList(node.sourceEvidence))}
+          ${section("测试证据", list(node.tests))}
+          ${section("项目映射", linkList(node.maps))}
+        `;
+      }
+
+      function clearHighlights() {
+        nodeEls.forEach(el => el.classList.remove("selected", "flow", "dimmed"));
+        edgeEls.forEach(el => el.classList.remove("connected", "flow-path", "dimmed"));
+      }
+
+      function selectNode(id, announce = true) {
+        selectedId = id;
+        activeFlow = "";
+        document.getElementById("flow-select").value = "";
+        clearHighlights();
+        const node = nodesById.get(id);
+        if (!node) return;
+        nodeEls.get(id).classList.add("selected");
+        for (const [edgeId, edge] of edgeEls) {
+          const source = edges.find(item => item.id === edgeId);
+          if (source.from === id || source.to === id) edge.classList.add("connected");
+          else edge.classList.add("dimmed");
+        }
+        nodeEls.forEach((el, nodeId) => {
+          const related = nodeId === id || node.upstream.includes(nodeId) || node.downstream.includes(nodeId);
+          if (!related) el.classList.add("dimmed");
+        });
+        renderNode(node);
+        document.getElementById("status").textContent = announce ? `已选择 ${node.name}` : "";
+      }
+
+      function selectFlow(flowId) {
+        activeFlow = flowId;
+        selectedId = "";
+        clearHighlights();
+        const flow = flows.find(item => item.id === flowId);
+        if (!flow) return;
+        const sequence = flow.steps.map(step => step.node).filter(id => nodeEls.has(id));
+        new Set(sequence).forEach(id => nodeEls.get(id).classList.add("flow"));
+        flow.steps.forEach((step, index) => {
+          if (!index) return;
+          const previous = flow.steps[index - 1];
+          const match = edges.find(edge =>
+            (edge.from === previous.node && edge.to === step.node) ||
+            (edge.from === step.node && edge.to === previous.node)
+          );
+          if (match) edgeEls.get(match.id)?.classList.add("flow-path");
+        });
+        const steps = flow.steps.map((step, index) => {
+          const name = nodesById.get(step.node)?.name || resources.find(item => item.id === step.node)?.name || step.node;
+          return `<li><button class="flow-step" type="button" data-flow-index="${index}" data-node="${nodesById.has(step.node) ? step.node : ""}">
+            <span><strong>${escapeHtml(name)}</strong><br>${escapeHtml(step.action)}</span>
+          </button></li>`;
+        }).join("");
+        document.getElementById("detail").innerHTML = `
+          <p class="panel-title">${escapeHtml(flow.name)}</p>
+          <span class="kind">${flow.steps.length} steps</span>
+          <ol class="flow-steps">${steps}</ol>
+          ${section("证据", `<div class="link-list">${flow.evidence.map(item => {
+            const at = item.lastIndexOf(":");
+            return fileLink(item.slice(0, at), item.slice(at + 1));
+          }).join("")}</div>`)}
+        `;
+        document.getElementById("status").textContent = `已高亮 ${flow.name}`;
+      }
+
+      function applySearch(query) {
+        const needle = query.trim().toLowerCase();
+        clearHighlights();
+        selectedId = "";
+        activeFlow = "";
+        document.getElementById("flow-select").value = "";
+        if (!needle) { renderOverview(); document.getElementById("status").textContent = ""; return; }
+        let matches = 0;
+        nodeEls.forEach((el, id) => {
+          const node = nodesById.get(id);
+          const haystack = JSON.stringify(node).toLowerCase();
+          const matched = haystack.includes(needle);
+          el.classList.toggle("dimmed", !matched);
+          if (matched) matches += 1;
+        });
+        edgeEls.forEach(el => el.classList.add("dimmed"));
+        document.getElementById("detail").innerHTML = `<p class="panel-title">搜索</p><span class="kind">${matches} matching primary nodes</span><p>匹配范围包括角色、owner、路径、子模块、测试与项目映射。</p>`;
+        document.getElementById("status").textContent = `${matches} 个主节点匹配 “${query.trim()}”`;
+      }
+
+      function init() {
+        if (nodes.length > (DATA.constraints?.primaryNodeLimit || 20)) throw new Error("primary node limit exceeded");
+        for (const edge of edges) {
+          const primaryIds = new Set(nodes.map(node => node.id));
+          const resourceIds = new Set(resources.map(resource => resource.id));
+          for (const endpoint of [edge.from, edge.to]) {
+            if (!primaryIds.has(endpoint) && !resourceIds.has(endpoint)) throw new Error(`unknown edge endpoint: ${endpoint}`);
+          }
+        }
+        renderEdges();
+        renderNodes();
+        renderOverview();
+        document.getElementById("revision").textContent = `${DATA.sourceRevision.branch}@${DATA.sourceRevision.commit.slice(0, 12)}`;
+        const flowSelect = document.getElementById("flow-select");
+        flows.forEach(flow => {
+          const option = document.createElement("option");
+          option.value = flow.id;
+          option.textContent = flow.name;
+          flowSelect.append(option);
+        });
+        flowSelect.addEventListener("change", () => selectFlow(flowSelect.value));
+        document.getElementById("search").addEventListener("input", event => applySearch(event.target.value));
+        document.getElementById("reset").addEventListener("click", () => {
+          flowSelect.value = "";
+          document.getElementById("search").value = "";
+          clearHighlights();
+          selectedId = "";
+          activeFlow = "";
+          renderOverview();
+          document.getElementById("status").textContent = "视图已重置";
+        });
+        document.getElementById("detail").addEventListener("click", event => {
+          const selector = event.target.closest("[data-select]");
+          if (selector) selectNode(selector.dataset.select);
+          const step = event.target.closest("[data-flow-index]");
+          if (step) {
+            document.querySelectorAll(".flow-step.active").forEach(item => item.classList.remove("active"));
+            step.classList.add("active");
+            if (step.dataset.node) selectNode(step.dataset.node, false);
+            const flow = flows.find(item => item.id === activeFlow);
+            if (flow) {
+              const current = flow.steps[Number(step.dataset.flowIndex)];
+              document.getElementById("status").textContent = `流程步骤：${current.action}`;
+            }
+          }
+        });
+      }
+
+      try { init(); }
+      catch (error) {
+        document.getElementById("detail").innerHTML = `<p class="panel-title">地图数据错误</p><code>${escapeHtml(error.message)}</code>`;
+        document.getElementById("status").textContent = error.message;
+        throw error;
+      }
+    })();
+  </script>
+</body>
+</html>

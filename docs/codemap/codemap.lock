@@ -1,0 +1,1354 @@
+{
+  "schemaVersion": "freehand.codemap.lock.v2",
+  "algorithm": "sha256",
+  "generatedAt": "2026-08-25T02:39:38Z",
+  "sourceRevision": {
+    "branch": "feat/webui-ux-audit-transitions-20260824",
+    "commit": "03f79e1f01a87a38e87b8e616ec0dd1938f9cf8a"
+  },
+  "scope": "files are JSON-referenced evidence paths; designSources are project-wide architectural truth documents",
+  "files": [
+    {
+      "path": ".github/workflows/ci.yml",
+      "sha256": "e7ea1df026f8b56905f32d17f1dd1114043cd6606341c04ee0e44873d959f4c1"
+    },
+    {
+      "path": ".github/workflows/nightly.yml",
+      "sha256": "1f879ce9de7c8bc8d5dd8fc5c9163b031422b07998971f7936bbed366ee22cd9"
+    },
+    {
+      "path": ".github/workflows/release.yml",
+      "sha256": "afc038032fff10fe842dd0144812df46532b24b4f72333e97967d447a884c80f"
+    },
+    {
+      "path": "Makefile",
+      "sha256": "d9708c2d3c93883799ff6c9573d6b15a4f3913e3171c9336dfbe2e7b35248cd3"
+    },
+    {
+      "path": "apps/freehand-android/README.md",
+      "sha256": "9b0ff4428109051d34cfc892c7f10087946e5ee5cb1b21024e7abda11ad3c40a"
+    },
+    {
+      "path": "apps/freehand-android/app/build.gradle.kts",
+      "sha256": "0f995449309860d101952ec2025d4b84ba93af0e312326ef9026346321c98f08"
+    },
+    {
+      "path": "apps/freehand-android/app/src/main/AndroidManifest.xml",
+      "sha256": "03ce39621087a26ef8d64730b0bca438576330ec19a3fc1779ccdb82d42f6eaf"
+    },
+    {
+      "path": "apps/freehand-android/app/src/main/assets/config/client.json",
+      "sha256": "3ccc6aa0fb1ed77be77af2da04b90ab9729a92d12cf4929e9536f077982a0ff8"
+    },
+    {
+      "path": "apps/freehand-android/app/src/main/java/com/freehand/android/data/ApkUpdateManifest.kt",
+      "sha256": "1ae104b6fbb2e4411432461f60b4221212089fd3b5ffc754713965437daed8b0"
+    },
+    {
+      "path": "apps/freehand-android/app/src/main/java/com/freehand/android/data/ClientConfig.kt",
+      "sha256": "cb98c294fa7bc05f0d0bcd0f5cad8cd9f00889553bc92d1a7222e5d12886603d"
+    },
+    {
+      "path": "apps/freehand-android/app/src/main/java/com/freehand/android/data/DaemonConnectionConfig.kt",
+      "sha256": "9141b134490c93e8c8e9d4919e5232b1ccb5ac66720b8a23644a7dcdd0432a66"
+    },
+    {
+      "path": "apps/freehand-android/app/src/main/java/com/freehand/android/data/HostConfig.kt",
+      "sha256": "bcecebd820edebac1516312eb158615d046bb9e4c0a4f2046a34d4964ef7860a"
+    },
+    {
+      "path": "apps/freehand-android/app/src/main/java/com/freehand/android/ui/AndroidApkUpdater.kt",
+      "sha256": "8127271651dd8b8620d4c686b9f2bc66b8483720ccc24e8c125ee53163322570"
+    },
+    {
+      "path": "apps/freehand-android/app/src/main/java/com/freehand/android/ui/ConnectionsActivity.kt",
+      "sha256": "3cccda293e427a7cdc0584984fda83d2f4d69224deca8638777c02db20a5926a"
+    },
+    {
+      "path": "apps/freehand-android/app/src/main/java/com/freehand/android/ui/FileAccessPermissionPolicy.kt",
+      "sha256": "f47f53b48ef1594575011a839c2d9bc514e90017a95f52f17f7365be62915a25"
+    },
+    {
+      "path": "apps/freehand-android/app/src/main/java/com/freehand/android/ui/MainActivity.kt",
+      "sha256": "f20bde8c015808abdc11be17e7969331c939c32f5c7a6193c9907673e006203f"
+    },
+    {
+      "path": "apps/freehand-android/app/src/main/java/com/freehand/android/ui/NotificationPermissionPolicy.kt",
+      "sha256": "a9e88ec3c061e14e3dcdc8b3190eb28eefa600435c9b68957caa51ee8fccf096"
+    },
+    {
+      "path": "apps/freehand-android/app/src/main/java/com/freehand/android/ui/WebUiStartupGate.kt",
+      "sha256": "c2cf0e6ffd0edd3e69be5428452977baff0903d9fe96aec35df269622ffb8644"
+    },
+    {
+      "path": "apps/freehand-android/app/src/main/res/mipmap-hdpi/ic_launcher.png",
+      "sha256": "9f63502f37973e7356c8a9296cbcb09e727863e50818c1b4369e25f6c9a68346"
+    },
+    {
+      "path": "apps/freehand-android/app/src/main/res/mipmap-hdpi/ic_launcher_round.png",
+      "sha256": "9f63502f37973e7356c8a9296cbcb09e727863e50818c1b4369e25f6c9a68346"
+    },
+    {
+      "path": "apps/freehand-android/app/src/main/res/mipmap-mdpi/ic_launcher.png",
+      "sha256": "2cef647ff36d9c1fe56163a6644c0d152a4bce23416e2eb6efb16a8e4bb89a3f"
+    },
+    {
+      "path": "apps/freehand-android/app/src/main/res/mipmap-mdpi/ic_launcher_round.png",
+      "sha256": "2cef647ff36d9c1fe56163a6644c0d152a4bce23416e2eb6efb16a8e4bb89a3f"
+    },
+    {
+      "path": "apps/freehand-android/app/src/main/res/mipmap-xhdpi/ic_launcher.png",
+      "sha256": "e0f2d970edb4de3de6627c6e28cf72aad63fb70fdc6dcba770391d4166a631cd"
+    },
+    {
+      "path": "apps/freehand-android/app/src/main/res/mipmap-xhdpi/ic_launcher_round.png",
+      "sha256": "e0f2d970edb4de3de6627c6e28cf72aad63fb70fdc6dcba770391d4166a631cd"
+    },
+    {
+      "path": "apps/freehand-android/app/src/main/res/mipmap-xxhdpi/ic_launcher.png",
+      "sha256": "493943744879f309a0f90ae08e3edd339684c9859d66c67bec3cbfb0cf922386"
+    },
+    {
+      "path": "apps/freehand-android/app/src/main/res/mipmap-xxhdpi/ic_launcher_round.png",
+      "sha256": "493943744879f309a0f90ae08e3edd339684c9859d66c67bec3cbfb0cf922386"
+    },
+    {
+      "path": "apps/freehand-android/app/src/main/res/mipmap-xxxhdpi/ic_launcher.png",
+      "sha256": "dc2ddc07f5d2c137ddd075fb2347edfe5b870aa4c9ae99b42312204a67d134c0"
+    },
+    {
+      "path": "apps/freehand-android/app/src/main/res/mipmap-xxxhdpi/ic_launcher_round.png",
+      "sha256": "dc2ddc07f5d2c137ddd075fb2347edfe5b870aa4c9ae99b42312204a67d134c0"
+    },
+    {
+      "path": "apps/freehand-android/app/src/main/res/values/colors.xml",
+      "sha256": "b96f052d2115f50826e0ea9365059afdc4211b92b459ce51ae814595e6dc3821"
+    },
+    {
+      "path": "apps/freehand-android/app/src/main/res/values/ids.xml",
+      "sha256": "333bec0e099288725aa8eed76ec0a7f890e89944586a6416d86aa2563d0c7ed0"
+    },
+    {
+      "path": "apps/freehand-android/app/src/main/res/values/strings.xml",
+      "sha256": "3fcac71afb3a6b4c03850550a01785d88b6c66afc65a674b4b497e4c2099c661"
+    },
+    {
+      "path": "apps/freehand-android/app/src/main/res/values/themes.xml",
+      "sha256": "43374732ddb6ecd4a4f2b69985ee7b4adaa5d2528d3bef2a0363bb3c59b7d7a2"
+    },
+    {
+      "path": "apps/freehand-android/app/src/main/res/xml/apk_update_paths.xml",
+      "sha256": "8fbfdf9c776c3d38a08b9357ae4eb2d5ea7410ffdc1d76fe04cca03a528ebcd3"
+    },
+    {
+      "path": "apps/freehand-android/app/src/main/res/xml/backup_rules.xml",
+      "sha256": "10d6d9b22d9945bc2dded36472ac8dbcf29dc917a066e5ed6c5f2b09e7c58fc6"
+    },
+    {
+      "path": "apps/freehand-android/app/src/main/res/xml/data_extraction_rules.xml",
+      "sha256": "4865e6452cf2765742cca846705636203084862c3a884e5d4a1977051408723c"
+    },
+    {
+      "path": "apps/freehand-android/app/src/test/java/com/freehand/android/data/ApkUpdateManifestTest.kt",
+      "sha256": "858e79b7171adfc2a0c7095b17e14b0d2e13a18d8f0cd80e8453ff483e93bc8b"
+    },
+    {
+      "path": "apps/freehand-android/app/src/test/java/com/freehand/android/data/DaemonConnectionConfigTest.kt",
+      "sha256": "10bd5caa537a5837ae1237d85464fb860cf7e96410718623fb94dec3306e2a50"
+    },
+    {
+      "path": "apps/freehand-android/app/src/test/java/com/freehand/android/data/HostConfigTest.kt",
+      "sha256": "9cd0a39e82d6556e020485529661e26833996d198f7ff82e3d24daec22009807"
+    },
+    {
+      "path": "apps/freehand-android/app/src/test/java/com/freehand/android/ui/AndroidApkUpdaterGenerationTest.kt",
+      "sha256": "eb536937b14374adb37ea8183ca214de5486722d46d6a903527c746f4cfbebc6"
+    },
+    {
+      "path": "apps/freehand-android/app/src/test/java/com/freehand/android/ui/ApkUpdateStatusTest.kt",
+      "sha256": "27643402d932ea7a88157de489f9db19ecd5be700b80c2f4d4e3e1bf4415229b"
+    },
+    {
+      "path": "apps/freehand-android/app/src/test/java/com/freehand/android/ui/FileAccessPermissionPolicyTest.kt",
+      "sha256": "df762a3c7ec64ffe671bcf90f272b5cc7ee8e952eccd109226f833ac634241a5"
+    },
+    {
+      "path": "apps/freehand-android/app/src/test/java/com/freehand/android/ui/NotificationPermissionPolicyTest.kt",
+      "sha256": "8904ee85c0700fd65d0c17426b738d420c77f136005f719dc938e6b07e2e99d8"
+    },
+    {
+      "path": "apps/freehand-android/app/src/test/java/com/freehand/android/ui/WebUiStartupGateTest.kt",
+      "sha256": "63b61001750938cdb44f52cc678eab34385a7d746f81177f3ff21bbda79848ee"
+    },
+    {
+      "path": "apps/freehand-android/build.gradle.kts",
+      "sha256": "818f6dd0c6214b9d70b8737ddc3db6f847efd33ed71daeaf92b6db63bf58d2fc"
+    },
+    {
+      "path": "apps/freehand-android/gradle.properties",
+      "sha256": "f8c6315f106aa77d68eafe3d806cdbea6a24b8ee6baefe29c5b8c59ca70dc40b"
+    },
+    {
+      "path": "apps/freehand-android/gradle/wrapper/gradle-wrapper.jar",
+      "sha256": "497c8c2a7e5031f6aa847f88104aa80a93532ec32ee17bdb8d1d2f67a194a9c7"
+    },
+    {
+      "path": "apps/freehand-android/gradle/wrapper/gradle-wrapper.properties",
+      "sha256": "0040dba42d8f589eb3a9d2078776e77d1f684dd3dcf71fd7d89f40c8dd07f38d"
+    },
+    {
+      "path": "apps/freehand-android/gradlew",
+      "sha256": "a5a5c199ba02189ae8c46a334223371a20599d9c298ef65e7540ede4a3f72d59"
+    },
+    {
+      "path": "apps/freehand-android/gradlew.bat",
+      "sha256": "d539676c48b596afda64c963ec8f7ee56c7b3fe7e3b81d1dbe2d1a1e3dd9e9f8"
+    },
+    {
+      "path": "apps/freehand-android/scripts/generate-launcher-icons.sh",
+      "sha256": "7666d84c48f56b79922d9d22ef0a6a2e05dad337050ddd365cd6aca729a4f15d"
+    },
+    {
+      "path": "apps/freehand-android/scripts/verify-device-ui.sh",
+      "sha256": "9a1da92fb9d8f1b71bbbb1ddabbc58c4705356a330ad2fcc9d85ab37856d804e"
+    },
+    {
+      "path": "apps/freehand-android/scripts/verify-launcher-icons.sh",
+      "sha256": "d00a07febe4cb70f0f5525a6b622d4509dde9b52aeeb274569f1f8165e2b00d9"
+    },
+    {
+      "path": "apps/freehand-android/settings.gradle.kts",
+      "sha256": "c5a6e78c5ddfc6101d483fa729e0cf14ff4478e5764da2d24197d64e5b91bda9"
+    },
+    {
+      "path": "apps/freehand-daemon/Cargo.toml",
+      "sha256": "784498f499b8e8184d0ba6fe6162c2d005d0ac4cbaa6d42713db694d6ddfcc36"
+    },
+    {
+      "path": "apps/freehand-daemon/src/main.rs",
+      "sha256": "1af0f9b8f823aad99d1b4f6e0c4bbd1e4f1b0eebd6b7bfcca3b5a6352391f147"
+    },
+    {
+      "path": "apps/freehand-relay-server/Cargo.toml",
+      "sha256": "b992c0dadc300aa6d961b3443d5b7c3cbe88ec6365a3bbf1e16a359a6388e623"
+    },
+    {
+      "path": "apps/freehand-relay-server/deploy/claw-deploy.sh",
+      "sha256": "a1108754af750660b835de77205a0a9e5571f4ec51d44999c4f641d51668a3a6"
+    },
+    {
+      "path": "apps/freehand-relay-server/deploy/freehand-relay.service",
+      "sha256": "ea02b7373e257780d566d80e826ef84ec8c1e8e042df8824d53ab9d54d13a914"
+    },
+    {
+      "path": "apps/freehand-relay-server/deploy/relay.env.example",
+      "sha256": "b2eedd60c359543c19362a1d2dbd338cd08bc5dd224d8c2a94ddc4428725189c"
+    },
+    {
+      "path": "apps/freehand-relay-server/src/main.rs",
+      "sha256": "0c01bca8aa5307acecccc88706cfd7c7c31411a95d7b88fc9b14ceb7e63c3707"
+    },
+    {
+      "path": "apps/freehand-server/Cargo.toml",
+      "sha256": "873f036a5cab019103eaf6034575e3c70548a0ef180ea4c191e02bd502d02641"
+    },
+    {
+      "path": "apps/freehand-server/assets/theme.css",
+      "sha256": "1492d0a492981f602168bccadd08cacc4c87f96babbe370e7df4b42761e07b70"
+    },
+    {
+      "path": "apps/freehand-server/assets/theme.js",
+      "sha256": "db443688e431db021fab35c0a7e9f460d63bbabb7393a84029b1b4df79668246"
+    },
+    {
+      "path": "apps/freehand-server/assets/webui.css",
+      "sha256": "044f747e370151a92c42a342443c8e8fcba2e69684ddc31c82915bab27b11fbf"
+    },
+    {
+      "path": "apps/freehand-server/assets/webui.js",
+      "sha256": "10dc9739691d4a5cf9a980c72ab15bfc51fae860c9e0c3cf83aeb71f62eee427"
+    },
+    {
+      "path": "apps/freehand-server/assets/webui/app-shell/adp-client.js",
+      "sha256": "30e513ff6838388227aebd7ff50d493a7254c9e3a6d975e38660c7d9c2a4325e"
+    },
+    {
+      "path": "apps/freehand-server/assets/webui/app-shell/dialog-motion.js",
+      "sha256": "64b1df19a40cd6ec344c640dddadac8082f959f47a47056bc6915298f7371e02"
+    },
+    {
+      "path": "apps/freehand-server/assets/webui/app-shell/edge-registry.js",
+      "sha256": "04f63e96ce3de5d57f57b623cbd5b47820e3156169567d854422fd1b8b0e0577"
+    },
+    {
+      "path": "apps/freehand-server/assets/webui/app-shell/layout-shape.js",
+      "sha256": "61d1eabbf9982330d993c10f1cab1106259853d2a33f91bc675800ad244e7aa4"
+    },
+    {
+      "path": "apps/freehand-server/assets/webui/app-shell/route-controller.js",
+      "sha256": "e6afccb787aa92718b3a112b1581d1ef9bd28e98a6d469afe3480a4f677a8cd1"
+    },
+    {
+      "path": "apps/freehand-server/assets/webui/app-shell/shared-states/index.js",
+      "sha256": "0bfba1e19a44feba3bc3222320a891965cf1504698452a615a924a8b9e6bc1e0"
+    },
+    {
+      "path": "apps/freehand-server/assets/webui/app-shell/shared-states/model.js",
+      "sha256": "dd2b4cf76eeb7dc6787e4e8bfdc7d5b12a5d500568d2b966b7dbb49f69f1a2b4"
+    },
+    {
+      "path": "apps/freehand-server/assets/webui/app-shell/shared-states/view.js",
+      "sha256": "21e52e51054bea30c56f7e5a60cbd4f3c398041ee4bbed85b7143f3320a1d1e2"
+    },
+    {
+      "path": "apps/freehand-server/assets/webui/app-shell/surface-registry.js",
+      "sha256": "140a8efb7fe1db7ac82e024599f171164d7b50486926a3ccef94896322801e80"
+    },
+    {
+      "path": "apps/freehand-server/assets/webui/bootstrap.js",
+      "sha256": "799327dd7094459e1bc503a3464a7bb9cd8b6deeb0ceebb820992fd6676eda74"
+    },
+    {
+      "path": "apps/freehand-server/assets/webui/generated/adp-protocol.js",
+      "sha256": "311c900e40d40371112d6b78b180f9c325e8b3b72b7a20c25a3da16732c8dc4e"
+    },
+    {
+      "path": "apps/freehand-server/assets/webui/legacy-monolith.js",
+      "sha256": "2e740e3953b704b415e4a621cc27f2f3a5536aad935279d4f4dedaf4708de31b"
+    },
+    {
+      "path": "apps/freehand-server/assets/webui/surfaces/home-dashboard/controls.js",
+      "sha256": "ced1f0453d3e788eb6c8b1c6ab7435d638000360b596ecf445e00c22f4e39908"
+    },
+    {
+      "path": "apps/freehand-server/assets/webui/surfaces/home-dashboard/index.js",
+      "sha256": "46ee8220c98796e0c99756782168f80e833cab849123b2942a642cad553b1f20"
+    },
+    {
+      "path": "apps/freehand-server/assets/webui/surfaces/home-dashboard/model.js",
+      "sha256": "b04e8d896fe6d5879e6eeb68853b2f91eff37e5658cccc6a84d8196ea683fd29"
+    },
+    {
+      "path": "apps/freehand-server/assets/webui/surfaces/home-dashboard/view.js",
+      "sha256": "cbc00cf35c367ad636209fa6e637231ebec0aeb2e8d37dfde094caef53a74090"
+    },
+    {
+      "path": "apps/freehand-server/assets/webui/surfaces/new-session/controls.js",
+      "sha256": "4159fd5f141e77dc7cca1810f7ff9d369d78583a586b8aad8a271f87a6214652"
+    },
+    {
+      "path": "apps/freehand-server/assets/webui/surfaces/new-session/index.js",
+      "sha256": "dd372fcb1a3499ebf8f15b4eae3d16a7820a63a6913afebc38154c451db01ed7"
+    },
+    {
+      "path": "apps/freehand-server/assets/webui/surfaces/session-detail/controls.js",
+      "sha256": "7a21f4c355ee0f9664a6aae566f83a24f979e15664595123aa96f49d7282275a"
+    },
+    {
+      "path": "apps/freehand-server/assets/webui/surfaces/session-detail/index.js",
+      "sha256": "d6851ccdca7b487b4869d458acb4d11742dc25df2a944bdc36a4f04304600c9a"
+    },
+    {
+      "path": "apps/freehand-server/assets/webui/surfaces/session-detail/recovery.js",
+      "sha256": "7124e8159731b0fdab199a521cf85100c73730a82f66c23530cdb649048fb2c7"
+    },
+    {
+      "path": "apps/freehand-server/assets/webui/surfaces/session-search/index.js",
+      "sha256": "3fa3b24461b450b894eeefb1faab3f9cfebe10bdae97ba2b2671789c63dc33af"
+    },
+    {
+      "path": "apps/freehand-server/assets/webui/surfaces/session-search/view.js",
+      "sha256": "4b36883efdca310cafd90eaa676ff1e8b8eb01e2b8c6bcbdec43ec8cf880e045"
+    },
+    {
+      "path": "apps/freehand-server/assets/webui/surfaces/settings/diagnostics.js",
+      "sha256": "2911807e5331ef940bd11e1bdf3b75d1e6b4d4e06c0a5c7399620e9afb257613"
+    },
+    {
+      "path": "apps/freehand-server/assets/webui/surfaces/settings/index.js",
+      "sha256": "297799cfff7d45ee30febd5d518c02e6ebdff358a5fd7ec38597c2d3512056d8"
+    },
+    {
+      "path": "apps/freehand-server/assets/webui/surfaces/settings/view.js",
+      "sha256": "23ac5a9d12ac1cb2ecb037680571b0b445a007db592e61d789ef3a1698ad49e2"
+    },
+    {
+      "path": "apps/freehand-server/assets/webui/surfaces/timer-dashboard/controls.js",
+      "sha256": "d95ada725181e15ca7ddacfac3f270d37234d3897635aea4b0167ee0b98894c5"
+    },
+    {
+      "path": "apps/freehand-server/assets/webui/surfaces/timer-dashboard/index.js",
+      "sha256": "8ce7529111e89379d6a0c9789ae5790a8fe93cea066e18eea5a157c0e1c3b40b"
+    },
+    {
+      "path": "apps/freehand-server/assets/webui/surfaces/timer-dashboard/view.js",
+      "sha256": "838857c6d70448afeb62fab843cf8c49ca2f27de208715834ae531444836aca4"
+    },
+    {
+      "path": "apps/freehand-server/assets/webui/surfaces/tools-registry/controls.js",
+      "sha256": "8bf149a077131398f3a12535cc4d807e271f06417f0953e3723762946058e43c"
+    },
+    {
+      "path": "apps/freehand-server/assets/webui/surfaces/tools-registry/index.js",
+      "sha256": "4c5f6c5491be1e4b67b55a9ce88fc5fe065bc4d8315f1c2b13305ea15ed3fb47"
+    },
+    {
+      "path": "apps/freehand-server/assets/webui/surfaces/tools-registry/view.js",
+      "sha256": "912af91b68aa46eb7d177070f89b4c42af5f7bd67de3accbe0f0adbb9646c400"
+    },
+    {
+      "path": "apps/freehand-server/src/assets.rs",
+      "sha256": "aaa31a6f26180e2ddc00ea3186243032b44165ca082efb862a8f8507f921b162"
+    },
+    {
+      "path": "apps/freehand-server/src/lib.rs",
+      "sha256": "df281043e486eab8e1e4221e2d3976aa1a41f6eb524bfdbbcfeacd7ead72a54c"
+    },
+    {
+      "path": "apps/freehand-server/src/main.rs",
+      "sha256": "86670c7336b4c3e83550df0de46b731cf06743594f5b6b77da3f369428b2988c"
+    },
+    {
+      "path": "apps/freehand-server/src/page.rs",
+      "sha256": "18362946be073b2cb5eb9648998f99693863ab0ab7ed11404d15b3a8123ee842"
+    },
+    {
+      "path": "crates/freehand-config/Cargo.toml",
+      "sha256": "b1c988064e44024d7269fcf3defa917d0cc1783bfa31e2a934d9de02fe05f635"
+    },
+    {
+      "path": "crates/freehand-config/src/lib.rs",
+      "sha256": "c20ef1a0f7c3d3f21b48c28b0071c6c9c1229aef46192a0d42b7d1266c10af37"
+    },
+    {
+      "path": "crates/freehand-contracts/Cargo.toml",
+      "sha256": "7220f76e8e8308a2725d533d53dd97d96c6fc0d0a89035c0d7f9d2ea88e85ecb"
+    },
+    {
+      "path": "crates/freehand-contracts/src/lib.rs",
+      "sha256": "45db2b3df5157d6ac98e9d42377f29aa1442148262598649bfb90b807f81c5b8"
+    },
+    {
+      "path": "crates/freehand-control/Cargo.toml",
+      "sha256": "511c01903b1230ae76d88e27a9ffb80119c5b38f36b201486cb4d118a5259ab7"
+    },
+    {
+      "path": "crates/freehand-control/src/lib.rs",
+      "sha256": "43e17209c5ab2329c920433354f9960d3e8b817d7f4a712ab04f2b5bbfca6a31"
+    },
+    {
+      "path": "crates/freehand-debug/Cargo.toml",
+      "sha256": "de592e3904aae41a225a3e475ae19184417883254551f353c56b7196970f5509"
+    },
+    {
+      "path": "crates/freehand-debug/src/lib.rs",
+      "sha256": "48d6f47a81a225ad677eae90ed4db1a6f8de8e5ffd5e8fa8bf51be4bbc3552d4"
+    },
+    {
+      "path": "crates/freehand-instructions/Cargo.toml",
+      "sha256": "93cbb6c7a2b1bf59277050bee9d62763413fd7c7a1bd66660f788a4a31b76c01"
+    },
+    {
+      "path": "crates/freehand-instructions/src/lib.rs",
+      "sha256": "f5ca2ba6ea5401757426c9bddc6e22e98ee31ae5a5428aa92a7eb30cc6b8e1f4"
+    },
+    {
+      "path": "crates/freehand-metadata/Cargo.toml",
+      "sha256": "454f74626c0c674076d5d4951d0d15266075e7630e789d0d81ad9ec97c2d82fb"
+    },
+    {
+      "path": "crates/freehand-metadata/src/lib.rs",
+      "sha256": "1553a9e45582859c3dfbfcc2eaf5b6d9d2e4aa8932661dbaad4e8b71c7fdd43e"
+    },
+    {
+      "path": "crates/freehand-node/Cargo.toml",
+      "sha256": "902bebff149dbc309639131d9c06a51ef07a1819c1ece4d99e7685fde6b75add"
+    },
+    {
+      "path": "crates/freehand-node/src/lib.rs",
+      "sha256": "2617ccaeceb2dbe54f52a696aa1f7876c377d2caa398537a4104c97b3acefaa8"
+    },
+    {
+      "path": "crates/freehand-provider-anthropic/Cargo.toml",
+      "sha256": "ea5e223d9e99c484a822ac2483e1f03d7dc2808baec631fd6e2ade26b24d732c"
+    },
+    {
+      "path": "crates/freehand-provider-anthropic/fixtures/minimonth_messages_single.json",
+      "sha256": "79bb0a990884aa9ccd652c9a2c612a7b392db003d9ca3b658343f1113f80f9bc"
+    },
+    {
+      "path": "crates/freehand-provider-anthropic/fixtures/minimonth_messages_stream.sse",
+      "sha256": "d7abe0f18ab962fc972ccd1b08dd7f42ad1dd5b052be5d1a3c75346a3e464e68"
+    },
+    {
+      "path": "crates/freehand-provider-anthropic/src/lib.rs",
+      "sha256": "e056137655c951f89ce56a741e8e7b6ec1be27414001901b0f194b7e79ee7d1d"
+    },
+    {
+      "path": "crates/freehand-provider-core/Cargo.toml",
+      "sha256": "03b4264664e193caef34343c0027cc9c8841d050f662a10fa2255ed6c5fa051d"
+    },
+    {
+      "path": "crates/freehand-provider-core/src/lib.rs",
+      "sha256": "044d0be267205f000ac3c4344b37dca23c4d11d6a9da229dd5c7f6dada01e4e0"
+    },
+    {
+      "path": "crates/freehand-provider-openai/Cargo.toml",
+      "sha256": "004760fcbc0b0debaddab650713a8096acf867570e8f78019d8cb3f939192725"
+    },
+    {
+      "path": "crates/freehand-provider-openai/src/lib.rs",
+      "sha256": "846737d26fa2a1d90eadc1a2d2b8d635e84e7018a3a1adce528a6954a22429f6"
+    },
+    {
+      "path": "crates/freehand-reason/Cargo.toml",
+      "sha256": "0acc78d638be314eb43abb11de62e0a3beb95cdad9009b18739babd5c2417b82"
+    },
+    {
+      "path": "crates/freehand-reason/src/lib.rs",
+      "sha256": "ef1b89e76db961a972d424141cfe2472e4d3aeb2baf1251fe3fea6a73c4eef72"
+    },
+    {
+      "path": "crates/freehand-reason/src/persistence.rs",
+      "sha256": "14b450d298ccaccef9120eaf344c6f47a491b63ca3b8a75034d0cc9226cb604d"
+    },
+    {
+      "path": "crates/freehand-reason/src/rewrite_runtime.rs",
+      "sha256": "05e3e237043c959d7af12f61d5509ffc3fc77feaee6c4cdcfcf69a5150d968d8"
+    },
+    {
+      "path": "crates/freehand-reason/src/session_history.rs",
+      "sha256": "de072a138d967f6f99fa2239bafe7172fb82e2ed1ef71c66d348182a89012603"
+    },
+    {
+      "path": "crates/freehand-relay/Cargo.toml",
+      "sha256": "c91ca39b2b80feea025f9f844b97a8d9f35f0917f25d7b6e0ad8668361f3dd65"
+    },
+    {
+      "path": "crates/freehand-relay/src/agent_client.rs",
+      "sha256": "95943b5afbd1535e9281a1b8c948920d1b3ac4ffa67447fe8ba5dd5d2a8a3bf4"
+    },
+    {
+      "path": "crates/freehand-relay/src/config.rs",
+      "sha256": "8670bb0612fa2a2ff2c94df64a2e5773cb3523dea466627c8111ad1099b19121"
+    },
+    {
+      "path": "crates/freehand-relay/src/directory_socket.rs",
+      "sha256": "742495fb782037e26ea14f51e7c2f25f1ac9864766bef270092952f636e77db3"
+    },
+    {
+      "path": "crates/freehand-relay/src/http_tunnel.rs",
+      "sha256": "1b4c0dffecc5c22df65ed0ca7ef0e204474df15f32f0dd5e83fd5ec39438b730"
+    },
+    {
+      "path": "crates/freehand-relay/src/lib.rs",
+      "sha256": "795dffe1f1bddcae99e5b26ede212b2f9122d2764a2fee18f13a030ae4df2eac"
+    },
+    {
+      "path": "crates/freehand-relay/src/model.rs",
+      "sha256": "ac1455eb7cfc34503f4609a87691404d95607bb024d28fffc41b4e783fb5f73d"
+    },
+    {
+      "path": "crates/freehand-relay/src/service.rs",
+      "sha256": "a7d909b92c279f113c4eca6f07887538fd4e6faa20a232f9b63d4e3885308502"
+    },
+    {
+      "path": "crates/freehand-relay/src/store.rs",
+      "sha256": "e3bf4efca0134d1e4c13b0efe90e272d996e8c2670e32a94ca398795cfb9a503"
+    },
+    {
+      "path": "crates/freehand-relay/src/tunnel.rs",
+      "sha256": "560ce09e8cc68749ab3b9406fd3af9af77031949867faca4262fbc34362a3f2c"
+    },
+    {
+      "path": "crates/freehand-relay/src/websocket_tunnel.rs",
+      "sha256": "38943f5ca88b5df8ad8c64dd30987fece0b64f0263ce18a4940270497aa74b0f"
+    },
+    {
+      "path": "crates/freehand-relay/tests/relay_http_blackbox.rs",
+      "sha256": "3a27dccd7d2d16a5225fb752554445632a205ec41cae6496e970b3af78d67c43"
+    },
+    {
+      "path": "crates/freehand-runtime/Cargo.toml",
+      "sha256": "1731676148257dfc6bc6b6308279b156d407eb7067b6d43bf07b7ec15f7ef8a9"
+    },
+    {
+      "path": "crates/freehand-runtime/src/checkpoint_store.rs",
+      "sha256": "fcfd868352b4d22a584195f7bf86dc307a50532ebb6b673bcc34e86459869dcf"
+    },
+    {
+      "path": "crates/freehand-runtime/src/lib.rs",
+      "sha256": "c7881357d72309d9606f7871f3c0ffabb131fa6428b0e8e54d1cc65404176b3b"
+    },
+    {
+      "path": "crates/freehand-runtime/src/lifecycle_wait.rs",
+      "sha256": "d3346af98cd28a0ea26bf950484ce45762666442b3632ef8331c1ea0e6fe47a5"
+    },
+    {
+      "path": "crates/freehand-runtime/src/live_context.rs",
+      "sha256": "f83f0a165b280539f2dfe81dc872532935c437554ef27628e35d87dccf0224d2"
+    },
+    {
+      "path": "crates/freehand-runtime/src/master_runner.rs",
+      "sha256": "737c5db0399088037838a652401434b1860cf1b926394a60ec081003136c54a3"
+    },
+    {
+      "path": "crates/freehand-runtime/src/master_runner/tests.rs",
+      "sha256": "c9699877c1b7bbe79c628fd3ee1844d8a71771ca42d92d0434360ade8b5c417d"
+    },
+    {
+      "path": "crates/freehand-runtime/src/path_diagnostics.rs",
+      "sha256": "fc71bad090422738deafad70a5ac816f3bb729039713d73e2e71870d8104918a"
+    },
+    {
+      "path": "crates/freehand-runtime/src/tests.rs",
+      "sha256": "8ff9545b0ace567b86ff2de36cced5f4ca92f3834f6459fa3573e1b70f9734cd"
+    },
+    {
+      "path": "crates/freehand-runtime/src/timer_store.rs",
+      "sha256": "3b65ce8be1f6420515026de2c36249470c4bfae8c095d05b84405e956d4c9278"
+    },
+    {
+      "path": "crates/freehand-runtime/src/turn_projection.rs",
+      "sha256": "9abf80de6db330b84f176e98056de08f77f612f6ad9802ab57d2874a23d5f447"
+    },
+    {
+      "path": "crates/freehand-runtime/src/worker_runner.rs",
+      "sha256": "1bf0eb27625afad91837f0aaca45605b57c28c27511dd311b0eb9c0ea9a69327"
+    },
+    {
+      "path": "crates/freehand-runtime/src/worker_runner/heartbeat.rs",
+      "sha256": "089d8c5078a7ea01698b9e3eee5bf987d095f9e2344c38ff4d41a058694440a3"
+    },
+    {
+      "path": "crates/freehand-runtime/src/worker_runner/tests.rs",
+      "sha256": "32fe886b22cc285fd22d07e5d2b965be7cad7c77a482883228c2c9740d61cc26"
+    },
+    {
+      "path": "crates/freehand-task/Cargo.toml",
+      "sha256": "530f7c91db15df59319d268d0acfe927746172845c086d9a13fc30ea3b89e9af"
+    },
+    {
+      "path": "crates/freehand-task/src/lib.rs",
+      "sha256": "9781c8ee4feaf2fece900fe1e3eaabb9f5c950ce903129c4d17021e6db8c690e"
+    },
+    {
+      "path": "crates/freehand-tools/Cargo.toml",
+      "sha256": "cab5cc73648d4f7b71e65b4b8088b9b787a0fcf6cd5f567fd80a22ed72e97982"
+    },
+    {
+      "path": "crates/freehand-tools/src/camo.rs",
+      "sha256": "b9cfdb2da67c679441df5eb618b0a0dea3d9ccd757241d70efb63b09ed39cf97"
+    },
+    {
+      "path": "crates/freehand-tools/src/lib.rs",
+      "sha256": "05986ee37e4de1e45f3741c3d1ee093ed6161d690703633c6171824be38e964a"
+    },
+    {
+      "path": "crates/freehand-ui-protocol/Cargo.toml",
+      "sha256": "2f46c5a927b368568748341d924843515ac92544278b136e9584bffeab39c6ce"
+    },
+    {
+      "path": "crates/freehand-ui-protocol/generated/adp-protocol.schema.json",
+      "sha256": "9d5d8fa1a07a6fe5cf4051f3c00ed22fe3a1b94cb6e689b37d1f6e8cfcb6454c"
+    },
+    {
+      "path": "crates/freehand-ui-protocol/src/adp_descriptor.rs",
+      "sha256": "834cb5cea8d41d24d1e0fb2e4ea35cf6e0db21949500df554a5d08452057cc0b"
+    },
+    {
+      "path": "crates/freehand-ui-protocol/src/adp_wire.rs",
+      "sha256": "9f229a244fff2362e1aba598dd6cebedb3acf55ee6cfeb151da050b1adfaf646"
+    },
+    {
+      "path": "crates/freehand-ui-protocol/src/bin/export-adp-protocol.rs",
+      "sha256": "f3681489e9cd82ed96395ec8bd92d8c4dd0b84aa442624b051048bdd86f31235"
+    },
+    {
+      "path": "crates/freehand-ui-protocol/src/dto.rs",
+      "sha256": "633e759bc9386c2867abdaa237658c27759c25a9a1919f63f2eb6862ca7e5d98"
+    },
+    {
+      "path": "crates/freehand-ui-protocol/src/lib.rs",
+      "sha256": "3636e74b446c761adeb064ca0c1dcaf20373218a477d561f895d2550fb248b21"
+    },
+    {
+      "path": "crates/freehand-ui-protocol/src/ports.rs",
+      "sha256": "a0a2d89aab8ba696cfb1dd68f67bed544f914a14483cde16e766914802044d60"
+    },
+    {
+      "path": "crates/freehand-ui-protocol/src/projection.rs",
+      "sha256": "13e7ee8c7e3ff85bc99ab2d613f826634fbdc522bfd58be6d93642e366cf0fb8"
+    },
+    {
+      "path": "crates/freehand-ui-protocol/src/state.rs",
+      "sha256": "79aefb051f4526a5c7c3c59f4770088cc6552692e7d95b818e1900427e3f9c6a"
+    },
+    {
+      "path": "crates/freehand-ui-protocol/src/tests.rs",
+      "sha256": "a8248b3b019dbba10e6784a0c3163d3db602073404372ec95b00f698a65d6961"
+    },
+    {
+      "path": "crates/freehand-ui-protocol/src/validate.rs",
+      "sha256": "fb2553b8b14335f9deb53bd4cad045c5505f4ff71b12c0e4f4f172c4c487662c"
+    },
+    {
+      "path": "docs/testing/app.android-client.md",
+      "sha256": "53bef594761cd4688eb7b23e2b3934414e11d896cc4167d986b8620c6026ff91"
+    },
+    {
+      "path": "docs/testing/relay.transport.md",
+      "sha256": "db6fdba13c04261caa9727d48ed992a767d6ca73399a89777453e1c9330a5402"
+    },
+    {
+      "path": "docs/testing/task.orchestration.md",
+      "sha256": "d4a33bdb7f80fa0f9b2c3449e66e6163643d6122122e47f64b230def668358f7"
+    },
+    {
+      "path": "scripts/freehand-daemon-launchd.sh",
+      "sha256": "98dcd878eedab58813a9acf75dd733f3cc92062bd6561bca3df2fc171fd5ccd0"
+    },
+    {
+      "path": "scripts/freehand-file-permission-preflight.sh",
+      "sha256": "e219b4308cd9c6be91dd9eadcf823d8ff26b11de7c76131f9c9bf7d8e981e00f"
+    },
+    {
+      "path": "scripts/install-global.sh",
+      "sha256": "df0362cedd29611f81a521301d311d0f1fea26bc074fea61d7d3d54791755e23"
+    },
+    {
+      "path": "scripts/install-launchd.sh",
+      "sha256": "1424f0d0060f51fa7101cfab09ac6ec691faa46c94a4b07d4641b6f6ae2f9807"
+    },
+    {
+      "path": "scripts/install-symlink.sh",
+      "sha256": "1c6a7723726d966121fafd78ef4bf000cfa58498ab28b3ba72bb39628e4578ad"
+    },
+    {
+      "path": "scripts/provision-openminis-source.sh",
+      "sha256": "3f76dcd2713f520162fc3db2a1f1410ed519820b995746ed1ab9b73822f3f3f5"
+    },
+    {
+      "path": "scripts/release.sh",
+      "sha256": "d75eaf657ecf84a9ba28d99a96f9b19eaf3bb7f2202a90772b5c56db9e4eeb49"
+    },
+    {
+      "path": "scripts/run-cargo-test-with-evidence.sh",
+      "sha256": "0cdb681158b4983a6ed7b95fd25780de18b798272db676cdd6d50e11b7d28936"
+    },
+    {
+      "path": "scripts/source-search.sh",
+      "sha256": "6c4fb220b0e2e4c66a2f429568146b336e0eb767318f79291fcc92c92974ccad"
+    },
+    {
+      "path": "scripts/uninstall-launchd.sh",
+      "sha256": "06f35d02a196ac3178569f97235ffa6a359a0eb6d1e777d65657369fc34571f0"
+    },
+    {
+      "path": "scripts/verify-acp-stdio.sh",
+      "sha256": "9d130bf761ae43f29cd80f61b33d806feb1a59ed63d0606911334c48bd8a85a9"
+    },
+    {
+      "path": "scripts/verify-adp-fixed-session-observability-online.py",
+      "sha256": "513f9348eb3e192b31bd90fe4c0f25cc8f0937ace1516ee13e9648f4c8995f8b"
+    },
+    {
+      "path": "scripts/verify-dual-path-update.sh",
+      "sha256": "8b0256ab9962a987952bc898b5755da935e401460a259f0e7e441042f2704668"
+    },
+    {
+      "path": "scripts/verify-launchd-restart-guard-online.sh",
+      "sha256": "4d2494ffc633414241553f70618118901172fc85b2d102d04d2efe7ec3b82f4b"
+    },
+    {
+      "path": "scripts/verify-launchd-restart-guard.sh",
+      "sha256": "6a8ce59c4e852c3623200eb5acf6831b98e85b213d128975c86c27a8c2f7271c"
+    },
+    {
+      "path": "scripts/verify-launchd-three-worker-services-online.sh",
+      "sha256": "0837d1cc5a0ff8379fcd030f54589281218267aa2b95a9ac2c2a99d032a31441"
+    },
+    {
+      "path": "scripts/verify-launchd-worker-naming.sh",
+      "sha256": "d5bdb3a5d132de60bb58e8204881c4146d629ef8616823951442ba3e71ce65f5"
+    },
+    {
+      "path": "scripts/verify-master-three-worker-e2e-online.sh",
+      "sha256": "f26849a27e3ae36cc1950e40832c05011ae61fcdbbd7ed7cff25900e0a8b623f"
+    },
+    {
+      "path": "scripts/verify-master-worker-autonomy-online.sh",
+      "sha256": "9138a56000d368c0ecde8695d598c0d9e7512e6dd95c6e03dcded5e8f52cc38e"
+    },
+    {
+      "path": "scripts/verify-mobile-ui-tree-goal-audit.mjs",
+      "sha256": "03456ab5deaf3637b5ecf01ea52587a58438d11dd1bc1ab20171455060e5c3bc"
+    },
+    {
+      "path": "scripts/verify-model-group-ui-online.mjs",
+      "sha256": "81debd7ea14915db84a0b019d876856d6cd8b1d6c6d8df4578a4f5590b863852"
+    },
+    {
+      "path": "scripts/verify-normal-master-worker-e2e.sh",
+      "sha256": "f879b7b9c6cdc2d915db82c6f08001dacbea91415de039308d7a40939a95712c"
+    },
+    {
+      "path": "scripts/verify-provider-hosted-web-search-online.mjs",
+      "sha256": "f05e82293fc5aea51ba6d0273a73056526914ac0f159a1efdbe0b940eb235d04"
+    },
+    {
+      "path": "scripts/verify-provider-recovery-webui-online.mjs",
+      "sha256": "758ba34e9e87c9406ad88a18d59e433757c8c18db7437349f1c8124f69a476e9"
+    },
+    {
+      "path": "scripts/verify-provider-registry-ui-online.mjs",
+      "sha256": "f87dddaf6e10b9bd4eebbe1688d754774cb1677c5a6d7cfc09ca54d5e5c3203f"
+    },
+    {
+      "path": "scripts/verify-provider-retry-online.sh",
+      "sha256": "c8dde38321532e8fbd6ebf8f21c73256ac208f6c4937af7e0ff1bc9b319bf153"
+    },
+    {
+      "path": "scripts/verify-provider-web-search-settings-ui-online.mjs",
+      "sha256": "d5d4eb7f2f101a52aed96abfe57e019de7d2b94adae24983dadc97f2cafc4c9b"
+    },
+    {
+      "path": "scripts/verify-real-provider-master-worker-history.sh",
+      "sha256": "7e927851064729f21120990835a5c7f5db8292a15692451608d32b2d4eb5dee8"
+    },
+    {
+      "path": "scripts/verify-relay-account-config-smoke.sh",
+      "sha256": "516e32f95e8d208c01d624e05fed1b44d3187ef2044c0d1490d749bfffc5fd25"
+    },
+    {
+      "path": "scripts/verify-relay-deployment-smoke.sh",
+      "sha256": "b20d4614873c31fc43498806f31c79dd8a8d2ead50f8477bec00f1516cdbd2c1"
+    },
+    {
+      "path": "scripts/verify-remote-relay-local-online.sh",
+      "sha256": "64564932ed64220a3537a4eeea21d9ed3145c6e5bbc51252b012556408370545"
+    },
+    {
+      "path": "scripts/verify-session-detail-recovery-model.mjs",
+      "sha256": "3de5804e7e617389a6922d5e342e574e7f93f06bbec48dad4b1c62818e604a08"
+    },
+    {
+      "path": "scripts/verify-timer-tool-online.sh",
+      "sha256": "5f90c67eb1c018ab8bc600173d199263544a203e0e9b24d0706db4a9cbfad1ac"
+    },
+    {
+      "path": "scripts/verify-web-fetch-tool-online.mjs",
+      "sha256": "8a45c87ebc05553647eba31e36aa78cd0c3a0d5840cb741992b3537dbd7d6e39"
+    },
+    {
+      "path": "scripts/verify-webui-ambiguous-submit-recovery.mjs",
+      "sha256": "fa26dae60877fdc8eaea9fe5a92018c163302cac57c741bc923e87d7d0f3f7a8"
+    },
+    {
+      "path": "scripts/verify-webui-diagnostics-online.mjs",
+      "sha256": "d7b720e9c83ada35bfc0f2731741e276dd7f900e25fb776e575dbca1def7f5ab"
+    },
+    {
+      "path": "scripts/verify-webui-foundation-contracts.mjs",
+      "sha256": "a42a2d1d6f0e475a644e9eaeeca31a3ace50eabb89af7bad0bd8af27f5a4eea0"
+    },
+    {
+      "path": "scripts/verify-webui-image-attachment-online.mjs",
+      "sha256": "61a6dbb4bd562b478fe7cb306c4f3a5c29832715c70efb5f6698fc656ee14f31"
+    },
+    {
+      "path": "scripts/verify-webui-layout-shapes.mjs",
+      "sha256": "0fc8bf61284fe359bb6d57d1cde0a08fcc3b2430bda783245db5499576932487"
+    },
+    {
+      "path": "scripts/verify-webui-live-tool-render-online.mjs",
+      "sha256": "5da7477fdcc165d9f042d4be258bddb2a99c5d8b5a73fac5e2a0cbbd61328be9"
+    },
+    {
+      "path": "scripts/verify-webui-mobile-ui-tree-online.mjs",
+      "sha256": "9cbcf93b18c8b7f55adfce0ede27235a9f42200eac3c5935f089f07e7dc32c10"
+    },
+    {
+      "path": "scripts/verify-webui-new-session-online.mjs",
+      "sha256": "d4e4aa38c7ef97c49668429a89abdbc17b7901af8bb0e187ac300bf5f1736264"
+    },
+    {
+      "path": "scripts/verify-webui-online.sh",
+      "sha256": "e51ae3e2466aa3aa433ab43f44e7f5d471a92136c232f8910b83e28d60570fb4"
+    },
+    {
+      "path": "scripts/verify-webui-path-diagnostic-online.mjs",
+      "sha256": "3360e5a8a6197ab40cdc8a49317826c5fb6287cc55aecb7e695ba27b51dbba4a"
+    },
+    {
+      "path": "scripts/verify-webui-release-online.sh",
+      "sha256": "48db9f026e34be196efd5f8b3220356cb25e3411b8aa2336f03ce76aacfa4ba7"
+    },
+    {
+      "path": "scripts/verify-webui-session-restore-error-exit-online.mjs",
+      "sha256": "9ff87852915bf9d874cb458507b5b86cecdb6e8f98e6694d2ae325d969248bdd"
+    },
+    {
+      "path": "scripts/verify-webui-session-search-online.mjs",
+      "sha256": "84e22934d23ad9860fcfb30f7b098f14e37163f1aef2251dfcb870889cce5fd4"
+    },
+    {
+      "path": "scripts/verify-webui-stop-continue-online.mjs",
+      "sha256": "acd174d3784a6cf0a73b73ba785723ceea74531b5842b335aa4c222c2bf99b0a"
+    },
+    {
+      "path": "scripts/verify-webui-surface-motion-online.mjs",
+      "sha256": "cf541d4f4ac46779077611800ae009ab03fee3a1542e3b018e264a8cd23174e8"
+    },
+    {
+      "path": "scripts/verify-webui-timer-dashboard-online.mjs",
+      "sha256": "e8e86c9829cabc0bacef7ccf8d3f74b4a639f264236d67fb259afefb4f35d063"
+    },
+    {
+      "path": "scripts/verify-webui-tools-registry-online.mjs",
+      "sha256": "9899d3c797fc0dc2bd1b56594df5310c69ac8be05dfb6f8279b84b825cf653d5"
+    },
+    {
+      "path": "scripts/verify-worker-recovered-history-online.mjs",
+      "sha256": "6c89489e7fa6364c53b36e5a43458b735075276292936560bd51a317c54df29a"
+    },
+    {
+      "path": "scripts/verify-worker-subtasks-online.py",
+      "sha256": "ab3cdb7dae1d4fb413d023644bc4633b07a0d499a5aeb4139c28632a3521e031"
+    },
+    {
+      "path": "scripts/verify-worker-subtasks-webui-online.mjs",
+      "sha256": "5bf715888effde377352da708cf42ee3ba672f5bd9b9f7e5cccbee93180d7f7f"
+    },
+    {
+      "path": "scripts/webui_verify_online.mjs",
+      "sha256": "26658b1c6469605071e747bb812d0f2af5b11adf46a27ab17c719514d967f43a"
+    },
+    {
+      "path": "xtask/Cargo.toml",
+      "sha256": "9e1a78df205b3e313442a96aee8439e6f7cb27622ea80678962b5bf1fb8983fd"
+    },
+    {
+      "path": "xtask/src/main.rs",
+      "sha256": "9038c4b0cb3fdccdde15ef714d6cda5a93653a07a85b92b9d06a2a112091dd8d"
+    },
+    {
+      "path": "xtask/src/openminis_ui_migration/binding.rs",
+      "sha256": "2d08f7b681647b9758b5f6a5034a8148cb954ff16ebef0c2a8e5ecb52ef77ddd"
+    },
+    {
+      "path": "xtask/src/openminis_ui_migration/call_graph.rs",
+      "sha256": "296d3936d4f65335306bbc293ba7c6f99386e7a850110ee127c33ec39b2600e3"
+    },
+    {
+      "path": "xtask/src/openminis_ui_migration/call_graph/cfg.rs",
+      "sha256": "f9a7c22fa093028c1b83d910a27601e660f814b3892778d5957c1dfcd4df6d28"
+    },
+    {
+      "path": "xtask/src/openminis_ui_migration/call_graph/discovery.rs",
+      "sha256": "449214b53deac98a387fee3089d686abc76eb4f3a35ae7ddf200c6593b2d2cf7"
+    },
+    {
+      "path": "xtask/src/openminis_ui_migration/call_graph/discovery/attributes.rs",
+      "sha256": "60714b2945907bcfa98747ede820ab89cb8bd0da799aaf119f6ba965bca357a5"
+    },
+    {
+      "path": "xtask/src/openminis_ui_migration/call_graph/discovery/index.rs",
+      "sha256": "f1b6951ff2baf54fa21f2b680649cb4ed43609c2d46777e8703e6023fb22fb19"
+    },
+    {
+      "path": "xtask/src/openminis_ui_migration/call_graph/discovery/macros.rs",
+      "sha256": "1555cbd5c8fe4a114046735dccc5db6159f41294bdba429798aa52486b1dd9ba"
+    },
+    {
+      "path": "xtask/src/openminis_ui_migration/call_graph/discovery/methods.rs",
+      "sha256": "88d60401d1ec9253bbb96e3057f9f0a7f3a8912161d4b6ec71778a0c62a00c45"
+    },
+    {
+      "path": "xtask/src/openminis_ui_migration/call_graph/discovery/methods/bindings.rs",
+      "sha256": "c4d3c8d6cc5a5434f03f8201f5bdefa979085115b92eacbb6ba8f1aab8e16730"
+    },
+    {
+      "path": "xtask/src/openminis_ui_migration/call_graph/discovery/methods/local_items.rs",
+      "sha256": "fdf4431542a8654e77429a659f0e78bffdd1a6168c40c7fe4a3c0be70066ba8c"
+    },
+    {
+      "path": "xtask/src/openminis_ui_migration/call_graph/discovery/methods/receiver.rs",
+      "sha256": "68cd6b486f5fedc7dd7687c7f9e071d8c680e08622977231ec38fb1b609d9404"
+    },
+    {
+      "path": "xtask/src/openminis_ui_migration/call_graph/discovery/methods/visitor.rs",
+      "sha256": "03abea50ea5c3fc61edd6d706358ce76d7d87d8afdb64650c07ee2d634ec9b36"
+    },
+    {
+      "path": "xtask/src/openminis_ui_migration/call_graph/discovery/methods/visitor/assignment.rs",
+      "sha256": "9bb9778ac279acb8c37e91f294da50169596b86808ab9ebdd12432b4dc1a4770"
+    },
+    {
+      "path": "xtask/src/openminis_ui_migration/call_graph/discovery/methods/visitor/conditions.rs",
+      "sha256": "1a25df48d88a87f685411393709dce6267ab9ce82e32455e9660561527750ea6"
+    },
+    {
+      "path": "xtask/src/openminis_ui_migration/call_graph/discovery/methods/visitor/entry.rs",
+      "sha256": "20fd342ff73649e4c05d262e12d71de1e00cab2196bcd47ab44277f8a9a7c663"
+    },
+    {
+      "path": "xtask/src/openminis_ui_migration/call_graph/discovery/scope.rs",
+      "sha256": "3b827ac3689a52a4a00b0ee3364e17f2825143c4bc47e32bf4cff6edee86f2d8"
+    },
+    {
+      "path": "xtask/src/openminis_ui_migration/call_graph/discovery/state.rs",
+      "sha256": "4f96acd78cb19be39c83b2e4d93ba7365936beb11d35bbb1d40fdb13a971f74f"
+    },
+    {
+      "path": "xtask/src/openminis_ui_migration/declarations.rs",
+      "sha256": "73a2b38c02c1c6b97039ea3b59599bff99f2c2dd6dc80d8df94c9901b492cc0a"
+    },
+    {
+      "path": "xtask/src/openminis_ui_migration/evidence.rs",
+      "sha256": "9b9aa270d214ca1d337c991caed04e4f50f5050b2d6efb4abd5dbd6a6c4e81d6"
+    },
+    {
+      "path": "xtask/src/openminis_ui_migration/evidence/provenance.rs",
+      "sha256": "09db49868af24f2381aba7abcdc3e84e1d550cf017f57181e7a5cdfff2157fe5"
+    },
+    {
+      "path": "xtask/src/openminis_ui_migration/evidence/retirement.rs",
+      "sha256": "a54ed88410452fd01b242a8ad38f834a3c52a32cc9ae339225571db778d7eba7"
+    },
+    {
+      "path": "xtask/src/openminis_ui_migration/lifecycle.rs",
+      "sha256": "b75b362a2edd3d5c8eda6974a8f3aea169e7aea6a77d5b7934c42279e223242a"
+    },
+    {
+      "path": "xtask/src/openminis_ui_migration/mod.rs",
+      "sha256": "8887b8c3b0351653d05b01fde8d919a222e085e3761986e4b5771b6898eeda2b"
+    },
+    {
+      "path": "xtask/src/openminis_ui_migration/node_verifier.rs",
+      "sha256": "c40d076bf0b9a27c4e93dfada922374c495894d11507cc39fded7573076eef06"
+    },
+    {
+      "path": "xtask/src/openminis_ui_migration/pinned_source.rs",
+      "sha256": "7247d8e743a42c16eccd38105e20116497a2f5adebd18d360c8e0082dfa09781"
+    },
+    {
+      "path": "xtask/src/openminis_ui_migration/support.rs",
+      "sha256": "0edf9a2308b21f550ca0782bdc7ee5eb4b1f52944ae1653ce987077893c3e100"
+    },
+    {
+      "path": "xtask/src/openminis_ui_migration/tests/call_graph.rs",
+      "sha256": "fa16368de8ac5dac375ee564b84f1d45d9d0b96f57885ef7757118dfad62e6c2"
+    },
+    {
+      "path": "xtask/src/openminis_ui_migration/tests/call_graph/call_graph_round18.rs",
+      "sha256": "187437dbdce6da5c79664c2f75db608825abd63bbf2d5242d43e428bd56651fc"
+    },
+    {
+      "path": "xtask/src/openminis_ui_migration/tests/call_graph/call_graph_round23.rs",
+      "sha256": "1a84f0b82c5b91fbbf2c3813ad7e98040584527d5aacd09946a92e9fd4cb8ab9"
+    },
+    {
+      "path": "xtask/src/openminis_ui_migration/tests/call_graph/call_graph_round24.rs",
+      "sha256": "161de450fb2ce7d131413aef55a9e41859c67beae44492eb6ddb577e1eef4da3"
+    },
+    {
+      "path": "xtask/src/openminis_ui_migration/tests/call_graph/call_graph_round25.rs",
+      "sha256": "ec2c5c7dc5b583a1e273658fad36d4c4346fffa535b4dfb3d6686f886ea0a266"
+    },
+    {
+      "path": "xtask/src/openminis_ui_migration/tests/call_graph/call_graph_round26.rs",
+      "sha256": "dbccb81db0ffa13c6bbdf06603dccc33e37d8eaa298c213315577e961876abbd"
+    },
+    {
+      "path": "xtask/src/openminis_ui_migration/tests/call_graph/call_graph_round27.rs",
+      "sha256": "3a657ad2784a93ae48508e5771ca9795da0139786cf3da9362ac3e95f7b541a1"
+    },
+    {
+      "path": "xtask/src/openminis_ui_migration/tests/call_graph/call_graph_round28.rs",
+      "sha256": "e758eec6e1599fe5d72fa48a3594c6413a4c60229118fb4da79a7892401d200a"
+    },
+    {
+      "path": "xtask/src/openminis_ui_migration/tests/call_graph/call_graph_round29.rs",
+      "sha256": "74a74c5958912d2cb96b127500fa378cad9454ac765cbdfd343cfd3acf536938"
+    },
+    {
+      "path": "xtask/src/openminis_ui_migration/tests/call_graph/call_graph_round30.rs",
+      "sha256": "348e1eacadf4f308741217d2abf73d1e4a177867d5f1a13660005b0794b4af80"
+    },
+    {
+      "path": "xtask/src/openminis_ui_migration/tests/call_graph/call_graph_round33.rs",
+      "sha256": "c8a1672168326c5521528707c45bb2900c2c74b57fcc76817c8ef2c0ba3f8aa6"
+    },
+    {
+      "path": "xtask/src/openminis_ui_migration/tests/call_graph/call_graph_round35.rs",
+      "sha256": "1b637cee53b4e665028183b9ee7150ceb01843dc50c93c7bae72d6187f5cbfd7"
+    },
+    {
+      "path": "xtask/src/openminis_ui_migration/tests/call_graph/call_graph_round36.rs",
+      "sha256": "ef697f48c747c868f9453e2bd5f23be91b75848e547163fecd8d4d97986fd9a6"
+    },
+    {
+      "path": "xtask/src/openminis_ui_migration/tests/call_graph/call_graph_round37.rs",
+      "sha256": "73d6e3c7789f71036a4e846f3288d6c0e5ff67670ce2332f6fa206aa80809db8"
+    },
+    {
+      "path": "xtask/src/openminis_ui_migration/tests/call_graph/call_graph_round38.rs",
+      "sha256": "b2f84ce211739f8d203b73248c4c1fd996ca1072abda568f8b75b679250d81dc"
+    },
+    {
+      "path": "xtask/src/openminis_ui_migration/tests/call_graph/call_graph_round39.rs",
+      "sha256": "f20ace56a13f1f76a111930c66438710bd230045b2d703f7a17ba1b615e0f5e3"
+    },
+    {
+      "path": "xtask/src/openminis_ui_migration/tests/common.rs",
+      "sha256": "8540f66defded2281ce25f399c1b8ff8585848b8307d7a851f2360fe81f5e541"
+    },
+    {
+      "path": "xtask/src/openminis_ui_migration/tests/evidence_retirement.rs",
+      "sha256": "3c946f0e59131cea98718cc0e0a71eecab94b187ba286bd0cfa50300b3736daf"
+    },
+    {
+      "path": "xtask/src/openminis_ui_migration/tests/evidence_retirement_round21.rs",
+      "sha256": "5eca38275fb60a2eb595a907ef3bda1d43348017fee1a90c0d1c9a3a44160cbd"
+    },
+    {
+      "path": "xtask/src/openminis_ui_migration/tests/evidence_retirement_round28.rs",
+      "sha256": "5762ccbaffb2b70450fc6bd0f8210c7f09a06a918f833f50889e1db2513e2746"
+    },
+    {
+      "path": "xtask/src/openminis_ui_migration/tests/evidence_round30.rs",
+      "sha256": "4b8193a772967fa7bc2724329ea136b7daabb97b54201562dbf48441f49b0003"
+    },
+    {
+      "path": "xtask/src/openminis_ui_migration/tests/lifecycle.rs",
+      "sha256": "a51846742cb9aa8f772205fd2129c008fbbfe3b474be2c89c925329f1d352e2b"
+    },
+    {
+      "path": "xtask/src/openminis_ui_migration/tests/mod.rs",
+      "sha256": "27d83cbc83d89289d4d9e6bc73dd51104a516071a88483e7f675af5af1adac80"
+    },
+    {
+      "path": "xtask/src/openminis_ui_migration/tests/round7.rs",
+      "sha256": "6166df40afedab5f743b80cba18c34f1a69e27d8a9e8dd855f73c6342f47bb0f"
+    },
+    {
+      "path": "xtask/src/openminis_ui_migration/tests/round7/round7_declarations.rs",
+      "sha256": "e595c07a6165dd4f9de972d2052d1e08dcb7cb96879a5e5df91a0ab52b839aa5"
+    },
+    {
+      "path": "xtask/src/openminis_ui_migration/tests/topology_source_binding.rs",
+      "sha256": "4fa9d82b94eb6a54b9a5fa2ec1950c2005ec54b248c0eef97fcbf1d36f72180a"
+    },
+    {
+      "path": "xtask/src/openminis_ui_migration/topology.rs",
+      "sha256": "3a9478adc8310bcca1d5b5564d82663dad18245cfe0f1df6675ee1c5cce86617"
+    }
+  ],
+  "designSources": [
+    {
+      "path": "Makefile",
+      "sha256": "d9708c2d3c93883799ff6c9573d6b15a4f3913e3171c9336dfbe2e7b35248cd3"
+    },
+    {
+      "path": "docs/architecture/feature-map.md",
+      "sha256": "5ecca2f3c8a511b653cec7c8727e755db933ac5a4d6e9e84ff5ea5842c9ccf47"
+    },
+    {
+      "path": "docs/architecture/function-map-spec.md",
+      "sha256": "ce79f94189670c847249733b5470dd4389607970815c5daba2ab4954819f058a"
+    },
+    {
+      "path": "docs/function-maps/agent.lifecycle.md",
+      "sha256": "7e8ccf5c227923dd5f51a93c17898c04b26d03af254512721177b09c802c817f"
+    },
+    {
+      "path": "docs/function-maps/app.android-client.md",
+      "sha256": "4412259f0ec422fadd7755324a02e2afe9ac52589585f6deb96530f3a5145163"
+    },
+    {
+      "path": "docs/function-maps/app.runtime-daemon.md",
+      "sha256": "8b4036b11e45a4b5b1c4be249bf134f79b9ef9ac0d5c138aca92dc9c362ae5da"
+    },
+    {
+      "path": "docs/function-maps/app.webui-smoke.md",
+      "sha256": "d91e08da4661b2a90cc299ad3721cf667e1a509f21810d5659c11ce73a8ae5b8"
+    },
+    {
+      "path": "docs/function-maps/config.core.md",
+      "sha256": "e2cce5567f292733b04e3f20f3a58c76331dd9d2cd382f9e7cc654751e08f1a2"
+    },
+    {
+      "path": "docs/function-maps/contracts.core.md",
+      "sha256": "54e3110d00587e9a0fd8288921ef89ece2489b1d2671ac994b5a629d75b4c334"
+    },
+    {
+      "path": "docs/function-maps/debug.core.md",
+      "sha256": "ac6a9a8097f95728469bf061dae3719ad6a61e52f22e45c51c60c5a385c8ddfb"
+    },
+    {
+      "path": "docs/function-maps/error.center.md",
+      "sha256": "6ad6cbc1077d448711c323fd4327e6192e4b1c84e741c21efc6d409865e4ad74"
+    },
+    {
+      "path": "docs/function-maps/foundation.workspace.md",
+      "sha256": "5d0e0f7f7d3f461fdc420031ebe01e68854be1102926afb7d53e8061b6060954"
+    },
+    {
+      "path": "docs/function-maps/instruction.capability-loader.md",
+      "sha256": "6f50fed0e36095c41c3d0168e5aa01a7c1f2a8e8a2d25287cfde0191ccab4148"
+    },
+    {
+      "path": "docs/function-maps/metadata.core.md",
+      "sha256": "f33a788cc91259bf005d4f400e4a641aea4f73b8976dffab4213cb351567e4a6"
+    },
+    {
+      "path": "docs/function-maps/node.master-slave.md",
+      "sha256": "c5eb070283b94c3a0d5419213fc539900328f49459c4cdc4fb7c9600a97ca794"
+    },
+    {
+      "path": "docs/function-maps/provider.anthropic-adapter.md",
+      "sha256": "8cd0ea376525be2dc909aa21638765b1049a7f78de77cb4773d3b8a4c838e3a9"
+    },
+    {
+      "path": "docs/function-maps/provider.openai-adapter.md",
+      "sha256": "100abdf7ff3d3690c203ddde7ed1853ad5f649dc5a713e7d69878217fe7edad1"
+    },
+    {
+      "path": "docs/function-maps/provider.reason-live-bridge.md",
+      "sha256": "9ce3a4f4d7f324f7f0c1b634b2d154aad3f5546f0681decf88525dc9b159b1e4"
+    },
+    {
+      "path": "docs/function-maps/provider.semantic.md",
+      "sha256": "05f9e929f8962882adcf0b43640725503cffdcd4480ac346bc57ef26294f2d4e"
+    },
+    {
+      "path": "docs/function-maps/reason.turn.md",
+      "sha256": "82a09f300704780fec9115f856ba248dcf0d6370b47fa0cdf9d42b981cbe14ae"
+    },
+    {
+      "path": "docs/function-maps/relay.transport.md",
+      "sha256": "1b58c9b9eb602012f06f81d3749be4c6821d063aede7c20fa25885c4d9f6b166"
+    },
+    {
+      "path": "docs/function-maps/runtime.master-worker-loop.md",
+      "sha256": "6f99a65757b51372e3f295fc3a3069a865fb0c8b65bef6377057865e5ff193a1"
+    },
+    {
+      "path": "docs/function-maps/runtime.ui-command-dispatch.md",
+      "sha256": "3dfb9fb2c77220ce10c4b6ce3f48d80bc858f4ac6acef81c1a9a8a0b01c14f57"
+    },
+    {
+      "path": "docs/function-maps/task.orchestration.md",
+      "sha256": "d8be627307e0a1d4aa0621c9464c9f307547175f4293f8c26762a8b0ec70f537"
+    },
+    {
+      "path": "docs/function-maps/tool.registry.md",
+      "sha256": "70b1896d83997122e81b9269ffa125ecdd6108ad1e25d927edc9e38b65c80084"
+    },
+    {
+      "path": "docs/function-maps/ui.protocol.md",
+      "sha256": "59743daaf94f1177272595114e3ba3cd55be1f5fa8e2038b5c10eda7266ba4d4"
+    },
+    {
+      "path": "docs/mainline-calls/config.core.json",
+      "sha256": "82f081c83825636ab6c74d9ebeab9fb58a1d4d49f5ae803b11e622c4faffcd61"
+    },
+    {
+      "path": "docs/mainline-calls/contracts.core.json",
+      "sha256": "eed930ed35031276c42bdedf825e83ca8f1dd3956ca86ec8c9cae0bef689b915"
+    },
+    {
+      "path": "docs/mainline-calls/reason.turn.json",
+      "sha256": "82ce6410ed28c903044a2b1fb9d46b526bfcb12ed3af5685ba1c91303f6463bd"
+    },
+    {
+      "path": "docs/mainline-calls/ui.protocol.json",
+      "sha256": "90427214fe15fc2eaf091f504cdc61ee4978be5c217c3e2dbd4e8c525cb74c82"
+    },
+    {
+      "path": "docs/resource-maps/core.json",
+      "sha256": "6be9d4105013f4430e21f50db768b66da2e32fb403816ebd315c2e2629650779"
+    },
+    {
+      "path": "docs/runtime/runtime-directories.md",
+      "sha256": "a6dda39213effd970b43fa8acabff5de54cde2069b460beb89a911d2cf5abe29"
+    },
+    {
+      "path": "docs/testing/app.runtime-daemon.md",
+      "sha256": "f7ba0407d8e5dc7895409bb7f6224fa982085944fa6ef04a2245459360f582a1"
+    },
+    {
+      "path": "docs/testing/app.webui-smoke.md",
+      "sha256": "a940db853a51f7ebc903eb68e44087f25e7607bcab573500afc98d780693c627"
+    },
+    {
+      "path": "docs/testing/config.core.md",
+      "sha256": "2a7ae923833c09fdd42e201abcc6f558147eb70fd9bbffbb26cb10136e7463c1"
+    },
+    {
+      "path": "docs/testing/contracts.core.md",
+      "sha256": "e92e47417c1c62f936d098745b3ed7fc762774c1370eb731b54498ef02ab85f7"
+    },
+    {
+      "path": "docs/testing/foundation.workspace.md",
+      "sha256": "dcd0813c2ef9fcd371d194b7deee84cd9a563ebdecc3e196fe5e621b71b1dcd4"
+    },
+    {
+      "path": "docs/testing/instruction.capability-loader.md",
+      "sha256": "32348a58cff7543da8c9203a77e69b20c077566950b52ae8cb0e96b277d403b8"
+    },
+    {
+      "path": "docs/testing/node.master-slave.md",
+      "sha256": "ee7922d0c3b0290cd859231e4b6e7ed564f8ff56ba20c91e86ee917e57909719"
+    },
+    {
+      "path": "docs/testing/provider.anthropic-adapter.md",
+      "sha256": "0922b3ca5756c1e735707b077f91bc8e3498ca14c5223b93125bafa333544f30"
+    },
+    {
+      "path": "docs/testing/provider.openai-adapter.md",
+      "sha256": "c625e04f2658ff362c38a4a4aa63e4b6500f89bc91f6664a56abbb057c5e84b9"
+    },
+    {
+      "path": "docs/testing/provider.reason-live-bridge.md",
+      "sha256": "7d2daa3ceb44c153a6daef1b9f5001b45ab000dae5511fdc92d594595d02cb98"
+    },
+    {
+      "path": "docs/testing/provider.semantic.md",
+      "sha256": "c7468075755ecaef003f4c2c7fe41be306b739a465ed26acbd2bb602d039e7f9"
+    },
+    {
+      "path": "docs/testing/reason.turn.md",
+      "sha256": "4d8c9d9d23dc43b388ae39249b0c8db89e64ded3d16afe7f44805f5605e441ca"
+    },
+    {
+      "path": "docs/testing/tool.registry.md",
+      "sha256": "3c0336e36f76413ee87e44d61c89e04e3d01c245c42fd947c9ce77697c9981db"
+    },
+    {
+      "path": "docs/testing/ui.protocol.md",
+      "sha256": "decd29cbb116d238bc354069056ad161264c54ecbcd44d2ddc20ad0cb77a2911"
+    },
+    {
+      "path": "scripts/install-launchd.sh",
+      "sha256": "1424f0d0060f51fa7101cfab09ac6ec691faa46c94a4b07d4641b6f6ae2f9807"
+    },
+    {
+      "path": "scripts/release.sh",
+      "sha256": "d75eaf657ecf84a9ba28d99a96f9b19eaf3bb7f2202a90772b5c56db9e4eeb49"
+    },
+    {
+      "path": "scripts/verify-dual-path-update.sh",
+      "sha256": "8b0256ab9962a987952bc898b5755da935e401460a259f0e7e441042f2704668"
+    },
+    {
+      "path": "scripts/verify-webui-mobile-ui-tree-online.mjs",
+      "sha256": "9cbcf93b18c8b7f55adfce0ede27235a9f42200eac3c5935f089f07e7dc32c10"
+    },
+    {
+      "path": "scripts/verify-webui-tools-registry-online.mjs",
+      "sha256": "9899d3c797fc0dc2bd1b56594df5310c69ac8be05dfb6f8279b84b825cf653d5"
+    }
+  ]
+}
