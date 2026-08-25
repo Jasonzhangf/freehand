@@ -150,6 +150,7 @@ export function requireSessionListPage(result, label = 'session list') {
     (page.page.next_cursor !== undefined &&
       page.page.next_cursor !== null &&
       typeof page.page.next_cursor !== 'string') ||
+    (page.page.has_older && typeof page.page.next_cursor !== 'string') ||
     !Array.isArray(page.page.unavailable_sessions)
   ) {
     throw new Error(`${label} returned malformed SessionListPage: ${JSON.stringify(page)}`);

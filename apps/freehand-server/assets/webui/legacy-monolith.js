@@ -9344,10 +9344,21 @@ async function loadOlderSessionListPage(options = {}) {
 
 function requireSessionListPageProjection(result, operation) {
   const projection = variantPayload(result, "SessionListPage");
-  if (!projection || !Array.isArray(projection.sessions) || !projection.page ||
-      typeof projection.page.has_older !== "boolean" ||
-      (projection.page.next_cursor !== null && typeof projection.page.next_cursor !== "string")) {
+  const page = projection && projection.page;
+  const cursor = page && page.next_cursor;
+  if (
+    !projection ||
+    !Array.isArray(projection.sessions) ||
+    !page ||
+    typeof page.has_older !== "boolean" ||
+    (cursor !== undefined && cursor !== null && typeof cursor !== "string") ||
+    !Array.isArray(page.unavailable_sessions) ||
+    (page.has_older && typeof cursor !== "string")
+  ) {
     throw new Error(`${operation} returned malformed SessionListPage projection`);
+  }
+  if (!Object.prototype.hasOwnProperty.call(page, "next_cursor")) {
+    page.next_cursor = null;
   }
   return projection;
 }

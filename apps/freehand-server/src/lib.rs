@@ -2454,6 +2454,24 @@ mod tests {
             .expect("legacy response");
         assert_eq!(legacy.status(), StatusCode::OK);
         let legacy_body = legacy.text().await.expect("legacy body");
+        assert!(
+            legacy_body.contains("function requireSessionListPageProjection"),
+            "legacy WebUI must expose the SessionListPage projection validator",
+        );
+        assert!(
+            legacy_body.contains(
+                "cursor !== undefined && cursor !== null && typeof cursor !== \"string\"",
+            ),
+            "legacy SessionListPage validator must accept omitted/undefined next_cursor",
+        );
+        assert!(
+            legacy_body.contains("!Array.isArray(page.unavailable_sessions)"),
+            "legacy SessionListPage validator must require unavailable_sessions array",
+        );
+        assert!(
+            legacy_body.contains("(page.has_older && typeof cursor !== \"string\")"),
+            "legacy SessionListPage validator must require a cursor when older pages exist",
+        );
         assert!(legacy_body.contains("function renderMobileHomeDashboard"));
         assert!(legacy_body.contains("function mobileHomeSessionButton"));
         assert!(legacy_body.contains("renderHomeDashboardSurface"));

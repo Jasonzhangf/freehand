@@ -129,6 +129,7 @@
   - Android update route smoke for env/sidecar manifest JSON, explicit missing-sidecar failure, and explicit missing-APK 404
   - WebUI JS asset smoke locks ADP WebSocket command/query usage, protocol_version stamping, first-frame handshake gating, generated `adpQueryOf`/`adpCommandOf`/`adpSubscribeOf` constructor usage, rejects `fetch` as a live path, and requires `EventSource` only for latest-turn SSE display refresh
   - WebUI JS asset smoke locks `refreshSessions` to `QuerySessionListPage` Latest limit 24, `loadOlderSessionListPage` to the owner-issued Older cursor, request-sequence staleness rejection, idle prefetch buffering, and `加载更早` visibility/disabled state
+  - WebUI JS asset smoke locks the inline SessionListPage validator to the shared protocol shape: an omitted terminal-page `next_cursor` is valid, `has_older` requires a string cursor, and non-string cursors or missing/unavailable session arrays are rejected
   - WebUI ADP subscription accepted/等待中 status rendering smoke
   - WebUI ADP failure frame visible-card/status smoke, with user-facing 连接/服务 wording instead of raw `ADP`
   - WebUI ADP request timeout visible-failure smoke

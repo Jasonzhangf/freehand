@@ -97,6 +97,14 @@ const validTerminalPageWithoutCursor = requireSessionListPage({
 });
 assert.equal(validTerminalPageWithoutCursor.page.has_older, false);
 
+const validOlderPage = requireSessionListPage({
+  SessionListPage: {
+    sessions: [],
+    page: { has_older: true, next_cursor: 'older-page', unavailable_sessions: [] },
+  },
+});
+assert.equal(validOlderPage.page.next_cursor, 'older-page');
+
 for (const page of [
   null,
   {},
@@ -107,6 +115,8 @@ for (const page of [
   { sessions: [], page: {} },
   { sessions: [], page: { has_older: false, next_cursor: null } },
   { sessions: [], page: { has_older: false, next_cursor: 123, unavailable_sessions: [] } },
+  { sessions: [], page: { has_older: true, unavailable_sessions: [] } },
+  { sessions: [], page: { has_older: true, next_cursor: null, unavailable_sessions: [] } },
 ]) {
   assert.throws(() => requireSessionListPage({ SessionListPage: page }), /malformed SessionListPage/);
 }
