@@ -2413,7 +2413,7 @@ mod tests {
             webui_css_body
                 .contains("body[data-layout-shape=\"tablet_portrait\"] .composer-command-menu")
         );
-        assert!(webui_css_body.contains("  left: 0;\n  right: auto;"));
+        assert!(webui_css_body.contains("position: fixed;\n  left: 0;\n  right: 0;\n  bottom: 0;"));
         assert!(
             webui_css_body
                 .contains("body[data-layout-shape=\"phone_portrait\"] .composer-command-strip")

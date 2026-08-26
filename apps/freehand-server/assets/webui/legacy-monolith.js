@@ -436,6 +436,9 @@ function applyMobileDrawerState() {
   if (mobileDrawerScrim) {
     mobileDrawerScrim.setAttribute("aria-hidden", drawer || state.mobileAgentSheetOpen ? "false" : "true");
   }
+  if (composerCommandMenu && composerCommandMenu.hidden) {
+    mobileDrawerScrim.setAttribute("aria-hidden", drawer || state.mobileAgentSheetOpen ? "false" : "true");
+  }
 }
 
 function applyMobileAgentSheetState() {
@@ -519,6 +522,7 @@ function setMobileAgentSheetOpen(open) {
 function closeMobileOverlays() {
   state.mobileDrawer = null;
   state.mobileAgentSheetOpen = false;
+  setComposerCommandMenuOpen(false);
   applyMobileDrawerState();
   applyMobileAgentSheetState();
 }
@@ -2578,8 +2582,12 @@ function renderToolSection(section, row) {
   if (display && display.kind) {
     section.dataset.toolKind = toolKindLabel(display.kind);
   }
-  const head = document.createElement("div");
+  section.dataset.toolExpanded = "false";
+  const head = document.createElement("button");
+  head.type = "button";
   head.className = "tool-chat-head";
+  head.setAttribute("aria-expanded", "false");
+  head.setAttribute("aria-controls", `tool-detail-${section.dataset.toolCallId || section.dataset.turnId || "row"}`);
   const titleWrap = document.createElement("span");
   titleWrap.className = "tool-chat-title-wrap";
   const title = document.createElement("span");
@@ -2592,7 +2600,11 @@ function renderToolSection(section, row) {
   const state = document.createElement("span");
   state.className = `tool-chat-state ${stateClass}`;
   state.textContent = row.status || "";
-  head.append(titleWrap, state);
+  const chevron = document.createElement("span");
+  chevron.className = "tool-chat-chevron";
+  chevron.setAttribute("aria-hidden", "true");
+  chevron.textContent = "⌄";
+  head.append(titleWrap, state, chevron);
 
   const body = document.createElement("div");
   body.className = "tool-chat-body";
@@ -2607,7 +2619,88 @@ function renderToolSection(section, row) {
   toolSemanticLines(row).forEach((line) => {
     body.appendChild(toolSemanticLineNode(line));
   });
-  section.append(head, body);
+  const detail = toolDetailNode(row, display);
+  detail.id = `tool-detail-${section.dataset.toolCallId || section.dataset.turnId || "row"}`;
+  detail.hidden = true;
+  head.addEventListener("click", () => {
+    const expanded = section.dataset.toolExpanded !== "true";
+    section.dataset.toolExpanded = expanded ? "true" : "false";
+    detail.hidden = !expanded;
+    head.setAttribute("aria-expanded", expanded ? "true" : "false");
+  });
+  section.append(head, body, detail);
+}
+
+function toolDetailNode(sectionRow, display) {
+  const wrap = document.createElement("div");
+  wrap.className = "tool-chat-detail";
+  const summary = display && display.summary ? `${display.summary}`.trim() : "";
+  const result = display && display.result_summary ? `${display.result_summary}`.trim() : "";
+  const parameterSummary = display && display.parameter_summary ? `${display.parameter_summary}`.trim() : "";
+  const target = display && display.target ? `${display.target}`.trim() : "";
+  if (target) {
+    wrap.appendChild(toolDetailLabelValue("目标", target));
+  }
+  if (parameterSummary) {
+    wrap.appendChild(toolDetailLabelValue("参数", parameterSummary));
+  }
+  if (summary) {
+    wrap.appendChild(toolDetailLabelValue("摘要", summary));
+  }
+  if (result) {
+    wrap.appendChild(toolDetailLabelValue("结果", result));
+  }
+  if (display && display.diff) {
+    const diff = display.diff;
+    const diffBlock = document.createElement("section");
+    diffBlock.className = "tool-detail-diff";
+    diffBlock.appendChild(toolDetailLabelValue("修改文件", diff.target || ""));
+    if (diff.before) {
+      diffBlock.appendChild(toolDetailLabelValue("修改前", diff.before));
+    }
+    if (diff.after) {
+      diffBlock.appendChild(toolDetailLabelValue("修改后", diff.after));
+    }
+    wrap.appendChild(diffBlock);
+  }
+  if (display && Array.isArray(display.fields) && display.fields.length > 0) {
+    const fields = document.createElement("section");
+    fields.className = "tool-detail-fields";
+    display.fields.forEach((field) => {
+      const label = `${field && field.label ? field.label : "field"}`.trim();
+      const value = `${field && field.value ? field.value : ""}`.trim();
+      if (label && value) {
+        fields.appendChild(toolDetailLabelValue(label, value));
+      }
+    });
+    wrap.appendChild(fields);
+  }
+  const rawLines = toolSemanticLines(sectionRow);
+  if (rawLines.length > 0) {
+    const raw = document.createElement("section");
+    raw.className = "tool-detail-raw";
+    rawLines.forEach((line) => {
+      const node = document.createElement("div");
+      node.className = "tool-detail-raw-line";
+      node.textContent = line.text;
+      raw.appendChild(node);
+    });
+    wrap.appendChild(raw);
+  }
+  return wrap;
+}
+
+function toolDetailLabelValue(label, value) {
+  const row = document.createElement("div");
+  row.className = "tool-detail-row";
+  const labelNode = document.createElement("span");
+  labelNode.className = "tool-detail-label";
+  labelNode.textContent = label;
+  const valueNode = document.createElement("code");
+  valueNode.className = "tool-detail-value";
+  valueNode.textContent = value;
+  row.append(labelNode, valueNode);
+  return row;
 }
 
 function toolStateClass(status) {
@@ -5536,6 +5629,20 @@ function setComposerCommandMenuOpen(open) {
   const next = !!open;
   composerCommandMenu.hidden = !next;
   composerCommandMenuButton.setAttribute("aria-expanded", next ? "true" : "false");
+  if (next) {
+    document.body.dataset.mobileCommandMenu = "open";
+    if (shell) {
+      shell.dataset.mobileCommandMenu = "open";
+    }
+  } else {
+    delete document.body.dataset.mobileCommandMenu;
+    if (shell) {
+      delete shell.dataset.mobileCommandMenu;
+    }
+  }
+  if (mobileDrawerScrim) {
+    mobileDrawerScrim.setAttribute("aria-hidden", next ? "false" : "true");
+  }
 }
 
 function runComposerCommandMenuItem(item) {
@@ -10651,6 +10758,7 @@ function installWebUiTestHooks() {
   if (!globalThis.__freehandEnableTestHooks) {
     return;
   }
+  globalThis.__freehandState = state;
   globalThis.__freehandWebUiTest = {
     projectHomeSharedStateForTest({ loaded, sessions }) {
       if (typeof loaded !== "boolean") {

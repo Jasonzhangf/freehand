@@ -2302,8 +2302,13 @@ body.theme-dark .chat-reasoning-body .md-link {
   align-items: center;
   justify-content: space-between;
   gap: 12px;
+  width: 100%;
+  border: 0;
+  font: inherit;
+  text-align: left;
   padding: 7px 10px;
   background: rgba(246, 239, 223, 0.84);
+  cursor: pointer;
 }
 
 .tool-chat-title {
@@ -2340,6 +2345,17 @@ body.theme-dark .chat-reasoning-body .md-link {
   color: #2f6fed;
 }
 
+.tool-chat-chevron {
+  color: var(--text-soft);
+  font-size: 16px;
+  line-height: 1;
+  transition: transform 160ms ease;
+}
+
+.tool-chat-head[aria-expanded="true"] .tool-chat-chevron {
+  transform: rotate(180deg);
+}
+
 .tool-chat-body {
   display: grid;
   gap: 4px;
@@ -2373,6 +2389,67 @@ body.theme-dark .chat-reasoning-body .md-link {
 
 .tool-chat-line-running {
   color: #2f6fed;
+}
+
+.tool-chat-detail {
+  display: grid;
+  gap: 9px;
+  padding: 0 10px 12px;
+  border-top: 1px solid rgba(138, 106, 48, 0.16);
+  background: rgba(255, 255, 255, 0.42);
+}
+
+.tool-chat-detail[hidden] {
+  display: none;
+}
+
+.tool-detail-row {
+  min-width: 0;
+  display: grid;
+  grid-template-columns: minmax(52px, auto) minmax(0, 1fr);
+  gap: 8px;
+  align-items: baseline;
+  padding: 7px 0 0;
+  color: #4b391d;
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.tool-detail-label {
+  color: var(--text-soft);
+  font-size: 9px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  white-space: nowrap;
+}
+
+.tool-detail-value {
+  min-width: 0;
+  overflow-wrap: anywhere;
+  color: #3d2f16;
+  font-family: "JetBrains Mono", "SFMono-Regular", Menlo, Monaco, Consolas, monospace;
+  font-size: 11px;
+  white-space: pre-wrap;
+}
+
+.tool-detail-fields,
+.tool-detail-diff,
+.tool-detail-raw {
+  display: grid;
+  gap: 2px;
+  border: 1px solid rgba(138, 106, 48, 0.14);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.58);
+  padding: 6px 8px;
+}
+
+.tool-detail-raw-line {
+  min-width: 0;
+  color: var(--text-soft);
+  font-size: 11px;
+  line-height: 1.42;
+  overflow-wrap: anywhere;
 }
 
 .tool-field-grid {
@@ -3809,10 +3886,53 @@ body[data-layout-shape="tablet_portrait"] .composer-command-strip .composer-cont
 body[data-layout-shape="phone_portrait"] .composer-command-menu,
 body[data-layout-shape="tall_phone"] .composer-command-menu,
 body[data-layout-shape="tablet_portrait"] .composer-command-menu {
+  position: fixed;
   left: 0;
-  right: auto;
-  width: min(260px, calc(100vw - 32px));
-  max-height: min(42svh, 360px);
+  right: 0;
+  bottom: 0;
+  z-index: 102;
+  width: min(100%, 720px);
+  max-height: min(72svh, 680px);
+  margin: 0 auto;
+  padding: 8px 12px calc(14px + env(safe-area-inset-bottom));
+  border: 1px solid rgba(31, 108, 88, 0.22);
+  border-bottom: 0;
+  border-radius: 22px 22px 0 0;
+  background: rgba(255, 255, 255, 0.985);
+  box-shadow: 0 -18px 48px rgba(20, 33, 29, 0.20);
+}
+
+body[data-layout-shape="phone_portrait"] .composer-command-menu::before,
+body[data-layout-shape="tall_phone"] .composer-command-menu::before,
+body[data-layout-shape="tablet_portrait"] .composer-command-menu::before {
+  content: "";
+  display: block;
+  width: 42px;
+  height: 4px;
+  margin: 0 auto 10px;
+  border-radius: 999px;
+  background: rgba(31, 108, 88, 0.22);
+}
+
+body[data-layout-shape="phone_portrait"] .composer-command-menu-heading,
+body[data-layout-shape="tall_phone"] .composer-command-menu-heading,
+body[data-layout-shape="tablet_portrait"] .composer-command-menu-heading {
+  padding: 10px 4px 4px;
+  font-size: 11px;
+}
+
+body[data-layout-shape="phone_portrait"] .composer-command-menu button,
+body[data-layout-shape="tall_phone"] .composer-command-menu button,
+body[data-layout-shape="tablet_portrait"] .composer-command-menu button {
+  min-height: 40px;
+  padding: 9px 10px;
+  border-radius: 10px;
+  font-size: 13px;
+}
+
+body[data-mobile-command-menu="open"] .mobile-drawer-scrim {
+  opacity: 1;
+  pointer-events: auto;
 }
 
 body[data-layout-shape="phone_landscape"] .workspace {
