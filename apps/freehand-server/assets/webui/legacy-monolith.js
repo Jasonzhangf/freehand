@@ -183,6 +183,8 @@ const debugDetailsToggle = document.getElementById("debug-details-toggle");
 const attachFileButton = document.getElementById("attach-file-button");
 const attachImageButton = document.getElementById("attach-image-button");
 const attachVideoButton = document.getElementById("attach-video-button");
+const composerCommandMenuButton = document.getElementById("composer-command-menu-button");
+const composerCommandMenu = document.getElementById("composer-command-menu");
 const previewAttachmentsButton = document.getElementById("preview-attachments-button");
 const refreshSessionButton = document.getElementById("refresh-session-button");
 const modelSelector = document.getElementById("model-selector");
@@ -5532,6 +5534,64 @@ function renderComposerContextStrip() {
   const compactedText = compacted > 0 ? `压缩 ${formatTokenCount(compacted)}` : "压缩 --";
   setText("context-stat-compacted", compactedText);
 }
+
+function setComposerCommandMenuOpen(open) {
+  if (!composerCommandMenu || !composerCommandMenuButton) {
+    return;
+  }
+  const next = !!open;
+  composerCommandMenu.hidden = !next;
+  composerCommandMenuButton.setAttribute("aria-expanded", next ? "true" : "false");
+}
+
+function runComposerCommandMenuItem(item) {
+  if (!item) {
+    return;
+  }
+  const command = item.dataset.composerCommand;
+  const action = item.dataset.composerAction;
+  setComposerCommandMenuOpen(false);
+  if (command && runSlashCommand(command)) {
+    return;
+  }
+  if (action === "tools") {
+    openToolsDashboard().catch((error) => {
+      state.toolRegistryError = error.message;
+      setCommandStatus(`工具注册表面板打开失败: ${error.message}`, { stickyMs: 9000 });
+      renderToolsDashboard();
+    });
+    return;
+  }
+  if (action === "compact") {
+    requestContextCompaction();
+  }
+}
+
+if (composerCommandMenuButton) {
+  composerCommandMenuButton.addEventListener("click", () => {
+    setComposerCommandMenuOpen(composerCommandMenu.hidden);
+  });
+}
+
+if (composerCommandMenu) {
+  composerCommandMenu.addEventListener("click", (event) => {
+    const item = event.target instanceof Element ? event.target.closest("[data-composer-command], [data-composer-action]") : null;
+    if (item) {
+      runComposerCommandMenuItem(item);
+    }
+  });
+}
+
+document.addEventListener("click", (event) => {
+  if (!composerCommandMenu || composerCommandMenu.hidden) {
+    return;
+  }
+  const target = event.target instanceof Element ? event.target : null;
+  if (target && target.closest(".composer-command-port")) {
+    return;
+  }
+  setComposerCommandMenuOpen(false);
+});
 
 function requestContextCompaction() {
   const latest = currentSessionUsageProjections()[currentSessionUsageProjections().length - 1];
