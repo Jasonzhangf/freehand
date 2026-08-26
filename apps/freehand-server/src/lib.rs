@@ -1994,6 +1994,12 @@ mod tests {
         assert!(html.contains("id=\"cwd-input\""));
         assert!(html.contains("id=\"model-selector\""));
         assert!(html.contains("id=\"attachment-tray\""));
+        assert!(html.contains("class=\"composer-input-shell\""));
+        assert!(html.contains("id=\"composer-command-menu-button\""));
+        assert!(html.contains("id=\"composer-command-menu\""));
+        assert!(html.contains("data-composer-command=\"/help\""));
+        assert!(html.contains("data-composer-action=\"tools\""));
+        assert!(html.contains("data-composer-action=\"compact\""));
         assert!(!html.contains("work-context-tags"));
         assert!(!html.contains("topbar-strip"));
         assert!(!html.contains("slave-drawer"));
@@ -2392,8 +2398,29 @@ mod tests {
         assert!(webui_css_body.contains(".path-preset-button"));
         assert!(webui_css_body.contains("body[data-layout-shape=\"phone_portrait\"][data-composer-focused=\"true\"] .composer-card"));
         assert!(webui_css_body.contains("body[data-layout-shape=\"phone_portrait\"][data-composer-focused=\"true\"] .composer-control-strip"));
+        assert!(webui_css_body.contains(".composer-input-shell"));
+        assert!(webui_css_body.contains(".composer-attach-image"));
+        assert!(webui_css_body.contains(".composer-command-menu"));
+        assert!(
+            webui_css_body
+                .contains("body[data-layout-shape=\"phone_portrait\"] .composer-command-menu")
+        );
+        assert!(
+            webui_css_body
+                .contains("body[data-layout-shape=\"tall_phone\"] .composer-command-menu")
+        );
+        assert!(
+            webui_css_body
+                .contains("body[data-layout-shape=\"tablet_portrait\"] .composer-command-menu")
+        );
+        assert!(webui_css_body.contains("  left: 0;\n  right: auto;"));
+        assert!(
+            webui_css_body
+                .contains("body[data-layout-shape=\"phone_portrait\"] .composer-command-strip")
+        );
+        assert!(webui_css_body.contains("body[data-layout-shape=\"phone_portrait\"][data-composer-focused=\"true\"] .composer-command-strip"));
         assert!(webui_css_body.contains("max-height: min(20svh, 158px)"));
-        assert!(webui_css_body.contains("max-height: 132px"));
+        assert!(webui_css_body.contains("max-height: min(30svh, 208px)"));
         assert!(
             webui_css_body.contains("padding-bottom: calc(112px + env(safe-area-inset-bottom))")
         );
@@ -2493,6 +2520,9 @@ mod tests {
         assert!(legacy_body.contains("adpCommandOf"));
         assert!(legacy_body.contains("generated/adp-protocol.js"));
         assert!(legacy_body.contains("dispatchWebUiEdge"));
+        assert!(legacy_body.contains("function setComposerCommandMenuOpen"));
+        assert!(legacy_body.contains("composerCommandMenuButton"));
+        assert!(legacy_body.contains("data-composer-action"));
         assert!(legacy_body.contains("__freehandOpenAndroidComposerForReadyHost"));
         assert!(legacy_body.contains("openAndroidComposerForReadyHost"));
         assert!(legacy_body.contains("scheduleAndroidComposerFocus"));

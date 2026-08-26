@@ -2923,6 +2923,46 @@ body.theme-dark .composer-input {
   background: rgba(255, 255, 255, 0.03);
 }
 
+.composer-input-shell {
+  position: relative;
+  min-width: 0;
+}
+
+.composer-input-shell .composer-input {
+  padding: 14px 14px 14px 52px;
+}
+
+.composer-attach-image {
+  position: absolute;
+  left: 8px;
+  bottom: 8px;
+  z-index: 2;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 34px;
+  height: 34px;
+  border: 1px solid rgba(31, 108, 88, 0.22);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.88);
+  color: var(--text-soft);
+  cursor: pointer;
+}
+
+.composer-attach-image svg {
+  width: 20px;
+  height: 20px;
+  fill: none;
+  stroke: currentColor;
+  stroke-width: 1.8;
+  stroke-linecap: round;
+  stroke-linejoin: round;
+}
+
+body.theme-dark .composer-input {
+  background: rgba(255, 255, 255, 0.03);
+}
+
 .composer-actions {
   display: flex;
   flex-direction: column;
@@ -2953,8 +2993,84 @@ body.theme-dark .composer-input {
   color: var(--text-soft);
 }
 
+.composer-command-strip {
+  display: flex;
+  align-items: stretch;
+  gap: 8px;
+  margin-top: 10px;
+}
+
+.composer-command-port {
+  position: relative;
+  flex: 0 0 auto;
+}
+
+.composer-command-menu-button {
+  min-width: 74px;
+}
+
+.composer-command-menu {
+  position: absolute;
+  right: 0;
+  bottom: calc(100% + 8px);
+  z-index: 80;
+  display: grid;
+  gap: 4px;
+  width: min(280px, calc(100vw - 24px));
+  max-height: min(52svh, 420px);
+  overflow: auto;
+  padding: 8px;
+  border: 1px solid rgba(31, 108, 88, 0.20);
+  border-radius: 14px;
+  background: rgba(255, 255, 255, 0.98);
+  color: var(--text);
+  box-shadow: 0 22px 48px rgba(20, 33, 29, 0.18);
+}
+
+.composer-command-menu[hidden] {
+  display: none;
+}
+
+.composer-command-menu-heading {
+  color: var(--text-soft);
+  font-size: 10px;
+  font-weight: 800;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  padding: 6px 8px 2px;
+}
+
+.composer-command-menu button {
+  border: 0;
+  border-radius: 9px;
+  background: transparent;
+  color: var(--text);
+  font: inherit;
+  font-size: 12px;
+  text-align: left;
+  padding: 8px 9px;
+  cursor: pointer;
+}
+
+.composer-command-menu button:hover,
+.composer-command-menu button:focus-visible {
+  background: rgba(13, 103, 84, 0.08);
+  outline: none;
+}
+
 .composer-context-strip[hidden] {
   display: none;
+}
+
+.composer-command-strip .composer-context-strip {
+  flex: 1 1 auto;
+  min-width: 0;
+  overflow-x: auto;
+  margin-top: 0;
+}
+
+.composer-command-strip .context-stat {
+  flex: 0 0 auto;
 }
 
 .context-stat {
@@ -3677,6 +3793,28 @@ body[data-layout-shape="phone_landscape"] .composer-control-strip {
   overflow: auto;
 }
 
+body[data-layout-shape="phone_portrait"] .composer-command-strip,
+body[data-layout-shape="tall_phone"] .composer-command-strip,
+body[data-layout-shape="tablet_portrait"] .composer-command-strip {
+  gap: 6px;
+}
+
+body[data-layout-shape="phone_portrait"] .composer-command-strip .composer-context-strip,
+body[data-layout-shape="tall_phone"] .composer-command-strip .composer-context-strip,
+body[data-layout-shape="tablet_portrait"] .composer-command-strip .composer-context-strip {
+  overflow-x: auto;
+  white-space: nowrap;
+}
+
+body[data-layout-shape="phone_portrait"] .composer-command-menu,
+body[data-layout-shape="tall_phone"] .composer-command-menu,
+body[data-layout-shape="tablet_portrait"] .composer-command-menu {
+  left: 0;
+  right: auto;
+  width: min(260px, calc(100vw - 32px));
+  max-height: min(42svh, 360px);
+}
+
 body[data-layout-shape="phone_landscape"] .workspace {
   display: grid;
   grid-template-rows: minmax(0, 1fr);
@@ -4278,10 +4416,50 @@ body[data-layout-shape="tall_phone"] .composer-input,
 body[data-layout-shape="tablet_portrait"] .composer-input {
   min-height: 46px;
   max-height: 12svh;
-  padding: 8px 9px;
+  padding: 8px 9px 8px 46px;
   border-radius: 13px;
   font-size: 12px;
   line-height: 1.42;
+}
+
+body[data-layout-shape="phone_portrait"] .composer-attach-image,
+body[data-layout-shape="tall_phone"] .composer-attach-image,
+body[data-layout-shape="tablet_portrait"] .composer-attach-image {
+  left: 5px;
+  bottom: 5px;
+  width: 32px;
+  height: 32px;
+  border-radius: 10px;
+}
+
+body[data-layout-shape="phone_portrait"] .composer-command-strip,
+body[data-layout-shape="tall_phone"] .composer-command-strip,
+body[data-layout-shape="tablet_portrait"] .composer-command-strip {
+  display: flex;
+}
+
+body[data-layout-shape="phone_portrait"][data-composer-focused="true"] .composer-command-strip,
+body[data-layout-shape="tall_phone"][data-composer-focused="true"] .composer-command-strip,
+body[data-layout-shape="tablet_portrait"][data-composer-focused="true"] .composer-command-strip {
+  display: flex;
+}
+
+body[data-layout-shape="phone_portrait"][data-composer-focused="true"] .composer-card,
+body[data-layout-shape="tall_phone"][data-composer-focused="true"] .composer-card,
+body[data-layout-shape="tablet_portrait"][data-composer-focused="true"] .composer-card {
+  max-height: min(30svh, 208px);
+}
+
+body[data-layout-shape="phone_portrait"][data-composer-focused="true"] .composer-context-strip,
+body[data-layout-shape="tall_phone"][data-composer-focused="true"] .composer-context-strip,
+body[data-layout-shape="tablet_portrait"][data-composer-focused="true"] .composer-context-strip {
+  display: none;
+}
+
+body[data-layout-shape="phone_portrait"][data-composer-focused="true"] .composer-command-strip,
+body[data-layout-shape="tall_phone"][data-composer-focused="true"] .composer-command-strip,
+body[data-layout-shape="tablet_portrait"][data-composer-focused="true"] .composer-command-strip {
+  display: flex;
 }
 
 body[data-layout-shape="phone_portrait"] #send-button,
@@ -4963,7 +5141,7 @@ body[data-layout-shape="tall_phone"] .composer-input,
 body[data-layout-shape="tablet_portrait"] .composer-input {
   min-height: 42px;
   max-height: 42px;
-  padding: 10px 12px;
+  padding: 10px 12px 10px 46px;
   border: 0;
   border-radius: 16px;
   background: #f4f6f2;
@@ -4991,7 +5169,7 @@ body[data-layout-shape="tablet_portrait"][data-composer-focused="true"] .convers
 body[data-layout-shape="phone_portrait"][data-composer-focused="true"] .composer-card,
 body[data-layout-shape="tall_phone"][data-composer-focused="true"] .composer-card,
 body[data-layout-shape="tablet_portrait"][data-composer-focused="true"] .composer-card {
-  max-height: 132px;
+  max-height: min(30svh, 208px);
   padding: 7px;
   overflow: hidden;
 }
