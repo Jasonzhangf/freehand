@@ -2516,6 +2516,47 @@ fn terminal_result_projection_smoke() {
 }
 
 #[test]
+fn end_turn_uses_model_visible_text_as_human_friendly_summary() {
+    let event = ReasonResp03TerminalEvent {
+        session_id: SessionId::new("session-1"),
+        turn_id: TurnId::new("turn-1"),
+        trace_id: TraceId::new("trace-1"),
+        feature_id: FeatureId::new("ui.protocol"),
+        agent_id: AgentId::new("agent-1"),
+        status: TerminalStatus::Success,
+        summary: "end_turn".to_owned(),
+        user_options: None,
+    };
+    let text_chunks = vec![
+        "这里是你需要的信息。".to_owned(),
+        "<freehand_completion>\n{\"claim\":\"complete\",\"completion_reason\":\"done\",\"evidence\":\"verified online sample\",\"summary\":\"已完成搜索并给出结论\",\"learned\":\"ok\"}\n</freehand_completion>".to_owned(),
+    ];
+    assert_eq!(
+        human_friendly_terminal_text(&text_chunks, &event),
+        "已完成搜索并给出结论"
+    );
+}
+
+#[test]
+fn end_turn_falls_back_to_stripped_visible_text_when_no_completion_block() {
+    let event = ReasonResp03TerminalEvent {
+        session_id: SessionId::new("session-1"),
+        turn_id: TurnId::new("turn-1"),
+        trace_id: TraceId::new("trace-1"),
+        feature_id: FeatureId::new("ui.protocol"),
+        agent_id: AgentId::new("agent-1"),
+        status: TerminalStatus::Success,
+        summary: "end_turn".to_owned(),
+        user_options: None,
+    };
+    let text_chunks = vec!["搜索结果如下。".to_owned(), "参考来源已给出。".to_owned()];
+    assert_eq!(
+        human_friendly_terminal_text(&text_chunks, &event),
+        "搜索结果如下。参考来源已给出。"
+    );
+}
+
+#[test]
 fn awaiting_user_options_terminal_projects_with_options_passthrough() {
     let event = ReasonResp03TerminalEvent {
         session_id: SessionId::new("session-1"),

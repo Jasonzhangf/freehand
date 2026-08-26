@@ -59,7 +59,7 @@
   - `public_conversation_items`
   - `public_turn_projection`
   - `checkpoint_projection_from_runtime_summary`
-  - `terminal_text_projection`
+  - `human_friendly_terminal_text`
   - `UiProtocolState::subscribe`
   - `UiProtocolState::query`
   - `UiProtocolState::preserve_live_activity_on_page_refresh`
@@ -157,7 +157,7 @@
 - projections are read-only views over owner-written truth
 - model request lifecycle is projected as typed `UiModelRequestActivity` inside `UiTurnProjection` when runtime reports the provider request has been built and sent, when completion-schema validation rejects a model terminal block and runtime sends repair feedback back to the model, or when tool results have been paired and the model continuation request is waiting; `kind` distinguishes `Thinking`, `SchemaRetry`, and `ToolResultContinuation`, while provider retry/failover are transport substate in `UiModelRequestActivity.transport` and never become a separate reasoning-flow phase; the activity clears when response/tool/usage/terminal/error projection arrives
 - selected-session transcript replacement preserves same-turn live-only `model_request` and `tool_activities` only for the latest replacement turn when that turn is nonterminal, so a persistence-backed refresh cannot erase current provider transport retry/waiting or per-tool-call activity, but older rounds stop looking live once a later round or terminal snapshot exists
-- terminal completion shows only final projected text
+- terminal completion shows human-friendly final text: completion/status summary when present, otherwise stripped visible model text, then the event summary fallback
 - turn projections preserve terminal status separately from terminal text so UI clients can distinguish success, failed, blocked, interrupted, running, and cancelled terminal states
 - turn projections preserve owner-created turn time as
   `UiTurnProjection.created_at` when runtime/reason supplies it, allowing UI
@@ -278,8 +278,8 @@
 
 ## Shared Multi-Reference Functions
 
-- `terminal_text_projection`
-  - owner: `crates/freehand-ui-protocol/src/lib.rs`
+- `human_friendly_terminal_text`
+  - owner: `crates/freehand-ui-protocol/src/projection.rs`
   - purpose: collapse terminal event to final user-visible text
   - allowed callers: query handlers, stream handlers, CLI/WebUI adapters
   - related tests: terminal result projection smoke
@@ -366,7 +366,7 @@
 | 07 | `subscription_selector` | `crates/freehand-ui-protocol/src/lib.rs` | build read-only subscribe selector | subscribe command | subscription selector | protocol boundary | stream handler | bound |
 | 08 | `subscription_matches` | `crates/freehand-ui-protocol/src/lib.rs` | route incremental projection to matching subscription | subscription selector + projection | delivery decision | stream handler | selector matcher | bound |
 | 09 | `TurnProjectionInput` / `turn_projection_from_events` / `UiTurnProjection` | `crates/freehand-ui-protocol/src/adp_wire.rs` / `crates/freehand-ui-protocol/src/adp_descriptor.rs` / `crates/freehand-ui-protocol/src/dto.rs` | project whole-turn state into UI snapshot, including owner-created turn time and tool lifecycle activities | semantic/tool/tool-result/usage/terminal/error/user inputs plus optional owner-created timestamp | UI turn projection with `created_at` when supplied by runtime/reason truth | query/stream handler | projector | bound |
-| 10 | `terminal_text_projection` | `crates/freehand-ui-protocol/src/lib.rs` | project terminal text | terminal semantic payload | UI terminal text | query/stream handler | projector | bound |
+| 10 | `human_friendly_terminal_text` | `crates/freehand-ui-protocol/src/projection.rs` | project terminal text as human-friendly visible response text | terminal semantic payload plus accumulated visible text | UI terminal text with completion/status summary, stripped visible text, or event summary fallback | query/stream handler | projector | bound |
 | 10a | `public_conversation_items` / `public_turn_projection` | `crates/freehand-ui-protocol/src/lib.rs` | derive public user-visible conversation stream, preserve user prompt, and strip raw completion schema | full turn projection | public turn projection | app transports/renderers | projector | bound |
 | 10b | `UiProtocolState::apply_terminal_event` / `turn_projection_from_events` | `crates/freehand-ui-protocol/src/lib.rs` | preserve terminal status alongside terminal text in UI turn projections | terminal semantic event | terminal text + terminal status projection | runtime/app protocol consumers | protocol projector | bound |
 | 11 | `UiProtocolState::apply_semantic_event` / `apply_tool_call` / `apply_tool_result` / `apply_usage_event` / `apply_terminal_event` / `apply_error_event` | `crates/freehand-ui-protocol/src/lib.rs` | incrementally update one turn projection from shared contract events and publish subscription updates | shared reason/error contracts | updated queryable/subscribable turn projection | runtime/debug bridges | protocol state | bound |

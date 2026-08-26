@@ -147,7 +147,7 @@
   - one selected anthropic provider emits a writable file tool call, gets checkpointed before execute, and can be rewound by runtime owner truth
   - one runtime dispatcher submit-user-input command drives an anthropic mock provider, materializes persistence, and exposes terminal projection through `UiProtocolState`
   - dispatcher failure recovery refreshes only the failed session transcript and does not clobber previously restored other-session transcripts in `UiProtocolState`
-  - invalid completion schema retries exactly 3 consecutive terminal-candidate responses and closes blocked terminal without early success or failed status
+  - invalid completion schema retries exactly 3 consecutive terminal-candidate responses and then closes with provider terminal truth when present, without early success or failed status
   - missing completion schema polishing request includes the required tag guidance needed by the model to align the response to the contract
   - invalid completion schema polishing request includes the missing schema fields required by the model to align the response to the contract
   - non-string completion fields produce explicit type feedback instead of being reported as missing

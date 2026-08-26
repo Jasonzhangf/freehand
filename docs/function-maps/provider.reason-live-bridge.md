@@ -126,7 +126,7 @@
 - runtime emits tool execution lifecycle debug snapshots and error-center
   metadata through `debug.core`/`metadata.core` without tool-result content; the
   full model-visible recovery text stays in reason tool-result truth only
-- completion schema is parsed only when the provider finish reason is a terminal completion candidate such as `stop` or `end_turn`; it is then validated and either accepted, rejected with field-level feedback plus UI-visible retry waiting projection, or used to schedule the next round
+- completion schema is parsed only when the provider finish reason is a terminal completion candidate such as `stop` or `end_turn`; it is then validated and either accepted, rejected with field-level feedback plus UI-visible retry waiting projection, or used to schedule the next round; provider terminal truth is accepted as terminal without schema
 - runtime emits terminal lifecycle debug snapshots through `debug.core` before terminal persistence
 - runtime dispatch callers may consume the same bridge through CLI or daemon command ingress without owning provider DTOs
 
@@ -141,11 +141,10 @@
 - master capability-boundary failures for unavailable tools remain paired
   failed tool results, so the model can either continue with local workspace
   tools or create and assign different-cwd/external work through `task`
-- completed/blocked schema writes terminal truth through `ReasonTurnEngine::submit_completion`
+- completed/blocked schema may write terminal truth through `ReasonTurnEngine::submit_completion`; provider terminal truth is also accepted as terminal without schema
 - terminal turns are materialized through `ReasonPersistence::record_turn_closed`
-- schema retry exhaustion writes blocked terminal truth through `ReasonTurnEngine::block_turn`
-- sourced-search recovery exhaustion also writes blocked terminal truth through
-  `ReasonTurnEngine::block_turn` only after the one-shot `web_fetch` attempt has failed or produced no usable source
+- schema retry exhaustion no longer blocks solely on missing completion/search schema; it closes with provider terminal truth when present
+- sourced-search recovery exhaustion no longer blocks solely on missing typed evidence; after bounded recovery attempts it closes with provider terminal truth
 - runtime drains both reason-owned and runtime-owned debug snapshots through one shared `DebugHub` hook path
 - bridge returns final turn truth, all round turns, captured broadcast events, schema rejection ledger, tool execution count, restore status, and live-output summary without leaking wire DTOs
 - runtime callers project the final turn into `UiProtocolState` from one shared runtime owner path
@@ -160,7 +159,9 @@
   response-schema mismatch pattern, not a provider failure: nullable optional
   fields are treated as absent, non-null wrong types receive type-aware
   field-level feedback, and the model may polish the response for up to 3
-  consecutive terminal-candidate responses
+  consecutive terminal-candidate responses; after bounded retries the bridge
+  closes with provider terminal truth when present instead of fabricating a
+  blocked/failed outcome
 - master shell or external-workspace attempts are execution-policy failures returned to the model with task/worker instructions; they do not execute, expose external content, or terminalize the turn
 - non-terminal completion-schema rejection retries publish a waiting projection so UI clients can show that repair feedback was sent to the model
 - non-terminal control-status rejection uses the same persisted response-schema
@@ -178,7 +179,7 @@
 - provider-output apply failures from `reason.turn` are returned as explicit `RuntimeLiveBridgeError::ProviderOutputApplyFailed`
 - provider raw debug-ledger write failures are returned as explicit `RuntimeLiveBridgeError::ReasonPersistenceFailed`
 - persistence restore/write failures fail the live bridge explicitly
-- provider terminal metadata does not become final completion truth without accepted Freehand completion schema
+- provider terminal metadata is final turn truth when no completion schema is available; accepted Freehand completion schema remains the authoritative semantic summary when present
 
 ## Shared Multi-Reference Functions
 

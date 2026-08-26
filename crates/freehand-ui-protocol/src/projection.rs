@@ -1,20 +1,72 @@
 use crate::adp_wire::UiProjection;
 use crate::dto::*;
 use freehand_blocks::{
-    ToolDisplayOutcome, ToolDisplayProjection, project_hosted_search_display,
-    project_tool_call_display, project_tool_result_display, strip_completion_submission_block,
+    ToolDisplayOutcome, ToolDisplayProjection, parse_completion_submission_block,
+    project_hosted_search_display, project_tool_call_display, project_tool_result_display,
+    strip_completion_submission_block,
 };
 use freehand_contracts::{
     AgentId, ReasonReq04ToolCall, ReasonReq05ToolResultReentry, ReasonResp03TerminalEvent,
     SearchEvidenceDelivery, SessionId, TerminalStatus, ToolResultContract, ToolResultStatus,
     TurnId,
 };
-use freehand_control::strip_control_status_block;
+use freehand_control::{parse_control_status_block, strip_control_status_block};
 use freehand_debug::DebugEvent;
 use std::collections::BTreeMap;
 
 pub fn terminal_text_projection(event: &ReasonResp03TerminalEvent) -> String {
     event.summary.clone()
+}
+
+pub fn human_friendly_terminal_text(
+    text_chunks: &[String],
+    event: &ReasonResp03TerminalEvent,
+) -> String {
+    if !is_raw_provider_stop_summary(&event.summary) {
+        return event.summary.clone();
+    }
+    let raw_text = text_chunks.join("");
+    if let Ok(submission) = parse_completion_submission_block(&raw_text)
+        && let Some(summary) = submission
+            .summary
+            .as_deref()
+            .or(submission.evidence.as_deref())
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+    {
+        return summary.to_owned();
+    }
+    if let Ok(submission) = parse_control_status_block(&raw_text)
+        && let Some(summary) = submission
+            .status
+            .summary
+            .as_deref()
+            .or(submission.status.evidence.as_deref())
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+    {
+        return summary.to_owned();
+    }
+    let visible_text = strip_control_status_block(&strip_completion_submission_block(&raw_text));
+    let visible_text = visible_text.trim();
+    if !visible_text.is_empty() {
+        return visible_text.to_owned();
+    }
+    event.summary.clone()
+}
+
+fn is_raw_provider_stop_summary(summary: &str) -> bool {
+    matches!(
+        summary.trim(),
+        "stop"
+            | "end_turn"
+            | "tool_use"
+            | "max_tokens"
+            | "refusal"
+            | "completed"
+            | "complete"
+            | "success"
+    )
 }
 
 pub fn public_conversation_items(projection: &UiTurnProjection) -> Vec<UiConversationItem> {

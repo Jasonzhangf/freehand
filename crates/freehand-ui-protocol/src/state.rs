@@ -1,10 +1,10 @@
 use crate::adp_wire::{UiProjection, UiQueryResult, UiSubscriptionEvent};
 use crate::dto::*;
 use crate::projection::{
-    empty_checkpoint_snapshot, fail_waiting_tool_activities, merge_hosted_search_activities,
-    preserve_live_activity_on_nonterminal_refresh, session_transcript_projection,
-    terminal_text_projection, tool_activity_detail_from_result, tool_activity_status_from_result,
-    turn_is_nonterminal, upsert_tool_activity,
+    empty_checkpoint_snapshot, fail_waiting_tool_activities, human_friendly_terminal_text,
+    merge_hosted_search_activities, preserve_live_activity_on_nonterminal_refresh,
+    session_transcript_projection, tool_activity_detail_from_result,
+    tool_activity_status_from_result, turn_is_nonterminal, upsert_tool_activity,
 };
 use freehand_blocks::{project_tool_call_display, project_tool_result_display};
 use freehand_contracts::SearchEvidenceTurnDelivery;
@@ -565,7 +565,7 @@ impl UiProtocolState {
                 slave_substream_card,
             );
             projection.terminal_status = Some(event.status.clone());
-            projection.terminal_text = Some(terminal_text_projection(event));
+            projection.terminal_text = Some(human_friendly_terminal_text(&projection.text, event));
             projection.model_request = None;
             if event.status == TerminalStatus::Failed {
                 fail_waiting_tool_activities(
