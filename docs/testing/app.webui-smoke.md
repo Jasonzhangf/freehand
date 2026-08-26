@@ -83,7 +83,7 @@
 - WebUI aspect-ratio layout classifier applies presentation-only shape attributes for phone portrait, tall phone, phone landscape, tablet portrait, tablet landscape, foldable unfolded, and desktop large without 会修改 protocol/session state
 - WebUI root route renders `?client=android-webview` with server-side `tablet_portrait` initial layout attributes before JS loads, while the normal browser root remains unpinned
 - WebUI phone/tall-phone/tablet-portrait layout defaults to the conversation workspace; sessions and debug/config detail panels are hidden in explicit overlay drawers and never consume the normal conversation flow
-  - WebUI mobile session drawer can be opened by a right-swipe gesture from the main interface content area without 会修改 ADP/session truth, selected session, transcript state, composer draft, pending submit, scroll anchor, or lifecycle timers
+  - WebUI mobile session drawer can be opened by the bottom session entry or a right-swipe gesture from the main interface content area without modifying ADP/session truth, selected session, transcript state, composer draft, pending submit, scroll anchor, or lifecycle timers; its visible bulk-remove control routes through `DeleteSession`, while search remains a separate drawer-header action
   - WebUI mobile session/设置 drawers must keep a sticky visible header with close control while drawer content scrolls; Android/browser back intent must blur focused form controls first and then close the WebUI dialog/Header tree/Agent sheet/mobile drawer before app-level exit/navigation
   - WebUI session drawer renders persisted sessions as agent -> session hierarchy, with task/global labels derived from protocol cwd and CRUD still routed by protocol session id
   - WebUI Home exposes multi-select and remove via `DeleteSession`, while SessionDetail exposes current-session rename and double-Esc rollback as protocol commands instead of local session truth; archive/restore affordances are intentionally absent from WebUI
@@ -153,7 +153,7 @@
   - WebUI submit-success path refresh smoke
   - WebUI cancel button / Escape key command smoke
   - WebUI submit-in-flight latest-active cancel smoke
-  - WebUI current-session rename plus Home multi-select/remove asset smoke and negative archive/restore affordance smoke
+  - WebUI current-session rename plus Home multi-select/remove asset smoke, mobile entry-to-drawer reachability, and negative archive/restore affordance smoke
   - WebUI double-Esc rollback asset smoke proving first Esc arms rollback and second Esc calls `RollbackLatestSessionTurn`
   - WebUI per-turn action asset smoke proving every rendered `.chat-message` has Copy, Edit from here, and 新建会话 actions; Edit from here uses repeated `RollbackLatestSessionTurn` command dispatch until the selected logical turn is removed, while 新建会话 creates a protocol-owned conversation before prefilling the composer
   - WebUI command ingress dispatch receipt smoke

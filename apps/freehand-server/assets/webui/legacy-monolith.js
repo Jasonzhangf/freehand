@@ -32,6 +32,7 @@ const messageList = document.getElementById("message-list");
 const sessionList = document.getElementById("session-list");
 const mobileDrawerScrim = document.getElementById("mobile-drawer-scrim");
 const openSessionDrawerButton = document.getElementById("open-session-drawer-button");
+const openSessionSearchButton = document.getElementById("open-session-search-button");
 const closeSessionDrawerButton = document.getElementById("close-session-drawer-button");
 const openDetailDrawerButton = document.getElementById("open-detail-drawer-button");
 const openSettingsDrawerButton = document.getElementById("open-settings-drawer-button");
@@ -10246,6 +10247,12 @@ if (debugDetailsToggle) {
 }
 if (openSessionDrawerButton) {
   openSessionDrawerButton.addEventListener("click", () => {
+    setMobileDrawer("sessions");
+  });
+}
+if (openSessionSearchButton) {
+  openSessionSearchButton.addEventListener("click", () => {
+    closeMobileDrawer();
     openSessionSearchDashboard().catch((error) => {
       state.sessionSearchError = error.message;
       setCommandStatus(`会话搜索失败: ${error.message}`, { stickyMs: 9000 });

@@ -2146,6 +2146,7 @@ mod tests {
         assert!(root_body.contains("id=\"open-timer-dashboard-button\""));
         assert!(root_body.contains("id=\"open-tools-dashboard-button\""));
         assert!(root_body.contains("id=\"mobile-new-entry-button\""));
+        assert!(root_body.contains("id=\"open-session-search-button\""));
         assert!(root_body.contains("class=\"mobile-bottom-entries\""));
         assert!(root_body.contains("id=\"mobile-home-dashboard\""));
         assert!(root_body.contains("id=\"mobile-home-active-list\""));
@@ -2779,6 +2780,18 @@ mod tests {
         assert!(legacy_body.contains("QueryWorkerControl"));
         assert!(legacy_body.contains("function renderMobileHomeDashboard"));
         assert!(legacy_body.contains("function mobileHomeSessionButton"));
+        let session_entry_start = legacy_body
+            .find("if (openSessionDrawerButton)")
+            .expect("mobile session entry handler");
+        let session_entry_end = legacy_body[session_entry_start..]
+            .find("if (mobileNewEntryButton)")
+            .map(|offset| session_entry_start + offset)
+            .expect("mobile new entry handler after session entry");
+        let session_entry_handler = &legacy_body[session_entry_start..session_entry_end];
+        assert!(
+            session_entry_handler.contains("setMobileDrawer(\"sessions\")"),
+            "mobile session entry must open the sessions drawer"
+        );
         assert!(legacy_body.contains("function renderToolsDashboard"));
         assert!(legacy_body.contains("function renderTimerDashboard"));
         assert!(legacy_body.contains("function renderSettingsDiagnostics"));

@@ -44,7 +44,7 @@ pub fn render_webui_smoke_for_client(client: Option<&str>) -> String {
             "<aside class=\"sidebar\">",
             "<div class=\"drawer-panel-head\">",
             "<div><div class=\"eyebrow\">会话</div><h1 class=\"page-title\">会话</h1></div>",
-            "<button class=\"drawer-close-button\" id=\"close-session-drawer-button\" type=\"button\" aria-label=\"关闭会话列表\">关闭</button>",
+            "<div class=\"drawer-panel-actions\"><button class=\"drawer-search-button\" id=\"open-session-search-button\" type=\"button\" aria-label=\"搜索会话\">搜索</button><button class=\"drawer-close-button\" id=\"close-session-drawer-button\" type=\"button\" aria-label=\"关闭会话列表\">关闭</button></div>",
             "</div>",
             "<label class=\"task-cwd-control\" for=\"task-cwd-input\"><span>任务目录</span><input id=\"task-cwd-input\" type=\"text\" placeholder=\"/Volumes/extension/code/freehand\" autocomplete=\"off\" /></label>",
             "<div class=\"session-create-actions\">",
