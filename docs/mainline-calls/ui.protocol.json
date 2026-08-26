@@ -60,7 +60,7 @@
     "projections are read-only views over owner-written truth",
     "model request lifecycle is projected as UiModelRequestActivity inside UiTurnProjection for ordinary thinking, schema retry, and tool-result continuation; provider retry/failover are transport substate on the same activity, not separate reasoning-flow phases, and the activity clears when response/tool/usage/terminal/error projection arrives",
     "per-turn usage is projected as UiUsageProjection inside UiTurnProjection.usage_projection with normalized input plus output/reasoning/cache tokens, cache-hit-rate bps, context tokens, and compacted-token counters; legacy usage without normalized_input_tokens uses the contracts-owned conservative reconstruction before projection, and protocol exposes the projection while provider usage truth stays reason-owned",
-    "terminal completion shows only final projected text",
+    "terminal completion shows human-friendly final text: completion/status summary when present, otherwise stripped visible model text, then the event summary fallback",
     "public conversation projection preserves the user prompt while stripping raw completion schema blocks and excluding reasoning, usage, provider payload, debug details, and verbose tool term text from the main user-visible stream",
     "debug state is projected as a read-only per-turn snapshot/stream with summary text plus ordered detail lines",
     "`ui.protocol` may ingest observation-only debug events from `debug.core` receivers and materialize only the snapshot projection into protocol state",
@@ -133,9 +133,9 @@
   ],
   "shared_functions": [
     {
-      "symbol": "terminal_text_projection",
-      "owner": "crates/freehand-ui-protocol/src/lib.rs",
-      "purpose": "collapse terminal event to final user-visible text",
+      "symbol": "human_friendly_terminal_text",
+      "owner": "crates/freehand-ui-protocol/src/projection.rs",
+      "purpose": "collapse terminal event to human-friendly visible response text",
       "allowed_callers": [
         "query handlers",
         "stream handlers",
@@ -501,7 +501,7 @@
     },
     {
       "step": "10",
-      "symbol_path": "terminal_text_projection",
+      "symbol_path": "human_friendly_terminal_text",
       "file_path": "crates/freehand-ui-protocol/src/projection.rs",
       "responsibility": "project terminal text",
       "input_semantic": "terminal semantic payload",

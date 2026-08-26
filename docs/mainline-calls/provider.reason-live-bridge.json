@@ -55,7 +55,7 @@
     "master workspace-boundary failures and unavailable shell/browser/local-broad-search/control function-tool calls remain paired failed tool results so the model can continue locally, use `web_fetch` for concrete URLs, use provider-hosted search when declared, or create and assign different-cwd/clean_search work through `task`",
     "completed/blocked schema writes terminal truth through `ReasonTurnEngine::submit_completion`",
     "terminal turns are materialized through `ReasonPersistence::record_turn_closed`",
-    "schema retry exhaustion writes blocked terminal truth through `ReasonTurnEngine::block_turn`; provider interruption without a completion-schema candidate writes interrupted terminal truth through `ReasonTurnEngine::interrupt_turn`",
+    "schema retry exhaustion closes with provider terminal truth when present through `ReasonTurnEngine::block_turn`; provider interruption without a completion-schema candidate writes interrupted terminal truth through `ReasonTurnEngine::interrupt_turn`",
     "sourced-search hosted/camo/social evidence exhaustion attempts one `web_fetch` recovery before Blocked; no extra provider round follows a failed or unusable recovery",
     "runtime drains both reason-owned and runtime-owned debug snapshots through one shared `DebugHub` hook path",
     "bridge returns final turn truth, all round turns, captured broadcast events, schema rejection ledger, tool execution count, restore status, and live-output summary without leaking wire DTOs",
@@ -77,7 +77,7 @@
     "metadata ledger bootstrap and metadata write failures are returned as explicit `RuntimeLiveBridgeError::MetadataFailed` errors",
     "provider raw debug-ledger write failures are returned as explicit `RuntimeLiveBridgeError::ReasonPersistenceFailed`",
     "persistence restore/write failures fail the live bridge explicitly",
-    "provider terminal metadata does not become final completion truth without accepted Freehand completion schema"
+    "provider terminal metadata is final turn truth when no completion schema is available; accepted Freehand completion schema remains the authoritative semantic summary when present"
   ],
   "shared_functions": [
     {

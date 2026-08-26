@@ -1,7 +1,7 @@
 use crate::adp_wire::TurnProjectionInput;
 use crate::dto::*;
 use crate::{
-    UiProtocolError, fail_waiting_tool_activities, terminal_text_projection,
+    UiProtocolError, fail_waiting_tool_activities, human_friendly_terminal_text,
     tool_activities_from_input, validate_command,
 };
 use freehand_contracts::{SemanticEventKind, TerminalStatus};
@@ -822,7 +822,23 @@ pub fn turn_projection_from_events(input: TurnProjectionInput) -> UiTurnProjecti
             .terminal_event
             .as_ref()
             .map(|event| event.status.clone()),
-        terminal_text: input.terminal_event.as_ref().map(terminal_text_projection),
+        terminal_text: {
+            let text_chunks: Vec<String> = input
+                .semantic_events
+                .iter()
+                .filter_map(|event| {
+                    if event.kind == SemanticEventKind::Text {
+                        Some(event.content.clone())
+                    } else {
+                        None
+                    }
+                })
+                .collect();
+            input
+                .terminal_event
+                .as_ref()
+                .map(|event| human_friendly_terminal_text(&text_chunks, event))
+        },
         user_options: input
             .terminal_event
             .as_ref()

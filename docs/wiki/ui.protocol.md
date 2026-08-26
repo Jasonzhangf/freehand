@@ -65,7 +65,7 @@ Generated from `docs/mainline-calls/ui.protocol.json`. Do not edit by hand.
 - projections are read-only views over owner-written truth
 - model request lifecycle is projected as UiModelRequestActivity inside UiTurnProjection for ordinary thinking, schema retry, and tool-result continuation; provider retry/failover are transport substate on the same activity, not separate reasoning-flow phases, and the activity clears when response/tool/usage/terminal/error projection arrives
 - per-turn usage is projected as UiUsageProjection inside UiTurnProjection.usage_projection with normalized input plus output/reasoning/cache tokens, cache-hit-rate bps, context tokens, and compacted-token counters; legacy usage without normalized_input_tokens uses the contracts-owned conservative reconstruction before projection, and protocol exposes the projection while provider usage truth stays reason-owned
-- terminal completion shows only final projected text
+- terminal completion shows human-friendly final text: completion/status summary when present, otherwise stripped visible model text, then the event summary fallback
 - public conversation projection preserves the user prompt while stripping raw completion schema blocks and excluding reasoning, usage, provider payload, debug details, and verbose tool term text from the main user-visible stream
 - debug state is projected as a read-only per-turn snapshot/stream with summary text plus ordered detail lines
 - `ui.protocol` may ingest observation-only debug events from `debug.core` receivers and materialize only the snapshot projection into protocol state
@@ -139,9 +139,9 @@ Generated from `docs/mainline-calls/ui.protocol.json`. Do not edit by hand.
 
 ## Shared Multi-Reference Functions
 
-- `terminal_text_projection`
-  - owner: `crates/freehand-ui-protocol/src/lib.rs`
-  - purpose: collapse terminal event to final user-visible text
+- `human_friendly_terminal_text`
+  - owner: `crates/freehand-ui-protocol/src/projection.rs`
+  - purpose: collapse terminal event to human-friendly visible response text
   - allowed callers: query handlers, stream handlers, CLI/WebUI adapters
   - related tests: terminal result projection smoke
   - why shared: ensures CLI and WebUI project the same terminal text truth
@@ -252,7 +252,7 @@ Generated from `docs/mainline-calls/ui.protocol.json`. Do not edit by hand.
 | 07 | `subscription_selector` | `crates/freehand-ui-protocol/src/validate.rs` | build read-only subscribe selector | subscribe command | subscription selector | protocol boundary | stream handler |  |  |  | bound |
 | 08 | `subscription_matches` | `crates/freehand-ui-protocol/src/validate.rs` | route incremental projection to matching subscription | subscription selector plus projection | delivery decision | stream handler | selector matcher |  |  |  | bound |
 | 09 | `turn_projection_from_events` | `crates/freehand-ui-protocol/src/adp_descriptor.rs` | project whole-turn state into UI snapshot, including tool lifecycle activities | semantic/tool/tool-result/usage/terminal/error/user inputs | UI turn projection | query/stream handler | projector |  |  |  | bound |
-| 10 | `terminal_text_projection` | `crates/freehand-ui-protocol/src/projection.rs` | project terminal text | terminal semantic payload | UI terminal text | query/stream handler | projector |  |  |  | bound |
+| 10 | `human_friendly_terminal_text` | `crates/freehand-ui-protocol/src/projection.rs` | project terminal text | terminal semantic payload | UI terminal text | query/stream handler | projector |  |  |  | bound |
 | 10a | `public_conversation_items / public_turn_projection` | `crates/freehand-ui-protocol/src/projection.rs` | derive public user-visible conversation stream, preserve user prompt, and strip raw completion schema | full turn projection | public turn projection | app transports/renderers | projector |  |  |  | bound |
 | 11 | `UiProtocolState::apply_semantic_event / apply_tool_call / apply_tool_result / apply_usage_event / apply_terminal_event / apply_error_event` | `crates/freehand-ui-protocol/src/state.rs` | incrementally update one turn projection from shared contract events and publish subscription updates | shared reason/error contracts | updated queryable/subscribable turn projection | runtime/debug bridges | protocol state |  |  |  | bound |
 | 12 | `turn_projection_for_client` | `crates/freehand-ui-protocol/src/adp_descriptor.rs` | gate client-specific slave substream visibility | turn projection plus client kind | client-specific turn projection | CLI/WebUI adapter | projector |  |  |  | bound |

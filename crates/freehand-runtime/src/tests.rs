@@ -7898,6 +7898,18 @@ fn max_tokens_text_response() -> String {
     .to_string()
 }
 
+fn plain_text_response(visible_text: &str) -> String {
+    json!({
+        "content": [{
+            "type": "text",
+            "text": visible_text
+        }],
+        "usage": {"input_tokens": 14, "output_tokens": 24},
+        "stop_reason": "end_turn"
+    })
+    .to_string()
+}
+
 fn task_tool_call(arguments: Vec<(&str, Value)>) -> ReasonReq04ToolCall {
     ReasonReq04ToolCall {
         session_id: SessionId::new("session-task"),
@@ -8729,7 +8741,7 @@ fn live_bridge_blocks_after_three_consecutive_invalid_control_statuses() {
         &live_selected_agent(base_url, freehand_config::ProviderType::Anthropic),
         live_request(false),
     )
-    .expect("schema mismatch exhaustion is blocked truth");
+    .expect("schema mismatch exhaustion preserves provider terminal");
     for _ in 0..3 {
         rx.recv().expect("provider request");
     }
@@ -8743,11 +8755,15 @@ fn live_bridge_blocks_after_three_consecutive_invalid_control_statuses() {
             .terminal_event
             .as_ref()
             .map(|event| event.status.clone()),
-        Some(TerminalStatus::Blocked)
+        Some(TerminalStatus::Success)
     );
-    assert!(outcome.turn.terminal_event.as_ref().is_some_and(|event| {
-        event.summary.contains("3 polishing attempts") && event.summary.contains("next_step")
-    }));
+    assert!(
+        outcome
+            .turn
+            .terminal_event
+            .as_ref()
+            .is_some_and(|event| event.summary == "end_turn")
+    );
     assert_eq!(
         outcome
             .broadcasts
@@ -11879,7 +11895,7 @@ fn live_bridge_fails_explicitly_when_provider_raw_ledger_is_not_writable() {
 }
 
 #[test]
-fn live_bridge_blocks_after_three_invalid_schema_retries_without_failed_status() {
+fn live_bridge_preserves_provider_terminal_after_three_invalid_schema_retries() {
     let _cwd_lock = cwd_lock()
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner());
@@ -11907,7 +11923,122 @@ fn live_bridge_blocks_after_three_invalid_schema_retries_without_failed_status()
             .terminal_event
             .as_ref()
             .map(|event| event.status.clone()),
-        Some(TerminalStatus::Blocked)
+        Some(TerminalStatus::Success)
+    );
+    assert_eq!(
+        outcome
+            .turn
+            .terminal_event
+            .as_ref()
+            .map(|event| event.summary.clone()),
+        Some("end_turn".to_owned())
+    );
+}
+
+#[test]
+fn live_bridge_accepts_provider_terminal_without_completion_schema() {
+    let _cwd_lock = cwd_lock()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    let (base_url, _rx, handle) = spawn_sequence_server(
+        "application/json",
+        vec![
+            missing_completion_schema_response(),
+            missing_completion_schema_response(),
+            missing_completion_schema_response(),
+        ],
+    );
+
+    let outcome = run_live_reason_turn(
+        &live_selected_agent(base_url, freehand_config::ProviderType::Anthropic),
+        live_request(false),
+    )
+    .expect("live bridge should close on provider terminal without schema");
+    handle.join().expect("join");
+
+    assert_eq!(outcome.rounds, 3);
+    assert_eq!(outcome.schema_rejections.len(), 3);
+    let terminal = outcome
+        .turn
+        .terminal_event
+        .as_ref()
+        .expect("terminal event");
+    assert_eq!(terminal.status, TerminalStatus::Success);
+    assert_eq!(terminal.summary, "end_turn");
+}
+
+#[test]
+fn live_bridge_does_not_block_after_three_invalid_completion_schema_attempts() {
+    let _cwd_lock = cwd_lock()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    let (base_url, rx, handle) = spawn_sequence_server(
+        "application/json",
+        vec![
+            invalid_complete_response(),
+            invalid_complete_response(),
+            invalid_complete_response(),
+        ],
+    );
+
+    let outcome = run_live_reason_turn(
+        &live_selected_agent(base_url, freehand_config::ProviderType::Anthropic),
+        live_request(false),
+    )
+    .expect("live bridge should not block on schema repair cap");
+    let requests = collect_provider_requests(&rx, 3);
+    handle.join().expect("join");
+
+    assert_eq!(outcome.rounds, 3);
+    assert_eq!(outcome.schema_rejections.len(), 3);
+    assert_eq!(requests.len(), 3);
+    assert_eq!(
+        outcome
+            .turn
+            .terminal_event
+            .as_ref()
+            .map(|event| event.status.clone()),
+        Some(TerminalStatus::Success)
+    );
+    assert!(
+        requests[2].contains("`evidence`: is required"),
+        "schema feedback may remain visible as model repair guidance, but must not become a blocked terminal gate"
+    );
+}
+
+#[test]
+fn live_bridge_does_not_block_sourced_search_when_typed_evidence_is_missing() {
+    let _cwd_lock = cwd_lock()
+        .lock()
+        .unwrap_or_else(|poisoned| poisoned.into_inner());
+    let (base_url, rx, handle) = spawn_sequence_server(
+        "application/json",
+        vec![
+            plain_text_response("hosted search returned no usable source"),
+            plain_text_response("camo verification returned no usable source"),
+            plain_text_response("web fetch recovery returned no usable source"),
+        ],
+    );
+    let mut request = live_request(false);
+    request.execution_profile = LiveReasonExecutionProfile::SourcedSearch;
+
+    let outcome = run_live_reason_turn(
+        &live_selected_agent(base_url, freehand_config::ProviderType::Anthropic),
+        request,
+    )
+    .expect("sourced search missing typed evidence should not force blocked");
+    let requests = collect_provider_requests(&rx, 3);
+    handle.join().expect("join");
+
+    assert_eq!(outcome.rounds, 3);
+    assert_eq!(requests.len(), 3);
+    assert_eq!(
+        outcome
+            .turn
+            .terminal_event
+            .as_ref()
+            .map(|event| event.status.clone()),
+        Some(TerminalStatus::Success)
     );
 }
 
@@ -11923,7 +12054,7 @@ fn live_bridge_interrupts_non_candidate_max_tokens_without_failed_status() {
         &live_selected_agent(base_url, freehand_config::ProviderType::Anthropic),
         live_request(false),
     )
-    .expect("live bridge should materialize interrupted turn");
+    .expect("live bridge should preserve provider interruption truth");
     handle.join().expect("join");
 
     assert_eq!(outcome.rounds, 1);
@@ -11934,11 +12065,7 @@ fn live_bridge_interrupts_non_candidate_max_tokens_without_failed_status() {
         .as_ref()
         .expect("terminal event");
     assert_eq!(terminal.status, TerminalStatus::Interrupted);
-    assert!(
-        terminal
-            .summary
-            .contains("Provider ended before completion schema was available: max_tokens")
-    );
+    assert_eq!(terminal.summary, "max_tokens");
 }
 
 #[test]

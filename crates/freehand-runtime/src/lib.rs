@@ -1255,6 +1255,32 @@ where
         ensure_live_not_cancelled(&request)?;
         let web_fetch_recovery = web_fetch_recovery_next;
         web_fetch_recovery_next = false;
+        if (consecutive_schema_rejections >= 3 || consecutive_search_schema_rejections >= 3)
+            && turns
+                .last()
+                .is_some_and(|previous: &TurnRecord| previous.terminal_event.is_some())
+        {
+            drain_broadcasts(&receiver, &mut broadcasts, &mut on_broadcast);
+            drain_debug_events(&debug_receiver, &mut on_debug);
+            ensure_live_not_cancelled(&request)?;
+            let turn = turns
+                .last_mut()
+                .expect("schema rejection cap has a current turn");
+            persistence
+                .record_turn_closed(&history, turn, schema_rejections.len() as u32)
+                .map_err(|err| RuntimeLiveBridgeError::ReasonPersistenceFailed(err.to_string()))?;
+            return Ok(LiveReasonTurnOutcome {
+                turn: turn.clone(),
+                turns,
+                broadcasts,
+                rounds: round,
+                schema_rejections,
+                search_schema_rejections,
+                tool_executions,
+                restore_status,
+                restored_closed_turns,
+            });
+        }
         if request.execution_profile == LiveReasonExecutionProfile::SourcedSearch
             && turns.last().is_some_and(|previous| {
                 sourced_search_recovery_attempt(previous, &executed_tool_call_ids)
@@ -1576,6 +1602,7 @@ where
                         &mut turn,
                         batch,
                         schema_rejections.len() as u32,
+                        Some(&|| live_is_cancelled(&request)),
                     ) {
                         *stream_persistence_error.borrow_mut() = Some(err);
                         return Err("live bridge failed while persisting stream output".to_owned());
@@ -1841,6 +1868,7 @@ where
                 &mut turn,
                 &outputs,
                 schema_rejections.len() as u32,
+                Some(&|| live_is_cancelled(&request)),
             )?;
         }
         ensure_live_not_cancelled(&request)?;
@@ -1885,13 +1913,17 @@ where
             }
         }
 
-        let mut attention_resolution_after_provider = record_master_live_safe_point(
-            role,
-            &request,
-            &agent_id,
-            master_runner::MasterWorkSafePoint::BeforeToolExecution,
-        )?;
         let pending_tool_calls = pending_tool_calls_for_execution(&turn, &executed_tool_call_ids);
+        let mut attention_resolution_after_provider = if pending_tool_calls.is_empty() {
+            None
+        } else {
+            record_master_live_safe_point(
+                role,
+                &request,
+                &agent_id,
+                master_runner::MasterWorkSafePoint::BeforeToolExecution,
+            )?
+        };
         if !pending_tool_calls.is_empty()
             && let Some(resolution) = attention_resolution_after_provider.take()
         {
@@ -2323,10 +2355,12 @@ where
             let reason = latest_finish_reason(&turn)
                 .unwrap_or("missing_finish_reason")
                 .to_owned();
-            engine.interrupt_turn(
-                &mut turn,
-                format!("Provider ended before completion schema was available: {reason}"),
-            );
+            if turn.terminal_event.is_none() {
+                engine.interrupt_turn(
+                    &mut turn,
+                    format!("Provider ended before completion schema was available: {reason}"),
+                );
+            }
             drain_broadcasts(&receiver, &mut broadcasts, &mut on_broadcast);
             drain_debug_events(&debug_receiver, &mut on_debug);
             ensure_live_not_cancelled(&request)?;
@@ -2386,33 +2420,6 @@ where
                                 RuntimeLiveBridgeError::ReasonPersistenceFailed(err.to_string())
                             })?;
                         let feedback = search_evidence_schema_rejection_feedback(&rejection);
-                        if consecutive_search_schema_rejections >= 3 {
-                            engine.block_turn(
-                                &mut turn,
-                                format!(
-                                    "Search evidence schema remained invalid after 3 attempts: {feedback}"
-                                ),
-                            );
-                            drain_broadcasts(&receiver, &mut broadcasts, &mut on_broadcast);
-                            drain_debug_events(&debug_receiver, &mut on_debug);
-                            persistence
-                                .record_turn_closed(&history, &turn, schema_rejections.len() as u32)
-                                .map_err(|err| {
-                                    RuntimeLiveBridgeError::ReasonPersistenceFailed(err.to_string())
-                                })?;
-                            turns.push(turn.clone());
-                            return Ok(LiveReasonTurnOutcome {
-                                turn,
-                                turns,
-                                broadcasts,
-                                rounds: round,
-                                schema_rejections,
-                                search_schema_rejections,
-                                tool_executions,
-                                restore_status,
-                                restored_closed_turns,
-                            });
-                        }
                         let retry_event = ReasonBroadcastEvent::SearchEvidenceSchemaRejected(
                             ReasonResp06SearchEvidenceSchemaRejected {
                                 session_id: turn.request.session_id.clone(),
@@ -2472,34 +2479,6 @@ where
                             .map_err(|err| {
                                 RuntimeLiveBridgeError::ReasonPersistenceFailed(err.to_string())
                             })?;
-                        if consecutive_search_schema_rejections >= 3 {
-                            engine.block_turn(
-                                &mut turn,
-                                format!(
-                                    "Search evidence schema remained invalid after 3 attempts: {}",
-                                    search_evidence_schema_rejection_feedback(&rejection)
-                                ),
-                            );
-                            drain_broadcasts(&receiver, &mut broadcasts, &mut on_broadcast);
-                            drain_debug_events(&debug_receiver, &mut on_debug);
-                            persistence
-                                .record_turn_closed(&history, &turn, schema_rejections.len() as u32)
-                                .map_err(|err| {
-                                    RuntimeLiveBridgeError::ReasonPersistenceFailed(err.to_string())
-                                })?;
-                            turns.push(turn.clone());
-                            return Ok(LiveReasonTurnOutcome {
-                                turn,
-                                turns,
-                                broadcasts,
-                                rounds: round,
-                                schema_rejections,
-                                search_schema_rejections,
-                                tool_executions,
-                                restore_status,
-                                restored_closed_turns,
-                            });
-                        }
                         let feedback = search_evidence_schema_rejection_feedback(&rejection);
                         let retry_event = ReasonBroadcastEvent::SearchEvidenceSchemaRejected(
                             ReasonResp06SearchEvidenceSchemaRejected {
@@ -2605,33 +2584,6 @@ where
                             RuntimeLiveBridgeError::ReasonPersistenceFailed(err.to_string())
                         })?;
                     let feedback = search_evidence_schema_rejection_feedback(&rejection);
-                    if consecutive_search_schema_rejections >= 3 {
-                        engine.block_turn(
-                            &mut turn,
-                            format!(
-                                "Search evidence schema remained invalid after 3 attempts: {feedback}"
-                            ),
-                        );
-                        drain_broadcasts(&receiver, &mut broadcasts, &mut on_broadcast);
-                        drain_debug_events(&debug_receiver, &mut on_debug);
-                        persistence
-                            .record_turn_closed(&history, &turn, schema_rejections.len() as u32)
-                            .map_err(|err| {
-                                RuntimeLiveBridgeError::ReasonPersistenceFailed(err.to_string())
-                            })?;
-                        turns.push(turn.clone());
-                        return Ok(LiveReasonTurnOutcome {
-                            turn,
-                            turns,
-                            broadcasts,
-                            rounds: round,
-                            schema_rejections,
-                            search_schema_rejections,
-                            tool_executions,
-                            restore_status,
-                            restored_closed_turns,
-                        });
-                    }
                     let retry_event = ReasonBroadcastEvent::SearchEvidenceSchemaRejected(
                         ReasonResp06SearchEvidenceSchemaRejected {
                             session_id: turn.request.session_id.clone(),
@@ -2723,6 +2675,10 @@ where
             }
         }
         if let Some(resolution) = attention_resolution_after_provider.take() {
+            engine.discard_provider_terminal(
+                &mut turn,
+                "provider terminal invalidated by master attention",
+            );
             prepare_master_attention_reasoning_continuation(
                 &resolution,
                 &mut next_prompt,
@@ -2793,13 +2749,6 @@ where
                         RuntimeLiveBridgeError::ReasonPersistenceFailed(err.to_string())
                     })?;
                 if consecutive_schema_rejections >= 3 {
-                    engine.block_turn(
-                        &mut turn,
-                        format!(
-                            "Response schema still invalid after 3 polishing attempts.\n{}",
-                            feedback
-                        ),
-                    );
                     drain_broadcasts(&receiver, &mut broadcasts, &mut on_broadcast);
                     drain_debug_events(&debug_receiver, &mut on_debug);
                     ensure_live_not_cancelled(&request)?;
@@ -3020,6 +2969,10 @@ where
                     if let Some(resolution) =
                         enter_master_terminal_persistence(role, &request, &agent_id)?
                     {
+                        engine.discard_provider_terminal(
+                            &mut turn,
+                            "provider terminal invalidated by master attention",
+                        );
                         prepare_master_attention_reasoning_continuation(
                             &resolution,
                             &mut next_prompt,
@@ -3141,6 +3094,10 @@ where
                     if let Some(resolution) =
                         enter_master_terminal_persistence(role, &request, &agent_id)?
                     {
+                        engine.discard_provider_terminal(
+                            &mut turn,
+                            "provider terminal invalidated by master attention",
+                        );
                         prepare_master_attention_reasoning_continuation(
                             &resolution,
                             &mut next_prompt,
@@ -3287,6 +3244,10 @@ where
                     if let Some(resolution) =
                         enter_master_terminal_persistence(role, &request, &agent_id)?
                     {
+                        engine.discard_provider_terminal(
+                            &mut turn,
+                            "provider terminal invalidated by master attention",
+                        );
                         prepare_master_attention_reasoning_continuation(
                             &resolution,
                             &mut next_prompt,
@@ -3441,6 +3402,35 @@ where
             },
             Err(rejection) => {
                 ensure_live_not_cancelled(&request)?;
+                if consecutive_schema_rejections >= 3
+                    && turn.terminal_event.is_some()
+                    && request.execution_profile != LiveReasonExecutionProfile::SourcedSearch
+                    && rejection
+                        .issues
+                        .iter()
+                        .any(|issue| issue.field == "freehand_completion")
+                {
+                    drain_broadcasts(&receiver, &mut broadcasts, &mut on_broadcast);
+                    drain_debug_events(&debug_receiver, &mut on_debug);
+                    ensure_live_not_cancelled(&request)?;
+                    persistence
+                        .record_turn_closed(&history, &turn, schema_rejections.len() as u32)
+                        .map_err(|err| {
+                            RuntimeLiveBridgeError::ReasonPersistenceFailed(err.to_string())
+                        })?;
+                    turns.push(turn.clone());
+                    return Ok(LiveReasonTurnOutcome {
+                        turn,
+                        turns,
+                        broadcasts,
+                        rounds: round,
+                        schema_rejections,
+                        search_schema_rejections,
+                        tool_executions,
+                        restore_status,
+                        restored_closed_turns,
+                    });
+                }
                 let feedback = completion_schema_rejection_feedback(&rejection);
                 schema_rejections.push(rejection.clone());
                 consecutive_schema_rejections = consecutive_schema_rejections.saturating_add(1);
@@ -3478,13 +3468,6 @@ where
                         RuntimeLiveBridgeError::ReasonPersistenceFailed(err.to_string())
                     })?;
                 if consecutive_schema_rejections >= 3 {
-                    engine.block_turn(
-                        &mut turn,
-                        format!(
-                            "Completion schema still invalid after 3 repair attempts.\n{}",
-                            feedback
-                        ),
-                    );
                     drain_broadcasts(&receiver, &mut broadcasts, &mut on_broadcast);
                     drain_debug_events(&debug_receiver, &mut on_debug);
                     ensure_live_not_cancelled(&request)?;
@@ -11867,6 +11850,7 @@ fn apply_provider_outputs_persist_and_capture_broadcasts<FB>(
     turn: &mut TurnRecord,
     outputs: &[ProviderSemanticOutput],
     schema_rejections: u32,
+    is_cancelled: Option<&dyn Fn() -> bool>,
 ) -> Result<(), RuntimeLiveBridgeError>
 where
     FB: FnMut(&ReasonBroadcastEvent),
@@ -11875,9 +11859,14 @@ where
         ctx.engine
             .apply_provider_output(turn, output.clone())
             .map_err(|err| RuntimeLiveBridgeError::ProviderOutputApplyFailed(err.to_string()))?;
-        ctx.persistence
-            .record_provider_output_applied(ctx.history, turn, output, schema_rejections)
-            .map_err(|err| RuntimeLiveBridgeError::ReasonPersistenceFailed(err.to_string()))?;
+        drain_broadcasts(ctx.receiver, ctx.broadcasts, ctx.on_broadcast);
+        drain_debug_events(ctx.debug_receiver, ctx.on_debug);
+        let cancelled = is_cancelled.is_some_and(|check| check());
+        if !(cancelled && matches!(output, ProviderSemanticOutput::Terminal(_))) {
+            ctx.persistence
+                .record_provider_output_applied(ctx.history, turn, output, schema_rejections)
+                .map_err(|err| RuntimeLiveBridgeError::ReasonPersistenceFailed(err.to_string()))?;
+        }
     }
     drain_broadcasts(ctx.receiver, ctx.broadcasts, ctx.on_broadcast);
     drain_debug_events(ctx.debug_receiver, ctx.on_debug);
