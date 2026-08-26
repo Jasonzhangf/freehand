@@ -701,12 +701,25 @@ pub fn validate_search_evidence_stage_append(
                             }
                         }
                         None => {
-                            // Non-sourced hosted discovery carries no domain plan and must be
-                            // the first delivery in the turn evidence stream.
-                            if !existing.is_empty() {
+                            // Non-sourced hosted discovery carries no domain plan. A single
+                            // provider response may contain more than one hosted
+                            // `server_tool_use` / `web_search_tool_result` pair (Anthropic
+                            // and OpenAI both support that shape), so each pair is emitted
+                            // as its own SearchDiscoveryDelivery. Multiple contiguous
+                            // HostedWebSearch deliveries are accepted, but no other stage
+                            // may open or re-open the non-sourced stream.
+                            let allowed_prev = match existing.last() {
+                                None => true,
+                                Some(SearchEvidenceDelivery::Discovery(previous)) => {
+                                    previous.discovery_channel
+                                        == SearchDiscoveryChannel::HostedWebSearch
+                                }
+                                _ => false,
+                            };
+                            if !allowed_prev {
                                 return invalid_search_field(
                                     "domain_plan_ref",
-                                    "non-sourced hosted discovery must be the first delivery",
+                                    "non-sourced hosted discovery must precede any other stage",
                                 );
                             }
                         }
@@ -3480,6 +3493,26 @@ mod tests {
         invalid.verified_by = Some("camo".to_owned());
         invalid.evidence_excerpt = Some(" ".to_owned());
         assert!(validate_search_verification_delivery(&invalid).is_err());
+    }
+
+    #[test]
+    fn non_sourced_search_evidence_accepts_multiple_contiguous_hosted_deliveries() {
+        let mut first = hosted_discovery();
+        first.domain_plan_ref = None;
+        let mut second = hosted_discovery();
+        second.domain_plan_ref = None;
+        second.delivery_id = "hosted-2".to_owned();
+        second.candidates[0].candidate_id = "c2".to_owned();
+        second.candidates[0].original_url = Some("https://example.com/news-2".to_owned());
+
+        validate_search_evidence_stage_append(
+            &[SearchEvidenceDelivery::Discovery(first.clone())],
+            &SearchEvidenceDelivery::Discovery(second.clone()),
+        )
+        .expect("non-sourced provider response may preserve more than one hosted attempt");
+        assert_eq!(first.domain_plan_ref, None);
+        assert_eq!(second.delivery_id, "hosted-2");
+        assert_eq!(second.candidates[0].candidate_id, "c2");
     }
 
     #[test]

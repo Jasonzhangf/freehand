@@ -1,7 +1,7 @@
 use super::*;
 use freehand_contracts::{
-    FeatureId, SemanticEventKind, TerminalStatus, ToolPreviewChangeKind, ToolPreviewContract,
-    ToolPreviewFileChange,
+    FeatureId, SearchDiscoveryChannel, SemanticEventKind, TerminalStatus, ToolPreviewChangeKind,
+    ToolPreviewContract, ToolPreviewFileChange,
 };
 use freehand_contracts::{ToolCallContract, ToolCallId};
 use freehand_metadata::MetadataEnvelope;
@@ -7729,6 +7729,65 @@ fn complete_single_response(visible_text: &str) -> String {
     )
 }
 
+fn anthropic_two_hosted_searches_complete_response(visible_text: &str) -> String {
+    let tagged = tagged_completion_json(&format!(
+        r#"{{"claim":"complete","completion_reason":"done","evidence":"provider returned {visible_text}","summary":"{visible_text}","learned":"keep tagged completion strict"}}"#
+    ));
+    let tagged_escaped = tagged.replace('\n', "\\n").replace('"', "\\\"");
+    format!(
+        r#"{{
+  "content": [
+    {{
+      "type": "text",
+      "text": "working"
+    }},
+    {{
+      "type": "server_tool_use",
+      "id": "srv-search-1",
+      "name": "web_search",
+      "input": {{"query": "Shenzhen weather forecast next 14 days"}}
+    }},
+    {{
+      "type": "web_search_tool_result",
+      "tool_use_id": "srv-search-1",
+      "content": [
+        {{
+          "title": "Shenzhen weather source one",
+          "url": "https://example.test/shenzhen-weather-1",
+          "content": "weather one"
+        }}
+      ]
+    }},
+    {{
+      "type": "server_tool_use",
+      "id": "srv-search-2",
+      "name": "web_search",
+      "input": {{"query": "Shenzhen weather 15 day"}}
+    }},
+    {{
+      "type": "web_search_tool_result",
+      "tool_use_id": "srv-search-2",
+      "content": [
+        {{
+          "title": "Shenzhen weather source two",
+          "url": "https://example.test/shenzhen-weather-2",
+          "content": "weather two"
+        }}
+      ]
+    }},
+    {{
+      "type": "text",
+      "text": "{visible}\n{tagged}"
+    }}
+  ],
+  "usage": {{"input_tokens": 14, "output_tokens": 120}},
+  "stop_reason": "end_turn"
+}}"#,
+        visible = visible_text,
+        tagged = tagged_escaped,
+    )
+}
+
 fn blocked_single_response(visible_text: &str, blocked_reason: &str) -> String {
     let tagged = tagged_completion_json(&format!(
         r#"{{"claim":"blocked","blocked_reason":"{blocked_reason}"}}"#
@@ -12648,6 +12707,52 @@ fn provider_web_search_test_fails_when_provider_does_not_observe_hosted_search()
     );
     assert!(err.to_string().contains("observed_outputs=semantic:"));
     assert!(err.to_string().contains("plain response"));
+}
+
+#[test]
+fn master_live_turn_accepts_multiple_hosted_search_deliveries_in_one_provider_response() {
+    let response =
+        anthropic_two_hosted_searches_complete_response("Shenzhen weather answer complete");
+    let (base_url, rx, handle) = spawn_mock_server(200, "application/json", response);
+    let mut selected = live_selected_agent_with_protocol(
+        base_url,
+        freehand_config::ProviderType::Anthropic,
+        ConfigProviderProtocol::Messages,
+    );
+    selected.provider.default_model = "MiniMax-M3".to_owned();
+
+    let request = live_request(false);
+    let outcome = run_live_reason_turn(&selected, request).expect("master live turn");
+    let _raw_request = rx.recv().expect("master provider request");
+    handle.join().expect("join provider");
+
+    assert_eq!(outcome.rounds, 1);
+    assert_eq!(
+        outcome
+            .turn
+            .terminal_event
+            .as_ref()
+            .map(|event| event.status.clone()),
+        Some(TerminalStatus::Success)
+    );
+    let evidence = outcome
+        .turn
+        .search_evidence
+        .as_ref()
+        .expect("search evidence");
+    assert!(evidence.domain_plan.is_none());
+    let hosted_count = evidence
+        .deliveries
+        .iter()
+        .filter(|delivery| {
+            matches!(
+                delivery,
+                SearchEvidenceDelivery::Discovery(discovery)
+                    if discovery.discovery_channel == SearchDiscoveryChannel::HostedWebSearch
+            )
+        })
+        .count();
+    assert_eq!(hosted_count, 2, "both hosted searches must be preserved");
 }
 
 #[test]
