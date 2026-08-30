@@ -5,7 +5,6 @@ import http from 'node:http';
 import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
-import { adpVerifierRequest } from './lib/adp-verifier-client.mjs';
 
 const repo = process.cwd();
 const home = process.env.HOME;
@@ -15,7 +14,6 @@ const daemonEnvPath = process.env.FREEHAND_WEBUI_PATH_DAEMON_ENV || path.join(ru
 const workerEnvPath = process.env.FREEHAND_WEBUI_PATH_WORKER_ENV || path.join(runtimeHome, 'workerS.worker.env');
 const cli = process.env.FREEHAND_WEBUI_PATH_CLI || path.join(home, '.local/bin/freehand-cliS');
 const adpUrl = process.env.FREEHAND_WEBUI_PATH_ADP_URL || 'ws://127.0.0.1:4042/adp';
-const adpAuthToken = process.env.FREEHAND_ADP_AUTH_TOKEN || '';
 const healthUrl = process.env.FREEHAND_WEBUI_PATH_HEALTH_URL || 'http://127.0.0.1:4042/health';
 const baseUrl = process.env.FREEHAND_WEBUI_PATH_BASE_URL || 'http://127.0.0.1:4042/?verify=webui-path-diagnostic';
 const chromePath =
@@ -1455,19 +1453,36 @@ function completionBlock(value) {
 }
 
 async function queryAdp(query, label) {
-  try {
-    return await adpVerifierRequest({
-      url: adpUrl,
-      authToken: adpAuthToken,
-      kind: 'query',
-      payloadKey: 'query',
-      payload: query,
-      timeoutMs: 30_000,
-      clientName: 'freehand-path-diagnostic-verifier',
+  const requestId = `${label}-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+  return new Promise((resolve, reject) => {
+    const socket = new WebSocket(adpUrl);
+    const timeout = setTimeout(() => {
+      socket.close();
+      reject(new Error(`timeout waiting for ADP query ${label}`));
+    }, 30000);
+    socket.addEventListener('open', () => {
+      socket.send(JSON.stringify({ kind: 'query', request_id: requestId, query }));
     });
-  } catch (error) {
-    throw new Error(`ADP query ${label} failed: ${error.message}`);
-  }
+    socket.addEventListener('message', (event) => {
+      const message = JSON.parse(event.data);
+      if (message.request_id !== requestId) {
+        return;
+      }
+      clearTimeout(timeout);
+      socket.close();
+      if (message.kind === 'failure' || message.failure || message.error) {
+        reject(new Error(`ADP query ${label} failed: ${JSON.stringify(message.failure || message.error)}`));
+      } else if (message.kind !== 'query_result' || !Object.prototype.hasOwnProperty.call(message, 'result')) {
+        reject(new Error(`ADP query ${label} returned unexpected frame: ${JSON.stringify(message)}`));
+      } else {
+        resolve(message.result);
+      }
+    });
+    socket.addEventListener('error', () => {
+      clearTimeout(timeout);
+      reject(new Error(`ADP socket error for ${label}`));
+    });
+  });
 }
 
 async function querySessionTurns(sessionId, label) {

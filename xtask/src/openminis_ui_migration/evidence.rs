@@ -287,7 +287,9 @@ fn verify_openminis_ui_report_revision(
     repository_commit: &str,
     repository_tree: &str,
 ) -> Result<(), String> {
-    let object_type = isolated_git_command(root)
+    let object_type = Command::new("git")
+        .arg("-C")
+        .arg(root)
         .args(["cat-file", "-t", repository_commit])
         .output()
         .map_err(|err| format!("inspect attested repository revision: {err}"))?;
@@ -298,7 +300,9 @@ fn verify_openminis_ui_report_revision(
             "OpenMinis UI verifier report repository_commit `{repository_commit}` must resolve to a commit object"
         ));
     }
-    let output = isolated_git_command(root)
+    let output = Command::new("git")
+        .arg("-C")
+        .arg(root)
         .args(["rev-parse", &format!("{repository_commit}^{{tree}}")])
         .output()
         .map_err(|err| format!("resolve attested repository commit: {err}"))?;
@@ -325,7 +329,9 @@ fn verify_openminis_ui_evidence_worktree(
     repository_commit: &str,
     evidence_paths: &BTreeSet<String>,
 ) -> Result<(), String> {
-    let output = isolated_git_command(root)
+    let output = Command::new("git")
+        .arg("-C")
+        .arg(root)
         .args([
             "diff",
             "--name-only",
@@ -345,7 +351,9 @@ fn verify_openminis_ui_evidence_worktree(
     }
     verify_openminis_ui_changed_paths(&output.stdout, evidence_paths)?;
 
-    let output = isolated_git_command(root)
+    let output = Command::new("git")
+        .arg("-C")
+        .arg(root)
         .args([
             "show",
             &format!("{repository_commit}:{OPENMINIS_UI_MANIFEST_PATH}"),
@@ -389,7 +397,9 @@ fn verify_openminis_ui_evidence_worktree(
         );
     }
 
-    let output = isolated_git_command(root)
+    let output = Command::new("git")
+        .arg("-C")
+        .arg(root)
         .args(["ls-files", "--others", "--exclude-standard", "-z"])
         .output()
         .map_err(|err| format!("list untracked repository paths: {err}"))?;

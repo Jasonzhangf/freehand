@@ -1,7 +1,7 @@
 use crate::adp_wire::TurnProjectionInput;
 use crate::dto::*;
 use crate::{
-    UiProtocolError, fail_waiting_tool_activities, human_friendly_terminal_text,
+    UiProtocolError, fail_waiting_tool_activities, terminal_text_projection,
     tool_activities_from_input, validate_command,
 };
 use freehand_contracts::{SemanticEventKind, TerminalStatus};
@@ -152,8 +152,16 @@ pub(crate) const UI_COMMAND_DESCRIPTORS: &[UiCommandDescriptor] = &[
         exposure: UiAdpCommandExposure::Public,
     },
     UiCommandDescriptor {
-        serde_name: "QuerySessionListPage",
-        semantic_kind: "query_session_list_page",
+        serde_name: "QuerySessionList",
+        semantic_kind: "query_session_list",
+        frame_class: UiCommandFrameClass::Query,
+        target_owner_feature: "ui.protocol",
+        target_owner_module: "crates/freehand-ui-protocol",
+        exposure: UiAdpCommandExposure::Public,
+    },
+    UiCommandDescriptor {
+        serde_name: "QueryArchivedSessionList",
+        semantic_kind: "query_archived_session_list",
         frame_class: UiCommandFrameClass::Query,
         target_owner_feature: "ui.protocol",
         target_owner_module: "crates/freehand-ui-protocol",
@@ -590,8 +598,9 @@ pub(crate) fn command_descriptor(command: &UiCommand) -> &'static UiCommandDescr
             command_descriptor_by_serde_name("QueryLatestActiveTurn")
         }
         UiCommand::QueryTurn { .. } => command_descriptor_by_serde_name("QueryTurn"),
-        UiCommand::QuerySessionListPage { .. } => {
-            command_descriptor_by_serde_name("QuerySessionListPage")
+        UiCommand::QuerySessionList => command_descriptor_by_serde_name("QuerySessionList"),
+        UiCommand::QueryArchivedSessionList => {
+            command_descriptor_by_serde_name("QueryArchivedSessionList")
         }
         UiCommand::QuerySessionTurns { .. } => {
             command_descriptor_by_serde_name("QuerySessionTurns")
@@ -822,23 +831,7 @@ pub fn turn_projection_from_events(input: TurnProjectionInput) -> UiTurnProjecti
             .terminal_event
             .as_ref()
             .map(|event| event.status.clone()),
-        terminal_text: {
-            let text_chunks: Vec<String> = input
-                .semantic_events
-                .iter()
-                .filter_map(|event| {
-                    if event.kind == SemanticEventKind::Text {
-                        Some(event.content.clone())
-                    } else {
-                        None
-                    }
-                })
-                .collect();
-            input
-                .terminal_event
-                .as_ref()
-                .map(|event| human_friendly_terminal_text(&text_chunks, event))
-        },
+        terminal_text: input.terminal_event.as_ref().map(terminal_text_projection),
         user_options: input
             .terminal_event
             .as_ref()

@@ -7,7 +7,6 @@
   - `session.restore`
   - `session.append_turn_to_turn`
   - `session.list_persisted`
-  - `session.list_persisted_page`
 
 ## Resource Operation Test Coverage
 
@@ -16,7 +15,6 @@
 | `session.restore` | bound | `cargo test -p freehand-reason ui_restore_ -- --nocapture` covers inactive partial restore-with-warning and active incomplete hard-error behavior | `cargo test -p freehand-reason -- --nocapture` covers snapshot-plus-tail, ledger-only rebuild, exact-round selected UI restore, partial warning, and active incomplete rejection in one owner package | `node scripts/verify-webui-session-restore-error-exit-online.mjs` proves production ADP `QuerySessionTurns` returns the legacy partial transcript with a visible integrity warning instead of a dispatch-port failure |
 | `session.append_turn_to_turn` | bound | `cargo test -p freehand-reason -- --nocapture` covers session snapshot, reason-ledger append, sequence, rollback, and recovery tests | `cargo test -p freehand-reason -- --nocapture` covers persistence save/reload, active-turn update, terminal materialization, sidecar rebuild, and metadata reload smokes | `cargo test -p freehand-runtime session_continue -- --nocapture` covers CLI/shared runtime persistence restore smokes and replay/debug inspection without provider raw truth |
 | `session.list_persisted` | bound | `cargo test -p freehand-runtime runtime_query_session_search_returns_worker_hits_under_parent_session -- --nocapture --test-threads=1` covers persisted index/metadata rows consumed through runtime search projection | `cargo test -p freehand-ui-protocol session_search -- --nocapture --test-threads=1` covers route separation and DTO validation while persistence remains owner truth | `node scripts/verify-webui-session-search-online.mjs` covers WebUI Search querying persisted session index truth and keeping worker matches out of the top-level result list |
-| `session.list_persisted_page` | bound | `cargo test -p freehand-reason session_list_page -- --nocapture --test-threads=1` covers ordered metadata-only summaries, owner cursors, archive separation, legacy migration, durable maintenance, and explicit unavailable-session facts | `cargo test -p freehand-reason session_list_page -- --nocapture --test-threads=1` proves unavailable poisoned rows do not block other page slots or force full transcript restore | `cargo test -p freehand-runtime runtime_session_list_page_avoids_full_transcript_restore -- --nocapture --test-threads=1` proves runtime consumes the bounded owner page without full restore |
 
 - lifecycle path under test:
   - authoritative session rewrite truth is snapshotted under `~/.freehand/state/turns`

@@ -185,19 +185,19 @@ Required edges:
 | --- | --- | --- | --- |
 | `root.open_home` | launch/back/home | none | Home route visible |
 | `home.open_session` | tap session row | `session_id` | SessionDetail route, Home hidden |
-| `home.delete_session` | row action | `session_id` | confirmation -> owner command -> latest `QuerySessionListPage` |
+| `home.delete_session` | row action | `session_id` | confirmation -> owner command -> QuerySessionList |
 | `home.open_search` | corner search | none/query | Search surface |
 | `home.open_new` | corner new | optional kind/cwd | New surface |
 | `root.open_tools` | corner tools | none | ToolsRegistry surface |
 | `root.open_timer` | corner timer | none | TimerDashboard surface |
 | `root.open_settings` | corner settings | optional page | Settings surface |
 | `session.back_home` | back/home | none | Home route visible, selected session preserved |
-| `session.rename_session` | current-session header action | `session_id`, `title` | owner command, then latest `QuerySessionListPage` and selected-session refresh |
+| `session.rename_session` | current-session header action | `session_id`, `title` | owner command, then QuerySessionList and selected-session refresh |
 | `session.submit` | composer submit | text/attachments/session_id | owner command, pending receipt in session scope |
 | `session.open_agent_sheet` | agent/status tap | session_id | scoped Agent sheet only |
 | `session.open_worker_session` | Worker task tap | `worker_session_id` from TaskBoard | SessionDetail for Worker session |
 | `search.open_result` | search result tap | parent `session_id` | SessionDetail route |
-| `new.created` | CreateSession receipt | `session_id` | SessionDetail route after latest `QuerySessionListPage` |
+| `new.created` | CreateSession receipt | `session_id` | SessionDetail route after QuerySessionList |
 | `tools.refresh` | refresh | none | QueryToolRegistry only |
 | `timer.refresh` | refresh | none | QueryTimerList only |
 | `settings.navigate` | settings card/back | `page_id` | Settings stack page only |
@@ -208,7 +208,7 @@ Required edges:
 
 Owner input:
 
-- latest `QuerySessionListPage`
+- `QuerySessionList`
 - scoped lifecycle projections when already loaded:
   - TaskBoard
   - AgentBoard
@@ -347,7 +347,7 @@ Render contract:
 Owner input:
 
 - `CreateSession`
-- latest `QuerySessionListPage` after receipt
+- `QuerySessionList` after receipt
 
 Render contract:
 

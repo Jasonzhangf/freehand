@@ -631,28 +631,6 @@ mod tests {
     use tokio_tungstenite::tungstenite::client::IntoClientRequest;
     use tokio_tungstenite::tungstenite::http::{HeaderValue, header};
 
-    fn active_session_list_page_command() -> UiCommand {
-        UiCommand::QuerySessionListPage {
-            archived: false,
-            page: freehand_ui_protocol::UiSessionListPageRequest {
-                direction: freehand_ui_protocol::UiSessionListPageDirection::Latest,
-                cursor: None,
-                limit: 100,
-            },
-        }
-    }
-
-    fn archived_session_list_page_command() -> UiCommand {
-        UiCommand::QuerySessionListPage {
-            archived: true,
-            page: freehand_ui_protocol::UiSessionListPageRequest {
-                direction: freehand_ui_protocol::UiSessionListPageDirection::Latest,
-                cursor: None,
-                limit: 100,
-            },
-        }
-    }
-
     static HOME_LOCK: Mutex<()> = Mutex::new(());
     const TEST_ADP_AUTH_TOKEN: &str = "test-adp-auth-token";
 
@@ -1355,11 +1333,11 @@ mod tests {
         match send_adp_query_and_wait_result(
             &mut socket,
             "session-active-list-1",
-            active_session_list_page_command(),
+            UiCommand::QuerySessionList,
         )
         .await
         {
-            UiQueryResult::SessionListPage(list) => assert!(
+            UiQueryResult::SessionList(list) => assert!(
                 !list
                     .sessions
                     .iter()
@@ -1370,11 +1348,11 @@ mod tests {
         match send_adp_query_and_wait_result(
             &mut socket,
             "session-archived-list-1",
-            archived_session_list_page_command(),
+            UiCommand::QueryArchivedSessionList,
         )
         .await
         {
-            UiQueryResult::SessionListPage(list) => {
+            UiQueryResult::SessionList(list) => {
                 let archived = list
                     .sessions
                     .iter()
@@ -1397,11 +1375,11 @@ mod tests {
         match send_adp_query_and_wait_result(
             &mut socket,
             "session-active-list-2",
-            active_session_list_page_command(),
+            UiCommand::QuerySessionList,
         )
         .await
         {
-            UiQueryResult::SessionListPage(list) => {
+            UiQueryResult::SessionList(list) => {
                 let restored = list
                     .sessions
                     .iter()

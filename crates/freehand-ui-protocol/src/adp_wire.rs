@@ -51,7 +51,7 @@ pub struct TurnProjectionInput {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub enum UiQueryResult {
     Turn(Option<UiTurnProjection>),
-    SessionListPage(UiSessionListPageProjection),
+    SessionList(UiSessionListProjection),
     SessionTurns(UiSessionTranscriptProjection),
     SessionTurnsPage(UiSessionTranscriptPageProjection),
     SessionSearch(UiSessionSearchProjection),
@@ -117,9 +117,9 @@ pub struct UiAdpFailure {
     pub retryable: bool,
 }
 
-pub const UI_ADP_PROTOCOL_VERSION: u32 = 4;
-pub const UI_ADP_HANDSHAKE_CAPABILITY: &str = "adp.v4.handshake";
-pub const UI_ADP_INTERNAL_COMMAND_CAPABILITY: &str = "adp.v4.internal_command_ingress";
+pub const UI_ADP_PROTOCOL_VERSION: u32 = 3;
+pub const UI_ADP_HANDSHAKE_CAPABILITY: &str = "adp.v3.handshake";
+pub const UI_ADP_INTERNAL_COMMAND_CAPABILITY: &str = "adp.v3.internal_command_ingress";
 
 pub fn adp_internal_command_capability(token: &str) -> String {
     format!("{}:{}", UI_ADP_INTERNAL_COMMAND_CAPABILITY, token)

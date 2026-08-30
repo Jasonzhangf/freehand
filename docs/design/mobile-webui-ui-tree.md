@@ -296,7 +296,7 @@ CRUD controls must be compact:
 - primary tap opens the session
 - secondary actions live in a row action menu or selection mode
 - destructive actions require explicit confirmation
-- action receipts re-query `QuerySessionListPage` before the row changes state
+- action receipts re-query `QuerySessionList` before the row changes state
 
 Home must not keep browser-local session CRUD truth. It may keep only transient
 selection/menu/dialog state.

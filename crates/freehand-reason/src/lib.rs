@@ -37,13 +37,11 @@ use serde_json::json;
 use thiserror::Error;
 
 pub use persistence::{
-    ActiveTurnSnapshot, MAX_SESSION_LIST_PAGE_LIMIT, PersistedSessionIndexEntry,
-    PersistedSessionMetadataEntry, PersistedSessionSummary, PersistedSessionSummaryIndex,
+    ActiveTurnSnapshot, PersistedSessionIndexEntry, PersistedSessionMetadataEntry,
     PersistedSessionView, ProviderRawLedgerRow, ProviderRawLedgerWrite, ProviderRawScenePosition,
     ReasonLedgerPayload, ReasonLedgerRow, ReasonPersistence, ReasonPersistenceCursor,
-    ReasonPersistenceError, ReasonSessionLatestStatus, ReasonSessionListCursor,
-    ReasonSessionListPage, ReasonSessionListPageRequest, ReasonTurnPage, ReasonTurnPageDirection,
-    ReasonTurnPageRequest, RestoredReasonSession, SessionRollbackMarker,
+    ReasonPersistenceError, ReasonTurnPage, ReasonTurnPageDirection, ReasonTurnPageRequest,
+    RestoredReasonSession, SessionRollbackMarker,
 };
 pub use rewrite_runtime::{
     CompactionPolicyOutcome, CompactionPolicyRequest, CompactionRewritePayload,
@@ -522,43 +520,14 @@ impl ReasonTurnEngine {
                     vec![format!("usage_events={}", turn.usage_events.len())],
                 );
             }
-            ProviderSemanticOutput::Terminal(event) => {
-                if event.status != TerminalStatus::ToolPending {
-                    // Only apply raw provider terminal if the turn has not already received
-                    // a completion-schema-driven terminal.  Completion schema is the
-                    // authoritative semantic summary; the raw stop_reason (e.g. "end_turn")
-                    // is not meaningful presentation text and must not shadow a
-                    // harness-parsed completion terminal.
-                    if turn.terminal_event.is_none() {
-                        turn.terminal_event = Some(event.clone());
-                        turn.timing.mark_completed(unix_millis_now());
-                        self.publish(ReasonBroadcastEvent::Terminal(event.clone()));
-                        self.emit_debug(
-                            turn,
-                            "ReasonTurnEngine::apply_provider_output",
-                            "provider terminal applied",
-                            vec![format!("terminal_status={:?}", event.status)],
-                        );
-                    } else {
-                        self.emit_debug(
-                            turn,
-                            "ReasonTurnEngine::apply_provider_output",
-                            "provider terminal skipped (completion terminal already set)",
-                            vec![format!(
-                                "terminal_status={:?} kept_summary={:?}",
-                                event.status,
-                                turn.terminal_event.as_ref().map(|e| &e.summary)
-                            )],
-                        );
-                    }
-                } else {
-                    self.emit_debug(
-                        turn,
-                        "ReasonTurnEngine::apply_provider_output",
-                        "provider tool-pending observed",
-                        vec!["terminal_waits_for_tool_round=true".to_owned()],
-                    );
-                }
+            ProviderSemanticOutput::Terminal(_) => {
+                // provider terminal is not final truth; wait for completion schema validation
+                self.emit_debug(
+                    turn,
+                    "ReasonTurnEngine::apply_provider_output",
+                    "provider terminal observed but not accepted",
+                    vec!["terminal_waits_for_completion_schema=true".to_owned()],
+                );
             }
             ProviderSemanticOutput::Error(event) => {
                 turn.error_events.push(event.clone());
@@ -572,18 +541,6 @@ impl ReasonTurnEngine {
             }
         }
         Ok(())
-    }
-
-    pub fn discard_provider_terminal(&self, turn: &mut TurnRecord, summary: impl Into<String>) {
-        turn.terminal_event = None;
-        turn.timing.completed_at_ms = None;
-        turn.timing.total_elapsed_ms = None;
-        self.emit_debug(
-            turn,
-            "ReasonTurnEngine::discard_provider_terminal",
-            "provider terminal invalidated before persistence",
-            vec![summary.into()],
-        );
     }
 
     pub fn submit_completion(
@@ -1232,73 +1189,6 @@ mod tests {
         assert_eq!(projected.len(), 1);
         assert_eq!(projected[0].user_text, "hello");
         assert_eq!(projected[0].terminal_summary, None);
-    }
-
-    #[test]
-    fn provider_terminal_event_closes_turn_without_completion_schema() {
-        let engine = ReasonTurnEngine::new();
-        let receiver = engine.subscribe(4);
-        let mut history = session_history();
-        let mut turn = engine
-            .start_turn(&mut history, start_input())
-            .expect("turn");
-        let provider_terminal = ReasonResp03TerminalEvent {
-            session_id: turn.request.session_id.clone(),
-            turn_id: turn.request.turn_id.clone(),
-            trace_id: turn.request.trace_id.clone(),
-            feature_id: turn.request.feature_id.clone(),
-            agent_id: turn.request.agent_id.clone(),
-            status: TerminalStatus::Success,
-            summary: "end_turn".to_owned(),
-            user_options: None,
-        };
-        engine
-            .apply_provider_output(
-                &mut turn,
-                ProviderSemanticOutput::Terminal(provider_terminal.clone()),
-            )
-            .expect("provider terminal must close turn truth");
-        assert_eq!(
-            turn.terminal_event.as_ref(),
-            Some(&provider_terminal),
-            "provider terminal is objective turn truth and must not wait for a completion schema"
-        );
-        assert!(turn.timing.completed_at_ms.is_some());
-        assert!(matches!(
-            receiver.recv().expect("terminal broadcast"),
-            ReasonBroadcastEvent::Terminal(event)
-                if event == provider_terminal
-        ));
-    }
-
-    #[test]
-    fn provider_terminal_failure_preserves_objective_status() {
-        let engine = ReasonTurnEngine::new();
-        let mut history = session_history();
-        let mut turn = engine
-            .start_turn(&mut history, start_input())
-            .expect("turn");
-        let provider_terminal = ReasonResp03TerminalEvent {
-            session_id: turn.request.session_id.clone(),
-            turn_id: turn.request.turn_id.clone(),
-            trace_id: turn.request.trace_id.clone(),
-            feature_id: turn.request.feature_id.clone(),
-            agent_id: turn.request.agent_id.clone(),
-            status: TerminalStatus::Interrupted,
-            summary: "max_tokens".to_owned(),
-            user_options: None,
-        };
-        engine
-            .apply_provider_output(
-                &mut turn,
-                ProviderSemanticOutput::Terminal(provider_terminal.clone()),
-            )
-            .expect("provider terminal must close turn truth");
-        assert_eq!(
-            turn.terminal_event.as_ref(),
-            Some(&provider_terminal),
-            "provider-observed interruption must remain an objective terminal status"
-        );
     }
 
     #[test]

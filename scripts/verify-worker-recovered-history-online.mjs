@@ -2,11 +2,9 @@ import { spawn } from 'node:child_process';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { adpVerifierRequest } from './lib/adp-verifier-client.mjs';
 
 const repo = process.cwd();
 const baseUrl = normalizedBaseUrl(process.env.FREEHAND_WORKER_RECOVERY_BASE_URL || 'http://127.0.0.1:4042/');
-const adpUrl = process.env.FREEHAND_WORKER_RECOVERY_ADP_URL || adpUrlFromBaseUrl(baseUrl);
 const chromePath = process.env.FREEHAND_WORKER_RECOVERY_CHROME ||
   process.env.FREEHAND_WEBUI_CHROME ||
   '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
@@ -259,14 +257,52 @@ async function assertProductionPageReachable() {
 }
 
 async function pageAdpQuery(query, timeoutMs = 30_000) {
-  return await adpVerifierRequest({
-    url: adpUrl,
-    kind: 'query',
-    payloadKey: 'query',
-    payload: query,
-    timeoutMs,
-    clientName: 'worker-recovered-history-verifier',
-  });
+  return await evalInPage(async (queryPayload, timeout) => {
+    const endpoint = document.querySelector('[data-webui-shell="true"]')?.dataset.adpEndpoint || '/adp';
+    const url = new URL(endpoint, location.href);
+    url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:';
+    return await new Promise((resolve, reject) => {
+      const socket = new WebSocket(url);
+      const suffix = `${Date.now()}-${Math.random().toString(36).slice(2)}`;
+      const handshakeId = `handshake-${suffix}`;
+      const requestId = `query-${suffix}`;
+      const timer = setTimeout(() => {
+        socket.close();
+        reject(new Error('ADP query timeout'));
+      }, timeout);
+      const fail = (message) => {
+        clearTimeout(timer);
+        socket.close();
+        reject(new Error(message));
+      };
+      socket.addEventListener('open', () => socket.send(JSON.stringify({
+        protocol_version: 3,
+        kind: 'handshake',
+        request_id: handshakeId,
+        client_name: 'worker-recovered-history-verifier',
+        capabilities: ['adp.v3.handshake'],
+      })));
+      socket.addEventListener('message', (event) => {
+        const message = JSON.parse(event.data);
+        if (message.request_id === handshakeId) {
+          if (message.kind !== 'handshake_accepted') return fail(JSON.stringify(message));
+          socket.send(JSON.stringify({
+            protocol_version: 3,
+            kind: 'query',
+            request_id: requestId,
+            query: queryPayload,
+          }));
+          return;
+        }
+        if (message.request_id !== requestId) return;
+        clearTimeout(timer);
+        socket.close();
+        if (message.kind === 'failure') reject(new Error(JSON.stringify(message)));
+        else resolve(message.result);
+      });
+      socket.addEventListener('error', () => fail('ADP query socket error'));
+    });
+  }, query, timeoutMs);
 }
 
 function variant(result, name) {
@@ -367,12 +403,4 @@ function createCdpClient(wsUrl) {
 
 function normalizeStatus(value) { return `${value || ''}`.trim().toLowerCase(); }
 function normalizedBaseUrl(value) { return value.endsWith('/') ? value : `${value}/`; }
-
-function adpUrlFromBaseUrl(value) {
-  const url = new URL(value);
-  url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:';
-  url.pathname = '/adp';
-  url.search = '';
-  return url.toString();
-}
 function delay(ms) { return new Promise((resolve) => setTimeout(resolve, ms)); }

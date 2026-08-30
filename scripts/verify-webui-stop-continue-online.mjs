@@ -4,7 +4,6 @@ import fss from 'node:fs';
 import http from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
-import { adpVerifierRequest, requireSessionListPage } from './lib/adp-verifier-client.mjs';
 
 const repo = process.cwd();
 const home = process.env.HOME;
@@ -20,7 +19,6 @@ const baseUrl = normalizedBaseUrl(
 );
 const adpUrl =
   process.env.FREEHAND_WEBUI_STOP_CONTINUE_ADP_URL || adpUrlFromBaseUrl(baseUrl);
-const adpAuthToken = process.env.FREEHAND_ADP_AUTH_TOKEN || '';
 const fixedSessionId =
   process.env.FREEHAND_WEBUI_STOP_CONTINUE_SESSION || 'webui-stop-continue-fixed';
 const fixturePort = Number.parseInt(
@@ -97,7 +95,7 @@ try {
   await waitHealth();
   await ensureFixedSession();
 
-  const sessionListBefore = await activeSessionListPage();
+  const sessionListBefore = await adpQuery('QuerySessionList');
   const sessionIdsBefore = sessionIdsFromList(sessionListBefore);
   await fs.writeFile(
     path.join(artifactDir, 'adp-session-list-before.json'),
@@ -314,7 +312,7 @@ try {
   );
   await capture(cdp, '07-same-session-continued-success', scope);
 
-  const sessionListAfter = await activeSessionListPage();
+  const sessionListAfter = await adpQuery('QuerySessionList');
   const sessionIdsAfter = sessionIdsFromList(sessionListAfter);
   await fs.writeFile(
     path.join(artifactDir, 'adp-session-list-after.json'),
@@ -525,7 +523,7 @@ async function captureFailureState(error) {
 
   const [sessionTurns, sessionList, configAfter] = await Promise.all([
     querySessionTurns().catch((queryError) => ({ error: queryError.message })),
-    activeSessionListPage().catch((queryError) => ({ error: queryError.message })),
+    adpQuery('QuerySessionList').catch((queryError) => ({ error: queryError.message })),
     run([cli, 'adp-config-query', '--url', adpUrl]).catch((runError) => ({
       code: -1,
       stdout: '',
@@ -654,13 +652,13 @@ function isIgnoredBrowserLogError(entry) {
 }
 
 async function ensureFixedSession() {
-  const activeList = await activeSessionListPage();
-  const activeSessions = requireSessionListPage(activeList, 'active session list').sessions;
+  const activeList = await adpQuery('QuerySessionList');
+  const activeSessions = activeList?.SessionList?.sessions || [];
   if (activeSessions.some((session) => session.session_id === fixedSessionId)) {
     return;
   }
-  const archivedList = await archivedSessionListPage();
-  const archivedSessions = requireSessionListPage(archivedList, 'archived session list').sessions;
+  const archivedList = await adpQuery('QueryArchivedSessionList');
+  const archivedSessions = archivedList?.SessionList?.sessions || [];
   if (archivedSessions.some((session) => session.session_id === fixedSessionId)) {
     await adpCommand({ RestoreSession: { session_id: fixedSessionId } });
     return;
@@ -824,24 +822,6 @@ async function adpQuery(query) {
   return await adpRequest('query', 'query', query);
 }
 
-async function activeSessionListPage() {
-  return await adpQuery({
-    QuerySessionListPage: {
-      archived: false,
-      page: { direction: 'Latest', cursor: null, limit: 100 },
-    },
-  });
-}
-
-async function archivedSessionListPage() {
-  return await adpQuery({
-    QuerySessionListPage: {
-      archived: true,
-      page: { direction: 'Latest', cursor: null, limit: 100 },
-    },
-  });
-}
-
 async function querySessionTurns() {
   return await adpQuery({ QuerySessionTurns: { session_id: fixedSessionId } });
 }
@@ -851,8 +831,7 @@ function sessionTurnsFromAdp(adp) {
 }
 
 function sessionIdsFromList(adp) {
-  const page = adp?.SessionListPage || adp?.session_list_page || adp;
-  return ((Array.isArray(page) ? page : page?.sessions) || [])
+  return (adp?.SessionList?.sessions || [])
     .map((session) => session.session_id)
     .filter(Boolean)
     .sort();
@@ -863,13 +842,46 @@ async function adpCommand(command) {
 }
 
 function adpRequest(kind, payloadKey, payload) {
-  return adpVerifierRequest({
-    url: adpUrl,
-    authToken: adpAuthToken,
-    kind,
-    payloadKey,
-    payload,
-    clientName: 'freehand-stop-continue-verifier',
+  const socket = new WebSocket(adpUrl);
+  const requestId = `${kind}-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => {
+      socket.close();
+      reject(new Error(`ADP ${kind} timeout`));
+    }, 20_000);
+    socket.addEventListener('open', () => {
+      socket.send(JSON.stringify({ kind, request_id: requestId, [payloadKey]: payload }));
+    });
+    socket.addEventListener('message', (event) => {
+      const message = JSON.parse(event.data);
+      if (message.request_id !== requestId) {
+        return;
+      }
+      clearTimeout(timer);
+      socket.close();
+      if (message.kind === 'failure') {
+        reject(
+          new Error(
+            (message.failure && (message.failure.message || message.failure.code)) ||
+              'ADP failure',
+          ),
+        );
+        return;
+      }
+      if (message.kind === 'query_result') {
+        resolve(message.result);
+        return;
+      }
+      if (message.kind === 'command_receipt') {
+        resolve(message.receipt);
+        return;
+      }
+      reject(new Error(`unexpected ADP ${kind} response: ${message.kind}`));
+    });
+    socket.addEventListener('error', () => {
+      clearTimeout(timer);
+      reject(new Error(`ADP ${kind} socket error`));
+    });
   });
 }
 

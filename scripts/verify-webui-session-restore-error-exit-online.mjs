@@ -2,13 +2,11 @@ import { spawn } from 'node:child_process';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { adpVerifierRequest, requireSessionListPage } from './lib/adp-verifier-client.mjs';
 
 const repo = process.cwd();
 const home = process.env.HOME;
 const baseUrl = normalizedBaseUrl(process.env.FREEHAND_SESSION_UNLOCK_BASE_URL || 'http://127.0.0.1:4042/');
 const adpUrl = process.env.FREEHAND_SESSION_UNLOCK_ADP_URL || adpUrlFromBaseUrl(baseUrl);
-const adpAuthToken = process.env.FREEHAND_ADP_AUTH_TOKEN || '';
 const chromePath = process.env.FREEHAND_SESSION_UNLOCK_CHROME ||
   process.env.FREEHAND_WEBUI_CHROME ||
   defaultBrowserPath();
@@ -16,7 +14,7 @@ const debugPort = Number.parseInt(process.env.FREEHAND_SESSION_UNLOCK_DEBUG_PORT
 const problemSessionId = process.env.FREEHAND_SESSION_UNLOCK_SESSION_ID ||
   'webui-session-20260723001509-bd98e156';
 const problemTurnId = process.env.FREEHAND_SESSION_UNLOCK_TURN_ID || 'runtime-turn-541-r3';
-const assetVersion = '20260824-session-list-page';
+const assetVersion = '20260726-stale-lifecycle-reconcile';
 const runId = `webui-session-unlock-${Date.now()}`;
 const newSessionId = process.env.FREEHAND_SESSION_UNLOCK_NEW_SESSION_ID ||
   `${runId}-new`;
@@ -180,7 +178,7 @@ try {
   }, 30_000, 'new session selected after refresh-error action', newSessionId);
   let newSessionOwner = null;
   for (let attempt = 0; attempt < 60; attempt += 1) {
-    newSessionOwner = findSession(await activeSessionListPage(), newSessionId);
+    newSessionOwner = findSession(sessionListPayload(await adpQuery('QuerySessionList')), newSessionId);
     if (newSessionOwner) break;
     await delay(500);
   }
@@ -252,11 +250,13 @@ function sessionTurnsPayload(result) {
 }
 
 function sessionListPayload(result) {
-  return requireSessionListPage(result);
+  return result?.SessionList || result?.session_list || result;
 }
 
 function allSessionRows(list) {
-  return list.sessions;
+  if (Array.isArray(list?.active)) return list.active;
+  if (Array.isArray(list?.sessions)) return list.sessions;
+  return [];
 }
 
 function findSession(list, sessionId) {
@@ -267,25 +267,32 @@ async function adpQuery(query, timeoutMs = 30_000) {
   return await adpRequest('query', 'query', query, timeoutMs);
 }
 
-async function activeSessionListPage() {
-  const result = await adpRequest('query', 'query', {
-    QuerySessionListPage: {
-      archived: false,
-      page: { direction: 'Latest', cursor: null, limit: 100 },
-    },
-  }, 30_000);
-  return sessionListPayload(result);
-}
-
 function adpRequest(kind, payloadKey, payload, timeoutMs) {
-  return adpVerifierRequest({
-    url: adpUrl,
-    authToken: adpAuthToken,
-    kind,
-    payloadKey,
-    payload,
-    timeoutMs,
-    clientName: 'freehand-session-unlock-verifier',
+  const socket = new WebSocket(adpUrl);
+  const requestId = `${kind}-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => {
+      socket.close();
+      reject(new Error(`ADP ${kind} timeout`));
+    }, timeoutMs);
+    socket.addEventListener('open', () => {
+      socket.send(JSON.stringify({ kind, request_id: requestId, [payloadKey]: payload }));
+    });
+    socket.addEventListener('message', (event) => {
+      const message = JSON.parse(event.data);
+      if (message.request_id !== requestId) return;
+      clearTimeout(timer);
+      socket.close();
+      if (message.kind === 'failure') {
+        return reject(new Error(message.failure?.message || message.failure?.code || 'ADP failure'));
+      }
+      if (message.kind === 'query_result') return resolve(message.result);
+      reject(new Error(`unexpected ADP ${kind} response: ${message.kind}`));
+    });
+    socket.addEventListener('error', () => {
+      clearTimeout(timer);
+      reject(new Error(`ADP ${kind} socket error`));
+    });
   });
 }
 
@@ -361,7 +368,7 @@ async function writeFailure(error) {
   await fs.writeFile(path.join(failureDir, 'error.txt'), error.stack || error.message);
   await fs.writeFile(path.join(failureDir, 'chrome-stdout.txt'), chromeStdout);
   await fs.writeFile(path.join(failureDir, 'chrome-stderr.txt'), chromeStderr);
-  await activeSessionListPage()
+  await adpQuery('QuerySessionList')
     .then((value) => fs.writeFile(path.join(failureDir, 'session-list.json'), JSON.stringify(value, null, 2)))
     .catch((queryError) => fs.writeFile(path.join(failureDir, 'session-list-error.txt'), queryError.stack || queryError.message));
   if (cdp) {

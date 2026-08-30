@@ -5,7 +5,6 @@ mod lifecycle_wait;
 mod live_context;
 mod master_runner;
 mod path_diagnostics;
-mod session_paging;
 mod timer_store;
 mod turn_projection;
 mod worker_runner;
@@ -43,10 +42,6 @@ pub use master_runner::{
     ProductionMasterRunner, ProductionMasterRunnerError, ProductionMasterTickOutcome,
 };
 pub(crate) use path_diagnostics::{expand_leading_tilde_path, path_resolution_diagnostic_text};
-pub(crate) use session_paging::{
-    internal_runtime_session_id, session_list_page_request_from_ui, session_summary_to_ui,
-    visible_session_list_page,
-};
 pub(crate) use timer_store::{
     DueTimerSchedule, TimerScheduleMode, TimerScheduleRequest, TimerStore,
     claim_due_timer_schedule, complete_due_timer_schedule, fail_due_timer_schedule,
@@ -194,20 +189,19 @@ use freehand_ui_protocol::{
     UiModelRouteUpdate, UiModelTransportActivity, UiModelTransportKind,
     UiModelWeightedRouteProjection, UiModelWeightedRouteUpdate, UiProtocolState,
     UiProviderConfigSummaryProjection, UiProviderConfigUpdate, UiQueryAccessScope, UiQueryResult,
-    UiRuntimeQueryPort, UiSchedulerTickCommand, UiSessionListPageInfo, UiSessionListPageProjection,
-    UiSessionMetadataProjection, UiSessionSearchChildProjection, UiSessionSearchProjection,
-    UiSessionSearchResultProjection, UiSessionTranscriptPageProjection,
-    UiSessionTurnsPageDirection, UiSessionTurnsPageInfo, UiSubmitMetadata,
-    UiTaskAgentCreateCommand, UiTaskAssignCommand, UiTaskBoardProjection, UiTaskClaimCommand,
-    UiTaskCreateCommand, UiTaskDispatchCommand, UiTaskEventInboxEntryProjection,
-    UiTaskEventInboxProjection, UiTaskHistoryProjection, UiTaskLedgerEventProjection,
-    UiTaskListProjection, UiTaskReviewCommand, UiTaskReviewRejectionCommand,
-    UiTaskSnapshotProjection, UiTimerEventProjection, UiTimerListProjection, UiTimerProjection,
-    UiTimerRepeatCommand, UiTimerScheduleCommand, UiToolRegistryProjection,
-    UiToolRegistryToolProjection, UiTurnProjection, UiTurnTimingProjection, UiWorkerControlCommand,
-    UiWorkerControlEventProjection, UiWorkerControlProjection,
-    checkpoint_projection_from_runtime_summary, turn_projection_for_client,
-    turn_projection_from_events,
+    UiRuntimeQueryPort, UiSchedulerTickCommand, UiSessionMetadataProjection,
+    UiSessionSearchChildProjection, UiSessionSearchProjection, UiSessionSearchResultProjection,
+    UiSessionTranscriptPageProjection, UiSessionTurnsPageDirection, UiSessionTurnsPageInfo,
+    UiSubmitMetadata, UiTaskAgentCreateCommand, UiTaskAssignCommand, UiTaskBoardProjection,
+    UiTaskClaimCommand, UiTaskCreateCommand, UiTaskDispatchCommand,
+    UiTaskEventInboxEntryProjection, UiTaskEventInboxProjection, UiTaskHistoryProjection,
+    UiTaskLedgerEventProjection, UiTaskListProjection, UiTaskReviewCommand,
+    UiTaskReviewRejectionCommand, UiTaskSnapshotProjection, UiTimerEventProjection,
+    UiTimerListProjection, UiTimerProjection, UiTimerRepeatCommand, UiTimerScheduleCommand,
+    UiToolRegistryProjection, UiToolRegistryToolProjection, UiTurnProjection,
+    UiTurnTimingProjection, UiWorkerControlCommand, UiWorkerControlEventProjection,
+    UiWorkerControlProjection, checkpoint_projection_from_runtime_summary,
+    turn_projection_for_client, turn_projection_from_events,
 };
 use serde_json::{Map, Value, json};
 use thiserror::Error;
@@ -422,7 +416,6 @@ impl LiveReasonExecutionRole {
         registry: &BuiltinToolRegistry,
         execution_profile: LiveReasonExecutionProfile,
         search_stage: Option<SourcedSearchRoundStage>,
-        web_fetch_recovery: bool,
     ) -> Vec<ProviderToolDefinition> {
         if execution_profile == LiveReasonExecutionProfile::CleanSearch {
             return registry
@@ -432,25 +425,18 @@ impl LiveReasonExecutionRole {
                 .collect();
         }
         if execution_profile == LiveReasonExecutionProfile::SourcedSearch {
-            if web_fetch_recovery {
-                return registry
-                    .worker_implemented_definitions()
-                    .into_iter()
-                    .filter(|definition| definition.name == "web_fetch")
-                    .collect();
-            }
-            return match search_stage {
-                Some(SourcedSearchRoundStage::HostedDiscovery) => Vec::new(),
+            if !matches!(
+                search_stage,
                 Some(SourcedSearchRoundStage::CamoVerification)
-                | Some(SourcedSearchRoundStage::SocialDiscovery) => {
-                    return registry
-                        .worker_implemented_definitions()
-                        .into_iter()
-                        .filter(|definition| definition.name == "camo")
-                        .collect();
-                }
-                _ => return Vec::new(),
-            };
+                    | Some(SourcedSearchRoundStage::SocialDiscovery)
+            ) {
+                return Vec::new();
+            }
+            return registry
+                .worker_implemented_definitions()
+                .into_iter()
+                .filter(|definition| definition.name == "camo")
+                .collect();
         }
         match self {
             Self::Master => registry.master_implemented_definitions(),
@@ -463,7 +449,6 @@ impl LiveReasonExecutionRole {
         descriptor: &ProviderDescriptor,
         execution_profile: LiveReasonExecutionProfile,
         search_stage: Option<SourcedSearchRoundStage>,
-        web_fetch_recovery: bool,
     ) -> Vec<ProviderHostedToolDefinition> {
         let allow_hosted_search = match (self, execution_profile) {
             (Self::Master, LiveReasonExecutionProfile::Workspace) => descriptor
@@ -476,7 +461,6 @@ impl LiveReasonExecutionRole {
             (Self::Worker, LiveReasonExecutionProfile::SourcedSearch) => {
                 descriptor.capabilities.web_search.is_hosted()
                     && search_stage == Some(SourcedSearchRoundStage::HostedDiscovery)
-                    && !web_fetch_recovery
             }
             (Self::Worker, LiveReasonExecutionProfile::Workspace) => descriptor
                 .capabilities
@@ -499,16 +483,10 @@ impl LiveReasonExecutionRole {
         registry: &BuiltinToolRegistry,
         execution_profile: LiveReasonExecutionProfile,
         search_stage: Option<SourcedSearchRoundStage>,
-        web_fetch_recovery: bool,
     ) -> String {
         if execution_profile == LiveReasonExecutionProfile::CleanSearch {
             let names = self
-                .tool_definitions(
-                    registry,
-                    execution_profile,
-                    search_stage,
-                    web_fetch_recovery,
-                )
+                .tool_definitions(registry, execution_profile, search_stage)
                 .into_iter()
                 .map(|definition| definition.name)
                 .collect::<Vec<_>>()
@@ -520,7 +498,7 @@ impl LiveReasonExecutionRole {
             };
         }
         if execution_profile == LiveReasonExecutionProfile::SourcedSearch {
-            return format!("sourced-search:{search_stage:?}:recovery={web_fetch_recovery}");
+            return format!("sourced-search:{search_stage:?}");
         }
         match self {
             Self::Master => registry.master_implemented_schema_fingerprint(),
@@ -739,38 +717,6 @@ where
         on_task_list_projection,
     )
 }
-
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-enum SourcedSearchRecoveryAttempt {
-    WebFetch,
-    Exhausted,
-}
-
-fn sourced_search_recovery_attempt(
-    turn: &TurnRecord,
-    executed_tool_call_ids: &[String],
-) -> SourcedSearchRecoveryAttempt {
-    if !matches!(
-        sourced_search_round_stage(turn),
-        SourcedSearchRoundStage::HostedDiscovery
-            | SourcedSearchRoundStage::CamoVerification
-            | SourcedSearchRoundStage::SocialDiscovery
-    ) {
-        return SourcedSearchRecoveryAttempt::Exhausted;
-    }
-    let attempted_web_fetch = turn.tool_calls.iter().any(|tool_call| {
-        tool_call.tool_call.tool_name.as_str() == "web_fetch"
-            && executed_tool_call_ids
-                .contains(&tool_call.tool_call.tool_call_id.as_str().to_owned())
-    });
-    if attempted_web_fetch {
-        SourcedSearchRecoveryAttempt::Exhausted
-    } else {
-        SourcedSearchRecoveryAttempt::WebFetch
-    }
-}
-
-const SOURCED_SEARCH_RECOVERY_GUIDANCE: &str = "Hosted discovery or camo verification produced no typed evidence. Try one concrete HTTP/HTTPS URL with web_fetch; if that also fails or yields no usable source, emit the blocked final delivery schema.";
 
 pub fn run_live_reason_turn_with_hooks<FB, FD, FT>(
     selected: &SelectedAgentConfig,
@@ -1249,74 +1195,9 @@ where
     let mut tool_exchanges: Vec<ProviderToolExchange> = Vec::new();
     let mut executed_tool_call_ids = Vec::<String>::new();
     let tool_registry = BuiltinToolRegistry::reasonix_aligned();
-    let mut web_fetch_recovery_next = false;
 
     'reason_loop: loop {
         ensure_live_not_cancelled(&request)?;
-        let web_fetch_recovery = web_fetch_recovery_next;
-        web_fetch_recovery_next = false;
-        if (consecutive_schema_rejections >= 3 || consecutive_search_schema_rejections >= 3)
-            && turns
-                .last()
-                .is_some_and(|previous: &TurnRecord| previous.terminal_event.is_some())
-        {
-            drain_broadcasts(&receiver, &mut broadcasts, &mut on_broadcast);
-            drain_debug_events(&debug_receiver, &mut on_debug);
-            ensure_live_not_cancelled(&request)?;
-            let turn = turns
-                .last_mut()
-                .expect("schema rejection cap has a current turn");
-            persistence
-                .record_turn_closed(&history, turn, schema_rejections.len() as u32)
-                .map_err(|err| RuntimeLiveBridgeError::ReasonPersistenceFailed(err.to_string()))?;
-            return Ok(LiveReasonTurnOutcome {
-                turn: turn.clone(),
-                turns,
-                broadcasts,
-                rounds: round,
-                schema_rejections,
-                search_schema_rejections,
-                tool_executions,
-                restore_status,
-                restored_closed_turns,
-            });
-        }
-        if request.execution_profile == LiveReasonExecutionProfile::SourcedSearch
-            && turns.last().is_some_and(|previous| {
-                sourced_search_recovery_attempt(previous, &executed_tool_call_ids)
-                    == SourcedSearchRecoveryAttempt::Exhausted
-                    && matches!(
-                        sourced_search_round_stage(previous),
-                        SourcedSearchRoundStage::HostedDiscovery
-                            | SourcedSearchRoundStage::CamoVerification
-                            | SourcedSearchRoundStage::SocialDiscovery
-                    )
-            })
-        {
-            let previous = turns
-                .last_mut()
-                .expect("sourced-search recovery checked the latest turn");
-            engine.block_turn(
-                previous,
-                "hosted discovery, camo verification, and web_fetch recovery produced no usable typed source",
-            );
-            drain_broadcasts(&receiver, &mut broadcasts, &mut on_broadcast);
-            drain_debug_events(&debug_receiver, &mut on_debug);
-            persistence
-                .record_turn_closed(&history, previous, schema_rejections.len() as u32)
-                .map_err(|err| RuntimeLiveBridgeError::ReasonPersistenceFailed(err.to_string()))?;
-            return Ok(LiveReasonTurnOutcome {
-                turn: previous.clone(),
-                turns,
-                broadcasts,
-                rounds: round,
-                schema_rejections,
-                search_schema_rejections,
-                tool_executions,
-                restore_status,
-                restored_closed_turns,
-            });
-        }
         if let Some(resolution) = record_master_live_safe_point(
             role,
             &request,
@@ -1369,12 +1250,8 @@ where
                     sourced_search_round_stage,
                 )
             });
-        let tool_schema_fingerprint = role.tool_schema_fingerprint(
-            &tool_registry,
-            request.execution_profile,
-            search_stage,
-            web_fetch_recovery,
-        );
+        let tool_schema_fingerprint =
+            role.tool_schema_fingerprint(&tool_registry, request.execution_profile, search_stage);
         let mut turn = engine
             .start_turn(
                 &mut history,
@@ -1423,17 +1300,12 @@ where
         } else {
             Vec::new()
         };
-        semantic_request.tools = role.tool_definitions(
-            &tool_registry,
-            request.execution_profile,
-            search_stage,
-            web_fetch_recovery,
-        );
+        semantic_request.tools =
+            role.tool_definitions(&tool_registry, request.execution_profile, search_stage);
         semantic_request.hosted_tools = role.hosted_tool_definitions(
             &active_provider_descriptor,
             request.execution_profile,
             search_stage,
-            web_fetch_recovery,
         );
         semantic_request.tool_choice = None;
         semantic_request.tool_exchanges = tool_exchanges.clone();
@@ -1602,7 +1474,6 @@ where
                         &mut turn,
                         batch,
                         schema_rejections.len() as u32,
-                        Some(&|| live_is_cancelled(&request)),
                     ) {
                         *stream_persistence_error.borrow_mut() = Some(err);
                         return Err("live bridge failed while persisting stream output".to_owned());
@@ -1868,7 +1739,6 @@ where
                 &mut turn,
                 &outputs,
                 schema_rejections.len() as u32,
-                Some(&|| live_is_cancelled(&request)),
             )?;
         }
         ensure_live_not_cancelled(&request)?;
@@ -1913,17 +1783,13 @@ where
             }
         }
 
+        let mut attention_resolution_after_provider = record_master_live_safe_point(
+            role,
+            &request,
+            &agent_id,
+            master_runner::MasterWorkSafePoint::BeforeToolExecution,
+        )?;
         let pending_tool_calls = pending_tool_calls_for_execution(&turn, &executed_tool_call_ids);
-        let mut attention_resolution_after_provider = if pending_tool_calls.is_empty() {
-            None
-        } else {
-            record_master_live_safe_point(
-                role,
-                &request,
-                &agent_id,
-                master_runner::MasterWorkSafePoint::BeforeToolExecution,
-            )?
-        };
         if !pending_tool_calls.is_empty()
             && let Some(resolution) = attention_resolution_after_provider.take()
         {
@@ -2355,12 +2221,10 @@ where
             let reason = latest_finish_reason(&turn)
                 .unwrap_or("missing_finish_reason")
                 .to_owned();
-            if turn.terminal_event.is_none() {
-                engine.interrupt_turn(
-                    &mut turn,
-                    format!("Provider ended before completion schema was available: {reason}"),
-                );
-            }
+            engine.interrupt_turn(
+                &mut turn,
+                format!("Provider ended before completion schema was available: {reason}"),
+            );
             drain_broadcasts(&receiver, &mut broadcasts, &mut on_broadcast);
             drain_debug_events(&debug_receiver, &mut on_debug);
             ensure_live_not_cancelled(&request)?;
@@ -2420,6 +2284,33 @@ where
                                 RuntimeLiveBridgeError::ReasonPersistenceFailed(err.to_string())
                             })?;
                         let feedback = search_evidence_schema_rejection_feedback(&rejection);
+                        if consecutive_search_schema_rejections >= 3 {
+                            engine.block_turn(
+                                &mut turn,
+                                format!(
+                                    "Search evidence schema remained invalid after 3 attempts: {feedback}"
+                                ),
+                            );
+                            drain_broadcasts(&receiver, &mut broadcasts, &mut on_broadcast);
+                            drain_debug_events(&debug_receiver, &mut on_debug);
+                            persistence
+                                .record_turn_closed(&history, &turn, schema_rejections.len() as u32)
+                                .map_err(|err| {
+                                    RuntimeLiveBridgeError::ReasonPersistenceFailed(err.to_string())
+                                })?;
+                            turns.push(turn.clone());
+                            return Ok(LiveReasonTurnOutcome {
+                                turn,
+                                turns,
+                                broadcasts,
+                                rounds: round,
+                                schema_rejections,
+                                search_schema_rejections,
+                                tool_executions,
+                                restore_status,
+                                restored_closed_turns,
+                            });
+                        }
                         let retry_event = ReasonBroadcastEvent::SearchEvidenceSchemaRejected(
                             ReasonResp06SearchEvidenceSchemaRejected {
                                 session_id: turn.request.session_id.clone(),
@@ -2479,6 +2370,34 @@ where
                             .map_err(|err| {
                                 RuntimeLiveBridgeError::ReasonPersistenceFailed(err.to_string())
                             })?;
+                        if consecutive_search_schema_rejections >= 3 {
+                            engine.block_turn(
+                                &mut turn,
+                                format!(
+                                    "Search evidence schema remained invalid after 3 attempts: {}",
+                                    search_evidence_schema_rejection_feedback(&rejection)
+                                ),
+                            );
+                            drain_broadcasts(&receiver, &mut broadcasts, &mut on_broadcast);
+                            drain_debug_events(&debug_receiver, &mut on_debug);
+                            persistence
+                                .record_turn_closed(&history, &turn, schema_rejections.len() as u32)
+                                .map_err(|err| {
+                                    RuntimeLiveBridgeError::ReasonPersistenceFailed(err.to_string())
+                                })?;
+                            turns.push(turn.clone());
+                            return Ok(LiveReasonTurnOutcome {
+                                turn,
+                                turns,
+                                broadcasts,
+                                rounds: round,
+                                schema_rejections,
+                                search_schema_rejections,
+                                tool_executions,
+                                restore_status,
+                                restored_closed_turns,
+                            });
+                        }
                         let feedback = search_evidence_schema_rejection_feedback(&rejection);
                         let retry_event = ReasonBroadcastEvent::SearchEvidenceSchemaRejected(
                             ReasonResp06SearchEvidenceSchemaRejected {
@@ -2584,6 +2503,33 @@ where
                             RuntimeLiveBridgeError::ReasonPersistenceFailed(err.to_string())
                         })?;
                     let feedback = search_evidence_schema_rejection_feedback(&rejection);
+                    if consecutive_search_schema_rejections >= 3 {
+                        engine.block_turn(
+                            &mut turn,
+                            format!(
+                                "Search evidence schema remained invalid after 3 attempts: {feedback}"
+                            ),
+                        );
+                        drain_broadcasts(&receiver, &mut broadcasts, &mut on_broadcast);
+                        drain_debug_events(&debug_receiver, &mut on_debug);
+                        persistence
+                            .record_turn_closed(&history, &turn, schema_rejections.len() as u32)
+                            .map_err(|err| {
+                                RuntimeLiveBridgeError::ReasonPersistenceFailed(err.to_string())
+                            })?;
+                        turns.push(turn.clone());
+                        return Ok(LiveReasonTurnOutcome {
+                            turn,
+                            turns,
+                            broadcasts,
+                            rounds: round,
+                            schema_rejections,
+                            search_schema_rejections,
+                            tool_executions,
+                            restore_status,
+                            restored_closed_turns,
+                        });
+                    }
                     let retry_event = ReasonBroadcastEvent::SearchEvidenceSchemaRejected(
                         ReasonResp06SearchEvidenceSchemaRejected {
                             session_id: turn.request.session_id.clone(),
@@ -2626,59 +2572,40 @@ where
                     | SourcedSearchRoundStage::CamoVerification
                     | SourcedSearchRoundStage::SocialDiscovery
             ) {
-                match sourced_search_recovery_attempt(&turn, &executed_tool_call_ids) {
-                    SourcedSearchRecoveryAttempt::WebFetch => {
-                        next_prompt = SOURCED_SEARCH_RECOVERY_GUIDANCE.to_owned();
-                        web_fetch_recovery_next = true;
-                        carryover_segments = next_round_segments(
-                            &request.prompt,
-                            &public_provider_text,
-                            Some(SOURCED_SEARCH_RECOVERY_GUIDANCE),
-                            LiveRoundContext {
-                                role,
-                                execution_profile: request.execution_profile,
-                                configured_worker_set,
-                                web_search_route_guidance: Some(web_search_route_guidance.as_str()),
-                                runtime_home: &request.runtime_home,
-                                cwd: request.cwd.as_deref(),
-                                agent_id: &agent_id,
-                            },
-                        )?;
-                        turns.push(turn);
-                        continue 'reason_loop;
+                next_prompt = match stage {
+                    SourcedSearchRoundStage::HostedDiscovery => {
+                        "Hosted discovery is validated. Emit the supplement decision schema based on verified-source coverage."
+                            .to_owned()
                     }
-                    SourcedSearchRecoveryAttempt::Exhausted => {
-                        let missing_delivery = "hosted discovery, camo verification, and web_fetch recovery produced no usable typed source";
-                        engine.block_turn(&mut turn, missing_delivery);
-                        drain_broadcasts(&receiver, &mut broadcasts, &mut on_broadcast);
-                        drain_debug_events(&debug_receiver, &mut on_debug);
-                        ensure_live_not_cancelled(&request)?;
-                        persistence
-                            .record_turn_closed(&history, &turn, schema_rejections.len() as u32)
-                            .map_err(|err| {
-                                RuntimeLiveBridgeError::ReasonPersistenceFailed(err.to_string())
-                            })?;
-                        turns.push(turn.clone());
-                        return Ok(LiveReasonTurnOutcome {
-                            turn,
-                            turns,
-                            broadcasts,
-                            rounds: round,
-                            schema_rejections,
-                            search_schema_rejections,
-                            tool_executions,
-                            restore_status,
-                            restored_closed_turns,
-                        });
+                    SourcedSearchRoundStage::CamoVerification => {
+                        "Use camo to verify every usable discovered URL, one source at a time. Return typed tool calls; do not claim verification in text."
+                            .to_owned()
                     }
-                }
+                    SourcedSearchRoundStage::SocialDiscovery => {
+                        "Use the exposed camo social search capability for the required supplement, then return its typed result."
+                            .to_owned()
+                    }
+                    _ => unreachable!("sourced search stage was checked above"),
+                };
+                carryover_segments = next_round_segments(
+                    &request.prompt,
+                    &public_provider_text,
+                    None,
+                    LiveRoundContext {
+                        role,
+                        execution_profile: request.execution_profile,
+                        configured_worker_set,
+                        web_search_route_guidance: Some(web_search_route_guidance.as_str()),
+                        runtime_home: &request.runtime_home,
+                        cwd: request.cwd.as_deref(),
+                        agent_id: &agent_id,
+                    },
+                )?;
+                turns.push(turn);
+                continue 'reason_loop;
             }
         }
         if let Some(resolution) = attention_resolution_after_provider.take() {
-            engine.discard_provider_terminal(
-                &mut turn,
-                "provider terminal invalidated by master attention",
-            );
             prepare_master_attention_reasoning_continuation(
                 &resolution,
                 &mut next_prompt,
@@ -2749,6 +2676,13 @@ where
                         RuntimeLiveBridgeError::ReasonPersistenceFailed(err.to_string())
                     })?;
                 if consecutive_schema_rejections >= 3 {
+                    engine.block_turn(
+                        &mut turn,
+                        format!(
+                            "Response schema still invalid after 3 polishing attempts.\n{}",
+                            feedback
+                        ),
+                    );
                     drain_broadcasts(&receiver, &mut broadcasts, &mut on_broadcast);
                     drain_debug_events(&debug_receiver, &mut on_debug);
                     ensure_live_not_cancelled(&request)?;
@@ -2969,10 +2903,6 @@ where
                     if let Some(resolution) =
                         enter_master_terminal_persistence(role, &request, &agent_id)?
                     {
-                        engine.discard_provider_terminal(
-                            &mut turn,
-                            "provider terminal invalidated by master attention",
-                        );
                         prepare_master_attention_reasoning_continuation(
                             &resolution,
                             &mut next_prompt,
@@ -3094,10 +3024,6 @@ where
                     if let Some(resolution) =
                         enter_master_terminal_persistence(role, &request, &agent_id)?
                     {
-                        engine.discard_provider_terminal(
-                            &mut turn,
-                            "provider terminal invalidated by master attention",
-                        );
                         prepare_master_attention_reasoning_continuation(
                             &resolution,
                             &mut next_prompt,
@@ -3244,10 +3170,6 @@ where
                     if let Some(resolution) =
                         enter_master_terminal_persistence(role, &request, &agent_id)?
                     {
-                        engine.discard_provider_terminal(
-                            &mut turn,
-                            "provider terminal invalidated by master attention",
-                        );
                         prepare_master_attention_reasoning_continuation(
                             &resolution,
                             &mut next_prompt,
@@ -3402,35 +3324,6 @@ where
             },
             Err(rejection) => {
                 ensure_live_not_cancelled(&request)?;
-                if consecutive_schema_rejections >= 3
-                    && turn.terminal_event.is_some()
-                    && request.execution_profile != LiveReasonExecutionProfile::SourcedSearch
-                    && rejection
-                        .issues
-                        .iter()
-                        .any(|issue| issue.field == "freehand_completion")
-                {
-                    drain_broadcasts(&receiver, &mut broadcasts, &mut on_broadcast);
-                    drain_debug_events(&debug_receiver, &mut on_debug);
-                    ensure_live_not_cancelled(&request)?;
-                    persistence
-                        .record_turn_closed(&history, &turn, schema_rejections.len() as u32)
-                        .map_err(|err| {
-                            RuntimeLiveBridgeError::ReasonPersistenceFailed(err.to_string())
-                        })?;
-                    turns.push(turn.clone());
-                    return Ok(LiveReasonTurnOutcome {
-                        turn,
-                        turns,
-                        broadcasts,
-                        rounds: round,
-                        schema_rejections,
-                        search_schema_rejections,
-                        tool_executions,
-                        restore_status,
-                        restored_closed_turns,
-                    });
-                }
                 let feedback = completion_schema_rejection_feedback(&rejection);
                 schema_rejections.push(rejection.clone());
                 consecutive_schema_rejections = consecutive_schema_rejections.saturating_add(1);
@@ -3468,6 +3361,13 @@ where
                         RuntimeLiveBridgeError::ReasonPersistenceFailed(err.to_string())
                     })?;
                 if consecutive_schema_rejections >= 3 {
+                    engine.block_turn(
+                        &mut turn,
+                        format!(
+                            "Completion schema still invalid after 3 repair attempts.\n{}",
+                            feedback
+                        ),
+                    );
                     drain_broadcasts(&receiver, &mut broadcasts, &mut on_broadcast);
                     drain_debug_events(&debug_receiver, &mut on_debug);
                     ensure_live_not_cancelled(&request)?;
@@ -3986,6 +3886,8 @@ struct RuntimeCommandDispatcherState {
     account_config_mirror_error: Option<String>,
 }
 
+type PersistedSessionFingerprint = (Option<TurnId>, Option<TurnId>);
+
 #[derive(Clone)]
 struct ActiveRuntimeTurn {
     turn_id: TurnId,
@@ -4014,6 +3916,7 @@ struct PreparedLiveSubmit {
 pub struct RuntimeCommandDispatcher {
     ui_state: Arc<Mutex<UiProtocolState>>,
     state: Mutex<RuntimeCommandDispatcherState>,
+    persisted_session_fingerprints: Mutex<BTreeMap<SessionId, PersistedSessionFingerprint>>,
 }
 
 impl RuntimeCommandDispatcher {
@@ -4299,6 +4202,7 @@ impl RuntimeCommandDispatcher {
         }
         let dispatcher = Self {
             ui_state,
+            persisted_session_fingerprints: Mutex::new(BTreeMap::new()),
             state: Mutex::new(RuntimeCommandDispatcherState {
                 config,
                 execution_role,
@@ -4362,7 +4266,7 @@ impl RuntimeCommandDispatcher {
     ) -> Result<Option<UiQueryResult>, UiCommandDispatchPortError> {
         let state = self.state.lock().expect("lock runtime dispatcher state");
         match command {
-            UiCommand::QuerySessionListPage { archived, page } => {
+            UiCommand::QuerySessionList | UiCommand::QueryArchivedSessionList => {
                 let Some(runtime_home) = state
                     .config
                     .live
@@ -4372,46 +4276,25 @@ impl RuntimeCommandDispatcher {
                     return Ok(None);
                 };
                 let reason_agent_id = state.config.reason_agent_id.clone();
-                let request = session_list_page_request_from_ui(*archived, page)?;
+                let reason_node_id = reason_node_id_for_config(&state.config);
                 drop(state);
-                let persistence = ReasonPersistence::new(runtime_home, reason_agent_id.clone());
-                let metadata = persistence.load_session_metadata().map_err(|error| {
-                    UiCommandDispatchPortError::DispatchFailed(format!(
-                        "failed to refresh persisted session metadata: {error}"
-                    ))
-                })?;
+                let mut fingerprints = self
+                    .persisted_session_fingerprints
+                    .lock()
+                    .expect("lock persisted session fingerprints");
+                refresh_persisted_sessions_for_ui_query(
+                    &runtime_home,
+                    &reason_agent_id,
+                    &reason_node_id,
+                    &self.ui_state,
+                    &mut fingerprints,
+                )?;
                 self.ui_state
                     .lock()
                     .expect("lock ui state")
-                    .set_session_metadata_entries(metadata.into_iter().map(session_metadata_to_ui));
-                let page = visible_session_list_page(&persistence, request).map_err(|error| {
-                    UiCommandDispatchPortError::DispatchFailed(format!(
-                        "failed to read persisted session list page: {error}"
-                    ))
-                })?;
-                Ok(Some(UiQueryResult::SessionListPage(
-                    UiSessionListPageProjection {
-                        sessions: page
-                            .sessions
-                            .into_iter()
-                            .map(session_summary_to_ui)
-                            .collect(),
-                        page: UiSessionListPageInfo {
-                            has_older: page.has_older,
-                            next_cursor: page
-                                .next_cursor
-                                .map(|cursor| {
-                                    serde_json::to_string(&cursor).map_err(|error| {
-                                        UiCommandDispatchPortError::DispatchFailed(format!(
-                                            "failed to serialize session list cursor: {error}"
-                                        ))
-                                    })
-                                })
-                                .transpose()?,
-                            unavailable_sessions: page.unavailable_sessions,
-                        },
-                    },
-                )))
+                    .query(command)
+                    .map(Some)
+                    .map_err(|error| UiCommandDispatchPortError::DispatchFailed(error.to_string()))
             }
             UiCommand::QuerySessionSearch { query, limit } => {
                 let Some(live) = state.config.live.as_ref() else {
@@ -7686,6 +7569,80 @@ fn restore_session_turns_page_for_ui_query(
     Ok(None)
 }
 
+fn refresh_persisted_sessions_for_ui_query(
+    runtime_home: &Path,
+    reason_agent_id: &AgentId,
+    master_node_id: &str,
+    ui_state: &Arc<Mutex<UiProtocolState>>,
+    fingerprints: &mut BTreeMap<SessionId, PersistedSessionFingerprint>,
+) -> Result<(), UiCommandDispatchPortError> {
+    let persistence = ReasonPersistence::new(runtime_home.to_path_buf(), reason_agent_id.clone());
+    let metadata = persistence.load_session_metadata().map_err(|error| {
+        UiCommandDispatchPortError::DispatchFailed(format!(
+            "failed to refresh persisted session metadata: {error}"
+        ))
+    })?;
+    let mut ui = ui_state.lock().expect("lock ui state");
+    ui.set_session_metadata_entries(metadata.into_iter().map(session_metadata_to_ui));
+    drop(ui);
+    let sessions = persistence.list_persisted_sessions().map_err(|error| {
+        UiCommandDispatchPortError::DispatchFailed(format!(
+            "failed to refresh persisted session index: {error}"
+        ))
+    })?;
+    let mut persisted_projections = Vec::new();
+    let mut refreshed_sessions = Vec::new();
+    for session in sessions {
+        let fingerprint = (
+            session.latest_turn_id.clone(),
+            session.active_turn_id.clone(),
+        );
+        if fingerprints.get(&session.session_id) == Some(&fingerprint) {
+            continue;
+        }
+        let turns = match persistence.restore_turn_snapshots_for_ui(&session.session_id) {
+            Ok(turns) => turns,
+            Err(
+                ReasonPersistenceError::MissingRecoveryTruth(_)
+                | ReasonPersistenceError::JsonParseFailed(_)
+                | ReasonPersistenceError::InvalidCursorCoherence(_)
+                | ReasonPersistenceError::InvalidLedgerCoherence(_)
+                | ReasonPersistenceError::LedgerSequenceGap { .. },
+            ) => {
+                // A single poisoned/incomplete ledger must not block the whole
+                // UI refresh for every other session. The daemon-side restore
+                // already tolerates the same set of recoverable ledger errors.
+                continue;
+            }
+            Err(error) => {
+                return Err(UiCommandDispatchPortError::DispatchFailed(format!(
+                    "failed to refresh persisted session turns: {error}"
+                )));
+            }
+        };
+        refreshed_sessions.push(session.session_id.clone());
+        fingerprints.insert(session.session_id.clone(), fingerprint);
+        for turn in turns {
+            persisted_projections.push(project_runtime_turn_history(
+                reason_agent_id,
+                master_node_id,
+                std::slice::from_ref(&turn),
+                None,
+            ));
+        }
+    }
+    let mut ui = ui_state.lock().expect("lock ui state");
+    for session_id in refreshed_sessions {
+        let session_projections = persisted_projections
+            .iter()
+            .filter(|projection| projection.session_id == session_id)
+            .cloned()
+            .collect::<Vec<_>>();
+        ui.replace_persisted_turn_projections_without_publish(&session_id, session_projections);
+    }
+    Ok(())
+}
+
 fn queryable_reason_agent_ids(config: &RuntimeCommandDispatcherConfig) -> Vec<AgentId> {
     let mut agent_ids = Vec::<AgentId>::new();
     push_unique_agent_id(&mut agent_ids, config.reason_agent_id.clone());
@@ -7861,6 +7818,13 @@ fn worker_parent_session_map(
         );
     }
     Ok(map)
+}
+
+fn internal_runtime_session_id(session_id: &SessionId) -> bool {
+    let id = session_id.as_str();
+    id.starts_with("worker-task-")
+        || id.starts_with("master-lifecycle-")
+        || id.starts_with("master-timer-")
 }
 
 fn session_search_match(
@@ -11850,7 +11814,6 @@ fn apply_provider_outputs_persist_and_capture_broadcasts<FB>(
     turn: &mut TurnRecord,
     outputs: &[ProviderSemanticOutput],
     schema_rejections: u32,
-    is_cancelled: Option<&dyn Fn() -> bool>,
 ) -> Result<(), RuntimeLiveBridgeError>
 where
     FB: FnMut(&ReasonBroadcastEvent),
@@ -11859,14 +11822,9 @@ where
         ctx.engine
             .apply_provider_output(turn, output.clone())
             .map_err(|err| RuntimeLiveBridgeError::ProviderOutputApplyFailed(err.to_string()))?;
-        drain_broadcasts(ctx.receiver, ctx.broadcasts, ctx.on_broadcast);
-        drain_debug_events(ctx.debug_receiver, ctx.on_debug);
-        let cancelled = is_cancelled.is_some_and(|check| check());
-        if !(cancelled && matches!(output, ProviderSemanticOutput::Terminal(_))) {
-            ctx.persistence
-                .record_provider_output_applied(ctx.history, turn, output, schema_rejections)
-                .map_err(|err| RuntimeLiveBridgeError::ReasonPersistenceFailed(err.to_string()))?;
-        }
+        ctx.persistence
+            .record_provider_output_applied(ctx.history, turn, output, schema_rejections)
+            .map_err(|err| RuntimeLiveBridgeError::ReasonPersistenceFailed(err.to_string()))?;
     }
     drain_broadcasts(ctx.receiver, ctx.broadcasts, ctx.on_broadcast);
     drain_debug_events(ctx.debug_receiver, ctx.on_debug);

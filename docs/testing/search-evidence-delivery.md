@@ -9,11 +9,6 @@
 ## Lifecycle Coverage
 
 - Domain plan validates domain policy and minimum verified source count.
-- A single non-sourced provider response may emit more than one contiguous
-  `HostedWebSearch` discovery delivery (for example two Anthropic
-  `server_tool_use` / `web_search_tool_result` pairs). Each delivery keeps its
-  provider-owned tool-call identity; the stream still rejects any other stage
-  before the observation-only completion.
 - Hosted discovery admits usable candidates only when an original HTTP/HTTPS URL exists.
 - Every usable hosted candidate enters camo verification before final delivery.
 - Supplement decisions enforce Weibo-first for news and Xiaohongshu-first for tutorial/operations.
@@ -25,10 +20,6 @@
 
 - `freehand-contracts`: six delivery schemas round-trip; `deny_unknown_fields` rejects unknown keys.
 - `freehand-blocks`: field validators and adjacent state transitions have paired positive/negative tests.
-  - `cargo test -p freehand-blocks non_sourced_search_evidence_accepts_multiple_contiguous_hosted_deliveries -- --nocapture`
-    locks the positive contiguous multi-delivery path; the pre-fix validator
-    rejected the second delivery as `non-sourced hosted discovery must be the
-    first delivery`.
 - `freehand-provider-core` plus adapters: hosted wire results become typed discovery candidates; missing URL remains unusable.
 - `freehand-tools`: camo search and page verification parse typed outputs; only actual camo access may emit `verified_by=camo`.
 - `freehand-reason`: turn truth persists deliveries and rejects complete claims with unknown, failed, or non-camo sources.

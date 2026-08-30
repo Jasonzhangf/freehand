@@ -49,7 +49,7 @@
       "node_id": "home",
       "label": "Home / 会话首页",
       "owns": "session navigation dashboard and session CRUD management",
-      "truth_source": "QuerySessionListPage plus scoped owner projections",
+      "truth_source": "QuerySessionList plus scoped owner projections",
       "body_sections": [
         "dashboard_header",
         "running_sessions",
@@ -207,7 +207,7 @@
       "node_id": "new_session",
       "label": "NewSession / 新建会话",
       "owns": "CreateSession entry",
-      "truth_source": "CreateSession command receipt plus QuerySessionListPage"
+      "truth_source": "CreateSession command receipt plus QuerySessionList"
     }
   ],
   "edges": [

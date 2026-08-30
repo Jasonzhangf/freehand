@@ -2,7 +2,6 @@ import { spawn } from 'node:child_process';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { adpVerifierRequest } from './lib/adp-verifier-client.mjs';
 
 const repo = process.cwd();
 const home = process.env.HOME;
@@ -11,13 +10,12 @@ const configPath = process.env.FREEHAND_MODEL_GROUP_UI_CONFIG || path.join(runti
 const envPath = process.env.FREEHAND_MODEL_GROUP_UI_ENV || path.join(runtimeHome, 'daemonS.env');
 const baseUrl = normalizedBaseUrl(process.env.FREEHAND_MODEL_GROUP_UI_BASE_URL || 'http://127.0.0.1:4042/');
 const adpUrl = process.env.FREEHAND_MODEL_GROUP_UI_ADP_URL || adpUrlFromBaseUrl(baseUrl);
-const adpAuthToken = process.env.FREEHAND_ADP_AUTH_TOKEN || '';
 const cli = process.env.FREEHAND_MODEL_GROUP_UI_CLI || path.join(home, '.local/bin/freehand-cliS');
 const debugPort = Number.parseInt(process.env.FREEHAND_MODEL_GROUP_UI_DEBUG_PORT || '9259', 10);
 const chromePath =
   process.env.FREEHAND_MODEL_GROUP_UI_CHROME ||
   '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
-const assetVersion = '20260824-session-list-page';
+const assetVersion = '20260726-stale-lifecycle-reconcile';
 const runId = `model-group-ui-${Date.now()}`;
 const artifactDir = path.join(repo, 'artifacts', 'webui-online', runId);
 const testGroupId = process.env.FREEHAND_MODEL_GROUP_UI_GROUP_ID || `ui.verify.${Date.now()}`;
@@ -419,14 +417,41 @@ async function adpQuery(query) {
 }
 
 function adpRequest(kind, payloadKey, payload, timeoutMs) {
-  return adpVerifierRequest({
-    url: adpUrl,
-    authToken: adpAuthToken,
-    kind,
-    payloadKey,
-    payload,
-    timeoutMs,
-    clientName: 'freehand-model-group-verifier',
+  const socket = new WebSocket(adpUrl);
+  const requestId = `${kind}-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => {
+      socket.close();
+      reject(new Error(`ADP ${kind} timeout`));
+    }, timeoutMs);
+    socket.addEventListener('open', () => {
+      socket.send(JSON.stringify({ kind, request_id: requestId, [payloadKey]: payload }));
+    });
+    socket.addEventListener('message', (event) => {
+      const message = JSON.parse(event.data);
+      if (message.request_id !== requestId) {
+        return;
+      }
+      clearTimeout(timer);
+      socket.close();
+      if (message.kind === 'failure') {
+        reject(new Error((message.failure && (message.failure.message || message.failure.code)) || 'ADP failure'));
+        return;
+      }
+      if (message.kind === 'query_result') {
+        resolve(message.result);
+        return;
+      }
+      if (message.kind === 'command_receipt') {
+        resolve(message.receipt);
+        return;
+      }
+      reject(new Error(`unexpected ADP ${kind} response: ${message.kind}`));
+    });
+    socket.addEventListener('error', () => {
+      clearTimeout(timer);
+      reject(new Error(`ADP ${kind} socket error`));
+    });
   });
 }
 

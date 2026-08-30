@@ -62,7 +62,9 @@ pub(super) fn bind_first_migration_node_for_test(manifest: &mut Value, target_sy
 }
 
 pub(super) fn run_test_git(repository: &Path, args: &[&str]) {
-    let output = isolated_git_command(repository)
+    let output = Command::new("git")
+        .arg("-C")
+        .arg(repository)
         .args(args)
         .output()
         .expect("run test git");
@@ -81,7 +83,9 @@ fn commit_test_repository_baseline(root: &Path) -> (String, String) {
     run_test_git(root, &["add", "."]);
     run_test_git(root, &["commit", "--allow-empty", "-m", "baseline"]);
     let revision = |spec: &str| {
-        let output = isolated_git_command(root)
+        let output = Command::new("git")
+            .arg("-C")
+            .arg(root)
             .args(["rev-parse", spec])
             .output()
             .expect("read baseline revision");

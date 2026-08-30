@@ -6,7 +6,7 @@ use std::time::{SystemTime, UNIX_EPOCH};
 use freehand_blocks::{CompletionSchemaRejection, SearchEvidenceSchemaRejection};
 use freehand_contracts::{
     AgentId, ContextSegment, ErrorClass, ErrorContract, ErrorErr01RuntimeClassified, FeatureId,
-    RecoveryPolicy, SearchEvidenceDelivery, SessionId, TerminalStatus, TraceId, TurnId,
+    RecoveryPolicy, SearchEvidenceDelivery, SessionId, TraceId, TurnId,
 };
 use freehand_provider_core::{ProviderFamily, ProviderSemanticOutput};
 use fs2::FileExt;
@@ -113,63 +113,6 @@ pub struct PersistedSessionMetadataEntry {
     pub archived: bool,
     pub cwd: Option<String>,
     pub updated_unix_seconds: u64,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub enum ReasonSessionLatestStatus {
-    Empty,
-    WaitingModel,
-    ToolRunning,
-    Terminal(TerminalStatus),
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct PersistedSessionSummary {
-    pub agent_id: AgentId,
-    pub session_id: SessionId,
-    pub activity_unix_seconds: u64,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub latest_turn_id: Option<TurnId>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub active_turn_id: Option<TurnId>,
-    pub turn_count: usize,
-    pub latest_status: ReasonSessionLatestStatus,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub latest_summary: Option<String>,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub title: Option<String>,
-    pub archived: bool,
-    #[serde(default, skip_serializing_if = "Option::is_none")]
-    pub cwd: Option<String>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct PersistedSessionSummaryIndex {
-    pub schema_version: u32,
-    pub sessions: Vec<PersistedSessionSummary>,
-    #[serde(default)]
-    pub unavailable_sessions: Vec<SessionId>,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-pub struct ReasonSessionListCursor {
-    pub last_activity_unix_seconds: u64,
-    pub last_session_id: SessionId,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ReasonSessionListPageRequest {
-    pub archived: bool,
-    pub cursor: Option<ReasonSessionListCursor>,
-    pub limit: usize,
-}
-
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct ReasonSessionListPage {
-    pub sessions: Vec<PersistedSessionSummary>,
-    pub has_older: bool,
-    pub next_cursor: Option<ReasonSessionListCursor>,
-    pub unavailable_sessions: Vec<SessionId>,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -281,15 +224,9 @@ pub enum ReasonPersistenceError {
     InvalidTurnPageLimit { max: usize, actual: usize },
     #[error("reason turn page request has an invalid cursor: {0}")]
     InvalidTurnPageCursor(String),
-    #[error("session list page limit must be between 1 and {max}, got {actual}")]
-    InvalidSessionListPageLimit { max: usize, actual: usize },
-    #[error("session list page request has an invalid cursor: {0}")]
-    InvalidSessionListPageCursor(String),
 }
 
 const MAX_REASON_TURN_PAGE_LIMIT: usize = 100;
-pub const MAX_SESSION_LIST_PAGE_LIMIT: usize = 100;
-const SESSION_SUMMARY_INDEX_SCHEMA_VERSION: u32 = 1;
 
 pub struct ReasonPersistence {
     runtime_home: PathBuf,
@@ -591,60 +528,6 @@ impl ReasonPersistence {
         self.load_session_metadata_entries()
     }
 
-    pub fn list_persisted_sessions_page(
-        &self,
-        request: &ReasonSessionListPageRequest,
-    ) -> Result<ReasonSessionListPage, ReasonPersistenceError> {
-        if !(1..=MAX_SESSION_LIST_PAGE_LIMIT).contains(&request.limit) {
-            return Err(ReasonPersistenceError::InvalidSessionListPageLimit {
-                max: MAX_SESSION_LIST_PAGE_LIMIT,
-                actual: request.limit,
-            });
-        }
-        let index = self.load_or_migrate_session_summary_index()?;
-        let unavailable_sessions = index.unavailable_sessions.clone();
-        let unavailable_ids = unavailable_sessions
-            .iter()
-            .cloned()
-            .collect::<BTreeSet<_>>();
-        let mut sessions = index
-            .sessions
-            .into_iter()
-            .filter(|summary| {
-                summary.archived == request.archived
-                    && !unavailable_ids.contains(&summary.session_id)
-            })
-            .collect::<Vec<_>>();
-        if let Some(cursor) = &request.cursor {
-            sessions.retain(|summary| {
-                (summary.activity_unix_seconds, summary.session_id.as_str())
-                    < (
-                        cursor.last_activity_unix_seconds,
-                        cursor.last_session_id.as_str(),
-                    )
-            });
-        }
-        sessions.sort_by(|left, right| {
-            (right.activity_unix_seconds, right.session_id.as_str())
-                .cmp(&(left.activity_unix_seconds, left.session_id.as_str()))
-        });
-        let has_older = sessions.len() > request.limit;
-        let page_sessions = sessions.into_iter().take(request.limit).collect::<Vec<_>>();
-        let next_cursor = has_older.then(|| {
-            let last = page_sessions.last().expect("non-empty older page");
-            ReasonSessionListCursor {
-                last_activity_unix_seconds: last.activity_unix_seconds,
-                last_session_id: last.session_id.clone(),
-            }
-        });
-        Ok(ReasonSessionListPage {
-            sessions: page_sessions,
-            has_older,
-            next_cursor,
-            unavailable_sessions,
-        })
-    }
-
     pub fn create_session_metadata(
         &self,
         session_id: SessionId,
@@ -655,7 +538,7 @@ impl ReasonPersistence {
         let mut entries = self.load_session_metadata_entries()?;
         let entry = PersistedSessionMetadataEntry {
             agent_id: self.agent_id.clone(),
-            session_id: session_id.clone(),
+            session_id,
             title: normalize_optional_title(title)?,
             archived: false,
             cwd: normalize_optional_string(cwd),
@@ -663,7 +546,6 @@ impl ReasonPersistence {
         };
         upsert_session_metadata_entry(&mut entries, entry.clone());
         self.write_session_metadata_entries(&entries)?;
-        self.sync_metadata_summary(&session_id)?;
         Ok(entry)
     }
 
@@ -1329,58 +1211,7 @@ impl ReasonPersistence {
         index.retain(|existing| existing.session_id != *session_id);
         index.push(entry);
         index.sort_by(|left, right| left.session_id.as_str().cmp(right.session_id.as_str()));
-        write_json_atomic(&self.session_index_path(), &index)?;
-        self.update_session_summary(session_id, restored)
-    }
-
-    fn update_session_summary(
-        &self,
-        session_id: &SessionId,
-        restored: &RestoredReasonSession,
-    ) -> Result<(), ReasonPersistenceError> {
-        let mut summary_index = self.load_or_migrate_session_summary_index()?;
-        let metadata = self
-            .load_session_metadata_entries()?
-            .into_iter()
-            .find(|entry| entry.session_id == *session_id);
-        let latest_turn = restored
-            .active_turn
-            .as_ref()
-            .map(|active| &active.turn)
-            .or_else(|| restored.closed_turns.last());
-        let activity_from_turn = latest_turn.map(|turn| turn.created_at).unwrap_or(0);
-        let activity_from_metadata = metadata
-            .as_ref()
-            .map(|entry| entry.updated_unix_seconds)
-            .unwrap_or(0);
-        let summary = PersistedSessionSummary {
-            agent_id: self.agent_id.clone(),
-            session_id: session_id.clone(),
-            activity_unix_seconds: activity_from_turn.max(activity_from_metadata),
-            latest_turn_id: restored.cursor.latest_turn_id.clone(),
-            active_turn_id: restored.cursor.active_turn_id.clone(),
-            turn_count: restored.closed_turns.len() + usize::from(restored.active_turn.is_some()),
-            latest_status: latest_turn
-                .and_then(|turn| turn.terminal_event.as_ref())
-                .map_or_else(
-                    || turn_live_status(latest_turn),
-                    |terminal| ReasonSessionLatestStatus::Terminal(terminal.status.clone()),
-                ),
-            latest_summary: latest_turn
-                .and_then(|turn| turn.terminal_event.as_ref())
-                .map(|terminal| terminal.summary.clone()),
-            title: metadata.as_ref().and_then(|entry| entry.title.clone()),
-            archived: metadata.as_ref().is_some_and(|entry| entry.archived),
-            cwd: metadata.and_then(|entry| entry.cwd),
-        };
-        summary_index
-            .sessions
-            .retain(|existing| existing.session_id != *session_id);
-        summary_index.sessions.push(summary);
-        summary_index
-            .sessions
-            .sort_by(|left, right| left.session_id.as_str().cmp(right.session_id.as_str()));
-        write_json_atomic(&self.session_summary_index_path(), &summary_index)
+        write_json_atomic(&self.session_index_path(), &index)
     }
 
     fn load_authoritative_state(
@@ -1514,110 +1345,6 @@ impl ReasonPersistence {
         read_json_file(&self.session_index_path())
     }
 
-    fn session_summary_index_path(&self) -> PathBuf {
-        self.runtime_home
-            .join("cache")
-            .join("session-index")
-            .join(format!("{}-summaries.json", self.agent_id.as_str()))
-    }
-
-    fn load_or_migrate_session_summary_index(
-        &self,
-    ) -> Result<PersistedSessionSummaryIndex, ReasonPersistenceError> {
-        let path = self.session_summary_index_path();
-        if path.is_file() {
-            return read_json_file(&path);
-        }
-
-        let legacy_entries = self.load_session_index()?;
-        let metadata_by_id = self
-            .load_session_metadata_entries()?
-            .into_iter()
-            .map(|entry| (entry.session_id.clone(), entry))
-            .collect::<BTreeMap<_, _>>();
-        let mut sessions = Vec::new();
-        let mut unavailable_sessions = BTreeSet::new();
-        for entry in legacy_entries {
-            let migrated = self.migrated_session_summary(entry.clone());
-            match migrated {
-                Ok(summary) => sessions.push(summary),
-                Err(_) => {
-                    unavailable_sessions.insert(entry.session_id);
-                }
-            }
-        }
-        for (session_id, metadata) in metadata_by_id {
-            if sessions
-                .iter()
-                .any(|summary| summary.session_id == session_id)
-            {
-                continue;
-            }
-            sessions.push(metadata_only_summary(metadata));
-        }
-        sessions.sort_by(|left, right| left.session_id.as_str().cmp(right.session_id.as_str()));
-        let index = PersistedSessionSummaryIndex {
-            schema_version: SESSION_SUMMARY_INDEX_SCHEMA_VERSION,
-            sessions,
-            unavailable_sessions: unavailable_sessions.into_iter().collect(),
-        };
-        write_json_atomic(&path, &index)?;
-        Ok(index)
-    }
-
-    fn migrated_session_summary(
-        &self,
-        legacy: PersistedSessionIndexEntry,
-    ) -> Result<PersistedSessionSummary, ReasonPersistenceError> {
-        let candidates = self.list_effective_ui_turn_snapshot_paths(&legacy.session_id)?;
-        let latest_path = candidates.last().map(|(_, path)| path.clone());
-        let latest_turn = match latest_path {
-            Some(path) if path == self.active_turn_path(&legacy.session_id) => {
-                Some(read_json_file::<ActiveTurnSnapshot>(&path)?.turn)
-            }
-            Some(path) => Some(read_json_file::<TurnRecord>(&path)?),
-            None => None,
-        };
-        let metadata = self
-            .load_session_metadata_entries()?
-            .into_iter()
-            .find(|entry| entry.session_id == legacy.session_id);
-        let activity_from_turn = latest_turn
-            .as_ref()
-            .map(|turn| turn.created_at)
-            .unwrap_or(0);
-        let activity_from_metadata = metadata
-            .as_ref()
-            .map(|entry| entry.updated_unix_seconds)
-            .unwrap_or(0);
-        Ok(PersistedSessionSummary {
-            agent_id: self.agent_id.clone(),
-            session_id: legacy.session_id.clone(),
-            activity_unix_seconds: activity_from_turn.max(activity_from_metadata),
-            latest_turn_id: latest_turn
-                .as_ref()
-                .map(|turn| turn.request.turn_id.clone())
-                .or(legacy.latest_turn_id),
-            active_turn_id: legacy.active_turn_id,
-            turn_count: candidates.len(),
-            latest_status: latest_turn
-                .as_ref()
-                .and_then(|turn| turn.terminal_event.as_ref())
-                .map_or_else(
-                    || turn_live_status(latest_turn.as_ref()),
-                    |terminal| ReasonSessionLatestStatus::Terminal(terminal.status.clone()),
-                ),
-            latest_summary: latest_turn
-                .as_ref()
-                .and_then(|turn| turn.terminal_event.as_ref())
-                .map(|terminal| terminal.summary.clone())
-                .or(legacy.latest_terminal_summary),
-            title: metadata.as_ref().and_then(|entry| entry.title.clone()),
-            archived: metadata.as_ref().is_some_and(|entry| entry.archived),
-            cwd: metadata.and_then(|entry| entry.cwd),
-        })
-    }
-
     fn load_session_metadata_entries(
         &self,
     ) -> Result<Vec<PersistedSessionMetadataEntry>, ReasonPersistenceError> {
@@ -1657,51 +1384,7 @@ impl ReasonPersistence {
         mutate(&mut entries[index]);
         let updated = entries[index].clone();
         self.write_session_metadata_entries(&entries)?;
-        self.sync_metadata_summary(session_id)?;
         Ok(updated)
-    }
-
-    fn sync_metadata_summary(
-        &self,
-        session_id: &SessionId,
-    ) -> Result<PersistedSessionSummary, ReasonPersistenceError> {
-        let metadata = self
-            .load_session_metadata_entries()?
-            .into_iter()
-            .find(|entry| entry.session_id == *session_id)
-            .ok_or_else(|| {
-                ReasonPersistenceError::SessionMetadataTargetNotFound(
-                    session_id.as_str().to_owned(),
-                )
-            })?;
-        let mut summary_index = self.load_or_migrate_session_summary_index()?;
-        let existing = summary_index
-            .sessions
-            .iter()
-            .find(|summary| summary.session_id == *session_id);
-        let summary = PersistedSessionSummary {
-            agent_id: self.agent_id.clone(),
-            session_id: session_id.clone(),
-            activity_unix_seconds: existing
-                .map(|summary| summary.activity_unix_seconds)
-                .unwrap_or(metadata.updated_unix_seconds),
-            latest_turn_id: existing.and_then(|summary| summary.latest_turn_id.clone()),
-            active_turn_id: existing.and_then(|summary| summary.active_turn_id.clone()),
-            turn_count: existing.map(|summary| summary.turn_count).unwrap_or(0),
-            latest_status: existing
-                .map(|summary| summary.latest_status.clone())
-                .unwrap_or(ReasonSessionLatestStatus::Empty),
-            latest_summary: existing.and_then(|summary| summary.latest_summary.clone()),
-            title: metadata.title,
-            archived: metadata.archived,
-            cwd: metadata.cwd,
-        };
-        summary_index
-            .sessions
-            .retain(|existing| existing.session_id != *session_id);
-        summary_index.sessions.push(summary.clone());
-        write_json_atomic(&self.session_summary_index_path(), &summary_index)?;
-        Ok(summary)
     }
 
     fn append_provider_raw_row(
@@ -2031,41 +1714,6 @@ fn upsert_session_metadata_entry(
     entries.retain(|existing| existing.session_id != entry.session_id);
     entries.push(entry);
     entries.sort_by(|left, right| left.session_id.as_str().cmp(right.session_id.as_str()));
-}
-
-fn metadata_only_summary(metadata: PersistedSessionMetadataEntry) -> PersistedSessionSummary {
-    PersistedSessionSummary {
-        agent_id: metadata.agent_id,
-        session_id: metadata.session_id,
-        activity_unix_seconds: metadata.updated_unix_seconds,
-        latest_turn_id: None,
-        active_turn_id: None,
-        turn_count: 0,
-        latest_status: ReasonSessionLatestStatus::Empty,
-        latest_summary: None,
-        title: metadata.title,
-        archived: metadata.archived,
-        cwd: metadata.cwd,
-    }
-}
-
-fn turn_live_status(turn: Option<&TurnRecord>) -> ReasonSessionLatestStatus {
-    let Some(turn) = turn else {
-        return ReasonSessionLatestStatus::Empty;
-    };
-    if turn.tool_calls.iter().any(|call| {
-        !turn
-            .tool_results
-            .iter()
-            .any(|result| result.tool_result.tool_call_id == call.tool_call.tool_call_id)
-    }) {
-        return ReasonSessionLatestStatus::ToolRunning;
-    }
-    if turn.terminal_event.is_none() {
-        ReasonSessionLatestStatus::WaitingModel
-    } else {
-        ReasonSessionLatestStatus::Empty
-    }
 }
 
 fn normalize_ledger_rows(
@@ -2661,184 +2309,6 @@ mod tests {
             invalid_cursor,
             ReasonPersistenceError::InvalidTurnPageCursor(_)
         ));
-
-        fs::remove_dir_all(runtime_home).expect("cleanup");
-    }
-
-    #[test]
-    fn session_list_page_orders_latest_then_paginates_metadata_only_sessions() {
-        let runtime_home = temp_runtime_home();
-        let coordinator = ReasonPersistence::new(&runtime_home, AgentId::new("agent-1"));
-        let metadata_session_id = SessionId::new("session-metadata");
-        coordinator
-            .write_session_metadata_entries(&[PersistedSessionMetadataEntry {
-                agent_id: AgentId::new("agent-1"),
-                session_id: metadata_session_id.clone(),
-                title: Some("Metadata only".to_owned()),
-                archived: false,
-                cwd: None,
-                updated_unix_seconds: 100,
-            }])
-            .expect("write metadata sidecar");
-
-        let mut history = SessionHistory::new(
-            SessionId::new("session-turns"),
-            vec![stable_segment(
-                "memory-turn-session",
-                ContextSegmentKind::SessionMemory,
-                "remember turn session",
-            )],
-        )
-        .expect("history");
-        let mut turn = ReasonTurnEngine::new()
-            .start_turn(
-                &mut history,
-                TurnStartInput {
-                    session_id: SessionId::new("session-turns"),
-                    turn_id: TurnId::new("runtime-turn-1"),
-                    trace_id: TraceId::new("trace-list"),
-                    feature_id: FeatureId::new("reason.persistence"),
-                    agent_id: AgentId::new("agent-1"),
-                    user_text: "latest session".to_owned(),
-                    planned_context_segments: Vec::new(),
-                    tool_schema_fingerprint: None,
-                    model: "model-a".to_owned(),
-                },
-            )
-            .expect("turn");
-        turn.created_at = 200;
-        turn.terminal_event = Some(ReasonResp03TerminalEvent {
-            session_id: history.session_id().clone(),
-            turn_id: turn.request.turn_id.clone(),
-            trace_id: turn.request.trace_id.clone(),
-            feature_id: FeatureId::new("reason.persistence"),
-            agent_id: AgentId::new("agent-1"),
-            status: TerminalStatus::Success,
-            summary: "latest".to_owned(),
-            user_options: None,
-        });
-        coordinator
-            .record_turn_closed(&history, &turn, 0)
-            .expect("persist closed turn and summary index");
-
-        let latest = coordinator
-            .list_persisted_sessions_page(&ReasonSessionListPageRequest {
-                archived: false,
-                cursor: None,
-                limit: 1,
-            })
-            .expect("latest session page");
-        assert_eq!(latest.sessions.len(), 1);
-        assert_eq!(latest.sessions[0].session_id.as_str(), "session-turns");
-        assert_eq!(latest.sessions[0].activity_unix_seconds, 200);
-        assert_eq!(latest.sessions[0].turn_count, 1);
-        assert_eq!(
-            latest.sessions[0].latest_status,
-            ReasonSessionLatestStatus::Terminal(TerminalStatus::Success)
-        );
-        assert!(latest.has_older);
-        let cursor = latest.next_cursor.expect("older cursor");
-
-        let older = coordinator
-            .list_persisted_sessions_page(&ReasonSessionListPageRequest {
-                archived: false,
-                cursor: Some(cursor),
-                limit: 10,
-            })
-            .expect("older session page");
-        assert_eq!(
-            older
-                .sessions
-                .iter()
-                .map(|summary| summary.session_id.as_str())
-                .collect::<Vec<_>>(),
-            vec!["session-metadata"]
-        );
-        assert!(!older.has_older);
-
-        let invalid_limit =
-            coordinator.list_persisted_sessions_page(&ReasonSessionListPageRequest {
-                archived: false,
-                cursor: None,
-                limit: 101,
-            });
-        assert_eq!(
-            invalid_limit.unwrap_err(),
-            ReasonPersistenceError::InvalidSessionListPageLimit {
-                max: 100,
-                actual: 101
-            }
-        );
-
-        fs::remove_dir_all(runtime_home).expect("cleanup");
-    }
-
-    #[test]
-    fn session_metadata_maintenance_updates_summary_and_archive_page() {
-        let runtime_home = temp_runtime_home();
-        let coordinator = ReasonPersistence::new(&runtime_home, AgentId::new("agent-1"));
-        let session_id = SessionId::new("metadata-maintained-session");
-        let created = coordinator
-            .create_session_metadata(
-                session_id.clone(),
-                Some("Created".to_owned()),
-                Some("/tmp/freehand-cwd".to_owned()),
-            )
-            .expect("create metadata session");
-        assert_eq!(created.title.as_deref(), Some("Created"));
-
-        let active = coordinator
-            .list_persisted_sessions_page(&ReasonSessionListPageRequest {
-                archived: false,
-                cursor: None,
-                limit: 10,
-            })
-            .expect("active page after create");
-        assert_eq!(active.sessions.len(), 1);
-        assert_eq!(active.sessions[0].title.as_deref(), Some("Created"));
-        assert_eq!(active.sessions[0].cwd.as_deref(), Some("/tmp/freehand-cwd"));
-
-        let renamed = coordinator
-            .rename_session(&session_id, "Renamed".to_owned())
-            .expect("rename metadata session");
-        assert_eq!(renamed.title.as_deref(), Some("Renamed"));
-        let active = coordinator
-            .list_persisted_sessions_page(&ReasonSessionListPageRequest {
-                archived: false,
-                cursor: None,
-                limit: 10,
-            })
-            .expect("active page after rename");
-        assert_eq!(active.sessions[0].title.as_deref(), Some("Renamed"));
-
-        coordinator
-            .archive_session(&session_id)
-            .expect("archive metadata session");
-        let active = coordinator
-            .list_persisted_sessions_page(&ReasonSessionListPageRequest {
-                archived: false,
-                cursor: None,
-                limit: 10,
-            })
-            .expect("active page after archive");
-        assert!(active.sessions.is_empty());
-        let archived = coordinator
-            .list_persisted_sessions_page(&ReasonSessionListPageRequest {
-                archived: true,
-                cursor: None,
-                limit: 10,
-            })
-            .expect("archived page after archive");
-        assert_eq!(
-            archived
-                .sessions
-                .iter()
-                .map(|summary| summary.session_id.as_str())
-                .collect::<Vec<_>>(),
-            vec![session_id.as_str()]
-        );
-        assert!(archived.sessions[0].archived);
-        assert_eq!(archived.sessions[0].title.as_deref(), Some("Renamed"));
 
         fs::remove_dir_all(runtime_home).expect("cleanup");
     }

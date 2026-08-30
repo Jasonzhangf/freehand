@@ -253,12 +253,6 @@ fn run_gates_check() -> Result<(), String> {
             "docs/verification-maps/config.account-config-sync.json",
             "docs/module-registry/app.runtime-daemon.json",
             "docs/verification-maps/app.runtime-daemon.json",
-            "docs/module-registry/app.cli-live-turn.json",
-            "docs/verification-maps/app.cli-live-turn.json",
-            "docs/module-registry/provider.reason-live-bridge.json",
-            "docs/verification-maps/provider.reason-live-bridge.json",
-            "docs/module-registry/reason.context-planner.json",
-            "docs/verification-maps/reason.context-planner.json",
             "docs/module-registry/foundation.workspace.json",
             "docs/verification-maps/foundation.workspace.json",
             "docs/wiki/app.acp-server.md",
@@ -294,13 +288,6 @@ fn run_gates_check() -> Result<(), String> {
     verify_relay_transport_boundary(&root)?;
     verify_account_config_sync_boundary(&root)?;
     verify_runtime_master_worker_loop_boundary(&root)?;
-    verify_cli_live_turn_boundary(&root)?;
-    verify_provider_reason_live_bridge_boundary(&root)?;
-    verify_reason_context_planner_boundary(&root)?;
-    verify_ui_protocol_boundary(&root)?;
-    verify_reason_persistence_boundary(&root)?;
-    verify_runtime_ui_command_dispatch_boundary(&root)?;
-    verify_app_webui_session_paging_boundary(&root)?;
     verify_search_evidence_schema_conformance(&root)?;
     verify_dependency_graph(&root)?;
     verify_task_status_single_writer(&root)?;
@@ -824,575 +811,6 @@ fn verify_runtime_master_worker_loop_boundary(root: &Path) -> Result<(), String>
         }
     }
     Ok(())
-}
-
-fn verify_cli_live_turn_boundary(root: &Path) -> Result<(), String> {
-    let registry_path = "docs/module-registry/app.cli-live-turn.json";
-    let registry = read_relay_module_registry(root, registry_path)?;
-    if registry.schema_version != 1
-        || registry.registry_id != "app.cli-live-turn.modules"
-        || registry.feature_id != "app.cli-live-turn"
-        || registry.status != "active"
-        || registry.coverage_roots != ["apps/freehand-cli"]
-        || registry.modules.len() != 1
-    {
-        return Err("app.cli-live-turn module registry identity/shape is invalid".to_owned());
-    }
-    let module = &registry.modules[0];
-    if module.module_id != "app.cli.shared-boundary"
-        || module.owner_feature_id != "app.cli-live-turn"
-        || module.status != "active"
-        || module.owned_paths
-            != [
-                "apps/freehand-cli/Cargo.toml",
-                "apps/freehand-cli/src/main.rs",
-                "apps/freehand-cli/tests/config_startup.rs",
-            ]
-    {
-        return Err("app.cli-live-turn shared-boundary identity/paths is invalid".to_owned());
-    }
-    verify_registered_rust_module_edges(root, &registry, module, "app.cli-live-turn")?;
-    verify_registered_module_verification_map(
-        root,
-        "app.cli-live-turn",
-        registry_path,
-        "docs/verification-maps/app.cli-live-turn.json",
-        &[
-            "app.cli-live-turn.unit",
-            "app.cli-live-turn.clippy",
-            "app.cli-live-turn.mainline",
-            "app.cli-live-turn.architecture",
-        ],
-    )
-}
-
-fn verify_provider_reason_live_bridge_boundary(root: &Path) -> Result<(), String> {
-    let registry_path = "docs/module-registry/provider.reason-live-bridge.json";
-    let registry = read_relay_module_registry(root, registry_path)?;
-    if registry.schema_version != 1
-        || registry.registry_id != "provider.reason-live-bridge.modules"
-        || registry.feature_id != "provider.reason-live-bridge"
-        || registry.status != "active"
-        || registry.coverage_roots
-            != [
-                "crates/freehand-runtime/Cargo.toml",
-                "crates/freehand-runtime/src/lib.rs",
-                "crates/freehand-runtime/src/live_context.rs",
-                "crates/freehand-runtime/src/tests.rs",
-            ]
-        || registry.modules.len() != 1
-    {
-        return Err(
-            "provider.reason-live-bridge module registry identity/shape is invalid".to_owned(),
-        );
-    }
-    let module = &registry.modules[0];
-    if module.module_id != "provider.reason-live-bridge.live-bridge"
-        || module.owner_feature_id != "provider.reason-live-bridge"
-        || module.status != "active"
-        || module.owned_paths
-            != [
-                "crates/freehand-runtime/Cargo.toml",
-                "crates/freehand-runtime/src/lib.rs",
-                "crates/freehand-runtime/src/live_context.rs",
-                "crates/freehand-runtime/src/tests.rs",
-            ]
-    {
-        return Err("provider.reason-live-bridge live-bridge identity/paths is invalid".to_owned());
-    }
-    verify_registered_rust_module_edges(root, &registry, module, "provider.reason-live-bridge")?;
-    verify_registered_module_verification_map(
-        root,
-        "provider.reason-live-bridge",
-        registry_path,
-        "docs/verification-maps/provider.reason-live-bridge.json",
-        &[
-            "provider.reason-live-bridge.unit",
-            "provider.reason-live-bridge.clippy",
-            "provider.reason-live-bridge.mainline",
-            "provider.reason-live-bridge.architecture",
-            "provider.reason-live-bridge.sourced-search-boundary",
-        ],
-    )
-}
-
-fn verify_reason_context_planner_boundary(root: &Path) -> Result<(), String> {
-    let registry_path = "docs/module-registry/reason.context-planner.json";
-    let registry = read_relay_module_registry(root, registry_path)?;
-    if registry.schema_version != 1
-        || registry.registry_id != "reason.context-planner.modules"
-        || registry.feature_id != "reason.context-planner"
-        || registry.status != "active"
-        || registry.coverage_roots
-            != [
-                "crates/freehand-blocks/Cargo.toml",
-                "crates/freehand-blocks/src/lib.rs",
-            ]
-        || registry.modules.len() != 1
-    {
-        return Err("reason.context-planner module registry identity/shape is invalid".to_owned());
-    }
-    let module = &registry.modules[0];
-    if module.module_id != "reason.context-planner.planner"
-        || module.owner_feature_id != "reason.context-planner"
-        || module.status != "active"
-        || module.owned_paths
-            != [
-                "crates/freehand-blocks/Cargo.toml",
-                "crates/freehand-blocks/src/lib.rs",
-            ]
-    {
-        return Err("reason.context-planner planner identity/paths is invalid".to_owned());
-    }
-    verify_registered_rust_module_edges(root, &registry, module, "reason.context-planner")?;
-    verify_registered_module_verification_map(
-        root,
-        "reason.context-planner",
-        registry_path,
-        "docs/verification-maps/reason.context-planner.json",
-        &[
-            "reason.context-planner.unit",
-            "reason.context-planner.clippy",
-            "reason.context-planner.mainline",
-            "reason.context-planner.architecture",
-            "reason.context-planner.search-evidence-context-boundary",
-        ],
-    )
-}
-
-fn read_relay_module_registry(root: &Path, path: &str) -> Result<RelayModuleRegistry, String> {
-    let source = fs::read_to_string(root.join(path)).map_err(|error| error.to_string())?;
-    serde_json::from_str(&source).map_err(|error| format!("{path} is invalid: {error}"))
-}
-
-fn verify_registered_module_verification_map(
-    root: &Path,
-    feature_id: &str,
-    registry_path: &str,
-    verification_path: &str,
-    gate_ids: &[&str],
-) -> Result<(), String> {
-    let source =
-        fs::read_to_string(root.join(verification_path)).map_err(|error| error.to_string())?;
-    let verification: RelayVerificationMap = serde_json::from_str(&source)
-        .map_err(|error| format!("{verification_path} is invalid: {error}"))?;
-    if verification.schema_version != 1
-        || verification.verification_map_id != format!("{feature_id}.verification")
-        || verification.feature_id != feature_id
-        || verification.status != "active"
-        || verification.module_registry != registry_path
-        || verification.function_map != format!("docs/function-maps/{feature_id}.md")
-        || verification.mainline_call_map != format!("docs/mainline-calls/{feature_id}.json")
-        || verification.test_design != format!("docs/testing/{feature_id}.md")
-    {
-        return Err(format!(
-            "{verification_path} identity/backlinks are invalid"
-        ));
-    }
-    for gate_id in gate_ids {
-        let gate = verification
-            .gates
-            .iter()
-            .find(|gate| gate.gate_id == *gate_id)
-            .ok_or_else(|| format!("{verification_path} is missing `{gate_id}`"))?;
-        if gate.binding_status != "active"
-            || gate.command.trim().is_empty()
-            || gate.kind.trim().is_empty()
-        {
-            return Err(format!(
-                "{verification_path} gate `{gate_id}` is not active"
-            ));
-        }
-    }
-    Ok(())
-}
-
-fn verify_registered_rust_module_edges(
-    root: &Path,
-    registry: &RelayModuleRegistry,
-    module: &RelayModuleEntry,
-    feature_id: &str,
-) -> Result<(), String> {
-    if registry.feature_id != feature_id || module.owner_feature_id != feature_id {
-        return Err(format!("{feature_id} module owner does not match registry"));
-    }
-    if module
-        .allowed_dependencies
-        .iter()
-        .any(|dependency| module.forbidden_dependencies.contains(dependency))
-    {
-        return Err(format!("{feature_id} both allows and forbids a dependency"));
-    }
-
-    let mut covered_files = BTreeSet::new();
-    for coverage_root in &registry.coverage_roots {
-        let coverage_path = root.join(coverage_root);
-        if coverage_path.is_file() {
-            covered_files.insert(coverage_root.clone());
-        } else {
-            collect_all_file_paths(root, &coverage_path, &mut covered_files)?;
-        }
-    }
-    let mut owned_files = BTreeSet::new();
-    for entry in &registry.modules {
-        owned_files.extend(entry.owned_paths.iter().cloned());
-    }
-    if covered_files != owned_files {
-        return Err(format!(
-            "{feature_id} module coverage mismatch; covered={covered_files:?}; owned={owned_files:?}"
-        ));
-    }
-    for path in &module.owned_paths {
-        if !root.join(path).is_file() {
-            return Err(format!("{feature_id} owns missing path `{path}`"));
-        }
-    }
-
-    let mut allowed_by_import = BTreeMap::<String, String>::new();
-    for dependency in &module.allowed_dependencies {
-        let Some(import_name) = module_dependency_import_name(dependency) else {
-            continue;
-        };
-        if allowed_by_import
-            .insert(import_name.clone(), dependency.clone())
-            .is_some()
-        {
-            return Err(format!(
-                "{feature_id} maps `{import_name}` to duplicate dependencies"
-            ));
-        }
-    }
-    let mut declared_edges = BTreeMap::<&str, &RelayModuleEdge>::new();
-    for edge in &registry.declared_edges {
-        if edge.from_module_id != module.module_id {
-            continue;
-        }
-        if declared_edges
-            .insert(edge.import_name.as_str(), edge)
-            .is_some()
-        {
-            return Err(format!(
-                "{feature_id} declares duplicate import edge `{}`",
-                edge.import_name
-            ));
-        }
-    }
-
-    let mut used_edges = BTreeSet::new();
-    for path in &module.owned_paths {
-        if !path.ends_with(".rs") {
-            continue;
-        }
-        let source = fs::read_to_string(root.join(path)).map_err(|error| error.to_string())?;
-        let rust_imports = collect_rust_use_roots(&source, path)?;
-        for import_root in rust_imports.imports {
-            if matches!(import_root.as_str(), "crate" | "self" | "super")
-                || rust_imports.local_modules.contains(import_root.as_str())
-            {
-                continue;
-            }
-            if matches!(import_root.as_str(), "std" | "core" | "alloc") {
-                if !module.allowed_dependencies.contains(&"rust.std".to_owned()) {
-                    return Err(format!(
-                        "{path}: standard library import `{import_root}` is not allowed"
-                    ));
-                }
-                continue;
-            }
-            let dependency = {
-                allowed_by_import
-                    .get(import_root.as_str())
-                    .cloned()
-                    .ok_or_else(|| {
-                        format!("{path}: actual import `{import_root}` has no registered allowed dependency")
-                    })?
-            };
-            if module
-                .forbidden_dependencies
-                .contains(&dependency.to_owned())
-            {
-                return Err(format!(
-                    "{path}: forbidden dependency `{dependency}` is imported as `{import_root}`"
-                ));
-            }
-            let edge = declared_edges.get(import_root.as_str()).ok_or_else(|| {
-                format!("{path}: actual import `{import_root}` has no declared module edge")
-            })?;
-            used_edges.insert(edge.edge_id.as_str());
-        }
-    }
-
-    let unused_edges = declared_edges
-        .values()
-        .filter(|edge| !used_edges.contains(edge.edge_id.as_str()))
-        .collect::<Vec<_>>();
-    if !unused_edges.is_empty() {
-        let ids = unused_edges
-            .iter()
-            .map(|edge| edge.edge_id.as_str())
-            .collect::<Vec<_>>()
-            .join(", ");
-        return Err(format!("{feature_id} declares unused import edges: {ids}"));
-    }
-    Ok(())
-}
-
-fn verify_ui_protocol_boundary(root: &Path) -> Result<(), String> {
-    let registry_path = "docs/module-registry/ui.protocol.json";
-    let registry = read_relay_module_registry(root, registry_path)?;
-    if registry.schema_version != 1
-        || registry.registry_id != "ui.protocol.modules"
-        || registry.feature_id != "ui.protocol"
-        || registry.status != "active"
-        || registry.coverage_roots != ["crates/freehand-ui-protocol"]
-        || registry.modules.len() != 1
-    {
-        return Err("ui.protocol module registry identity/shape is invalid".to_owned());
-    }
-    let module = &registry.modules[0];
-    if module.module_id != "ui.protocol.library" || module.status != "active" {
-        return Err("ui.protocol library identity is invalid".to_owned());
-    }
-    verify_registered_rust_module_edges(root, &registry, module, "ui.protocol")?;
-    verify_registered_module_verification_map(
-        root,
-        "ui.protocol",
-        registry_path,
-        "docs/verification-maps/ui.protocol.json",
-        &[
-            "ui.protocol.unit",
-            "ui.protocol.clippy",
-            "ui.protocol.architecture",
-        ],
-    )
-}
-
-fn verify_reason_persistence_boundary(root: &Path) -> Result<(), String> {
-    let registry_path = "docs/module-registry/reason.persistence.json";
-    let registry = read_relay_module_registry(root, registry_path)?;
-    if registry.schema_version != 1
-        || registry.registry_id != "reason.persistence.modules"
-        || registry.feature_id != "reason.persistence"
-        || registry.status != "active"
-        || registry.modules.len() != 1
-    {
-        return Err("reason.persistence module registry identity/shape is invalid".to_owned());
-    }
-    let module = &registry.modules[0];
-    if module.module_id != "reason.persistence.library"
-        || module.owner_feature_id != "reason.persistence"
-        || module.status != "active"
-        || module.owned_paths.len() != 5
-    {
-        return Err("reason.persistence library identity/paths is invalid".to_owned());
-    }
-    verify_registered_rust_module_edges(root, &registry, module, "reason.persistence")?;
-    verify_registered_module_verification_map(
-        root,
-        "reason.persistence",
-        registry_path,
-        "docs/verification-maps/reason.persistence.json",
-        &[
-            "reason.persistence.unit",
-            "reason.persistence.session-page",
-            "reason.persistence.clippy",
-            "reason.persistence.mainline",
-            "reason.persistence.architecture",
-        ],
-    )
-}
-
-fn verify_runtime_ui_command_dispatch_boundary(root: &Path) -> Result<(), String> {
-    let registry_path = "docs/module-registry/runtime.ui-command-dispatch.json";
-    let registry = read_relay_module_registry(root, registry_path)?;
-    if registry.schema_version != 1
-        || registry.registry_id != "runtime.ui-command-dispatch.modules"
-        || registry.feature_id != "runtime.ui-command-dispatch"
-        || registry.status != "active"
-        || registry.coverage_roots != ["crates/freehand-runtime/src/session_paging.rs"]
-        || registry.modules.len() != 1
-    {
-        return Err(
-            "runtime.ui-command-dispatch module registry identity/shape is invalid".to_owned(),
-        );
-    }
-    let module = &registry.modules[0];
-    if module.module_id != "runtime.ui-command-dispatch.bridge"
-        || module.owner_feature_id != "runtime.ui-command-dispatch"
-        || module.status != "active"
-        || module.owned_paths != ["crates/freehand-runtime/src/session_paging.rs"]
-    {
-        return Err("runtime.ui-command-dispatch bridge identity/path is invalid".to_owned());
-    }
-    verify_registered_rust_module_edges(root, &registry, module, "runtime.ui-command-dispatch")?;
-    verify_registered_module_verification_map(
-        root,
-        "runtime.ui-command-dispatch",
-        registry_path,
-        "docs/verification-maps/runtime.ui-command-dispatch.json",
-        &[
-            "runtime.ui-command-dispatch.unit",
-            "runtime.ui-command-dispatch.session-page",
-            "runtime.ui-command-dispatch.clippy",
-            "runtime.ui-command-dispatch.mainline",
-            "runtime.ui-command-dispatch.architecture",
-        ],
-    )
-}
-
-fn verify_app_webui_session_paging_boundary(root: &Path) -> Result<(), String> {
-    let registry_path = "docs/module-registry/app.webui-smoke.json";
-    let registry = read_relay_module_registry(root, registry_path)?;
-    if registry.schema_version != 1
-        || registry.registry_id != "app.webui-smoke.modules"
-        || registry.feature_id != "app.webui-smoke"
-        || registry.status != "active"
-        || registry.modules.len() != 2
-    {
-        return Err("app.webui-smoke module registry identity/shape is invalid".to_owned());
-    }
-    let module = &registry.modules[0];
-    if module.module_id != "app.webui-smoke.session-paging-surface"
-        || module.owner_feature_id != "app.webui-smoke"
-        || module.status != "active"
-        || module.owned_paths
-            != [
-                "apps/freehand-server/assets/webui.css",
-                "apps/freehand-server/assets/webui/generated/adp-protocol.js",
-                "apps/freehand-server/assets/webui/legacy-monolith.js",
-                "apps/freehand-server/assets/webui/surfaces/timer-dashboard/view.js",
-                "apps/freehand-server/src/lib.rs",
-                "apps/freehand-server/src/assets.rs",
-            ]
-    {
-        return Err("app.webui-smoke paging surface identity/paths is invalid".to_owned());
-    }
-    let verifiers = &registry.modules[1];
-    if verifiers.module_id != "app.webui-smoke.online-verifiers"
-        || verifiers.owner_feature_id != "app.webui-smoke"
-        || verifiers.status != "active"
-        || verifiers.owned_paths
-            != [
-                "scripts/lib/adp-verifier-client.mjs",
-                "scripts/lib/adp-verifier-client.test.mjs",
-                "scripts/verify-model-group-ui-online.mjs",
-                "scripts/verify-provider-hosted-web-search-online.mjs",
-                "scripts/verify-provider-recovery-webui-online.mjs",
-                "scripts/verify-provider-registry-ui-online.mjs",
-                "scripts/verify-provider-web-search-settings-ui-online.mjs",
-                "scripts/verify-web-fetch-tool-online.mjs",
-                "scripts/verify-webui-ambiguous-submit-recovery.mjs",
-                "scripts/verify-webui-diagnostics-online.mjs",
-                "scripts/verify-webui-image-attachment-online.mjs",
-                "scripts/verify-webui-live-tool-render-online.mjs",
-                "scripts/verify-webui-mobile-ui-tree-online.mjs",
-                "scripts/verify-webui-new-session-online.mjs",
-                "scripts/verify-webui-path-diagnostic-online.mjs",
-                "scripts/verify-webui-session-restore-error-exit-online.mjs",
-                "scripts/verify-webui-session-search-online.mjs",
-                "scripts/verify-webui-stop-continue-online.mjs",
-                "scripts/verify-webui-timer-dashboard-online.mjs",
-                "scripts/verify-webui-tools-registry-online.mjs",
-                "scripts/verify-worker-recovered-history-online.mjs",
-                "scripts/webui_verify_online.mjs",
-            ]
-    {
-        return Err("app.webui-smoke online verifier identity/paths is invalid".to_owned());
-    }
-    for path in &verifiers.owned_paths {
-        if !root.join(path).is_file() {
-            return Err(format!(
-                "app.webui-smoke owns missing verifier path `{path}`"
-            ));
-        }
-    }
-    verify_registered_rust_module_edges(root, &registry, module, "app.webui-smoke")?;
-    verify_registered_module_verification_map(
-        root,
-        "app.webui-smoke",
-        registry_path,
-        "docs/verification-maps/app.webui-smoke.json",
-        &[
-            "app.webui-smoke.unit",
-            "app.webui-smoke.syntax",
-            "app.webui-smoke.verifier-syntax",
-            "app.webui-smoke.verifier-adp-client",
-            "app.webui-smoke.clippy",
-            "app.webui-smoke.browser",
-            "app.webui-smoke.session-paging-online",
-            "app.webui-smoke.mainline",
-            "app.webui-smoke.architecture",
-        ],
-    )
-}
-
-fn module_dependency_import_name(dependency: &str) -> Option<String> {
-    if dependency == "rust.std" {
-        return None;
-    }
-    let base = dependency.rsplit('.').next().unwrap_or(dependency);
-    if base.is_empty() || base == "rust" || base == "third_party" {
-        return None;
-    }
-    Some(base.replace('-', "_"))
-}
-
-struct RustImportRoots {
-    imports: BTreeSet<String>,
-    local_modules: BTreeSet<String>,
-}
-
-fn collect_rust_use_roots(source: &str, path: &str) -> Result<RustImportRoots, String> {
-    struct UseRootVisitor {
-        imports: BTreeSet<String>,
-        local_modules: BTreeSet<String>,
-    }
-
-    impl UseRootVisitor {
-        fn add_tree(&mut self, tree: &syn::UseTree) {
-            match tree {
-                syn::UseTree::Path(value) => {
-                    self.imports.insert(value.ident.to_string());
-                }
-                syn::UseTree::Name(value) => {
-                    self.imports.insert(value.ident.to_string());
-                }
-                syn::UseTree::Rename(value) => {
-                    self.imports.insert(value.ident.to_string());
-                }
-                syn::UseTree::Glob(_) => {}
-                syn::UseTree::Group(value) => {
-                    for item in &value.items {
-                        self.add_tree(item);
-                    }
-                }
-            }
-        }
-    }
-
-    impl<'ast> syn::visit::Visit<'ast> for UseRootVisitor {
-        fn visit_item_use(&mut self, item: &'ast syn::ItemUse) {
-            self.add_tree(&item.tree);
-        }
-
-        fn visit_item_mod(&mut self, item: &'ast syn::ItemMod) {
-            self.local_modules.insert(item.ident.to_string());
-        }
-    }
-
-    use syn::visit::Visit;
-
-    let syntax = syn::parse_file(source)
-        .map_err(|error| format!("parse Rust imports in {path}: {error}"))?;
-    let mut visitor = UseRootVisitor {
-        imports: BTreeSet::new(),
-        local_modules: BTreeSet::new(),
-    };
-    visitor.visit_file(&syntax);
-    Ok(RustImportRoots {
-        imports: visitor.imports,
-        local_modules: visitor.local_modules,
-    })
 }
 
 fn rust_source_contains_identifier(source: &str, identifier: &str) -> bool {
@@ -3311,7 +2729,7 @@ fn verify_ci_cd_gate_commands(root: &Path) -> Result<(), String> {
         fs::read_to_string(root.join("Makefile")).map_err(|err| format!("read Makefile: {err}"))?;
     require_contains(
         &makefile,
-        ".PHONY: provision-openminis-source build fmt clippy test mainlines gates session-paging-online relay-deployment-smoke relay-local-online relay-account-config-smoke launchd-guard-offline launchd-guard-online launchd-guards ci verify-webui-online verify-webui-release-online release install-global install-symlink install-launchd install-launchdS install-worker-launchd install-worker-launchdS restart-launchd restart-launchdS restart-worker-launchd restart-worker-launchdS uninstall-launchd uninstall-launchdS uninstall-worker-launchd uninstall-worker-launchdS launchd-status launchd-statusS worker-launchd-status worker-launchd-statusS launchd-logs launchd-logsS worker-launchd-logs worker-launchd-logsS hooks",
+        ".PHONY: provision-openminis-source build fmt clippy test mainlines gates relay-deployment-smoke relay-local-online relay-account-config-smoke launchd-guard-offline launchd-guard-online launchd-guards ci verify-webui-online verify-webui-release-online release install-global install-symlink install-launchd install-launchdS install-worker-launchd install-worker-launchdS restart-launchd restart-launchdS restart-worker-launchd restart-worker-launchdS uninstall-launchd uninstall-launchdS uninstall-worker-launchd uninstall-worker-launchdS launchd-status launchd-statusS worker-launchd-status worker-launchd-statusS launchd-logs launchd-logsS worker-launchd-logs worker-launchd-logsS hooks",
         "Makefile",
     )?;
     require_contains(
@@ -3320,21 +2738,11 @@ fn verify_ci_cd_gate_commands(root: &Path) -> Result<(), String> {
         "Makefile",
     )?;
     require_contains(&makefile, "test: provision-openminis-source", "Makefile")?;
-    require_contains(
-        &makefile,
-        "RUST_TEST_THREADS=1 cargo test --workspace",
-        "Makefile workspace test execution contract",
-    )?;
     require_contains(&makefile, "gates: provision-openminis-source", "Makefile")?;
     require_contains(
         &makefile,
         "mainlines:\n\tcargo run -p xtask -- mainlines check",
         "Makefile",
-    )?;
-    require_contains(
-        &makefile,
-        "session-paging-online:\n\tset -a && . \"$${HOME}/.freehand/daemonS.env\" && set +a && \\\n\tFREEHAND_NEW_SESSION_BASE_URL=\"http://100.66.1.82:4042/\" \\\n\tFREEHAND_NEW_SESSION_ADP_URL=\"ws://100.66.1.82:4042/adp\" \\\n\tnode scripts/verify-webui-new-session-online.mjs",
-        "Makefile session paging online gate",
     )?;
     require_contains(
         &makefile,
@@ -5693,7 +5101,6 @@ fn verify_daemon_module_registry(
         "app.runtime-daemon.clippy",
         "app.runtime-daemon.launchd-offline",
         "app.runtime-daemon.launchd-online",
-        "app.runtime-daemon.three-worker-online",
         "app.runtime-daemon.architecture",
     ] {
         let gate = verification
@@ -6209,12 +5616,12 @@ fn verify_adp_protocol_artifacts(root: &Path) -> Result<(), String> {
 
     require_contains(
         &expected_json_body,
-        "\"protocol_version\": 4",
+        "\"protocol_version\": 3",
         "crates/freehand-ui-protocol/generated/adp-protocol.schema.json",
     )?;
     require_contains(
         &expected_json_body,
-        "\"handshake_capability\": \"adp.v4.handshake\"",
+        "\"handshake_capability\": \"adp.v3.handshake\"",
         "crates/freehand-ui-protocol/generated/adp-protocol.schema.json",
     )?;
     require_contains(
@@ -6703,50 +6110,6 @@ mod tests {
         .expect_err("missing observer edge must fail");
         assert!(
             err.contains("exactly three edges") || err.contains("observer to launchd-control"),
-            "{err}"
-        );
-    }
-
-    fn write_cli_live_turn_fixture(root: &Path) {
-        let repository_root = Path::new(env!("CARGO_MANIFEST_DIR"))
-            .parent()
-            .expect("repository root");
-        for relative in [
-            "docs/module-registry/app.cli-live-turn.json",
-            "docs/verification-maps/app.cli-live-turn.json",
-            "apps/freehand-cli/Cargo.toml",
-            "apps/freehand-cli/src/main.rs",
-            "apps/freehand-cli/tests/config_startup.rs",
-        ] {
-            let destination = root.join(relative);
-            fs::create_dir_all(destination.parent().expect("fixture parent"))
-                .expect("create fixture directory");
-            fs::copy(repository_root.join(relative), destination).expect("copy CLI fixture");
-        }
-    }
-
-    #[test]
-    fn cli_live_turn_module_registry_accepts_declared_import_edges() {
-        let root = test_repo_root("cli-live-turn-module-edges-exact");
-        write_cli_live_turn_fixture(&root);
-
-        verify_cli_live_turn_boundary(&root)
-            .expect("declared import edges should match the CLI source surface");
-    }
-
-    #[test]
-    fn cli_live_turn_module_registry_rejects_undeclared_import_edge() {
-        let root = test_repo_root("cli-live-turn-module-edge-missing");
-        write_cli_live_turn_fixture(&root);
-        let source_path = root.join("apps/freehand-cli/src/main.rs");
-        let mut source = fs::read_to_string(&source_path).expect("read CLI fixture");
-        source.push_str("\nuse freehand_reason::SessionHistory;\n");
-        fs::write(&source_path, source).expect("write CLI fixture");
-
-        let err = verify_cli_live_turn_boundary(&root)
-            .expect_err("undeclared actual import must fail the module gate");
-        assert!(
-            err.contains("actual import `freehand_reason` has no declared module edge"),
             "{err}"
         );
     }
@@ -7623,15 +6986,14 @@ mod tests {
             | CiFixtureMode::CiWorkflowMissingLaunchdGate
             | CiFixtureMode::LaunchdMissingEnvBind
             | CiFixtureMode::LaunchdRepoRootWorkdir => {
-                ".PHONY: provision-openminis-source build fmt clippy test mainlines gates session-paging-online relay-deployment-smoke relay-local-online relay-account-config-smoke launchd-guard-offline launchd-guard-online launchd-guards ci verify-webui-online verify-webui-release-online release install-global install-symlink install-launchd install-launchdS install-worker-launchd install-worker-launchdS restart-launchd restart-launchdS restart-worker-launchd restart-worker-launchdS uninstall-launchd uninstall-launchdS uninstall-worker-launchd uninstall-worker-launchdS launchd-status launchd-statusS worker-launchd-status worker-launchd-statusS launchd-logs launchd-logsS worker-launchd-logs worker-launchd-logsS hooks\n\
+                ".PHONY: provision-openminis-source build fmt clippy test mainlines gates relay-deployment-smoke relay-local-online relay-account-config-smoke launchd-guard-offline launchd-guard-online launchd-guards ci verify-webui-online verify-webui-release-online release install-global install-symlink install-launchd install-launchdS install-worker-launchd install-worker-launchdS restart-launchd restart-launchdS restart-worker-launchd restart-worker-launchdS uninstall-launchd uninstall-launchdS uninstall-worker-launchd uninstall-worker-launchdS launchd-status launchd-statusS worker-launchd-status worker-launchd-statusS launchd-logs launchd-logsS worker-launchd-logs worker-launchd-logsS hooks\n\
 provision-openminis-source:\n\tscripts/provision-openminis-source.sh\n\
 build:\n\tcargo build --workspace\n\
 fmt:\n\tcargo fmt --check\n\
 clippy:\n\tcargo clippy --workspace --all-targets -- -D warnings\n\
-test: provision-openminis-source\n\tRUST_TEST_THREADS=1 cargo test --workspace\n\
+test: provision-openminis-source\n\tcargo test --workspace\n\
 mainlines:\n\tcargo run -p xtask -- mainlines check\n\
 gates: provision-openminis-source\n\tcargo run -p xtask -- gates check\n\
-session-paging-online:\n\tset -a && . \"$${HOME}/.freehand/daemonS.env\" && set +a && \\\n\tFREEHAND_NEW_SESSION_BASE_URL=\"http://100.66.1.82:4042/\" \\\n\tFREEHAND_NEW_SESSION_ADP_URL=\"ws://100.66.1.82:4042/adp\" \\\n\tnode scripts/verify-webui-new-session-online.mjs\n\
 relay-deployment-smoke:\n\tscripts/verify-relay-deployment-smoke.sh\n\
 relay-local-online:\n\tscripts/verify-remote-relay-local-online.sh\n\
 relay-account-config-smoke:\n\tscripts/verify-relay-account-config-smoke.sh\n\
@@ -7655,15 +7017,14 @@ uninstall-launchdS:\n\tscripts/uninstall-launchd.sh uninstallS\n\
 uninstall-worker-launchdS:\n\tscripts/uninstall-launchd.sh uninstallWorkerS\n"
             }
             CiFixtureMode::MakeCiMissingMainlines => {
-                ".PHONY: provision-openminis-source build fmt clippy test gates session-paging-online ci verify-webui-online verify-webui-release-online release install-global install-symlink install-launchd install-launchdS install-worker-launchd install-worker-launchdS restart-launchd restart-launchdS restart-worker-launchd restart-worker-launchdS uninstall-launchd uninstall-launchdS uninstall-worker-launchd uninstall-worker-launchdS launchd-status launchd-statusS worker-launchd-status worker-launchd-statusS launchd-logs launchd-logsS worker-launchd-logs worker-launchd-logsS hooks\n\
+                ".PHONY: provision-openminis-source build fmt clippy test gates ci verify-webui-online verify-webui-release-online release install-global install-symlink install-launchd install-launchdS install-worker-launchd install-worker-launchdS restart-launchd restart-launchdS restart-worker-launchd restart-worker-launchdS uninstall-launchd uninstall-launchdS uninstall-worker-launchd uninstall-worker-launchdS launchd-status launchd-statusS worker-launchd-status worker-launchd-statusS launchd-logs launchd-logsS worker-launchd-logs worker-launchd-logsS hooks\n\
 provision-openminis-source:\n\tscripts/provision-openminis-source.sh\n\
 build:\n\tcargo build --workspace\n\
 fmt:\n\tcargo fmt --check\n\
 clippy:\n\tcargo clippy --workspace --all-targets -- -D warnings\n\
-test: provision-openminis-source\n\tRUST_TEST_THREADS=1 cargo test --workspace\n\
+test: provision-openminis-source\n\tcargo test --workspace\n\
 gates: provision-openminis-source\n\tcargo run -p xtask -- gates check\n\
-session-paging-online:\n\t. \"$${HOME}/.freehand/daemonS.env\" && \\\n\tFREEHAND_NEW_SESSION_BASE_URL=\"http://100.66.1.82:4042/\" \\\n\tFREEHAND_NEW_SESSION_ADP_URL=\"ws://100.66.1.82:4042/adp\" \\\n\tnode scripts/verify-webui-new-session-online.mjs\n\
-ci: provision-openminis-source build fmt clippy test gates session-paging-online\n\
+ci: provision-openminis-source build fmt clippy test gates\n\
 verify-webui-online:\n\tscripts/verify-webui-online.sh\n\
 verify-webui-release-online:\n\tscripts/verify-webui-release-online.sh\n\
 release:\n\tscripts/release.sh\n\

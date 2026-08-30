@@ -3,17 +3,15 @@ import fsSync from 'node:fs';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { adpVerifierRequest, requireSessionListPage } from './lib/adp-verifier-client.mjs';
 
 const repo = process.cwd();
 const chromePath = process.env.FREEHAND_WEBUI_DIAGNOSTICS_CHROME || defaultBrowserPath();
 const debugPort = Number.parseInt(process.env.FREEHAND_WEBUI_DIAGNOSTICS_DEBUG_PORT || '9279', 10);
 const baseUrl = normalizedBaseUrl(process.env.FREEHAND_WEBUI_DIAGNOSTICS_BASE_URL || 'http://127.0.0.1:4042/');
 const adpUrl = process.env.FREEHAND_WEBUI_DIAGNOSTICS_ADP_URL || adpUrlFromBaseUrl(baseUrl);
-const adpAuthToken = process.env.FREEHAND_ADP_AUTH_TOKEN || '';
 const runId = `webui-诊断-${Date.now()}`;
 const artifactDir = path.join(repo, 'artifacts', 'webui-online', runId);
-const assetVersion = '20260824-session-list-page';
+const assetVersion = '20260726-stale-lifecycle-reconcile';
 const forbiddenPattern = /\/Users\/|\/Volumes\/|authorization|api_key|apikey|x-api-key|bearer |pair_token|secret|provider request|provider payload/i;
 
 await fs.mkdir(artifactDir, { recursive: true });
@@ -25,7 +23,7 @@ let summary = null;
 try {
   await waitHealth();
   await assertProductionPageReachable();
-  const beforeSessions = await activeSessionListPage();
+  const beforeSessions = sessionListPayload(await adpQuery('QuerySessionList'));
   const diagnostics = diagnosticsPayload(await adpQuery('QueryDiagnostics'));
   await fs.writeFile(path.join(artifactDir, 'session-list-before.json'), JSON.stringify(beforeSessions, null, 2));
   await fs.writeFile(path.join(artifactDir, '诊断-adp.json'), JSON.stringify(diagnostics, null, 2));
@@ -118,7 +116,7 @@ try {
   await fs.writeFile(path.join(artifactDir, '诊断-dom.json'), JSON.stringify(dom, null, 2));
   await captureScreenshot(cdp, '诊断-settings.png');
 
-  const afterSessions = await activeSessionListPage();
+  const afterSessions = sessionListPayload(await adpQuery('QuerySessionList'));
   await fs.writeFile(path.join(artifactDir, 'session-list-after.json'), JSON.stringify(afterSessions, null, 2));
 
   summary = {
@@ -211,11 +209,15 @@ function diagnosticsPayload(result) {
 }
 
 function sessionListPayload(result) {
-  return requireSessionListPage(result);
+  const payload = result?.SessionList || result?.session_list || result;
+  return {
+    sessions: Array.isArray(payload?.sessions) ? payload.sessions : [],
+    archived: Array.isArray(payload?.archived) ? payload.archived : [],
+  };
 }
 
 function sessionIds(list) {
-  return list.sessions
+  return (list.sessions || [])
     .map((session) => session.session_id || '')
     .filter(Boolean)
     .sort();
@@ -243,25 +245,38 @@ async function adpQuery(query) {
   return await adpRequest('query', 'query', query, 30_000);
 }
 
-async function activeSessionListPage() {
-  const result = await adpRequest('query', 'query', {
-    QuerySessionListPage: {
-      archived: false,
-      page: { direction: 'Latest', cursor: null, limit: 100 },
-    },
-  }, 30_000);
-  return sessionListPayload(result);
-}
-
 function adpRequest(kind, payloadKey, payload, timeoutMs) {
-  return adpVerifierRequest({
-    url: adpUrl,
-    authToken: adpAuthToken,
-    kind,
-    payloadKey,
-    payload,
-    timeoutMs,
-    clientName: 'freehand-diagnostics-verifier',
+  const socket = new WebSocket(adpUrl);
+  const requestId = `${kind}-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => {
+      socket.close();
+      reject(new Error(`ADP ${kind} timeout`));
+    }, timeoutMs);
+    socket.addEventListener('open', () => {
+      socket.send(JSON.stringify({ kind, request_id: requestId, [payloadKey]: payload }));
+    });
+    socket.addEventListener('message', (event) => {
+      const message = JSON.parse(event.data);
+      if (message.request_id !== requestId) {
+        return;
+      }
+      clearTimeout(timer);
+      socket.close();
+      if (message.kind === 'failure') {
+        reject(new Error(message.failure?.message || message.failure?.code || 'ADP failure'));
+        return;
+      }
+      if (message.kind === 'query_result') {
+        resolve(message.result);
+        return;
+      }
+      reject(new Error(`unexpected ADP ${kind} response: ${message.kind}`));
+    });
+    socket.addEventListener('error', () => {
+      clearTimeout(timer);
+      reject(new Error(`ADP ${kind} socket error`));
+    });
   });
 }
 

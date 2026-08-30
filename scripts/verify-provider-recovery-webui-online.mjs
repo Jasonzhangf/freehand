@@ -4,7 +4,6 @@ import fss from 'node:fs';
 import http from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
-import { adpVerifierRequest, requireSessionListPage } from './lib/adp-verifier-client.mjs';
 
 const repo = process.cwd();
 const home = process.env.HOME;
@@ -14,7 +13,6 @@ const envPath = process.env.FREEHAND_PROVIDER_RECOVERY_ENV || path.join(runtimeH
 const cli = process.env.FREEHAND_PROVIDER_RECOVERY_CLI || path.join(home, '.local/bin/freehand-cliS');
 const baseUrl = process.env.FREEHAND_PROVIDER_RECOVERY_BASE_URL || 'http://127.0.0.1:4042/';
 const adpUrl = process.env.FREEHAND_PROVIDER_RECOVERY_ADP_URL || 'ws://127.0.0.1:4042/adp';
-const adpAuthToken = process.env.FREEHAND_ADP_AUTH_TOKEN || '';
 const fixturePort = Number.parseInt(process.env.FREEHAND_PROVIDER_RECOVERY_FIXTURE_PORT || '18137', 10);
 const debugPort = Number.parseInt(process.env.FREEHAND_PROVIDER_RECOVERY_DEBUG_PORT || '9237', 10);
 const retryBackoffMs = process.env.FREEHAND_PROVIDER_RECOVERY_BACKOFF_MS || '5000';
@@ -484,23 +482,15 @@ async function waitForLoad(cdp) {
 }
 
 async function ensureFixedSession() {
-  const activeList = await adpRawRequest('query', 'query', {
-    QuerySessionListPage: {
-      archived: false,
-      page: { direction: 'Latest', cursor: null, limit: 100 },
-    },
-  });
-  const activeSessions = requireSessionListPage(activeList.result, 'active session list').sessions;
+  const activeList = await adpRawRequest('query', 'query', 'QuerySessionList');
+  const activeSessions =
+    (activeList.result && activeList.result.SessionList && activeList.result.SessionList.sessions) || [];
   if (activeSessions.some((session) => session.session_id === fixedSessionId)) {
     return;
   }
-  const archivedList = await adpRawRequest('query', 'query', {
-    QuerySessionListPage: {
-      archived: true,
-      page: { direction: 'Latest', cursor: null, limit: 100 },
-    },
-  });
-  const archivedSessions = requireSessionListPage(archivedList.result, 'archived session list').sessions;
+  const archivedList = await adpRawRequest('query', 'query', 'QueryArchivedSessionList');
+  const archivedSessions =
+    (archivedList.result && archivedList.result.SessionList && archivedList.result.SessionList.sessions) || [];
   if (archivedSessions.some((session) => session.session_id === fixedSessionId)) {
     await adpRawRequest('command', 'command', {
       RestoreSession: { session_id: fixedSessionId },
@@ -628,15 +618,36 @@ async function adpQuerySession(sessionId) {
 }
 
 function adpRawRequest(kind, payloadKey, payload) {
-  return adpVerifierRequest({
-    url: adpUrl,
-    authToken: adpAuthToken,
-    kind,
-    payloadKey,
-    payload,
-    timeoutMs: 15_000,
-    clientName: 'freehand-provider-recovery-verifier',
-    resolveRawMessage: true,
+  const socket = new WebSocket(adpUrl);
+  const requestId = 'provider-recovery-' + kind + '-' + Date.now() + '-' + Math.random().toString(36).slice(2);
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => reject(new Error('ADP ' + kind + ' timeout')), 15000);
+    socket.addEventListener('open', () => {
+      socket.send(
+        JSON.stringify({
+          kind,
+          request_id: requestId,
+          [payloadKey]: payload,
+        }),
+      );
+    });
+    socket.addEventListener('message', (event) => {
+      const message = JSON.parse(event.data);
+      if (message.request_id !== requestId) {
+        return;
+      }
+      clearTimeout(timer);
+      socket.close();
+      if (message.kind === 'failure') {
+        reject(new Error((message.failure && (message.failure.message || message.failure.code)) || 'ADP failure'));
+        return;
+      }
+      resolve(message);
+    });
+    socket.addEventListener('error', () => {
+      clearTimeout(timer);
+      reject(new Error('ADP socket error'));
+    });
   });
 }
 

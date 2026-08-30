@@ -19,7 +19,7 @@
     "accepted command ingress is wrapped into a dispatch envelope that declares the target owner feature/module before leaving the protocol boundary",
     "runtime-owned mutation commands such as checkpoint rewind stay explicit at the protocol envelope layer and do not become UI-owned semantics",
     "query and subscribe stay separate",
-    "ADP WebSocket clients use protocol-owned typed frames with top-level protocol_version=4; the first client frame must be Handshake, and command/query/subscribe frames are valid only after a server HandshakeAccepted capability response",
+    "ADP WebSocket clients use protocol-owned typed frames with top-level protocol_version=3; the first client frame must be Handshake, and command/query/subscribe frames are valid only after a server HandshakeAccepted capability response",
     "ADP command/frame metadata is single-sourced from the protocol-owned UI_COMMAND_DESCRIPTORS table; generated JSON manifest and WebUI constructors must be exported from Rust instead of handwritten in JavaScript",
     "task list/history query commands are protocol-owned read-only ADP/query shapes while task truth remains runtime/task-owner supplied",
     "Phase 1 TaskBoard, AgentBoard, and AgentLifecycle queries are protocol-owned ADP/query command shapes while runtime/task owners supply truth",
@@ -60,7 +60,7 @@
     "projections are read-only views over owner-written truth",
     "model request lifecycle is projected as UiModelRequestActivity inside UiTurnProjection for ordinary thinking, schema retry, and tool-result continuation; provider retry/failover are transport substate on the same activity, not separate reasoning-flow phases, and the activity clears when response/tool/usage/terminal/error projection arrives",
     "per-turn usage is projected as UiUsageProjection inside UiTurnProjection.usage_projection with normalized input plus output/reasoning/cache tokens, cache-hit-rate bps, context tokens, and compacted-token counters; legacy usage without normalized_input_tokens uses the contracts-owned conservative reconstruction before projection, and protocol exposes the projection while provider usage truth stays reason-owned",
-    "terminal completion shows human-friendly final text: completion/status summary when present, otherwise stripped visible model text, then the event summary fallback",
+    "terminal completion shows only final projected text",
     "public conversation projection preserves the user prompt while stripping raw completion schema blocks and excluding reasoning, usage, provider payload, debug details, and verbose tool term text from the main user-visible stream",
     "debug state is projected as a read-only per-turn snapshot/stream with summary text plus ordered detail lines",
     "`ui.protocol` may ingest observation-only debug events from `debug.core` receivers and materialize only the snapshot projection into protocol state",
@@ -76,7 +76,7 @@
     "public conversation tool summaries carry tool_call_id so UI clients can update one tool card instead of rendering duplicate waiting/completed cards, and completed/failed public tool bodies expose protocol-projected tool result detail even when structured display fields are present",
     "cancel commands route to reason.turn whether they target an explicit turn_id or the latest active turn",
     "session list and transcript projections expose cwd bound by runtime/session truth",
-    "session list projections expose only owner-supplied persisted session metadata as top-level active/archived pages; runtime.ui-command-dispatch compacts internal `master-lifecycle-*`, `master-timer-*`, and `worker-task-*` rows before public projection, while ui.protocol owns only DTO validation, transport shape, and read-only page projection",
+    "session list projections expose only owner-supplied persisted session metadata as top-level active/archived sessions; internal framework sessions such as `master-lifecycle-*`, `master-timer-*`, and `worker-task-*` remain directly transcript-queryable but are hidden from global session lists",
     "UiSessionSummary.active_turn_id is a live/progress identity only: it points only to the latest same-session turn when that turn is nonterminal; terminal latest turns remain visible as terminal summaries but do not appear active, and later nonterminal model/tool activity can become active again",
     "TaskBoard projections carry parent_session_id, observing attached_session_ids, canonical worker_session_id, and task-owner created_at so WebUI can scope current Worker work, correlate submit receipt truth, and open Worker transcripts without synthesizing ids or making workers top-level sessions",
     "task list/history query results use protocol-owned UI-safe DTOs supplied through `UiRuntimeQueryPort`",
@@ -133,9 +133,9 @@
   ],
   "shared_functions": [
     {
-      "symbol": "human_friendly_terminal_text",
-      "owner": "crates/freehand-ui-protocol/src/projection.rs",
-      "purpose": "collapse terminal event to human-friendly visible response text",
+      "symbol": "terminal_text_projection",
+      "owner": "crates/freehand-ui-protocol/src/lib.rs",
+      "purpose": "collapse terminal event to final user-visible text",
       "allowed_callers": [
         "query handlers",
         "stream handlers",
@@ -263,11 +263,9 @@
         "daemon ADP query transport"
       ],
       "related_tests": [
-      "daemon_adp_queries_runtime_task_truth",
-      "internal_lifecycle_transcripts_remain_queryable_while_list_is_runtime_owned",
-      "session_list_page_is_runtime_owned_even_when_turns_exist"
+        "daemon_adp_queries_runtime_task_truth"
       ],
-    "why_shared": "keeps app transports protocol-only while allowing runtime owner read models and rejecting local state answers for public session lists"
+      "why_shared": "keeps app transports protocol-only while allowing runtime owner read models"
     },
     {
       "symbol": "UiProtocolState::publish_task_list_projection",
@@ -310,9 +308,7 @@
         "session_refresh_preserves_active_model_request_activity",
         "session_refresh_preserves_active_tool_activity_cards",
         "terminal_session_refresh_drops_stale_live_activity",
-        "runtime_query_session_turns_projects_background_provider_retry_from_error_center",
-        "runtime_query_session_turns_does_not_reactivate_terminal_error_center_retry",
-        "runtime_query_session_turns_does_not_reactivate_historical_retry_before_later_terminal_round"
+        "session_list_active_turn_id_tracks_only_nonterminal_turns"
       ],
       "why_shared": "runtime must refresh effective transcript projection centrally after rollback instead of letting each UI delete DOM rows locally"
     },
@@ -445,6 +441,17 @@
       "binding_status": "bound"
     },
     {
+      "step": "04c",
+      "symbol_path": "session_list_projection / turn_is_nonterminal",
+      "file_path": "crates/freehand-ui-protocol/src/projection.rs",
+      "responsibility": "project persisted session summaries while allowing active turn identity only for the latest nonterminal live/progress turn",
+      "input_semantic": "persisted session metadata plus turn projections plus latest protocol active turn id",
+      "output_semantic": "session summary list where terminal latest turns remain visible but do not appear active",
+      "caller": "UiProtocolState::query",
+      "callee": "protocol state",
+      "binding_status": "bound"
+    },
+    {
       "step": "05",
       "symbol_path": "UiProtocolState::query",
       "file_path": "crates/freehand-ui-protocol/src/state.rs",
@@ -501,7 +508,7 @@
     },
     {
       "step": "10",
-      "symbol_path": "human_friendly_terminal_text",
+      "symbol_path": "terminal_text_projection",
       "file_path": "crates/freehand-ui-protocol/src/projection.rs",
       "responsibility": "project terminal text",
       "input_semantic": "terminal semantic payload",
@@ -910,17 +917,6 @@
       "binding_status": "bound"
     },
     {
-      "step": "38",
-      "symbol_path": "UiCommand::QuerySessionListPage / UiSessionListPageRequest / UiSessionListPageInfo / UiSessionListPageProjection / validate_command",
-      "file_path": "crates/freehand-ui-protocol/src/dto.rs / crates/freehand-ui-protocol/src/validate.rs",
-      "responsibility": "define bounded metadata-only session-list page DTOs, expose the public ADP query descriptor, and validate limit plus latest/older cursor rules before runtime dispatch",
-      "input_semantic": "archived flag plus Latest/older direction, optional owner cursor, and 1..=100 limit",
-      "output_semantic": "validated paged session-list intent routed to runtime.ui-command-dispatch; owner supplies ordered summaries and unavailable-session facts",
-      "caller": "WebUI/ADP query transport",
-      "callee": "runtime.ui-command-dispatch",
-      "binding_status": "bound"
-    },
-    {
       "step": "18a",
       "symbol_path": "UI_COMMAND_DESCRIPTORS / command_descriptor / adp_protocol_manifest / adp_protocol_webui_module",
       "file_path": "crates/freehand-ui-protocol/src/adp_wire.rs",
@@ -961,7 +957,7 @@
     "tool activity status and result detail are now preserved in UiTurnProjection.tool_activities and public conversation status mapping",
     "public tool summaries preserve tool_call_id, duplicate same-id tool calls upsert into one public card, and completed/failed public tool bodies expose tool result detail",
     "CancelLatestActiveTurn is now accepted by command ingress and routed to reason.turn",
-    "ADP request and response frames are protocol-owned, versioned with protocol_version=4, include handshake/handshake_accepted variants, and are JSON roundtrip/negative-version tested for UI-less automation clients",
+    "ADP request and response frames are protocol-owned, versioned with protocol_version=3, include handshake/handshake_accepted variants, and are JSON roundtrip/negative-version tested for UI-less automation clients",
     "task list/history query command DTOs and runtime query-port shape are landed",
     "Phase 1 TaskBoard, AgentBoard, and AgentLifecycle query DTOs are landed and route only through runtime-backed query ports",
     "Phase 1 ApplyExecutionFact and RunSchedulerTick command DTOs are landed and route only through runtime-backed task.orchestration dispatch",
@@ -978,7 +974,6 @@
     "Search dashboard query/result DTOs are landed and locked by `cargo test -p freehand-ui-protocol session_search -- --nocapture --test-threads=1`; protocol-state local query rejection proves runtime/reason owners supply the search projection",
     "Diagnostics query/result DTOs are landed and locked by cargo test -p freehand-ui-protocol diagnostics_query -- --nocapture; protocol-state local query rejection proves runtime/debug owners supply the diagnostics projection.",
     "CompactSessionContext mutation command DTO is landed, owner-routed to reason.rewrite-policy, validated for non-empty session id, and locked by compact_session_context_roundtrips_through_wire_and_validates plus runtime_compact_session_context_hold_when_no_provider_summary_payload and runtime_compact_session_context_rejects_missing_recovery_truth_explicitly; runtime/reason.rewrite-policy owners supply the policy/rewrite outcome and the dispatch receipt never fabricates a rewrite result",
-    "PullAccountConfig/PushAccountConfig command DTOs and UiAccountConfigSyncProjection are landed in dto.rs, exposed through the ADP descriptor, and consumed by the WebUI Settings connectivity card; protocol-state local queries reject runtime-owned sync state",
-    "QuerySessionListPage DTOs and ADP descriptor are landed with positive wire roundtrip plus reverse validation for oversized limits, Latest cursors, and Older requests without a cursor; runtime/reason owners supply page truth"
+    "PullAccountConfig/PushAccountConfig command DTOs and UiAccountConfigSyncProjection are landed in dto.rs, exposed through the ADP descriptor, and consumed by the WebUI Settings connectivity card; protocol-state local queries reject runtime-owned sync state"
   ]
 }

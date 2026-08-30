@@ -59,7 +59,7 @@
   - `public_conversation_items`
   - `public_turn_projection`
   - `checkpoint_projection_from_runtime_summary`
-  - `human_friendly_terminal_text`
+  - `terminal_text_projection`
   - `UiProtocolState::subscribe`
   - `UiProtocolState::query`
   - `UiProtocolState::preserve_live_activity_on_page_refresh`
@@ -70,6 +70,7 @@
   - `UiModelGroupConfigUpdate`
   - `UiAgentModelGroupSelectionUpdate`
   - `UiToolRegistryProjection`
+  - `session_list_projection`
   - `turn_is_nonterminal`
 - `UiProtocolState::apply_semantic_event`
   - `UiProtocolState::apply_tool_call`
@@ -93,7 +94,7 @@
 - `SubmitUserInput.metadata.attachments` is the neutral attachment ingress for image payloads; protocol validates non-empty id/name/media-type/base64 and rejects unsupported kinds before runtime dispatch, while images do not enter `text`
 - session management commands (`CreateSession`, `RenameSession`, `ArchiveSession`, `RestoreSession`, `DeleteSession`, `RollbackLatestSessionTurn`) are mutation intents only; the protocol validates and routes them while `reason.persistence` owns durable session metadata and rollback truth
 - query and subscribe stay separate
-- ADP WebSocket clients use protocol-owned typed frames with top-level `protocol_version=4`; the first client frame must be `Handshake`, and command/query/subscribe frames are valid only after a server `HandshakeAccepted` capability response
+- ADP WebSocket clients use protocol-owned typed frames with top-level `protocol_version=3`; the first client frame must be `Handshake`, and command/query/subscribe frames are valid only after a server `HandshakeAccepted` capability response
 - ADP command/frame metadata is single-sourced from the protocol-owned `UI_COMMAND_DESCRIPTORS` table; generated JSON manifest and WebUI constructors must be exported from Rust instead of handwritten in JavaScript
 - task list and task history queries are protocol-owned ADP/query command shapes, but the protocol only defines UI-safe DTOs and query-port routing; persisted task truth remains owned by `task.orchestration`
 - Phase 1 TaskBoard, AgentBoard, and AgentLifecycle queries are protocol-owned ADP/query command shapes; protocol defines UI-safe DTOs while runtime/task owners supply truth, including task `created_at` for submit-receipt correlation without relying on heartbeat `updated_at`
@@ -157,7 +158,7 @@
 - projections are read-only views over owner-written truth
 - model request lifecycle is projected as typed `UiModelRequestActivity` inside `UiTurnProjection` when runtime reports the provider request has been built and sent, when completion-schema validation rejects a model terminal block and runtime sends repair feedback back to the model, or when tool results have been paired and the model continuation request is waiting; `kind` distinguishes `Thinking`, `SchemaRetry`, and `ToolResultContinuation`, while provider retry/failover are transport substate in `UiModelRequestActivity.transport` and never become a separate reasoning-flow phase; the activity clears when response/tool/usage/terminal/error projection arrives
 - selected-session transcript replacement preserves same-turn live-only `model_request` and `tool_activities` only for the latest replacement turn when that turn is nonterminal, so a persistence-backed refresh cannot erase current provider transport retry/waiting or per-tool-call activity, but older rounds stop looking live once a later round or terminal snapshot exists
-- terminal completion shows human-friendly final text: completion/status summary when present, otherwise stripped visible model text, then the event summary fallback
+- terminal completion shows only final projected text
 - turn projections preserve terminal status separately from terminal text so UI clients can distinguish success, failed, blocked, interrupted, running, and cancelled terminal states
 - turn projections preserve owner-created turn time as
   `UiTurnProjection.created_at` when runtime/reason supplies it, allowing UI
@@ -171,7 +172,7 @@
 - session list and transcript projections expose session `cwd`, and turn projections carry `cwd` when the runtime owner has bound a session to a workspace
 - session list projections expose only owner-supplied persisted session metadata (`CreateSession` / session metadata truth) as top-level active or archived sessions, so WebUI, Android, CLI, and headless ADP clients share one CRUD truth instead of deriving global sessions from raw turns
 - `UiSessionSummary.active_turn_id` is a live/progress identity only: it may point only to the same-session latest turn when that turn is nonterminal with model/tool activity; terminal snapshots are authoritative and clear the session active identity even if an older round still has historical retry metadata
-- `runtime.ui-command-dispatch` compacts internal `master-lifecycle-*`, `master-timer-*`, and `worker-task-*` sessions out of public `QuerySessionListPage` truth before projection; `ui.protocol` owns only DTO validation, transport shape, and read-only page projection, while explicit `QuerySessionTurns { session_id }` remains queryable for debug/replay truth
+- session list projections hide internal framework sessions such as `master-lifecycle-*`, `master-timer-*`, and `worker-task-*` from user-facing active and archived lists, while explicit `QuerySessionTurns { session_id }` remains queryable for debug/replay truth
 - bounded selected-session page projections preserve same-turn live activity only for nonterminal replacement truth; terminal page truth clears stale activity
 - task board projections carry `parent_session_id`, observing `attached_session_ids`, and canonical `worker_session_id` so WebUI can scope tasks to the selected parent/observer session and open the Worker transcript without synthesizing an id
 - rollback command ingress exposes append-only latest-turn rollback as a reason.persistence mutation intent; protocol does not remove turns or mutate local transcript truth
@@ -278,8 +279,8 @@
 
 ## Shared Multi-Reference Functions
 
-- `human_friendly_terminal_text`
-  - owner: `crates/freehand-ui-protocol/src/projection.rs`
+- `terminal_text_projection`
+  - owner: `crates/freehand-ui-protocol/src/lib.rs`
   - purpose: collapse terminal event to final user-visible text
   - allowed callers: query handlers, stream handlers, CLI/WebUI adapters
   - related tests: terminal result projection smoke
@@ -366,7 +367,7 @@
 | 07 | `subscription_selector` | `crates/freehand-ui-protocol/src/lib.rs` | build read-only subscribe selector | subscribe command | subscription selector | protocol boundary | stream handler | bound |
 | 08 | `subscription_matches` | `crates/freehand-ui-protocol/src/lib.rs` | route incremental projection to matching subscription | subscription selector + projection | delivery decision | stream handler | selector matcher | bound |
 | 09 | `TurnProjectionInput` / `turn_projection_from_events` / `UiTurnProjection` | `crates/freehand-ui-protocol/src/adp_wire.rs` / `crates/freehand-ui-protocol/src/adp_descriptor.rs` / `crates/freehand-ui-protocol/src/dto.rs` | project whole-turn state into UI snapshot, including owner-created turn time and tool lifecycle activities | semantic/tool/tool-result/usage/terminal/error/user inputs plus optional owner-created timestamp | UI turn projection with `created_at` when supplied by runtime/reason truth | query/stream handler | projector | bound |
-| 10 | `human_friendly_terminal_text` | `crates/freehand-ui-protocol/src/projection.rs` | project terminal text as human-friendly visible response text | terminal semantic payload plus accumulated visible text | UI terminal text with completion/status summary, stripped visible text, or event summary fallback | query/stream handler | projector | bound |
+| 10 | `terminal_text_projection` | `crates/freehand-ui-protocol/src/lib.rs` | project terminal text | terminal semantic payload | UI terminal text | query/stream handler | projector | bound |
 | 10a | `public_conversation_items` / `public_turn_projection` | `crates/freehand-ui-protocol/src/lib.rs` | derive public user-visible conversation stream, preserve user prompt, and strip raw completion schema | full turn projection | public turn projection | app transports/renderers | projector | bound |
 | 10b | `UiProtocolState::apply_terminal_event` / `turn_projection_from_events` | `crates/freehand-ui-protocol/src/lib.rs` | preserve terminal status alongside terminal text in UI turn projections | terminal semantic event | terminal text + terminal status projection | runtime/app protocol consumers | protocol projector | bound |
 | 11 | `UiProtocolState::apply_semantic_event` / `apply_tool_call` / `apply_tool_result` / `apply_usage_event` / `apply_terminal_event` / `apply_error_event` | `crates/freehand-ui-protocol/src/lib.rs` | incrementally update one turn projection from shared contract events and publish subscription updates | shared reason/error contracts | updated queryable/subscribable turn projection | runtime/debug bridges | protocol state | bound |
@@ -385,6 +386,8 @@
 | 18b | `write_output` / `main` | `crates/freehand-ui-protocol/src/bin/export-adp-protocol.rs` | write the generated ADP JSON manifest or WebUI constructor module to the requested artifact path | `--json` or `--js` output path | generated `adp-protocol.schema.json` or `adp-protocol.js` artifact | developer / `xtask` gate | freehand-ui-protocol manifest exporters | bound |
 | 19 | `validate_command` / `command_dispatch_target` | `crates/freehand-ui-protocol/src/lib.rs` | validate session-management mutation intents and route them to the session persistence owner | session CRUD or rollback command | owner-routed dispatch envelope or protocol rejection | WebUI/Android/CLI transports | runtime/reason persistence owner path | bound |
 | 19a | `UiProtocolState::replace_session_turn_projections` / `preserve_live_activity_on_nonterminal_refresh` / `merge_tool_activity` | `crates/freehand-ui-protocol/src/lib.rs` | replace one session's effective transcript projection after persistence-owned rollback or selected-session refresh while preserving live provider-transport/tool activity only for the latest nonterminal replacement turn and keeping terminal snapshots authoritative | session id plus effective turn projections plus current protocol state | queryable session transcript without rolled-back turns, without stale live activity on historical rounds, and without losing current provider transport retry/tool-call observability | runtime.ui-command-dispatch | protocol state | bound |
+| 19b | `UiProtocolState::merge_persisted_turn_projections_without_publish` | `crates/freehand-ui-protocol/src/lib.rs` | merge persistence-owned background session snapshots for list queries without publishing replay events, changing latest-active identity, or replacing a newer live nonterminal projection | persisted turn projections plus current protocol state | silently refreshed queryable session rows with live activity preserved | runtime.ui-command-dispatch | protocol state | bound |
+| 19b | `session_list_projection` / `turn_is_nonterminal` | `crates/freehand-ui-protocol/src/lib.rs` | project persisted session summaries while allowing active turn identity only for the latest nonterminal live/progress turn | persisted session metadata plus turn projections plus latest protocol active turn id | session summary list where terminal latest turns remain visible but do not appear active | protocol query handler | protocol state | bound |
 | 20 | `UiRuntimeQueryPort::query_runtime` | `crates/freehand-ui-protocol/src/lib.rs` | define runtime-backed read-only query extension point without making app transports import runtime owners | UI query command | optional runtime-owned query result or explicit dispatch failure | WebUI/daemon ADP query transport | runtime query owner | bound |
 | 20d | `UiRuntimeQueryPort::query_runtime_with_scope` / `UiQueryAccessScope` | `crates/freehand-ui-protocol/src/lib.rs` | carry typed local/remote visibility scope beside ConfigStatus query execution without placing control semantics in query payloads | UI query command + typed access scope | scoped runtime-owned UI projection or explicit dispatch failure | WebUI/Relay ADP transport | runtime query owner | bound |
 | 20a | `UiCommand::QueryConfigStatus` / `UiQueryResult::ConfigStatus` / `UiConfigStatusProjection` / `UiProviderConfigSummaryProjection` | `crates/freehand-ui-protocol/src/lib.rs` | define UI-safe active config query/result DTO with complete provider registry and no secrets | config status query | active agent/provider/fallback/model/auth-source/resource-count projection plus safe configured provider registry | ADP query transport | runtime query port | bound |
@@ -406,7 +409,6 @@
 | 31 | `UiCommand::QuerySessionSearch` / `UiQueryResult::SessionSearch` / `UiSessionSearchProjection` / `UiSessionSearchResultProjection` / `UiSessionSearchChildProjection` | `crates/freehand-ui-protocol/src/lib.rs` | define read-only persisted-session Search dashboard query/result DTOs without owning session index truth or promoting Worker sessions to top-level results | search query text plus optional limit | runtime-backed UI-safe persisted session search projection or protocol-state route rejection | ADP query transport | runtime.ui-command-dispatch | bound |
 | 32 | `UiCommand::QueryDiagnostics` / `UiQueryResult::Diagnostics` / `UiDiagnosticsProjection` / `UiDiagnosticLogFileProjection` | `crates/freehand-ui-protocol/src/lib.rs` | define read-only diagnostics query/result DTOs without owning debug/log truth or exposing raw provider payloads, secrets, or absolute user paths | diagnostics query | runtime-backed UI-safe diagnostics projection or protocol-state route rejection | ADP query transport | runtime.ui-command-dispatch | bound |
 | 33 | `UiConfigStatusProjection` / `UiLocalAgentProjection` | `crates/freehand-ui-protocol/src/lib.rs` | carry the config-owned local Agent endpoint directory without owning endpoint selection or session truth | runtime-owned config status projection | credential-free Agent name, role, node, and WebUI URL rows | ADP query transport | runtime.ui-command-dispatch | bound |
-| 38 | `UiCommand::QuerySessionListPage` / `UiSessionListPageRequest` / `UiSessionListPageInfo` / `UiSessionListPageProjection` / `validate_command` | `crates/freehand-ui-protocol/src/dto.rs` / `crates/freehand-ui-protocol/src/validate.rs` / `crates/freehand-ui-protocol/src/adp_descriptor.rs` | define bounded metadata-only session-list page DTOs, expose the public ADP query descriptor, and validate limit plus latest/older cursor rules before runtime dispatch | archived flag plus Latest/older direction, optional owner cursor, and `1..=100` limit | validated paged session-list intent routed to `runtime.ui-command-dispatch`; owner supplies ordered summaries and unavailable-session facts | WebUI/ADP query transport | runtime.ui-command-dispatch | bound |
 
 ## Sync Status Against Code
 
@@ -417,10 +419,8 @@
 - client-specific projection gating is now also bound in code
 - `UiProtocolState` now owns a continuous subscription channel plus incremental shared-contract turn projection updates
 - `UiProtocolState` now projects provider-request-sent, schema-retry, and tool-result-continuation waiting states into typed `UiTurnProjection.model_request.kind` and clears it on response/tool/usage/terminal/error projection
-- `UiProtocolState::replace_session_turn_projections` now preserves same-turn provider transport retry/model waiting and tool activity cards only on the latest nonterminal replacement turn, while terminal or later-round refresh drops stale live waiting state; covered by `session_refresh_preserves_active_model_request_activity`, `session_refresh_preserves_active_tool_activity_cards`, and `terminal_session_refresh_drops_stale_live_activity`
-- Runtime-owned paged summaries expose `active_turn_id` only for the latest nonterminal live/progress turn; terminal latest turns keep their terminal summary/status but do not make the session look active. Covered by `runtime_query_session_turns_projects_background_provider_retry_from_error_center`, `runtime_query_session_turns_does_not_reactivate_terminal_error_center_retry`, and `runtime_query_session_turns_does_not_reactivate_historical_retry_before_later_terminal_round`
-- Internal lifecycle/timer/Worker transcripts remain directly queryable while global session lists remain runtime-owned; covered by `internal_lifecycle_transcripts_remain_queryable_while_list_is_runtime_owned`
-- A session with turn truth but no metadata sidecar still cannot make local protocol state answer the public page query; covered by `session_list_page_is_runtime_owned_even_when_turns_exist`
+- `UiProtocolState::replace_session_turn_projections` now preserves same-turn provider transport retry/model waiting and tool activity cards only on the latest nonterminal replacement turn, while terminal or later-round refresh drops stale live waiting state; covered by `session_refresh_preserves_active_model_request_activity`, `session_refresh_preserves_active_tool_activity_cards`, `terminal_session_refresh_drops_stale_live_activity`, and `session_list_active_turn_id_tracks_only_nonterminal_turns`
+- `session_list_projection` now exposes `active_turn_id` only for the latest nonterminal live/progress turn; terminal latest turns keep their terminal summary/status but do not make the session look active. Covered by `session_list_active_turn_id_tracks_only_nonterminal_turns`
 - debug-state projection consumes `freehand-debug::DebugStateSnapshot` instead of a UI-owned duplicate DTO
 - UI ingress versus truth-writer separation is now locked in the function map
 - minimal per-turn debug-state query/subscribe plus receiver-drain bridge are now bound in `UiProtocolState`

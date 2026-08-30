@@ -5,7 +5,6 @@ import fss from 'node:fs';
 import http from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
-import { adpVerifierRequest } from './lib/adp-verifier-client.mjs';
 
 const repo = process.cwd();
 const home = process.env.HOME;
@@ -18,7 +17,6 @@ const baseUrl = normalizedBaseUrl(
   process.env.FREEHAND_PROVIDER_WEB_SEARCH_UI_BASE_URL || 'http://127.0.0.1:4042/',
 );
 const adpUrl = process.env.FREEHAND_PROVIDER_WEB_SEARCH_UI_ADP_URL || adpUrlFromBaseUrl(baseUrl);
-const adpAuthToken = process.env.FREEHAND_ADP_AUTH_TOKEN || '';
 const cli = process.env.FREEHAND_PROVIDER_WEB_SEARCH_UI_CLI || path.join(home, '.local/bin/freehand-cliS');
 const chromePath =
   process.env.FREEHAND_PROVIDER_WEB_SEARCH_UI_CHROME ||
@@ -30,7 +28,7 @@ const fixtureKeyName = 'FREEHAND_PROVIDER_WEB_SEARCH_UI_FIXTURE_KEY';
 const fixtureModel = 'gpt-5.5-web-search-ui';
 const runId = `provider-web-search-settings-ui-${Date.now()}`;
 const artifactDir = path.join(repo, 'artifacts', 'webui-online', runId);
-const assetVersion = '20260824-session-list-page';
+const assetVersion = '20260726-stale-lifecycle-reconcile';
 
 let chrome = null;
 let cdp = null;
@@ -472,14 +470,37 @@ async function adpQuery(query) {
 }
 
 function adpRequest(kind, payloadKey, payload, timeoutMs) {
-  return adpVerifierRequest({
-    url: adpUrl,
-    authToken: adpAuthToken,
-    kind,
-    payloadKey,
-    payload,
-    timeoutMs,
-    clientName: 'freehand-provider-search-verifier',
+  const socket = new WebSocket(adpUrl);
+  const requestId = `${kind}-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => {
+      socket.close();
+      reject(new Error(`ADP ${kind} timeout`));
+    }, timeoutMs);
+    socket.addEventListener('open', () => {
+      socket.send(JSON.stringify({ kind, request_id: requestId, [payloadKey]: payload }));
+    });
+    socket.addEventListener('message', (event) => {
+      const message = JSON.parse(event.data);
+      if (message.request_id !== requestId) {
+        return;
+      }
+      clearTimeout(timer);
+      socket.close();
+      if (message.kind === 'failure') {
+        reject(new Error(message.failure?.message || message.failure?.code || 'ADP failure'));
+        return;
+      }
+      if (message.kind === 'query_result') {
+        resolve(message.result);
+        return;
+      }
+      reject(new Error(`unexpected ADP ${kind} response: ${JSON.stringify(message)}`));
+    });
+    socket.addEventListener('error', () => {
+      clearTimeout(timer);
+      reject(new Error(`ADP ${kind} socket error`));
+    });
   });
 }
 

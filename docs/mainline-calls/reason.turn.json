@@ -36,8 +36,8 @@
   ],
   "error_mainline": [
     "invalid completion schema is rejected and reprompted with field-level feedback",
-    "invalid completion schema retries are capped at 3 before runtime closes with provider terminal truth when present",
-    "provider finish_reason=stop or finish_reason=end_turn is accepted as terminal by the turn engine; ToolPending remains nonterminal until a tool result round follows",
+    "invalid completion schema retries are capped at 3 before a failed terminal outcome is written",
+    "provider finish_reason=stop or finish_reason=end_turn does not end the turn by itself",
     "raw provider events go to debug ledger, not session truth",
     "debug emission is observation-only and must not mutate turn/session truth",
     "metadata/request boundary violations must be treated as architecture errors, not silently tolerated",

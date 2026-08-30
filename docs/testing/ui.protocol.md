@@ -83,7 +83,6 @@ The config-status projection also carries a Relay-backed Agent URL for non-loopb
   - tool-result continuation projection marks a turn as `ToolResultContinuation` so UI clients do not infer continuation waits from completed/failed tool cards
   - selected-session transcript refresh preserves same-turn nonterminal live-only provider/model waiting and tool activity projections already present in protocol state, while terminal refresh clears stale live waiting truth
   - session list active identity is latest-nonterminal-only: a latest terminal turn keeps its terminal status/summary but cannot keep `UiSessionSummary.active_turn_id` populated, and a later nonterminal model wait can become active again
-  - `QuerySessionListPage` accepts a valid Latest wire roundtrip and valid Older cursor; protocol rejects limits outside `1..=100`, Latest cursors, and Older requests without a cursor before runtime dispatch
   - tool-call projection stays lifecycle-aware: requested tool calls remain `waiting` until a matching `ReasonReq05ToolResultReentry` marks the activity `completed`, or failed terminal truth marks still-waiting activities `failed`
   - tool display projection is attached to `UiToolActivity` from the `tool.display` parser owner and is preserved in public conversation tool summaries
   - public tool summaries preserve `UiToolActivity.detail` alongside structured display fields, so failed tool results expose the actual owner-projected execution error instead of only tool parameters
@@ -106,7 +105,6 @@ The config-status projection also carries a Relay-backed Agent URL for non-loopb
   - submit command selected-cwd validation and JSON roundtrip mapping
   - submit metadata attachment validation covers image-only submit, missing base64, and unsupported/empty fields
   - session management command validation covers empty title, empty session id, empty cwd, rollback empty session id, and explicit owner-routing to `reason.persistence`
-  - paged session-list validation covers positive Latest/Older wire roundtrips and reverse invalid limit/cursor cases
   - session transcript replacement coverage proves runtime can refresh one effective session transcript after rollback without UI-local deletion
   - explicit cancel and latest-active cancel owner-routing mapping
   - checkpoint rewind ingress validation and owner-routing mapping
@@ -171,7 +169,7 @@ The config-status projection also carries a Relay-backed Agent URL for non-loopb
   - image-only SubmitUserInput metadata command smoke
   - selected-session cwd projection smoke
 - session metadata projection smoke covers created empty sessions, renamed sessions, archived sessions being hidden from the active list, and restored sessions becoming visible again
-- runtime-owned session-list-page smoke covers top-level active/archived pages being metadata-only: created persisted sessions appear even when empty, turn-only sessions do not become global sessions, `runtime.ui-command-dispatch::visible_session_list_page` removes internal `master-lifecycle-*`, `master-timer-*`, and `worker-task-*` rows before protocol projection while explicit `QuerySessionTurns` for those ids remains queryable, and `active_turn_id` is present only for the latest nonterminal live/progress turn
+- session list projection smoke covers top-level active/archived lists being metadata-only: created persisted sessions appear even when empty, turn-only sessions do not become global sessions, internal `master-lifecycle-*`, `master-timer-*`, and `worker-task-*` sessions are absent while explicit `QuerySessionTurns` for those ids remains queryable, and `active_turn_id` is present only for the latest nonterminal live/progress turn
   - command dispatch envelope owner-routing smoke
   - latest-turn subscribe, specific-turn query, stream-kind routing through protocol boundary
   - debug-state snapshot/query by `turn_id`
@@ -254,8 +252,8 @@ The config-status projection also carries a Relay-backed Agent URL for non-loopb
   - incremental turn projection update methods from shared contracts landed
   - typed model request waiting projection is landed and regression-locked for normal thinking, schema retry, and tool-result continuation; provider retry/failover are regression-locked as transport substate on the same model request activity
   - selected-session transcript refresh preserves active provider transport retry/model waiting and active tool activity cards through `replace_session_turn_projections`, and terminal refresh clearing stale live state is regression-locked
-  - runtime-owned session-list nonterminal-only active identity is positively and negatively locked by `runtime_query_session_turns_projects_background_provider_retry_from_error_center`, `runtime_query_session_turns_does_not_reactivate_terminal_error_center_retry`, and `runtime_query_session_turns_does_not_reactivate_historical_retry_before_later_terminal_round`
-  - internal lifecycle transcripts remain queryable while lists stay runtime-owned through `internal_lifecycle_transcripts_remain_queryable_while_list_is_runtime_owned`; turn-only sessions cannot revive a local page path through `session_list_page_is_runtime_owned_even_when_turns_exist`
+  - persisted session-list refresh through `merge_persisted_turn_projections_without_publish` emits no subscription replay, preserves the current live projection, and keeps the active turn identity stable
+  - session list nonterminal-only active identity is regression-locked by `session_list_active_turn_id_tracks_only_nonterminal_turns`
   - minimal per-turn debug-state query/subscribe baseline landed
   - debug receiver-drain bridge from `debug.core` into protocol state landed
   - debug-state snapshot shape now comes from `freehand-debug`
@@ -265,7 +263,7 @@ The config-status projection also carries a Relay-backed Agent URL for non-loopb
   - tool activity status is now preserved in `UiTurnProjection.tool_activities` and public conversation tool summaries, including failed status for still-waiting tools when terminal truth is failed
   - tool summaries now expose `tool_call_id`, duplicate same-id tool calls are regression-locked to one public card, and completed/failed public tool bodies include tool result detail
   - tool summaries now expose `display` from the `tool.display` owner, and public bodies prefer structured result summaries over raw detail text
-  - ADP request/response frames are versioned (`protocol_version=4`), carry handshake/handshake_accepted variants, and are regression-locked by JSON roundtrip plus missing/unsupported-version tests
+  - ADP request/response frames are versioned (`protocol_version=3`), carry handshake/handshake_accepted variants, and are regression-locked by JSON roundtrip plus missing/unsupported-version tests
   - ADP generated manifest and WebUI constructor module are landed; `xtask gates check` regenerates both artifacts and fails stale or missing committed outputs
   - session cwd summary/transcript projection is landed and regression-locked
   - session management command/query projection is implemented for `CreateSession`, `RenameSession`, `ArchiveSession`, `RestoreSession`, `DeleteSession`, and `RollbackLatestSessionTurn` routing through runtime to `reason.persistence`; `CreateSession.cwd` empty-string rejection and rollback empty-session rejection are regression-locked at the protocol boundary

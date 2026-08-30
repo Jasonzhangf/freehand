@@ -1,72 +1,20 @@
 use crate::adp_wire::UiProjection;
 use crate::dto::*;
 use freehand_blocks::{
-    ToolDisplayOutcome, ToolDisplayProjection, parse_completion_submission_block,
-    project_hosted_search_display, project_tool_call_display, project_tool_result_display,
-    strip_completion_submission_block,
+    ToolDisplayOutcome, ToolDisplayProjection, project_hosted_search_display,
+    project_tool_call_display, project_tool_result_display, strip_completion_submission_block,
 };
 use freehand_contracts::{
     AgentId, ReasonReq04ToolCall, ReasonReq05ToolResultReentry, ReasonResp03TerminalEvent,
     SearchEvidenceDelivery, SessionId, TerminalStatus, ToolResultContract, ToolResultStatus,
     TurnId,
 };
-use freehand_control::{parse_control_status_block, strip_control_status_block};
+use freehand_control::strip_control_status_block;
 use freehand_debug::DebugEvent;
 use std::collections::BTreeMap;
 
 pub fn terminal_text_projection(event: &ReasonResp03TerminalEvent) -> String {
     event.summary.clone()
-}
-
-pub fn human_friendly_terminal_text(
-    text_chunks: &[String],
-    event: &ReasonResp03TerminalEvent,
-) -> String {
-    if !is_raw_provider_stop_summary(&event.summary) {
-        return event.summary.clone();
-    }
-    let raw_text = text_chunks.join("");
-    if let Ok(submission) = parse_completion_submission_block(&raw_text)
-        && let Some(summary) = submission
-            .summary
-            .as_deref()
-            .or(submission.evidence.as_deref())
-            .map(str::trim)
-            .filter(|value| !value.is_empty())
-    {
-        return summary.to_owned();
-    }
-    if let Ok(submission) = parse_control_status_block(&raw_text)
-        && let Some(summary) = submission
-            .status
-            .summary
-            .as_deref()
-            .or(submission.status.evidence.as_deref())
-            .map(str::trim)
-            .filter(|value| !value.is_empty())
-    {
-        return summary.to_owned();
-    }
-    let visible_text = strip_control_status_block(&strip_completion_submission_block(&raw_text));
-    let visible_text = visible_text.trim();
-    if !visible_text.is_empty() {
-        return visible_text.to_owned();
-    }
-    event.summary.clone()
-}
-
-fn is_raw_provider_stop_summary(summary: &str) -> bool {
-    matches!(
-        summary.trim(),
-        "stop"
-            | "end_turn"
-            | "tool_use"
-            | "max_tokens"
-            | "refusal"
-            | "completed"
-            | "complete"
-            | "success"
-    )
 }
 
 pub fn public_conversation_items(projection: &UiTurnProjection) -> Vec<UiConversationItem> {
@@ -272,6 +220,68 @@ pub(crate) fn empty_checkpoint_snapshot() -> UiCheckpointSnapshot {
     }
 }
 
+pub(crate) fn session_list_projection(
+    turns: &BTreeMap<TurnId, UiTurnProjection>,
+    session_cwds: &BTreeMap<SessionId, String>,
+    session_metadata: &BTreeMap<SessionId, UiSessionMetadataProjection>,
+    latest_active_turn_id: Option<&TurnId>,
+    archived: bool,
+) -> UiSessionListProjection {
+    let mut sessions = session_metadata
+        .values()
+        .filter(|metadata| {
+            metadata.archived == archived && user_visible_session_id(&metadata.session_id)
+        })
+        .map(|metadata| {
+            let mut session_turns = turns
+                .values()
+                .filter(|turn| turn.session_id == metadata.session_id)
+                .collect::<Vec<_>>();
+            session_turns.sort_by(|left, right| {
+                turn_order_key(&left.turn_id).cmp(&turn_order_key(&right.turn_id))
+            });
+            let latest = session_turns.last().copied();
+            let active_turn_id = latest_active_turn_id.and_then(|turn_id| {
+                session_turns
+                    .iter()
+                    .find(|turn| {
+                        &turn.turn_id == turn_id
+                            && latest.is_some_and(|latest| latest.turn_id == turn.turn_id)
+                            && turn_is_nonterminal(turn)
+                    })
+                    .map(|_| turn_id.clone())
+            });
+            let cwd = session_cwds
+                .get(&metadata.session_id)
+                .cloned()
+                .or_else(|| metadata.cwd.clone())
+                .or_else(|| latest.and_then(|turn| turn.cwd.clone()));
+            UiSessionSummary {
+                session_id: metadata.session_id.clone(),
+                title: metadata.title.clone(),
+                archived: metadata.archived,
+                cwd,
+                latest_turn_id: latest.map(|turn| turn.turn_id.clone()),
+                active_turn_id,
+                turn_count: session_turns.len(),
+                latest_status: latest
+                    .map(session_latest_status)
+                    .unwrap_or_else(|| "empty".to_owned()),
+                latest_summary: latest.and_then(session_latest_summary),
+            }
+        })
+        .collect::<Vec<_>>();
+    sessions.sort_by(|left, right| left.session_id.as_str().cmp(right.session_id.as_str()));
+    UiSessionListProjection { sessions }
+}
+
+pub(crate) fn user_visible_session_id(session_id: &SessionId) -> bool {
+    let value = session_id.as_str();
+    !value.starts_with("master-lifecycle-")
+        && !value.starts_with("master-timer-")
+        && !value.starts_with("worker-task-")
+}
+
 pub(crate) fn session_transcript_projection(
     session_id: &SessionId,
     turns: &BTreeMap<TurnId, UiTurnProjection>,
@@ -304,8 +314,39 @@ pub(crate) fn session_transcript_projection(
     }
 }
 
+pub(crate) fn session_latest_status(turn: &UiTurnProjection) -> String {
+    if let Some(status) = &turn.terminal_status {
+        return format!("{status:?}").to_lowercase();
+    }
+    if turn
+        .tool_activities
+        .iter()
+        .any(|activity| activity.status == UiToolActivityStatus::Waiting)
+    {
+        return "tool_running".to_owned();
+    }
+    if turn.model_request.is_some() {
+        return "waiting_model".to_owned();
+    }
+    if !turn.text.is_empty() || !turn.reasoning.is_empty() {
+        return "active".to_owned();
+    }
+    "submitted".to_owned()
+}
+
 pub(crate) fn turn_is_nonterminal(turn: &UiTurnProjection) -> bool {
     turn.terminal_status.is_none() && turn.terminal_text.is_none()
+}
+
+pub(crate) fn turn_is_terminal(turn: &UiTurnProjection) -> bool {
+    !turn_is_nonterminal(turn)
+}
+
+pub(crate) fn session_latest_summary(turn: &UiTurnProjection) -> Option<String> {
+    turn.terminal_text
+        .clone()
+        .or_else(|| turn.text.last().cloned())
+        .or_else(|| turn.user_text.clone())
 }
 
 pub(crate) fn turn_order_key(turn_id: &TurnId) -> (String, u64, u64, String) {

@@ -2,14 +2,12 @@ import { spawn } from 'node:child_process';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { adpVerifierRequest, requireSessionListPage } from './lib/adp-verifier-client.mjs';
 
 const chromePath =
   process.env.FREEHAND_WEBUI_CHROME || '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
 const debugPort = Number.parseInt(process.env.FREEHAND_WEBUI_DEBUG_PORT || '9238', 10);
 const baseUrl = normalizedBaseUrl(process.env.FREEHAND_WEBUI_BASE_URL || 'http://127.0.0.1:4042/');
 const adpUrl = process.env.FREEHAND_WEBUI_AMBIGUOUS_ADP_URL || adpUrlFromBaseUrl(baseUrl);
-const adpAuthToken = process.env.FREEHAND_ADP_AUTH_TOKEN || '';
 const fixedSessionId =
   process.env.FREEHAND_WEBUI_AMBIGUOUS_SESSION || 'webui-ambiguous-submit-recovery-fixed';
 const fixedAttachmentSessionId =
@@ -19,7 +17,7 @@ const fixedPrompt =
 const attachmentFailurePrompt =
   process.env.FREEHAND_WEBUI_ATTACHMENT_FAILURE_PROMPT || 'fixed attachment failure retain proof prompt';
 const taskCwd = process.env.FREEHAND_WEBUI_ATTACHMENT_FAILURE_CWD || process.cwd();
-const assetVersion = '20260824-session-list-page';
+const assetVersion = '20260726-stale-lifecycle-reconcile';
 const artifactDir =
   process.env.FREEHAND_WEBUI_AMBIGUOUS_ARTIFACT_DIR ||
   path.join(process.cwd(), 'artifacts', 'webui-online', 'ambiguous-submit-recovery-fixed');
@@ -320,13 +318,8 @@ function runAmbiguousSubmitRecoveryProof(sessionId, prompt) {
     hook.setAdpQueryForTest(async (query) => {
       const name = queryName(query);
       calls.push(name);
-      if (name === 'QuerySessionListPage') {
-        return {
-          SessionListPage: {
-            sessions: [makeSession()],
-            page: { has_older: false, next_cursor: null, unavailable_sessions: [] },
-          },
-        };
+      if (name === 'QuerySessionList') {
+        return { SessionList: { sessions: [makeSession()] } };
       }
       if (name === 'QuerySessionTurns') {
         return { SessionTurns: { session_id: sessionId, turns: mode === 'turn' ? [makeTurn()] : [] } };
@@ -464,7 +457,7 @@ async function waitForSelectedSession(cdp, sessionId, cwd, timeoutMs) {
 
 async function waitForOwnerSession(sessionId, predicate, timeoutMs) {
   return await waitFor(async () => {
-    const list = await activeSessionListPage();
+    const list = sessionListPayload(await adpQuery('QuerySessionList'));
     const row = allSessionRows(list).find((session) => session.session_id === sessionId) || null;
     if (predicate(row)) return row;
     return null;
@@ -472,36 +465,41 @@ async function waitForOwnerSession(sessionId, predicate, timeoutMs) {
 }
 
 function sessionListPayload(result) {
-  return requireSessionListPage(result);
+  return result?.SessionList || result?.session_list || result;
 }
 
 function allSessionRows(list) {
-  return list.sessions;
+  if (Array.isArray(list?.active)) return list.active;
+  if (Array.isArray(list?.sessions)) return list.sessions;
+  return [];
 }
 
 async function adpQuery(query) {
   return await adpRequest('query', 'query', query, 30_000);
 }
 
-async function activeSessionListPage() {
-  const result = await adpRequest('query', 'query', {
-    QuerySessionListPage: {
-      archived: false,
-      page: { direction: 'Latest', cursor: null, limit: 100 },
-    },
-  }, 30_000);
-  return sessionListPayload(result);
-}
-
 function adpRequest(kind, payloadKey, payload, timeoutMs) {
-  return adpVerifierRequest({
-    url: adpUrl,
-    authToken: adpAuthToken,
-    kind,
-    payloadKey,
-    payload,
-    timeoutMs,
-    clientName: 'freehand-ambiguous-submit-verifier',
+  const socket = new WebSocket(adpUrl);
+  const requestId = `${kind}-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => {
+      socket.close();
+      reject(new Error(`ADP ${kind} timeout`));
+    }, timeoutMs);
+    socket.addEventListener('open', () => socket.send(JSON.stringify({ kind, request_id: requestId, [payloadKey]: payload })));
+    socket.addEventListener('message', (event) => {
+      const message = JSON.parse(event.data);
+      if (message.request_id !== requestId) return;
+      clearTimeout(timer);
+      socket.close();
+      if (message.kind === 'failure') return reject(new Error(message.failure?.message || message.failure?.code || 'ADP failure'));
+      if (message.kind === 'query_result') return resolve(message.result);
+      reject(new Error(`unexpected ADP ${kind} response: ${message.kind}`));
+    });
+    socket.addEventListener('error', () => {
+      clearTimeout(timer);
+      reject(new Error(`ADP ${kind} socket error`));
+    });
   });
 }
 

@@ -2,7 +2,6 @@ import { spawn } from 'node:child_process';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { adpVerifierRequest } from './lib/adp-verifier-client.mjs';
 
 const repo = process.cwd();
 const home = process.env.HOME;
@@ -11,7 +10,6 @@ const configPath = process.env.FREEHAND_PROVIDER_REGISTRY_UI_CONFIG || path.join
 const envPath = process.env.FREEHAND_PROVIDER_REGISTRY_UI_ENV || path.join(runtimeHome, 'daemonS.env');
 const baseUrl = normalizedBaseUrl(process.env.FREEHAND_PROVIDER_REGISTRY_UI_BASE_URL || 'http://127.0.0.1:4042/');
 const adpUrl = process.env.FREEHAND_PROVIDER_REGISTRY_UI_ADP_URL || adpUrlFromBaseUrl(baseUrl);
-const adpAuthToken = process.env.FREEHAND_ADP_AUTH_TOKEN || '';
 const cli = process.env.FREEHAND_PROVIDER_REGISTRY_UI_CLI || path.join(home, '.local/bin/freehand-cliS');
 const debugPort = Number.parseInt(process.env.FREEHAND_PROVIDER_REGISTRY_UI_DEBUG_PORT || '9251', 10);
 const chromePath =
@@ -376,13 +374,37 @@ async function adpQuery(query) {
 }
 
 function adpRequest(kind, payloadKey, payload) {
-  return adpVerifierRequest({
-    url: adpUrl,
-    authToken: adpAuthToken,
-    kind,
-    payloadKey,
-    payload,
-    clientName: 'freehand-provider-registry-verifier',
+  const socket = new WebSocket(adpUrl);
+  const requestId = `${kind}-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => {
+      socket.close();
+      reject(new Error(`ADP ${kind} timeout`));
+    }, 20_000);
+    socket.addEventListener('open', () => {
+      socket.send(JSON.stringify({ kind, request_id: requestId, [payloadKey]: payload }));
+    });
+    socket.addEventListener('message', (event) => {
+      const message = JSON.parse(event.data);
+      if (message.request_id !== requestId) {
+        return;
+      }
+      clearTimeout(timer);
+      socket.close();
+      if (message.kind === 'failure') {
+        reject(new Error((message.failure && (message.failure.message || message.failure.code)) || 'ADP failure'));
+        return;
+      }
+      if (message.kind === 'query_result') {
+        resolve(message.result);
+        return;
+      }
+      reject(new Error(`unexpected ADP ${kind} response: ${message.kind}`));
+    });
+    socket.addEventListener('error', () => {
+      clearTimeout(timer);
+      reject(new Error(`ADP ${kind} socket error`));
+    });
   });
 }
 

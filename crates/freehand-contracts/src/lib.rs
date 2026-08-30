@@ -207,7 +207,6 @@ pub struct SearchDomainPlanDelivery {
 pub enum SearchDiscoveryChannel {
     HostedWebSearch,
     CamoSocialSearch,
-    WebFetch,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]

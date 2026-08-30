@@ -34,7 +34,6 @@
     "the master-safe registry subset exposes locked local workspace tools, concrete-URL `web_fetch`, plus `task` and `timer`, while Worker live requests use the worker-safe registry subset including `web_fetch` stamped into planner diagnostics",
     "search-only hosted providers must not be mixed into the Master function-tool request; broad/current search on such providers is routed through `TaskExecutionProfile::CleanSearch` Worker turns with zero Freehand function tools",
     "Worker runtime tool guidance names the exact Worker-safe tool surface from `tool.registry`, including `web_fetch` for known HTTP/HTTPS URLs, states that all path tools are locked to the canonical task cwd, forbids `shell`/`bash`/`readlink`/`pwd`/`cat`/`find` guesses, and gives first-call path patterns such as `ls` before `read_file`",
-    "sourced-search hosted/camo/social failure enters exactly one recovery round whose function-tool surface is only concrete-URL `web_fetch`; successful recovery is a discovery candidate that still requires camo verification, while failed or unusable recovery immediately writes Blocked",
     "provider-core `ProviderLiveExecutor` runs concrete HTTP/SSE executor requests through raw-capable callbacks owned by the adapter crates so runtime can capture debug-only provider raw bodies/events before semantic parsing",
     "stream mode applies outputs incrementally through the executor callback path before the provider response completes",
     "completed provider tool calls are classified by registry execution scope; Master local workspace read/search/write/edit tools execute only in the current selected session cwd under tool.registry path and checkpoint locks, Master concrete-URL `web_fetch` executes through the tool registry network scope, and Master `task` and `timer` remain framework tools; injected Master shell, browser, broad web_search, todo, or complete-step calls return paired failed capability-boundary guidance with no file-content leak; Worker read/search/write path tools remain locked to the task cwd after absolute-normalization and symlink/canonical resolution, Worker `web_fetch` executes only concrete HTTP/HTTPS URL reads, and Worker boundary failures instruct relative in-cwd paths or blocked return instead of external probing; Worker shell/unknown-tool failures include the exact Worker tool list and forbid invented `shell`/`readlink` style calls; incomplete `tool_use` calls and execution failures become paired failed tool-result exchanges, while writable in-root tool calls first go through runtime checkpoint preview/snapshot/execute gating before success or execution-failure results are written back through `ReasonTurnEngine::apply_provider_output`, persisted, and sent to the next Anthropic request",
@@ -55,8 +54,7 @@
     "master workspace-boundary failures and unavailable shell/browser/local-broad-search/control function-tool calls remain paired failed tool results so the model can continue locally, use `web_fetch` for concrete URLs, use provider-hosted search when declared, or create and assign different-cwd/clean_search work through `task`",
     "completed/blocked schema writes terminal truth through `ReasonTurnEngine::submit_completion`",
     "terminal turns are materialized through `ReasonPersistence::record_turn_closed`",
-    "schema retry exhaustion closes with provider terminal truth when present through `ReasonTurnEngine::block_turn`; provider interruption without a completion-schema candidate writes interrupted terminal truth through `ReasonTurnEngine::interrupt_turn`",
-    "sourced-search hosted/camo/social evidence exhaustion attempts one `web_fetch` recovery before Blocked; no extra provider round follows a failed or unusable recovery",
+    "schema retry exhaustion writes blocked terminal truth through `ReasonTurnEngine::block_turn`; provider interruption without a completion-schema candidate writes interrupted terminal truth through `ReasonTurnEngine::interrupt_turn`",
     "runtime drains both reason-owned and runtime-owned debug snapshots through one shared `DebugHub` hook path",
     "bridge returns final turn truth, all round turns, captured broadcast events, schema rejection ledger, tool execution count, restore status, and live-output summary without leaking wire DTOs",
     "runtime callers project the final turn into `UiProtocolState` from one shared runtime owner path"
@@ -77,7 +75,7 @@
     "metadata ledger bootstrap and metadata write failures are returned as explicit `RuntimeLiveBridgeError::MetadataFailed` errors",
     "provider raw debug-ledger write failures are returned as explicit `RuntimeLiveBridgeError::ReasonPersistenceFailed`",
     "persistence restore/write failures fail the live bridge explicitly",
-    "provider terminal metadata is final turn truth when no completion schema is available; accepted Freehand completion schema remains the authoritative semantic summary when present"
+    "provider terminal metadata does not become final completion truth without accepted Freehand completion schema"
   ],
   "shared_functions": [
     {

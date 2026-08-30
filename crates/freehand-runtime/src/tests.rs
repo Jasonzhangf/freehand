@@ -1,7 +1,7 @@
 use super::*;
 use freehand_contracts::{
-    FeatureId, SearchDiscoveryChannel, SemanticEventKind, TerminalStatus, ToolPreviewChangeKind,
-    ToolPreviewContract, ToolPreviewFileChange,
+    FeatureId, SemanticEventKind, TerminalStatus, ToolPreviewChangeKind, ToolPreviewContract,
+    ToolPreviewFileChange,
 };
 use freehand_contracts::{ToolCallContract, ToolCallId};
 use freehand_metadata::MetadataEnvelope;
@@ -23,28 +23,6 @@ use std::thread;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 static TEST_COUNTER: AtomicU64 = AtomicU64::new(0);
-
-fn active_session_list_page_command() -> UiCommand {
-    UiCommand::QuerySessionListPage {
-        archived: false,
-        page: freehand_ui_protocol::UiSessionListPageRequest {
-            direction: freehand_ui_protocol::UiSessionListPageDirection::Latest,
-            cursor: None,
-            limit: 100,
-        },
-    }
-}
-
-fn archived_session_list_page_command() -> UiCommand {
-    UiCommand::QuerySessionListPage {
-        archived: true,
-        page: freehand_ui_protocol::UiSessionListPageRequest {
-            direction: freehand_ui_protocol::UiSessionListPageDirection::Latest,
-            cursor: None,
-            limit: 100,
-        },
-    }
-}
 
 fn runtime() -> RuntimeCommandDispatcher {
     RuntimeCommandDispatcher::new(RuntimeCommandDispatcherConfig {
@@ -630,23 +608,17 @@ fn live_bootstrap_restores_all_persisted_sessions_into_ui_state() {
     .expect("runtime bootstrap");
 
     let session_list = runtime
-        .query_runtime(&active_session_list_page_command())
-        .expect("runtime session list query")
-        .expect("runtime-owned session list");
+        .ui_state()
+        .lock()
+        .expect("lock ui")
+        .query(&UiCommand::QuerySessionList)
+        .expect("session list query");
     match session_list {
-        UiQueryResult::SessionListPage(list) => {
-            assert_eq!(list.sessions.len(), 2);
+        UiQueryResult::SessionList(list) => {
             assert!(
-                list.sessions
-                    .iter()
-                    .any(|row| row.session_id.as_str() == "runtime-session-agent-live")
+                list.sessions.is_empty(),
+                "turn-only persisted sessions stay out of the metadata-owned session list"
             );
-            assert!(
-                list.sessions
-                    .iter()
-                    .any(|row| row.session_id.as_str() == "runtime-session-other")
-            );
-            assert!(list.sessions.iter().all(|row| row.turn_count == 1));
         }
         other => panic!("unexpected session list query: {other:?}"),
     }
@@ -707,11 +679,11 @@ fn runtime_session_list_refreshes_current_agent_persistence_without_cross_agent_
         .expect("persist foreign background session");
 
     let result = runtime
-        .query_runtime(&active_session_list_page_command())
+        .query_runtime(&UiCommand::QuerySessionList)
         .expect("runtime query")
         .expect("runtime-owned session list");
     match result {
-        UiQueryResult::SessionListPage(list) => {
+        UiQueryResult::SessionList(list) => {
             assert!(
                 list.sessions
                     .iter()
@@ -725,260 +697,6 @@ fn runtime_session_list_refreshes_current_agent_persistence_without_cross_agent_
         }
         other => panic!("unexpected session list result: {other:?}"),
     }
-
-    fs::remove_dir_all(runtime_home).expect("cleanup");
-}
-
-#[test]
-fn runtime_session_list_page_avoids_full_transcript_restore() {
-    let runtime_home = temp_runtime_home();
-    let selected = live_selected_agent(
-        "http://127.0.0.1:1".to_owned(),
-        freehand_config::ProviderType::Anthropic,
-    );
-    let runtime = RuntimeCommandDispatcher::from_selected_agent_with_live(
-        &selected,
-        runtime_home.clone(),
-        false,
-    )
-    .expect("runtime bootstrap");
-    let agent_id = AgentId::new(selected.name.clone());
-    let persistence = ReasonPersistence::new(runtime_home.clone(), agent_id.clone());
-    persistence
-        .create_session_metadata(
-            SessionId::new("page-metadata-session"),
-            Some("Metadata page".to_owned()),
-            None,
-        )
-        .expect("persist metadata-only page session");
-    let poisoned_session = SessionId::new("page-poison-session");
-    persistence
-        .create_session_metadata(poisoned_session.clone(), Some("Poisoned".to_owned()), None)
-        .expect("persist poisoned page session");
-
-    let turns_dir = runtime_home
-        .join("state")
-        .join("turns")
-        .join(agent_id.as_str())
-        .join(poisoned_session.as_str())
-        .join("turns");
-    fs::create_dir_all(&turns_dir).expect("create poisoned turns directory");
-    fs::write(turns_dir.join("runtime-turn-1.json"), "{not-json")
-        .expect("write poisoned authoritative snapshot");
-    fs::write(
-        runtime_home
-            .join("state")
-            .join("turns")
-            .join(agent_id.as_str())
-            .join(poisoned_session.as_str())
-            .join("session-history.json"),
-        "{\"schema_version\":1}",
-    )
-    .expect("write poisoned history marker");
-    fs::write(
-        runtime_home
-            .join("state")
-            .join("turns")
-            .join(agent_id.as_str())
-            .join(poisoned_session.as_str())
-            .join("session-cursor.json"),
-        "{\"schema_version\":1,\"latest_turn_id\":\"runtime-turn-1\",\"active_turn_id\":null,\"last_applied_reason_seq\":1}",
-    )
-    .expect("write poisoned cursor fixture");
-
-    let legacy_index_path = runtime_home
-        .join("cache")
-        .join("session-index")
-        .join(format!("{}.json", agent_id.as_str()));
-    fs::write(
-        &legacy_index_path,
-        format!(
-            r#"[{{"agent_id":"{}","session_id":"{}","latest_turn_id":"runtime-turn-1","active_turn_id":null,"latest_terminal_summary":null}}]"#,
-            agent_id.as_str(),
-            poisoned_session.as_str()
-        ),
-    )
-    .expect("write legacy index fixture");
-    let summary_index_path = runtime_home
-        .join("cache")
-        .join("session-index")
-        .join(format!("{}-summaries.json", agent_id.as_str()));
-    if summary_index_path.is_file() {
-        fs::remove_file(&summary_index_path)
-            .expect("remove bootstrap summary for migration fixture");
-    }
-
-    let result = runtime
-        .query_runtime(&UiCommand::QuerySessionListPage {
-            archived: false,
-            page: freehand_ui_protocol::UiSessionListPageRequest {
-                direction: freehand_ui_protocol::UiSessionListPageDirection::Latest,
-                cursor: None,
-                limit: 1,
-            },
-        })
-        .expect("runtime paged query")
-        .expect("runtime-owned page");
-    match result {
-        UiQueryResult::SessionListPage(page) => {
-            assert_eq!(page.page.unavailable_sessions.len(), 1);
-            assert_eq!(page.page.unavailable_sessions[0], poisoned_session);
-            assert_eq!(
-                page.sessions
-                    .iter()
-                    .map(|summary| summary.session_id.as_str())
-                    .collect::<Vec<_>>(),
-                vec!["page-metadata-session"]
-            );
-        }
-        other => panic!("unexpected session list page result: {other:?}"),
-    }
-
-    fs::remove_dir_all(runtime_home).expect("cleanup");
-}
-
-#[test]
-fn runtime_session_list_page_skips_internal_only_pages_without_empty_ui_page() {
-    let runtime_home = temp_runtime_home();
-    let selected = live_selected_agent(
-        "http://127.0.0.1:1".to_owned(),
-        freehand_config::ProviderType::Anthropic,
-    );
-    let runtime = RuntimeCommandDispatcher::from_selected_agent_with_live(
-        &selected,
-        runtime_home.clone(),
-        false,
-    )
-    .expect("runtime bootstrap");
-    let persistence =
-        ReasonPersistence::new(runtime_home.clone(), AgentId::new(selected.name.clone()));
-    for index in 0..120 {
-        persistence
-            .create_session_metadata(
-                SessionId::new(format!("master-lifecycle-z-{index:03}")),
-                None,
-                None,
-            )
-            .expect("persist internal session");
-    }
-    for index in 1..=3 {
-        persistence
-            .create_session_metadata(SessionId::new(format!("aaa-visible-{index}")), None, None)
-            .expect("persist visible session");
-    }
-
-    let latest = runtime
-        .query_runtime(&UiCommand::QuerySessionListPage {
-            archived: false,
-            page: freehand_ui_protocol::UiSessionListPageRequest {
-                direction: freehand_ui_protocol::UiSessionListPageDirection::Latest,
-                cursor: None,
-                limit: 2,
-            },
-        })
-        .expect("latest query")
-        .expect("latest page");
-    let UiQueryResult::SessionListPage(latest) = latest else {
-        panic!("unexpected latest page")
-    };
-    assert_eq!(
-        latest
-            .sessions
-            .iter()
-            .map(|row| row.session_id.as_str())
-            .collect::<Vec<_>>(),
-        vec!["aaa-visible-3", "aaa-visible-2"]
-    );
-    assert!(latest.page.has_older);
-    let cursor = latest.page.next_cursor.expect("visible cursor");
-
-    let older = runtime
-        .query_runtime(&UiCommand::QuerySessionListPage {
-            archived: false,
-            page: freehand_ui_protocol::UiSessionListPageRequest {
-                direction: freehand_ui_protocol::UiSessionListPageDirection::Older,
-                cursor: Some(cursor),
-                limit: 2,
-            },
-        })
-        .expect("older query")
-        .expect("older page");
-    let UiQueryResult::SessionListPage(older) = older else {
-        panic!("unexpected older page")
-    };
-    assert_eq!(
-        older
-            .sessions
-            .iter()
-            .map(|row| row.session_id.as_str())
-            .collect::<Vec<_>>(),
-        vec!["aaa-visible-1"]
-    );
-    assert!(!older.page.has_older);
-
-    fs::remove_dir_all(runtime_home).expect("cleanup");
-}
-
-#[test]
-fn runtime_rejects_invalid_session_list_cursor_without_projection() {
-    let runtime_home = temp_runtime_home();
-    let selected = live_selected_agent(
-        "http://127.0.0.1:1".to_owned(),
-        freehand_config::ProviderType::Anthropic,
-    );
-    let runtime = RuntimeCommandDispatcher::from_selected_agent_with_live(
-        &selected,
-        runtime_home.clone(),
-        false,
-    )
-    .expect("runtime bootstrap");
-
-    let error = runtime
-        .query_runtime(&UiCommand::QuerySessionListPage {
-            archived: false,
-            page: freehand_ui_protocol::UiSessionListPageRequest {
-                direction: freehand_ui_protocol::UiSessionListPageDirection::Older,
-                cursor: Some("{invalid-json".to_owned()),
-                limit: 2,
-            },
-        })
-        .expect_err("invalid session list cursor must fail");
-    let UiCommandDispatchPortError::DispatchFailed(message) = error else {
-        panic!("unexpected session list cursor error: {error:?}");
-    };
-    assert!(message.contains("invalid session list page cursor"));
-
-    fs::remove_dir_all(runtime_home).expect("cleanup");
-}
-
-#[test]
-fn runtime_rejects_zero_session_list_limit_without_projection_or_panic() {
-    let runtime_home = temp_runtime_home();
-    let selected = live_selected_agent(
-        "http://127.0.0.1:1".to_owned(),
-        freehand_config::ProviderType::Anthropic,
-    );
-    let runtime = RuntimeCommandDispatcher::from_selected_agent_with_live(
-        &selected,
-        runtime_home.clone(),
-        false,
-    )
-    .expect("runtime bootstrap");
-
-    let error = runtime
-        .query_runtime(&UiCommand::QuerySessionListPage {
-            archived: false,
-            page: freehand_ui_protocol::UiSessionListPageRequest {
-                direction: freehand_ui_protocol::UiSessionListPageDirection::Latest,
-                cursor: None,
-                limit: 0,
-            },
-        })
-        .expect_err("zero session list limit must fail before paging arithmetic");
-    let UiCommandDispatchPortError::DispatchFailed(message) = error else {
-        panic!("unexpected session list limit error: {error:?}");
-    };
-    assert!(message.contains("session list page limit must be between 1 and 100"));
 
     fs::remove_dir_all(runtime_home).expect("cleanup");
 }
@@ -1700,11 +1418,13 @@ fn runtime_query_session_turns_projects_background_provider_retry_from_error_cen
         other => panic!("unexpected session query result: {other:?}"),
     }
     let session_list = runtime
-        .query_runtime(&active_session_list_page_command())
-        .expect("runtime session list query")
-        .expect("runtime-owned session list");
+        .ui_state()
+        .lock()
+        .expect("lock ui")
+        .query(&UiCommand::QuerySessionList)
+        .expect("session list query");
     match session_list {
-        UiQueryResult::SessionListPage(list) => {
+        UiQueryResult::SessionList(list) => {
             let summary = list
                 .sessions
                 .iter()
@@ -1808,11 +1528,13 @@ fn runtime_query_session_turns_does_not_reactivate_terminal_error_center_retry()
         other => panic!("unexpected session query result: {other:?}"),
     }
     let session_list = runtime
-        .query_runtime(&active_session_list_page_command())
-        .expect("runtime session list query")
-        .expect("runtime-owned session list");
+        .ui_state()
+        .lock()
+        .expect("lock ui")
+        .query(&UiCommand::QuerySessionList)
+        .expect("session list query");
     match session_list {
-        UiQueryResult::SessionListPage(list) => {
+        UiQueryResult::SessionList(list) => {
             let summary = list
                 .sessions
                 .iter()
@@ -1952,11 +1674,13 @@ fn runtime_query_session_turns_does_not_reactivate_historical_retry_before_later
         other => panic!("unexpected session query result: {other:?}"),
     }
     let session_list = runtime
-        .query_runtime(&active_session_list_page_command())
-        .expect("runtime session list query")
-        .expect("runtime-owned session list");
+        .ui_state()
+        .lock()
+        .expect("lock ui")
+        .query(&UiCommand::QuerySessionList)
+        .expect("session list query");
     match session_list {
-        UiQueryResult::SessionListPage(list) => {
+        UiQueryResult::SessionList(list) => {
             let summary = list
                 .sessions
                 .iter()
@@ -2403,11 +2127,13 @@ fn runtime_dispatches_session_crud_into_shared_ui_projection() {
     runtime.dispatch(rename).expect("rename dispatch");
 
     match runtime
-        .query_runtime(&active_session_list_page_command())
-        .expect("runtime session list query")
-        .expect("runtime-owned session list")
+        .ui_state()
+        .lock()
+        .expect("lock ui")
+        .query(&UiCommand::QuerySessionList)
+        .expect("session list")
     {
-        UiQueryResult::SessionListPage(list) => {
+        UiQueryResult::SessionList(list) => {
             assert_eq!(list.sessions.len(), 1);
             assert_eq!(list.sessions[0].session_id, session_id);
             assert_eq!(list.sessions[0].title.as_deref(), Some("Renamed"));
@@ -2422,11 +2148,13 @@ fn runtime_dispatches_session_crud_into_shared_ui_projection() {
     .expect("archive envelope");
     runtime.dispatch(archive).expect("archive dispatch");
     match runtime
-        .query_runtime(&archived_session_list_page_command())
-        .expect("runtime archived session list query")
-        .expect("runtime-owned archived session list")
+        .ui_state()
+        .lock()
+        .expect("lock ui")
+        .query(&UiCommand::QueryArchivedSessionList)
+        .expect("archived list")
     {
-        UiQueryResult::SessionListPage(list) => {
+        UiQueryResult::SessionList(list) => {
             assert_eq!(list.sessions.len(), 1);
             assert_eq!(list.sessions[0].session_id, session_id);
             assert!(list.sessions[0].archived);
@@ -2440,11 +2168,13 @@ fn runtime_dispatches_session_crud_into_shared_ui_projection() {
     .expect("restore envelope");
     runtime.dispatch(restore).expect("restore dispatch");
     match runtime
-        .query_runtime(&active_session_list_page_command())
-        .expect("runtime active session list query")
-        .expect("runtime-owned active session list")
+        .ui_state()
+        .lock()
+        .expect("lock ui")
+        .query(&UiCommand::QuerySessionList)
+        .expect("active list")
     {
-        UiQueryResult::SessionListPage(list) => {
+        UiQueryResult::SessionList(list) => {
             assert_eq!(list.sessions.len(), 1);
             assert_eq!(list.sessions[0].session_id, session_id);
             assert!(!list.sessions[0].archived);
@@ -5106,11 +4836,13 @@ fn live_bootstrap_closes_stale_toolpending_without_lifecycle_owner() {
     );
 
     match runtime
-        .query_runtime(&active_session_list_page_command())
-        .expect("runtime session list query")
-        .expect("runtime-owned session list")
+        .ui_state()
+        .lock()
+        .expect("lock ui")
+        .query(&UiCommand::QuerySessionList)
+        .expect("session list")
     {
-        UiQueryResult::SessionListPage(list) => {
+        UiQueryResult::SessionList(list) => {
             let summary = list
                 .sessions
                 .iter()
@@ -7729,65 +7461,6 @@ fn complete_single_response(visible_text: &str) -> String {
     )
 }
 
-fn anthropic_two_hosted_searches_complete_response(visible_text: &str) -> String {
-    let tagged = tagged_completion_json(&format!(
-        r#"{{"claim":"complete","completion_reason":"done","evidence":"provider returned {visible_text}","summary":"{visible_text}","learned":"keep tagged completion strict"}}"#
-    ));
-    let tagged_escaped = tagged.replace('\n', "\\n").replace('"', "\\\"");
-    format!(
-        r#"{{
-  "content": [
-    {{
-      "type": "text",
-      "text": "working"
-    }},
-    {{
-      "type": "server_tool_use",
-      "id": "srv-search-1",
-      "name": "web_search",
-      "input": {{"query": "Shenzhen weather forecast next 14 days"}}
-    }},
-    {{
-      "type": "web_search_tool_result",
-      "tool_use_id": "srv-search-1",
-      "content": [
-        {{
-          "title": "Shenzhen weather source one",
-          "url": "https://example.test/shenzhen-weather-1",
-          "content": "weather one"
-        }}
-      ]
-    }},
-    {{
-      "type": "server_tool_use",
-      "id": "srv-search-2",
-      "name": "web_search",
-      "input": {{"query": "Shenzhen weather 15 day"}}
-    }},
-    {{
-      "type": "web_search_tool_result",
-      "tool_use_id": "srv-search-2",
-      "content": [
-        {{
-          "title": "Shenzhen weather source two",
-          "url": "https://example.test/shenzhen-weather-2",
-          "content": "weather two"
-        }}
-      ]
-    }},
-    {{
-      "type": "text",
-      "text": "{visible}\n{tagged}"
-    }}
-  ],
-  "usage": {{"input_tokens": 14, "output_tokens": 120}},
-  "stop_reason": "end_turn"
-}}"#,
-        visible = visible_text,
-        tagged = tagged_escaped,
-    )
-}
-
 fn blocked_single_response(visible_text: &str, blocked_reason: &str) -> String {
     let tagged = tagged_completion_json(&format!(
         r#"{{"claim":"blocked","blocked_reason":"{blocked_reason}"}}"#
@@ -7851,26 +7524,6 @@ fn openai_responses_continue_response(visible_text: &str, next_step: &str) -> St
             "output_tokens": 82,
             "total_tokens": 96
         }
-    })
-    .to_string()
-}
-
-fn openai_responses_function_call_response(
-    call_id: &str,
-    tool_name: &str,
-    arguments: Value,
-) -> String {
-    json!({
-        "id": format!("resp-{call_id}"),
-        "object": "response",
-        "status": "completed",
-        "output": [{
-            "type": "function_call",
-            "call_id": call_id,
-            "name": tool_name,
-            "arguments": arguments.to_string()
-        }],
-        "usage": {"input_tokens": 14, "output_tokens": 18, "total_tokens": 32}
     })
     .to_string()
 }
@@ -7953,18 +7606,6 @@ fn max_tokens_text_response() -> String {
         }],
         "usage": {"input_tokens": 14, "output_tokens": 512},
         "stop_reason": "max_tokens"
-    })
-    .to_string()
-}
-
-fn plain_text_response(visible_text: &str) -> String {
-    json!({
-        "content": [{
-            "type": "text",
-            "text": visible_text
-        }],
-        "usage": {"input_tokens": 14, "output_tokens": 24},
-        "stop_reason": "end_turn"
     })
     .to_string()
 }
@@ -8800,7 +8441,7 @@ fn live_bridge_blocks_after_three_consecutive_invalid_control_statuses() {
         &live_selected_agent(base_url, freehand_config::ProviderType::Anthropic),
         live_request(false),
     )
-    .expect("schema mismatch exhaustion preserves provider terminal");
+    .expect("schema mismatch exhaustion is blocked truth");
     for _ in 0..3 {
         rx.recv().expect("provider request");
     }
@@ -8814,15 +8455,11 @@ fn live_bridge_blocks_after_three_consecutive_invalid_control_statuses() {
             .terminal_event
             .as_ref()
             .map(|event| event.status.clone()),
-        Some(TerminalStatus::Success)
+        Some(TerminalStatus::Blocked)
     );
-    assert!(
-        outcome
-            .turn
-            .terminal_event
-            .as_ref()
-            .is_some_and(|event| event.summary == "end_turn")
-    );
+    assert!(outcome.turn.terminal_event.as_ref().is_some_and(|event| {
+        event.summary.contains("3 polishing attempts") && event.summary.contains("next_step")
+    }));
     assert_eq!(
         outcome
             .broadcasts
@@ -11954,7 +11591,7 @@ fn live_bridge_fails_explicitly_when_provider_raw_ledger_is_not_writable() {
 }
 
 #[test]
-fn live_bridge_preserves_provider_terminal_after_three_invalid_schema_retries() {
+fn live_bridge_blocks_after_three_invalid_schema_retries_without_failed_status() {
     let _cwd_lock = cwd_lock()
         .lock()
         .unwrap_or_else(|poisoned| poisoned.into_inner());
@@ -11982,122 +11619,7 @@ fn live_bridge_preserves_provider_terminal_after_three_invalid_schema_retries() 
             .terminal_event
             .as_ref()
             .map(|event| event.status.clone()),
-        Some(TerminalStatus::Success)
-    );
-    assert_eq!(
-        outcome
-            .turn
-            .terminal_event
-            .as_ref()
-            .map(|event| event.summary.clone()),
-        Some("end_turn".to_owned())
-    );
-}
-
-#[test]
-fn live_bridge_accepts_provider_terminal_without_completion_schema() {
-    let _cwd_lock = cwd_lock()
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner());
-    let (base_url, _rx, handle) = spawn_sequence_server(
-        "application/json",
-        vec![
-            missing_completion_schema_response(),
-            missing_completion_schema_response(),
-            missing_completion_schema_response(),
-        ],
-    );
-
-    let outcome = run_live_reason_turn(
-        &live_selected_agent(base_url, freehand_config::ProviderType::Anthropic),
-        live_request(false),
-    )
-    .expect("live bridge should close on provider terminal without schema");
-    handle.join().expect("join");
-
-    assert_eq!(outcome.rounds, 3);
-    assert_eq!(outcome.schema_rejections.len(), 3);
-    let terminal = outcome
-        .turn
-        .terminal_event
-        .as_ref()
-        .expect("terminal event");
-    assert_eq!(terminal.status, TerminalStatus::Success);
-    assert_eq!(terminal.summary, "end_turn");
-}
-
-#[test]
-fn live_bridge_does_not_block_after_three_invalid_completion_schema_attempts() {
-    let _cwd_lock = cwd_lock()
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner());
-    let (base_url, rx, handle) = spawn_sequence_server(
-        "application/json",
-        vec![
-            invalid_complete_response(),
-            invalid_complete_response(),
-            invalid_complete_response(),
-        ],
-    );
-
-    let outcome = run_live_reason_turn(
-        &live_selected_agent(base_url, freehand_config::ProviderType::Anthropic),
-        live_request(false),
-    )
-    .expect("live bridge should not block on schema repair cap");
-    let requests = collect_provider_requests(&rx, 3);
-    handle.join().expect("join");
-
-    assert_eq!(outcome.rounds, 3);
-    assert_eq!(outcome.schema_rejections.len(), 3);
-    assert_eq!(requests.len(), 3);
-    assert_eq!(
-        outcome
-            .turn
-            .terminal_event
-            .as_ref()
-            .map(|event| event.status.clone()),
-        Some(TerminalStatus::Success)
-    );
-    assert!(
-        requests[2].contains("`evidence`: is required"),
-        "schema feedback may remain visible as model repair guidance, but must not become a blocked terminal gate"
-    );
-}
-
-#[test]
-fn live_bridge_does_not_block_sourced_search_when_typed_evidence_is_missing() {
-    let _cwd_lock = cwd_lock()
-        .lock()
-        .unwrap_or_else(|poisoned| poisoned.into_inner());
-    let (base_url, rx, handle) = spawn_sequence_server(
-        "application/json",
-        vec![
-            plain_text_response("hosted search returned no usable source"),
-            plain_text_response("camo verification returned no usable source"),
-            plain_text_response("web fetch recovery returned no usable source"),
-        ],
-    );
-    let mut request = live_request(false);
-    request.execution_profile = LiveReasonExecutionProfile::SourcedSearch;
-
-    let outcome = run_live_reason_turn(
-        &live_selected_agent(base_url, freehand_config::ProviderType::Anthropic),
-        request,
-    )
-    .expect("sourced search missing typed evidence should not force blocked");
-    let requests = collect_provider_requests(&rx, 3);
-    handle.join().expect("join");
-
-    assert_eq!(outcome.rounds, 3);
-    assert_eq!(requests.len(), 3);
-    assert_eq!(
-        outcome
-            .turn
-            .terminal_event
-            .as_ref()
-            .map(|event| event.status.clone()),
-        Some(TerminalStatus::Success)
+        Some(TerminalStatus::Blocked)
     );
 }
 
@@ -12113,7 +11635,7 @@ fn live_bridge_interrupts_non_candidate_max_tokens_without_failed_status() {
         &live_selected_agent(base_url, freehand_config::ProviderType::Anthropic),
         live_request(false),
     )
-    .expect("live bridge should preserve provider interruption truth");
+    .expect("live bridge should materialize interrupted turn");
     handle.join().expect("join");
 
     assert_eq!(outcome.rounds, 1);
@@ -12124,7 +11646,11 @@ fn live_bridge_interrupts_non_candidate_max_tokens_without_failed_status() {
         .as_ref()
         .expect("terminal event");
     assert_eq!(terminal.status, TerminalStatus::Interrupted);
-    assert_eq!(terminal.summary, "max_tokens");
+    assert!(
+        terminal
+            .summary
+            .contains("Provider ended before completion schema was available: max_tokens")
+    );
 }
 
 #[test]
@@ -12179,35 +11705,20 @@ fn live_bridge_derives_hosted_web_search_for_configured_provider_native_protocol
     );
     assert_eq!(
         LiveReasonExecutionRole::Master
-            .hosted_tool_definitions(
-                &responses,
-                LiveReasonExecutionProfile::Workspace,
-                None,
-                false
-            )
+            .hosted_tool_definitions(&responses, LiveReasonExecutionProfile::Workspace, None)
             .len(),
         1
     );
     assert_eq!(
         LiveReasonExecutionRole::Worker
-            .hosted_tool_definitions(
-                &responses,
-                LiveReasonExecutionProfile::Workspace,
-                None,
-                false
-            )
+            .hosted_tool_definitions(&responses, LiveReasonExecutionProfile::Workspace, None)
             .len(),
         1,
         "worker Workspace profile must expose hosted web search when provider supports function-tool mixing"
     );
     assert_eq!(
         LiveReasonExecutionRole::Worker
-            .hosted_tool_definitions(
-                &responses,
-                LiveReasonExecutionProfile::CleanSearch,
-                None,
-                false
-            )
+            .hosted_tool_definitions(&responses, LiveReasonExecutionProfile::CleanSearch, None)
             .len(),
         1
     );
@@ -12220,12 +11731,7 @@ fn live_bridge_derives_hosted_web_search_for_configured_provider_native_protocol
     );
     assert!(
         LiveReasonExecutionRole::Master
-            .hosted_tool_definitions(
-                &disabled,
-                LiveReasonExecutionProfile::Workspace,
-                None,
-                false
-            )
+            .hosted_tool_definitions(&disabled, LiveReasonExecutionProfile::Workspace, None)
             .is_empty()
     );
 
@@ -12254,37 +11760,22 @@ fn live_bridge_derives_hosted_web_search_for_configured_provider_native_protocol
     );
     assert_eq!(
         LiveReasonExecutionRole::Master
-            .hosted_tool_definitions(
-                &messages,
-                LiveReasonExecutionProfile::Workspace,
-                None,
-                false
-            )
+            .hosted_tool_definitions(&messages, LiveReasonExecutionProfile::Workspace, None)
             .len(),
         1
     );
 }
 
 #[test]
-fn sourced_search_attempts_web_fetch_before_blocking_missing_hosted_discovery() {
+fn sourced_search_blocks_when_hosted_round_returns_no_typed_discovery() {
     let domain_plan = r#"<freehand_search_delivery>
 {"schema":"search_evidence.domain_plan.v1","delivery_id":"plan-news-001","domain":"news","preferred_source_kinds":["official_publication","mainstream_news"],"social_platform_priority":["weibo","x"],"minimum_verified_sources":2,"policy_version":"2026-08-15"}
 </freehand_search_delivery>"#;
-    let (web_fetch_url, web_fetch_rx, web_fetch_handle) = spawn_status_sequence_server(vec![(
-        500,
-        "text/plain",
-        "web fetch recovery unavailable".to_owned(),
-    )]);
     let (base_url, rx, handle) = spawn_sequence_server(
         "application/json",
         vec![
             openai_responses_continue_response(domain_plan, "continue to hosted discovery"),
             openai_responses_complete_response("hosted search was not observed"),
-            openai_responses_function_call_response(
-                "call-web-fetch-recovery",
-                "web_fetch",
-                json!({"url":format!("{web_fetch_url}/unavailable"),"domain_plan_ref":"plan-news-001"}),
-            ),
         ],
     );
     let mut selected = live_selected_worker_agent(base_url, freehand_config::ProviderType::OpenAi);
@@ -12298,7 +11789,6 @@ fn sourced_search_attempts_web_fetch_before_blocking_missing_hosted_discovery() 
         .expect("missing hosted discovery must close the sourced-search turn");
     let first_request = rx.recv().expect("domain-plan request");
     let second_request = rx.recv().expect("hosted-discovery request");
-    let third_request = rx.recv().expect("web-fetch recovery request");
     handle.join().expect("join provider");
 
     assert!(
@@ -12311,33 +11801,7 @@ fn sourced_search_attempts_web_fetch_before_blocking_missing_hosted_discovery() 
             .as_array()
             .is_some_and(|tools| tools.iter().any(|tool| tool["type"] == "web_search"))
     );
-    assert!(
-        http_request_body_json(&third_request)["tools"]
-            .as_array()
-            .is_some_and(|tools| tools.iter().any(|tool| tool["name"] == "web_fetch")),
-        "missing hosted discovery must attempt web_fetch before blocking"
-    );
-    assert!(
-        !http_request_body_json(&third_request)["tools"]
-            .as_array()
-            .is_some_and(|tools| tools.iter().any(|tool| tool["type"] == "web_search"))
-    );
-    let _web_fetch_request = web_fetch_rx.recv().expect("web fetch recovery attempt");
-    web_fetch_handle.join().expect("join web fetch fixture");
-    assert!(
-        outcome
-            .turn
-            .tool_calls
-            .iter()
-            .any(|tool_call| tool_call.tool_call.tool_name.as_str() == "web_fetch"),
-        "hosted recovery must execute a typed web_fetch call"
-    );
-    assert!(outcome.turn.tool_results.iter().any(|tool_result| {
-        tool_result.tool_result.tool_call_id.as_str() == "call-web-fetch-recovery"
-            && tool_result.tool_result.status == ToolResultStatus::Failed
-            && tool_result.tool_result.output.contains("HTTP 500")
-    }));
-    assert_eq!(outcome.rounds, 3);
+    assert_eq!(outcome.rounds, 2);
     assert_eq!(
         outcome
             .turn
@@ -12351,7 +11815,7 @@ fn sourced_search_attempts_web_fetch_before_blocking_missing_hosted_discovery() 
             .turn
             .terminal_event
             .as_ref()
-            .is_some_and(|event| event.summary.contains("web_fetch recovery"))
+            .is_some_and(|event| event.summary.contains("typed hosted discovery"))
     );
     assert_eq!(
         outcome
@@ -12516,7 +11980,7 @@ fn sourced_search_with_typed_hosted_discovery_advances_to_supplement_decision() 
 }
 
 #[test]
-fn sourced_search_attempts_web_fetch_before_blocking_missing_camo_verification() {
+fn sourced_search_blocks_when_camo_round_returns_without_typed_verification() {
     let domain_plan = r#"<freehand_search_delivery>
 {"schema":"search_evidence.domain_plan.v1","delivery_id":"plan-news-camo-001","domain":"news","preferred_source_kinds":["official_publication","mainstream_news"],"social_platform_priority":["weibo","x"],"minimum_verified_sources":2,"policy_version":"2026-08-15"}
 </freehand_search_delivery>"#;
@@ -12561,22 +12025,12 @@ fn sourced_search_attempts_web_fetch_before_blocking_missing_camo_verification()
         }
     })
     .to_string();
-    let (web_fetch_url, web_fetch_rx, web_fetch_handle) = spawn_status_sequence_server(vec![(
-        500,
-        "text/plain",
-        "web fetch camo recovery unavailable".to_owned(),
-    )]);
     let (base_url, rx, handle) = spawn_sequence_server(
         "application/json",
         vec![
             openai_responses_continue_response(domain_plan, "continue to hosted discovery"),
             hosted_discovery,
             openai_responses_complete_response("camo verification was not observed"),
-            openai_responses_function_call_response(
-                "call-web-fetch-camo-recovery",
-                "web_fetch",
-                json!({"url":format!("{web_fetch_url}/unavailable"),"domain_plan_ref":"plan-news-camo-001"}),
-            ),
         ],
     );
     let mut selected = live_selected_worker_agent(base_url, freehand_config::ProviderType::OpenAi);
@@ -12591,31 +12045,9 @@ fn sourced_search_attempts_web_fetch_before_blocking_missing_camo_verification()
     let first_request = rx.recv().expect("domain-plan request");
     let second_request = rx.recv().expect("hosted-discovery request");
     let third_request = rx.recv().expect("camo-verification request");
-    let fourth_request = rx.recv().expect("web-fetch recovery request");
     handle.join().expect("join provider");
 
-    assert!(
-        http_request_body_json(&fourth_request)["tools"]
-            .as_array()
-            .is_some_and(|tools| tools.iter().any(|tool| tool["name"] == "web_fetch")),
-        "missing camo verification must attempt web_fetch before blocking"
-    );
-    let _web_fetch_request = web_fetch_rx.recv().expect("web fetch recovery attempt");
-    web_fetch_handle.join().expect("join web fetch fixture");
-    assert!(
-        outcome
-            .turn
-            .tool_calls
-            .iter()
-            .any(|tool_call| tool_call.tool_call.tool_name.as_str() == "web_fetch"),
-        "camo recovery must execute a typed web_fetch call"
-    );
-    assert!(outcome.turn.tool_results.iter().any(|tool_result| {
-        tool_result.tool_result.tool_call_id.as_str() == "call-web-fetch-camo-recovery"
-            && tool_result.tool_result.status == ToolResultStatus::Failed
-            && tool_result.tool_result.output.contains("HTTP 500")
-    }));
-    assert_eq!(outcome.rounds, 4);
+    assert_eq!(outcome.rounds, 3);
     assert_eq!(
         outcome
             .turn
@@ -12629,7 +12061,7 @@ fn sourced_search_attempts_web_fetch_before_blocking_missing_camo_verification()
             .turn
             .terminal_event
             .as_ref()
-            .is_some_and(|event| event.summary.contains("web_fetch recovery"))
+            .is_some_and(|event| event.summary.contains("camo verification evidence"))
     );
     assert!(
         !http_request_body_json(&first_request)["tools"]
@@ -12673,22 +12105,12 @@ fn live_bridge_does_not_mix_search_only_hosted_tool_with_master_functions() {
 
     assert!(
         LiveReasonExecutionRole::Master
-            .hosted_tool_definitions(
-                &descriptor,
-                LiveReasonExecutionProfile::Workspace,
-                None,
-                false
-            )
+            .hosted_tool_definitions(&descriptor, LiveReasonExecutionProfile::Workspace, None)
             .is_empty()
     );
     assert_eq!(
         LiveReasonExecutionRole::Worker
-            .hosted_tool_definitions(
-                &descriptor,
-                LiveReasonExecutionProfile::CleanSearch,
-                None,
-                false
-            )
+            .hosted_tool_definitions(&descriptor, LiveReasonExecutionProfile::CleanSearch, None)
             .len(),
         1
     );
@@ -12837,52 +12259,6 @@ fn provider_web_search_test_fails_when_provider_does_not_observe_hosted_search()
 }
 
 #[test]
-fn master_live_turn_accepts_multiple_hosted_search_deliveries_in_one_provider_response() {
-    let response =
-        anthropic_two_hosted_searches_complete_response("Shenzhen weather answer complete");
-    let (base_url, rx, handle) = spawn_mock_server(200, "application/json", response);
-    let mut selected = live_selected_agent_with_protocol(
-        base_url,
-        freehand_config::ProviderType::Anthropic,
-        ConfigProviderProtocol::Messages,
-    );
-    selected.provider.default_model = "MiniMax-M3".to_owned();
-
-    let request = live_request(false);
-    let outcome = run_live_reason_turn(&selected, request).expect("master live turn");
-    let _raw_request = rx.recv().expect("master provider request");
-    handle.join().expect("join provider");
-
-    assert_eq!(outcome.rounds, 1);
-    assert_eq!(
-        outcome
-            .turn
-            .terminal_event
-            .as_ref()
-            .map(|event| event.status.clone()),
-        Some(TerminalStatus::Success)
-    );
-    let evidence = outcome
-        .turn
-        .search_evidence
-        .as_ref()
-        .expect("search evidence");
-    assert!(evidence.domain_plan.is_none());
-    let hosted_count = evidence
-        .deliveries
-        .iter()
-        .filter(|delivery| {
-            matches!(
-                delivery,
-                SearchEvidenceDelivery::Discovery(discovery)
-                    if discovery.discovery_channel == SearchDiscoveryChannel::HostedWebSearch
-            )
-        })
-        .count();
-    assert_eq!(hosted_count, 2, "both hosted searches must be preserved");
-}
-
-#[test]
 fn clean_search_worker_profile_exposes_hosted_search_with_camo_only() {
     let mut agent = live_selected_agent_with_protocol(
         "http://127.0.0.1:1".to_owned(),
@@ -12897,7 +12273,6 @@ fn clean_search_worker_profile_exposes_hosted_search_with_camo_only() {
         &registry,
         LiveReasonExecutionProfile::CleanSearch,
         None,
-        false,
     );
     assert_eq!(clean_search_tools.len(), 1);
     assert_eq!(clean_search_tools[0].name, "camo");
@@ -12905,42 +12280,26 @@ fn clean_search_worker_profile_exposes_hosted_search_with_camo_only() {
         LiveReasonExecutionRole::Worker.tool_schema_fingerprint(
             &registry,
             LiveReasonExecutionProfile::CleanSearch,
-            None,
-            false
+            None
         ),
         "clean-search:camo"
     );
     assert_eq!(
         LiveReasonExecutionRole::Worker
-            .hosted_tool_definitions(
-                &descriptor,
-                LiveReasonExecutionProfile::CleanSearch,
-                None,
-                false
-            )
+            .hosted_tool_definitions(&descriptor, LiveReasonExecutionProfile::CleanSearch, None)
             .len(),
         1
     );
 
     assert!(
         LiveReasonExecutionRole::Worker
-            .tool_definitions(
-                &registry,
-                LiveReasonExecutionProfile::Workspace,
-                None,
-                false
-            )
+            .tool_definitions(&registry, LiveReasonExecutionProfile::Workspace, None)
             .iter()
             .any(|tool| tool.name == "read_file")
     );
     assert_eq!(
         LiveReasonExecutionRole::Worker
-            .hosted_tool_definitions(
-                &descriptor,
-                LiveReasonExecutionProfile::Workspace,
-                None,
-                false
-            )
+            .hosted_tool_definitions(&descriptor, LiveReasonExecutionProfile::Workspace, None)
             .len(),
         1,
         "worker Workspace profile must expose hosted web search when provider supports function-tool mixing"

@@ -1224,14 +1224,7 @@ async fn run_adp_session_query_async(
         &mut socket,
         UiAdpRequest::Query {
             request_id: list_request_id.clone(),
-            query: UiCommand::QuerySessionListPage {
-                archived: false,
-                page: freehand_ui_protocol::UiSessionListPageRequest {
-                    direction: freehand_ui_protocol::UiSessionListPageDirection::Latest,
-                    cursor: None,
-                    limit: 24,
-                },
-            },
+            query: UiCommand::QuerySessionList,
         },
     )
     .await?;
@@ -1249,13 +1242,13 @@ async fn run_adp_session_query_async(
             .map_err(|_| "ADP session list timeout".to_owned())??;
         match response {
             UiAdpResponse::QueryResult { request_id, result } if request_id == list_request_id => {
-                let freehand_ui_protocol::UiQueryResult::SessionListPage(list) = result else {
+                let freehand_ui_protocol::UiQueryResult::SessionList(list) = result else {
                     return Err("ADP session list returned non-session result".to_owned());
                 };
                 if selected_session.is_none() {
                     selected_session = list
                         .sessions
-                        .first()
+                        .last()
                         .map(|session| session.session_id.clone());
                 }
                 list_summary = Some(format!(

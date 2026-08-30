@@ -1,4 +1,4 @@
-.PHONY: provision-openminis-source build fmt clippy test mainlines gates session-paging-online relay-deployment-smoke relay-local-online relay-account-config-smoke launchd-guard-offline launchd-guard-online launchd-guards ci verify-webui-online verify-webui-release-online release install-global install-symlink install-launchd install-launchdS install-worker-launchd install-worker-launchdS restart-launchd restart-launchdS restart-worker-launchd restart-worker-launchdS uninstall-launchd uninstall-launchdS uninstall-worker-launchd uninstall-worker-launchdS launchd-status launchd-statusS worker-launchd-status worker-launchd-statusS launchd-logs launchd-logsS worker-launchd-logs worker-launchd-logsS hooks
+.PHONY: provision-openminis-source build fmt clippy test mainlines gates relay-deployment-smoke relay-local-online relay-account-config-smoke launchd-guard-offline launchd-guard-online launchd-guards ci verify-webui-online verify-webui-release-online release install-global install-symlink install-launchd install-launchdS install-worker-launchd install-worker-launchdS restart-launchd restart-launchdS restart-worker-launchd restart-worker-launchdS uninstall-launchd uninstall-launchdS uninstall-worker-launchd uninstall-worker-launchdS launchd-status launchd-statusS worker-launchd-status worker-launchd-statusS launchd-logs launchd-logsS worker-launchd-logs worker-launchd-logsS hooks
 .PHONY: dev pre-push-fast nightly
 
 # Build/test tiers (from fastest to slowest):
@@ -9,8 +9,7 @@
 #   make ci            - full release-candidate gate: build + fmt + clippy +
 #                        workspace test + mainlines + gates + relay smokes.
 #                        This is what .githooks/pre-push runs by default.
-#   make nightly       - ci + operator-provisioned session-paging and remaining
-#                        webui release online verifiers. Run on the nightly cron.
+#   make nightly       - ci + webui online verifiers. Run on the nightly cron.
 #   make release       - full release: ci + Android JVM regression + release
 #                        binaries + Android APK (invoked separately).
 
@@ -27,19 +26,13 @@ clippy:
 	cargo clippy --workspace --all-targets -- -D warnings
 
 test: provision-openminis-source
-	RUST_TEST_THREADS=1 cargo test --workspace
+	cargo test --workspace
 
 mainlines:
 	cargo run -p xtask -- mainlines check
 
 gates: provision-openminis-source
 	cargo run -p xtask -- gates check
-
-session-paging-online:
-	set -a && . "$${HOME}/.freehand/daemonS.env" && set +a && \
-	FREEHAND_NEW_SESSION_BASE_URL="http://100.66.1.82:4042/" \
-	FREEHAND_NEW_SESSION_ADP_URL="ws://100.66.1.82:4042/adp" \
-	node scripts/verify-webui-new-session-online.mjs
 
 relay-deployment-smoke:
 	scripts/verify-relay-deployment-smoke.sh
@@ -84,7 +77,7 @@ pre-push-fast: provision-openminis-source
 
 ci: provision-openminis-source build fmt clippy test mainlines gates relay-deployment-smoke relay-local-online relay-account-config-smoke launchd-guards
 
-nightly: ci session-paging-online verify-webui-online verify-webui-release-online
+nightly: ci verify-webui-online verify-webui-release-online
 
 verify-webui-online:
 	scripts/verify-webui-online.sh

@@ -1,7 +1,5 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-unset $(git rev-parse --local-env-vars)
-
 echo "[freehand] pre-push: full gate"
 make ci

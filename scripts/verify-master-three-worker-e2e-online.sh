@@ -306,17 +306,17 @@ headers = {
 async def query_board():
     async with websockets.connect(url, additional_headers=headers) as ws:
         await ws.send(json.dumps({
-            "protocol_version": 4,
+            "protocol_version": 3,
             "kind": "handshake",
             "request_id": f"worker-health-handshake-{phase}",
             "client_name": "three-worker-verifier",
-            "capabilities": ["adp.v4.handshake"],
+            "capabilities": ["adp.v3.handshake"],
         }))
         handshake = json.loads(await asyncio.wait_for(ws.recv(), timeout=20))
         if handshake.get("request_id") != f"worker-health-handshake-{phase}":
             raise RuntimeError(f"ADP worker health handshake failed: {handshake}")
         await ws.send(json.dumps({
-            "protocol_version": 4,
+            "protocol_version": 3,
             "kind": "query",
             "request_id": f"worker-health-{phase}",
             "query": {"QueryAgentBoard": {}},
@@ -918,18 +918,18 @@ headers = {
 }
 
 def adp_command(request_id, command):
-    return {"protocol_version": 4, "kind": "command", "request_id": request_id, "command": command}
+    return {"protocol_version": 3, "kind": "command", "request_id": request_id, "command": command}
 
 def adp_query(request_id, query):
-    return {"protocol_version": 4, "kind": "query", "request_id": request_id, "query": query}
+    return {"protocol_version": 3, "kind": "query", "request_id": request_id, "query": query}
 
 async def handshake(ws, request_id):
     await ws.send(json.dumps({
-        "protocol_version": 4,
+        "protocol_version": 3,
         "kind": "handshake",
         "request_id": request_id,
         "client_name": "three-worker-verifier",
-        "capabilities": ["adp.v4.handshake"],
+        "capabilities": ["adp.v3.handshake"],
     }))
     response = json.loads(await asyncio.wait_for(ws.recv(), timeout=20))
     if response.get("request_id") != request_id or response.get("kind") != "handshake_accepted":
@@ -1265,17 +1265,17 @@ headers = {
 async def main():
     async with websockets.connect(url, additional_headers=headers) as ws:
         await ws.send(json.dumps({
-            "protocol_version": 4,
+            "protocol_version": 3,
             "kind": "handshake",
             "request_id": "restart-handshake",
             "client_name": "three-worker-verifier",
-            "capabilities": ["adp.v4.handshake"],
+            "capabilities": ["adp.v3.handshake"],
         }))
         handshake = json.loads(await asyncio.wait_for(ws.recv(), timeout=20))
         if handshake.get("request_id") != "restart-handshake" or handshake.get("kind") != "handshake_accepted":
             raise RuntimeError(f"ADP restart handshake failed: {handshake}")
         await ws.send(json.dumps({
-            "protocol_version": 4,
+            "protocol_version": 3,
             "kind": "query",
             "request_id": "restart-turns",
             "query": {"QuerySessionTurns": {"session_id": session_id}},

@@ -1,18 +1,5 @@
 use super::*;
 
-pub(super) fn isolated_git_command(repository: &Path) -> Command {
-    let inherited_git_keys = std::env::vars_os()
-        .map(|(key, _)| key)
-        .filter(|key| key.to_string_lossy().starts_with("GIT_"))
-        .collect::<Vec<_>>();
-    let mut command = Command::new("git");
-    command.arg("-C").arg(repository);
-    for key in inherited_git_keys {
-        command.env_remove(key);
-    }
-    command
-}
-
 #[derive(Clone, Copy)]
 pub(super) enum MapDocumentKind {
     Function,

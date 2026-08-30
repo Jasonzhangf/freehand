@@ -249,26 +249,6 @@ pub fn validate_command(command: &UiCommand) -> Result<(), UiProtocolError> {
         {
             Err(UiProtocolError::InvalidTurnPageCursor)
         }
-        UiCommand::QuerySessionListPage { page, .. } if !(1..=100).contains(&page.limit) => {
-            Err(UiProtocolError::InvalidSessionListPageLimit)
-        }
-        UiCommand::QuerySessionListPage { page, .. }
-            if matches!(page.direction, UiSessionListPageDirection::Latest)
-                && page.cursor.is_some() =>
-        {
-            Err(UiProtocolError::InvalidSessionListPageCursor)
-        }
-        UiCommand::QuerySessionListPage { page, .. }
-            if matches!(page.direction, UiSessionListPageDirection::Older)
-                && page
-                    .cursor
-                    .as_deref()
-                    .map(str::trim)
-                    .unwrap_or("")
-                    .is_empty() =>
-        {
-            Err(UiProtocolError::InvalidSessionListPageCursor)
-        }
         UiCommand::UpdateAgentProviderSelection { selection }
             if selection.agent_name.trim().is_empty() =>
         {
@@ -627,8 +607,6 @@ pub fn protocol_rejection(err: UiProtocolError) -> UiProtocolRejection {
         UiProtocolError::IngressCommandKindMismatch => "ingress_command_kind_mismatch",
         UiProtocolError::QueryCommandKindMismatch => "direct_task_mutation_forbidden",
         UiProtocolError::StreamKindMismatch => "stream_kind_mismatch",
-        UiProtocolError::InvalidSessionListPageLimit => "invalid_session_list_page_limit",
-        UiProtocolError::InvalidSessionListPageCursor => "invalid_session_list_page_cursor",
     };
     UiProtocolRejection {
         code: code.to_owned(),
