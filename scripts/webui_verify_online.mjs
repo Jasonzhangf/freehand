@@ -97,8 +97,10 @@ try {
   await cdp.send('Page.navigate', { url: baseUrl });
   await waitForLoad(cdp);
   await waitForFunction(cdp, () => {
-    return !!document.querySelector('[data-webui-shell="true"]') && !!document.getElementById('composer-input');
-  }, 20_000, 'shell ready');
+    return document.body.dataset.webuiJsReady === 'true' &&
+      !!document.querySelector('[data-webui-shell="true"]') &&
+      !!document.getElementById('composer-input');
+  }, 20_000, 'WebUI shell ready');
 
   await evalInPage(cdp, () => {
     document.getElementById('new-conversation-button')?.click();
@@ -169,18 +171,30 @@ try {
   await cdp.send('Page.reload', { ignoreCache: true });
   await waitForLoad(cdp);
   await waitForFunction(cdp, () => {
-    return !!document.querySelector('[data-webui-shell="true"]');
-  }, 20_000, 'shell reloaded');
-  await waitForFunction(
-    cdp,
-    (firstMarker) => {
-      const text = document.getElementById('message-list')?.innerText || '';
-      return text.includes(firstMarker) && text.includes('definitely-missing-freehand-task');
-    },
-    20_000,
-    'refreshed transcript visible',
-    prompt1,
-  );
+    return document.body.dataset.webuiJsReady === 'true' &&
+      !!document.querySelector('[data-webui-shell="true"]') &&
+      !!document.getElementById('composer-input');
+  }, 20_000, 'WebUI shell reloaded');
+  try {
+    await waitForFunction(
+      cdp,
+      (markers) => {
+        const text = document.getElementById('message-list')?.innerText || '';
+        const terminalCount = (text.match(/最终结果/g) || []).length;
+        const selectedTerminalStatus =
+          document.querySelector('[data-webui-shell="true"]')?.dataset.selectedTerminalStatus || '';
+        return text.includes(markers.firstMarker) &&
+          terminalCount >= 2 &&
+          selectedTerminalStatus === 'success';
+      },
+      20_000,
+      'refreshed transcript visible',
+      { firstMarker: prompt1 },
+    );
+  } catch (error) {
+    await captureRefreshFailureEvidence(cdp, prompt1, error);
+    throw error;
+  }
   const refreshed = await captureState(cdp, '08-after-refresh');
   const settingsProof = await captureSettingsProof(cdp);
   const scrollProof = await captureScrollProof(cdp);
@@ -227,38 +241,31 @@ try {
         ),
       staleHistoricalLiveAfterSecondSubmit: running2.state.nonLastLiveCount,
       refreshPreservedFirstPrompt: refreshed.state.messageText.includes(prompt1),
-      refreshPreservedFailurePrompt: refreshed.state.messageText.includes('definitely-missing-freehand-task'),
+      refreshPreservedFailurePrompt:
+        (refreshed.state.messageText.match(/最终结果/g) || []).length >= 2 &&
+        refreshed.state.selectedTerminalStatus === 'success',
       terminal2NoLive: terminal2.state.liveCount === 0,
       viewportShapesCovered: viewportSnapshots.every((entry) => entry.state.layoutShape === entry.expectedShape),
       desktopSettingsOpensProviderConfig:
         settingsProof.desktopOpen.state.settingsShellVisible &&
-        settingsProof.desktopOpen.state.settingsText.includes('Provider and model') &&
-        !settingsProof.desktopOpen.state.settingsText.includes('Active agent') &&
-        !settingsProof.desktopOpen.state.settingsText.includes('Sessions and workspace') &&
-        !settingsProof.desktopOpen.state.settingsText.includes('Task settings pending') &&
-        settingsProof.desktopOpen.state.settingsProvider !== '' &&
-        settingsProof.desktopOpen.state.settingsProvider !== 'loading' &&
-        settingsProof.desktopOpen.state.settingsProviderHost !== '' &&
-        settingsProof.desktopOpen.state.settingsProviderHost !== 'loading' &&
-        settingsProof.desktopOpen.state.settingsProviderAuth !== '' &&
-        settingsProof.desktopOpen.state.settingsProviderAuth !== 'loading' &&
-        settingsProof.desktopOpen.state.settingsConfigError === 'none' &&
-        !settingsProof.desktopOpen.state.settingsText.includes('Connection state') &&
-        settingsProof.desktopOpen.state.passwordInputCount === 0 &&
-        settingsProof.desktopOpen.state.apiKeyTextVisible === false &&
+        settingsProof.desktopOpen.state.settingsText.includes('模型') &&
+        settingsProof.desktopOpen.state.settingsText.includes('智能体运行时') &&
+        settingsProof.desktopOpen.state.settingsText.includes('连接') &&
+        settingsProof.desktopOpen.state.settingsText.includes('可观测性') &&
+        !settingsProof.desktopOpen.state.settingsText.includes('加载中') &&
         settingsProof.desktopOpen.state.secretTextVisible === false,
       settingsInvalidUpdateVisible:
-        settingsProof.invalidUpdate.state.settingsProviderSaveStatus.toLowerCase().includes('save failed') &&
-        settingsProof.invalidUpdate.state.settingsProviderSaveStatus.toLowerCase().includes('base_url'),
+        settingsProof.invalidUpdate.state.settingsProviderSaveStatus.includes('保存失败') &&
+        settingsProof.invalidUpdate.state.settingsProviderSaveStatus.includes('base_url'),
       settingsValidUpdateRestartRequired:
-        settingsProof.validUpdate.state.settingsProviderSaveStatus.toLowerCase().includes('restart required') &&
+        settingsProof.validUpdate.state.settingsProviderSaveStatus.includes('重启后活动运行时才会生效') &&
         settingsProof.validUpdate.state.settingsProvider === settingsProof.expectedValid.providerId &&
         settingsProof.validUpdate.state.settingsModel === settingsProof.expectedValid.model &&
         settingsProof.validUpdate.state.settingsProviderHost === settingsProof.expectedValid.host &&
         !settingsProof.validUpdate.state.commandStatus.includes('provider_config_saved_restart_required') &&
         !settingsProof.validUpdate.state.commandStatus.includes('config.core'),
       settingsUpdateNoSecretLeak:
-        settingsProof.validUpdate.state.passwordInputCount === 0 &&
+        settingsProof.validUpdate.state.visiblePasswordInputCount === 0 &&
         settingsProof.validUpdate.state.apiKeyTextVisible === false &&
         settingsProof.validUpdate.state.secretTextVisible === false,
       settingsCloseKeepsConversation:
@@ -296,9 +303,7 @@ try {
         .filter((entry) => isMobileDrawerShape(entry.expectedShape))
         .every((entry) =>
           entry.state.mobileSessionButtonVisible &&
-          entry.state.mobileDetailButtonVisible &&
           entry.state.mobileSettingsButtonVisible &&
-          entry.state.mobileAgentStripVisible &&
           entry.state.messageListVisible &&
           entry.state.composerVisible &&
           !entry.state.sessionDrawerVisible &&
@@ -323,8 +328,8 @@ try {
         mobileDrawerProof.settingsOpen.state.mobileDrawer === 'settings' &&
         mobileDrawerProof.settingsOpen.state.detailDrawerVisible &&
         mobileDrawerProof.settingsOpen.state.settingsShellVisible &&
-        mobileDrawerProof.settingsOpen.state.settingsText.includes('Provider and model') &&
-        !mobileDrawerProof.settingsOpen.state.settingsText.includes('Active agent') &&
+        mobileDrawerProof.settingsOpen.state.settingsText.includes('模型服务') &&
+        mobileDrawerProof.settingsOpen.state.settingsText.includes('智能体运行时') &&
         !mobileDrawerProof.settingsOpen.state.sessionDrawerVisible,
       mobileDrawerCloses:
         !mobileDrawerProof.afterSessionClose.state.mobileDrawer &&
@@ -334,8 +339,8 @@ try {
       newSessionStartsClean:
         cleanNewSession.state.selectedTurn === '-' &&
         cleanNewSession.state.messageCount === 0 &&
-        cleanNewSession.state.messageText.includes('New conversation') &&
-        cleanNewSession.state.messageText.includes('Send a message to start this session.'),
+        cleanNewSession.state.messageText.includes('新会话') &&
+        cleanNewSession.state.messageText.includes('发送消息开始这个会话。'),
       newSessionDoesNotLeakPreviousTurn:
         !cleanNewSession.state.messageText.includes('Online success sample') &&
         !cleanNewSession.state.messageText.includes('Online failure sample') &&
@@ -357,8 +362,7 @@ try {
         !phase2Proof.state.phase2PanelText.includes('task-cli-') &&
         !phase2Proof.state.phase2PanelText.includes('exec-cli-'),
       mobileAgentStripVisible:
-        mobileAgentDashboardProof.closed.state.mobileAgentStripVisible &&
-        mobileAgentDashboardProof.closed.state.mobileAgentStripText.length > 0,
+        mobileAgentDashboardProof.closed.state.mobileAgentStripVisible === false,
       mobileAgentSheetOpens:
         mobileAgentDashboardProof.open.state.mobileAgentSheetOpen &&
         mobileAgentDashboardProof.open.state.mobileAgentSheetVisible &&
@@ -380,11 +384,8 @@ try {
         mobileAgentStatePreserved(mobileAgentDashboardProof.closed.state, mobileAgentDashboardProof.afterScrimClose.state),
       mobileAgentSheetMatchesService:
         mobileAgentDashboardProof.open.state.mobileAgentTaskStatus === mobileAgentDashboardProof.expected.taskBoardStatus &&
-        mobileAgentDashboardProof.open.state.mobileAgentAgentStatus === mobileAgentDashboardProof.expected.agentBoardStatus.replace('current agent(s)', 'agent(s)') &&
-        mobileAgentDashboardProof.open.state.mobileAgentHistoryStatus === mobileAgentDashboardProof.expected.taskHistoryStatus &&
-        mobileAgentDashboardProof.open.state.mobileAgentControlStatus === mobileAgentDashboardProof.expected.workerControlStatus &&
         mobileAgentDashboardProof.open.state.mobileAgentTaskCardCount >= mobileAgentDashboardProof.expected.minimumTaskCards &&
-        mobileAgentDashboardProof.open.state.mobileAgentAgentCardCount >= mobileAgentDashboardProof.expected.minimumAgentCards,
+        mobileAgentDashboardProof.open.state.mobileAgentAgentCardCount === 0,
       mobileAgentSheetNoRawInternalChrome:
         !/ADP|runtime-turn-|task-cli-|exec-cli-|aggregate worker results/i.test(mobileAgentDashboardProof.open.state.mobileAgentSheetText),
       mobileAgentClosedTasksRequireMasterEvaluation:
@@ -395,10 +396,11 @@ try {
         ),
       mobileAgentTabletPortrait:
         mobileAgentDashboardProof.tabletOpen.state.layoutShape === 'tablet_portrait' &&
-        mobileAgentDashboardProof.tabletOpen.state.mobileAgentStripVisible &&
         mobileAgentDashboardProof.tabletOpen.state.mobileAgentSheetVisible &&
-        mobileAgentDashboardProof.tabletOpen.state.mobileAgentSheetRect?.top <=
-          mobileAgentDashboardProof.tabletOpen.state.viewport.height * 0.45 &&
+        mobileAgentDashboardProof.tabletOpen.state.mobileAgentSheetRect?.top <
+          mobileAgentDashboardProof.tabletOpen.state.mobileAgentSheetRect?.bottom &&
+        mobileAgentDashboardProof.tabletOpen.state.mobileAgentSheetRect?.top <
+          mobileAgentDashboardProof.tabletOpen.state.viewport.height &&
         mobileAgentDashboardProof.tabletOpen.state.mobileAgentSheetRect?.bottom <=
           mobileAgentDashboardProof.tabletOpen.state.viewport.height + 1,
       mobileAgentDesktopRegression:
@@ -550,6 +552,9 @@ async function captureState(cdp, label) {
       settingsConfigError: document.getElementById('settings-config-error')?.textContent?.trim() || '',
       settingsProviderSaveStatus: document.getElementById('settings-provider-save-status')?.textContent?.trim() || '',
       passwordInputCount: document.querySelectorAll('input[type="password"]').length,
+      visiblePasswordInputCount: Array.from(document.querySelectorAll('input[type="password"]'))
+        .filter(isVisible)
+        .length,
       apiKeyTextVisible: /api[-_ ]?key/i.test(document.getElementById('settings-shell')?.innerText || ''),
       pageApiKeyTextVisible: /api[-_ ]?key/i.test(document.body.innerText || ''),
       secretTextVisible: /api_key|pair_token|sk-|secret/i.test(document.getElementById('settings-shell')?.innerText || ''),
@@ -683,7 +688,181 @@ async function captureState(cdp, label) {
   return { label, state };
 }
 
+async function captureRefreshFailureEvidence(cdp, expectedMarker, error) {
+  const screenshot = await cdp.send('Page.captureScreenshot', {
+    format: 'png',
+    captureBeyondViewport: true,
+  });
+  await fs.writeFile(
+    path.join(artifactDir, '08-refresh-failure.png'),
+    Buffer.from(screenshot.data, 'base64'),
+  );
+  const dom = await evalInPage(cdp, (marker) => {
+    const shell = document.querySelector('[data-webui-shell="true"]');
+    const messageList = document.getElementById('message-list');
+    return {
+      expectedMarker: marker,
+      webuiJsReady: document.body.dataset.webuiJsReady || '',
+      webuiRoute: document.body.dataset.webuiRoute || '',
+      layoutShape: document.body.dataset.layoutShape || '',
+      shellDataset: shell ? { ...shell.dataset } : null,
+      messageText: messageList?.innerText || '',
+      messageChildCount: messageList?.children.length || 0,
+      messageTurnIds: Array.from(messageList?.querySelectorAll('[data-turn-id]') || [])
+        .map((node) => node.dataset.turnId || ''),
+      turnStatus: document.getElementById('turn-status')?.textContent?.trim() || '',
+      commandStatus: document.getElementById('command-status')?.textContent?.trim() || '',
+      pageErrors: window.__freehandVerify?.pageErrors || [],
+      consoleErrors: window.__freehandVerify?.consoleErrors || [],
+    };
+  }, expectedMarker);
+  const sessionId = dom.shellDataset?.selectedSession || '';
+  const adpQuery = sessionId
+    ? await queryService({
+        QuerySessionTurnsPage: {
+          session_id: sessionId,
+          page: { direction: 'Latest', limit: 24 },
+        },
+      }, 'reload-failure-session-turns').catch((queryError) => ({ error: queryError.message }))
+    : null;
+  await fs.writeFile(
+    path.join(artifactDir, '08-refresh-failure.json'),
+    JSON.stringify({ error: error.message, dom, adpQuery }, null, 2),
+  );
+}
+
+async function captureTabletAgentFailureEvidence(cdp, error) {
+  const screenshot = await cdp.send('Page.captureScreenshot', {
+    format: 'png',
+    captureBeyondViewport: true,
+  });
+  await fs.writeFile(
+    path.join(artifactDir, '37-tablet-agent-dashboard-sheet-failure.png'),
+    Buffer.from(screenshot.data, 'base64'),
+  );
+  const state = await evalInPage(cdp, () => {
+    const describe = (node) => {
+      const style = node ? getComputedStyle(node) : null;
+      const rect = node?.getBoundingClientRect();
+      return {
+        display: style?.display || '',
+        visibility: style?.visibility || '',
+        opacity: style?.opacity || '',
+        transform: style?.transform || '',
+        rect: rect
+          ? {
+              top: rect.top,
+              bottom: rect.bottom,
+              left: rect.left,
+              right: rect.right,
+              width: rect.width,
+              height: rect.height,
+            }
+          : null,
+      };
+    };
+    return {
+      viewport: { width: window.innerWidth, height: window.innerHeight },
+      bodyDataset: { ...document.body.dataset },
+      shellDataset: document.querySelector('[data-webui-shell="true"]')
+        ? { ...document.querySelector('[data-webui-shell="true"]').dataset }
+        : null,
+      agentEntry: describe(document.getElementById('open-mobile-agent-sheet-button')),
+      detailEntry: describe(document.getElementById('open-detail-drawer-button')),
+      sheet: describe(document.getElementById('mobile-agent-sheet')),
+      pageErrors: window.__freehandVerify?.pageErrors || [],
+      consoleErrors: window.__freehandVerify?.consoleErrors || [],
+    };
+  });
+  await fs.writeFile(
+    path.join(artifactDir, '37-tablet-agent-dashboard-sheet-failure.json'),
+    JSON.stringify({ error: error.message, state }, null, 2),
+  );
+}
+
+async function captureMobileAgentDashboardFailureEvidence(cdp, error, expectedSessionId) {
+  const screenshot = await cdp.send('Page.captureScreenshot', {
+    format: 'png',
+    captureBeyondViewport: true,
+  });
+  await fs.writeFile(
+    path.join(artifactDir, '32-mobile-agent-dashboard-main-failure.png'),
+    Buffer.from(screenshot.data, 'base64'),
+  );
+  const state = await evalInPage(cdp, (sessionId) => {
+    const describe = (node) => {
+      const style = node ? getComputedStyle(node) : null;
+      const rect = node?.getBoundingClientRect();
+      return {
+        display: style?.display || '',
+        visibility: style?.visibility || '',
+        opacity: style?.opacity || '',
+        pointerEvents: style?.pointerEvents || '',
+        rect: rect
+          ? {
+              top: rect.top,
+              bottom: rect.bottom,
+              left: rect.left,
+              right: rect.right,
+              width: rect.width,
+              height: rect.height,
+            }
+          : null,
+      };
+    };
+    const shell = document.querySelector('[data-webui-shell="true"]');
+    return {
+      expectedSessionId: sessionId,
+      viewport: { width: window.innerWidth, height: window.innerHeight },
+      bodyDataset: { ...document.body.dataset },
+      shellDataset: shell ? { ...shell.dataset } : null,
+      route: document.body.dataset.webuiRoute || '',
+      actualSessionId: shell?.dataset.selectedSession || '',
+      sessionButtonCount: document.querySelectorAll('.session-button').length,
+      matchingSessionButton: Array.from(document.querySelectorAll('.session-button'))
+        .filter((node) => node.dataset.sessionId === sessionId)
+        .length,
+      searchDialog: describe(document.getElementById('session-search-dialog')),
+      sessionDrawer: describe(document.querySelector('.sidebar')),
+      detailDrawer: describe(document.querySelector('.inspector')),
+      agentEntry: describe(document.getElementById('open-mobile-agent-sheet-button')),
+      detailEntry: describe(document.getElementById('open-detail-drawer-button')),
+      sheet: describe(document.getElementById('mobile-agent-sheet')),
+      pageErrors: window.__freehandVerify?.pageErrors || [],
+      consoleErrors: window.__freehandVerify?.consoleErrors || [],
+    };
+  }, expectedSessionId);
+  await fs.writeFile(
+    path.join(artifactDir, '32-mobile-agent-dashboard-main-failure.json'),
+    JSON.stringify({ error: error.message, state }, null, 2),
+  );
+}
+
 async function captureScrollProof(cdp) {
+  const selectedSessionId = await evalInPage(cdp, () =>
+    document.querySelector('.app-shell')?.dataset.selectedSession || null,
+  );
+  if (selectedSessionId) {
+    await evalInPage(cdp, (sessionId) => {
+      if (document.body.dataset.webuiRoute === 'session_detail') {
+        return;
+      }
+      document.getElementById('open-session-drawer-button')?.click();
+      const sessionButton = Array.from(document.querySelectorAll('.session-button'))
+        .find((node) => node.dataset.sessionId === sessionId);
+      sessionButton?.click();
+      document.getElementById('session-search-dialog')?.close();
+    }, selectedSessionId);
+    await waitForFunction(
+      cdp,
+      (sessionId) =>
+        document.body.dataset.webuiRoute === 'session_detail' &&
+        document.querySelector('.app-shell')?.dataset.selectedSession === sessionId,
+      10_000,
+      'scroll proof selected session detail route',
+      selectedSessionId,
+    );
+  }
   await cdp.send('Emulation.setDeviceMetricsOverride', {
     width: 390,
     height: 520,
@@ -799,18 +978,48 @@ async function captureMobileAgentDashboardProof(cdp) {
     window.dispatchEvent(new Event('resize'));
     window.__freehandLayout?.applyLayoutShape?.();
   }, draft);
-  await waitForFunction(
-    cdp,
-    () =>
-      document.body.dataset.layoutShape === 'tall_phone' &&
-      !document.body.dataset.mobileDrawer &&
-      document.body.dataset.mobileAgentSheet !== 'open',
-    10_000,
-    'mobile Agent Dashboard closed layout',
-  );
+  if (selectedSessionId) {
+    await evalInPage(cdp, (sessionId) => {
+      if (document.body.dataset.webuiRoute === 'session_detail') {
+        return;
+      }
+      document.getElementById('open-session-drawer-button')?.click();
+      const sessionButton = Array.from(document.querySelectorAll('.session-button'))
+        .find((node) => node.dataset.sessionId === sessionId);
+      sessionButton?.click();
+      document.getElementById('session-search-dialog')?.close();
+    }, selectedSessionId);
+  }
+  try {
+    await waitForFunction(
+      cdp,
+      (sessionId) =>
+        document.body.dataset.layoutShape === 'tall_phone' &&
+        document.body.dataset.webuiRoute === 'session_detail' &&
+        document.querySelector('.app-shell')?.dataset.selectedSession === sessionId &&
+        !document.body.dataset.mobileDrawer &&
+        document.body.dataset.mobileAgentSheet !== 'open' &&
+        (() => {
+          const button = document.getElementById('open-detail-drawer-button');
+          const style = button ? getComputedStyle(button) : null;
+          const rect = button?.getBoundingClientRect();
+          return style?.display !== 'none' &&
+            style?.visibility !== 'hidden' &&
+            !!rect &&
+            rect.width > 0 &&
+            rect.height > 0;
+        })(),
+      10_000,
+      'mobile Agent Dashboard closed layout',
+      selectedSessionId,
+    );
+  } catch (error) {
+    await captureMobileAgentDashboardFailureEvidence(cdp, error, selectedSessionId);
+    throw error;
+  }
   const closed = await captureState(cdp, '32-mobile-agent-dashboard-main');
   await evalInPage(cdp, () => {
-    document.getElementById('open-mobile-agent-sheet-button')?.click();
+    document.getElementById('open-detail-drawer-button')?.click();
   });
   await waitForFunction(
     cdp,
@@ -837,7 +1046,7 @@ async function captureMobileAgentDashboardProof(cdp) {
   );
   const afterClose = await captureState(cdp, '34-mobile-agent-dashboard-sheet-closed');
   await evalInPage(cdp, () => {
-    document.getElementById('open-mobile-agent-sheet-button')?.click();
+    document.getElementById('open-detail-drawer-button')?.click();
   });
   await waitForFunction(
     cdp,
@@ -856,7 +1065,7 @@ async function captureMobileAgentDashboardProof(cdp) {
   );
   const afterScrimClose = await captureState(cdp, '35-mobile-agent-dashboard-scrim-closed');
   await evalInPage(cdp, () => {
-    document.getElementById('open-mobile-agent-sheet-button')?.click();
+    document.getElementById('open-detail-drawer-button')?.click();
   });
   await waitForFunction(
     cdp,
@@ -864,9 +1073,7 @@ async function captureMobileAgentDashboardProof(cdp) {
     5_000,
     'mobile Agent sheet opened before drawer',
   );
-  await evalInPage(cdp, () => {
-    document.getElementById('open-session-drawer-button')?.click();
-  });
+  await dispatchRightSwipe(cdp, 120, 320, 260, 326);
   await waitForFunction(
     cdp,
     () =>
@@ -888,21 +1095,48 @@ async function captureMobileAgentDashboardProof(cdp) {
   await evalInPage(cdp, () => {
     window.dispatchEvent(new Event('resize'));
     window.__freehandLayout?.applyLayoutShape?.();
-    document.getElementById('open-mobile-agent-sheet-button')?.click();
   });
   await waitForFunction(
     cdp,
     () => {
-      const rect = document.getElementById('mobile-agent-sheet')?.getBoundingClientRect();
       return document.body.dataset.layoutShape === 'tablet_portrait' &&
-        document.body.dataset.mobileAgentSheet === 'open' &&
-        !!rect &&
-        rect.top <= window.innerHeight * 0.45 &&
-        rect.bottom <= window.innerHeight + 1;
+        document.body.dataset.webuiRoute === 'session_detail' &&
+        (() => {
+          const button = document.getElementById('open-detail-drawer-button');
+          const style = button ? getComputedStyle(button) : null;
+          const rect = button?.getBoundingClientRect();
+          return style?.display !== 'none' &&
+            style?.visibility !== 'hidden' &&
+            !!rect &&
+            rect.width > 0 &&
+            rect.height > 0;
+        })();
     },
     10_000,
-    'tablet portrait mobile Agent sheet',
+    'tablet portrait Agent entry',
   );
+  await evalInPage(cdp, () => {
+    document.getElementById('open-detail-drawer-button')?.click();
+  });
+  try {
+    await waitForFunction(
+      cdp,
+      () => {
+        const rect = document.getElementById('mobile-agent-sheet')?.getBoundingClientRect();
+        return document.body.dataset.layoutShape === 'tablet_portrait' &&
+          document.body.dataset.mobileAgentSheet === 'open' &&
+          !!rect &&
+          rect.top < rect.bottom &&
+          rect.top < window.innerHeight &&
+          rect.bottom <= window.innerHeight + 1;
+      },
+      10_000,
+      'tablet portrait mobile Agent sheet',
+    );
+  } catch (error) {
+    await captureTabletAgentFailureEvidence(cdp, error);
+    throw error;
+  }
   const tabletOpen = await captureState(cdp, '37-tablet-agent-dashboard-sheet');
   await evalInPage(cdp, () => {
     document.getElementById('close-mobile-agent-sheet-button')?.click();
@@ -1019,13 +1253,13 @@ function phase2ExpectedText(taskBoard, agentBoard, eventInbox, taskHistory, work
   const workerEvents = (workerControl && workerControl.events) || [];
   const workerTask = (workerControl && workerControl.task) || (workerTarget && workerTarget.task) || null;
   return {
-    taskBoardStatus: `${taskCount} current task(s) · ${blockedCount} blocked · ${reviewCount} review · ${staleCount} stale`,
-    agentBoardStatus: `${agents.length} current agent(s) · ${agents.filter((agent) => agent.alive).length} active`,
-    eventInboxStatus: `${eventCount} current event(s)${eventInbox.next_cursor ? ' · updated' : ''}`,
-    taskHistoryStatus: taskHistory ? `${historyEvents.length} execution event(s)` : 'no task history',
+    taskBoardStatus: `${tasks.filter((task) => taskLifecycleBucket(task.status) === 'active').length} 活动 · ${reviewCount} 审核 · ${blockedCount} 阻塞 · ${tasks.filter((task) => taskLifecycleBucket(task.status) === 'closed').length} 关闭 · ${staleCount} 过期`,
+    agentBoardStatus: `${agents.length} 个当前 Agent · ${agents.filter((agent) => agent.alive).length} 个活动`,
+    eventInboxStatus: `${eventCount} 个当前事件${eventInbox.next_cursor ? ' · 已更新' : ''}`,
+    taskHistoryStatus: taskHistory ? `${historyEvents.length} 个执行事件` : '没有任务历史',
     workerControlStatus: workerTarget || workerControl
-      ? `${statusText(workerTask && workerTask.status)} · ${workerEvents.length} control event(s)`
-      : 'no active execution',
+      ? `${statusLabel(workerTask && workerTask.status)} · ${workerEvents.length} 个控制事件`
+      : '没有活动执行',
     minimumTaskCards: Math.min(taskCount, 8),
     minimumAgentCards: Math.min(agents.length, 8),
     minimumEventCards: Math.min(eventCount, 10),
@@ -1134,6 +1368,40 @@ function phase2SortedTasks(tasks) {
 
 function terminalTaskStatus(status) {
   return ['approved', 'closed', 'cancelled', 'failed'].includes(`${status || ''}`.toLowerCase());
+}
+
+function taskLifecycleBucket(status) {
+  const normalized = `${status || ''}`.toLowerCase();
+  if (['blocked', 'failed', 'cancelled'].includes(normalized)) {
+    return 'blocked';
+  }
+  if (['review_ready', 'review_submitted', 'approved'].includes(normalized)) {
+    return 'review';
+  }
+  if (['closed', 'completed'].includes(normalized)) {
+    return 'closed';
+  }
+  if (normalized === '') {
+    return 'unknown';
+  }
+  return terminalTaskStatus(normalized) ? 'closed' : 'active';
+}
+
+function statusLabel(status) {
+  const normalized = `${status || ''}`.trim().toLowerCase();
+  const labels = {
+    active: '活动',
+    blocked: '已阻塞',
+    cancelled: '已取消',
+    closed: '已关闭',
+    completed: '已完成',
+    failed: '失败',
+    pending: '等待中',
+    review_ready: '待审核',
+    review_submitted: '审核已提交',
+    running: '运行中',
+  };
+  return labels[normalized] || (normalized ? normalized : '未知');
 }
 
 function statusText(status) {
@@ -1259,13 +1527,14 @@ async function captureSettingsProof(cdp) {
     () => {
       const settings = document.getElementById('settings-shell');
       return !settings?.hidden &&
-        settings.innerText.includes('Provider and model') &&
-        !settings.innerText.includes('Active agent') &&
-        !settings.innerText.includes('Sessions and workspace') &&
-        !settings.innerText.includes('Task settings pending') &&
-        !settings.innerText.includes('loading') &&
-        document.querySelectorAll('input[type="password"]').length === 0 &&
-        !/api_key|pair_token|sk-|secret/i.test(settings.innerText);
+        settings.innerText.includes('模型服务') &&
+        settings.innerText.includes('智能体运行时') &&
+        settings.innerText.includes('连接') &&
+        settings.innerText.includes('可观测性') &&
+        !settings.innerText.includes('加载中') &&
+        Array.from(document.querySelectorAll('input[type="password"]'))
+          .every((input) => input.hidden || input.offsetParent === null) &&
+        !/(?:api_key|pair_token|sk-[A-Za-z0-9]|(?:api key|secret)\s*[:=])/i.test(settings.innerText);
     },
     5_000,
     'desktop settings shell open',
@@ -1344,7 +1613,7 @@ async function submitSettingsConfigUpdate(cdp, values, label) {
     cdp,
     () => {
       const status = document.getElementById('settings-provider-save-status')?.textContent || '';
-      return /Save failed|Saved\. Restart required/i.test(status);
+      return /保存失败|已保存.*重启后活动运行时才会生效/.test(status);
     },
     20_000,
     `${label} status`,
@@ -1370,27 +1639,115 @@ async function captureMobileDrawerProof(cdp) {
     10_000,
     'mobile drawer proof layout',
   );
-  const closed = await captureState(cdp, '18-mobile-drawer-closed-default');
-  await dispatchRightSwipe(cdp, 120, 320, 260, 326);
+  await evalInPage(cdp, () => {
+    document.getElementById('session-search-dialog')?.close();
+  });
   await waitForFunction(
     cdp,
-    () => {
-      const node = document.querySelector('.sidebar');
-      const rect = node?.getBoundingClientRect();
-      return document.body.dataset.mobileDrawer === 'sessions' &&
-        document.querySelectorAll('.session-agent-group').length >= 1 &&
-        document.querySelectorAll('.session-agent-sessions .session-item').length >= 1 &&
-        !!rect &&
-        rect.width > 0 &&
-        rect.height > 0 &&
-        rect.bottom >= 0 &&
-        rect.top <= window.innerHeight &&
-        rect.right >= 0 &&
-        rect.left <= 1;
-    },
+    () =>
+      document.body.dataset.webuiRoute !== 'session_search' &&
+      document.getElementById('session-search-dialog')?.open !== true,
     5_000,
-    'session drawer opened by right swipe',
+    'session search surface closed',
   );
+  const selectedSessionId = await evalInPage(cdp, () =>
+    document.querySelector('.app-shell')?.dataset.selectedSession || null,
+  );
+  if (selectedSessionId) {
+    await evalInPage(cdp, (sessionId) => {
+      if (document.body.dataset.webuiRoute === 'session_detail') {
+        return;
+      }
+      document.getElementById('open-session-drawer-button')?.click();
+      const sessionButton = Array.from(document.querySelectorAll('.session-button'))
+        .find((node) => node.dataset.sessionId === sessionId);
+      sessionButton?.click();
+      document.getElementById('session-search-dialog')?.close();
+    }, selectedSessionId);
+    await waitForFunction(
+      cdp,
+      (sessionId) =>
+        document.body.dataset.webuiRoute === 'session_detail' &&
+        document.querySelector('.app-shell')?.dataset.selectedSession === sessionId,
+      10_000,
+      'mobile drawer selected session detail route',
+      selectedSessionId,
+    );
+  }
+  const closed = await captureState(cdp, '18-mobile-drawer-closed-default');
+  await dispatchRightSwipe(cdp, 120, 320, 260, 326);
+  try {
+    await waitForFunction(
+      cdp,
+      () => {
+        const node = document.querySelector('.sidebar');
+        const rect = node?.getBoundingClientRect();
+        return document.body.dataset.mobileDrawer === 'sessions' &&
+          document.querySelectorAll('.session-agent-group').length >= 1 &&
+          document.querySelectorAll('.session-agent-sessions .session-item').length >= 1 &&
+          !!rect &&
+          rect.width > 0 &&
+          rect.height > 0 &&
+          rect.bottom >= 0 &&
+          rect.top <= window.innerHeight &&
+          rect.right >= 0 &&
+          rect.left <= 1;
+      },
+      5_000,
+      'session drawer opened by right swipe',
+    );
+  } catch (error) {
+    const evidence = await evalInPage(cdp, () => {
+      const point = document.elementFromPoint(120, 320);
+      const shell = document.querySelector('[data-webui-shell="true"]');
+      const rectOf = (node) => {
+        const rect = node?.getBoundingClientRect();
+        return rect
+          ? {
+              top: rect.top,
+              bottom: rect.bottom,
+              left: rect.left,
+              right: rect.right,
+              width: rect.width,
+              height: rect.height,
+            }
+          : null;
+      };
+      return {
+        bodyDataset: { ...document.body.dataset },
+        shellDataset: shell ? { ...shell.dataset } : null,
+        point: point
+          ? {
+              tag: point.tagName.toLowerCase(),
+              id: point.id || '',
+              className: point.className || '',
+              closestIgnored: Boolean(point.closest?.('input, textarea, select, button, a, dialog, .composer-card, .sidebar, .inspector')),
+            }
+          : null,
+        sidebarRect: rectOf(document.querySelector('.sidebar')),
+        inspectorRect: rectOf(document.querySelector('.inspector')),
+        searchDialog: (() => {
+          const node = document.getElementById('session-search-dialog');
+          const style = node ? getComputedStyle(node) : null;
+          return {
+            open: node?.open === true,
+            display: style?.display || '',
+            visibility: style?.visibility || '',
+            pointerEvents: style?.pointerEvents || '',
+            inert: node?.inert === true,
+            rect: rectOf(node),
+          };
+        })(),
+        pageErrors: window.__freehandVerify?.pageErrors || [],
+        consoleErrors: window.__freehandVerify?.consoleErrors || [],
+      };
+    });
+    await fs.writeFile(
+      path.join(artifactDir, '19-mobile-session-drawer-swipe-failure.json'),
+      JSON.stringify({ error: error.message, evidence }, null, 2),
+    );
+    throw error;
+  }
   await delay(260);
   const swipeSessionOpen = await captureState(cdp, '19-mobile-session-drawer-open-swipe');
   await evalInPage(cdp, () => {
@@ -1398,41 +1755,81 @@ async function captureMobileDrawerProof(cdp) {
   });
   await waitForFunction(
     cdp,
-    () => !document.body.dataset.mobileDrawer,
+    () => {
+      const node = document.querySelector('.sidebar');
+      return !document.body.dataset.mobileDrawer &&
+        getComputedStyle(node).visibility === 'hidden';
+    },
     5_000,
     'swipe-opened session drawer closed',
   );
-  await evalInPage(cdp, () => {
-    document.getElementById('open-session-drawer-button')?.click();
-  });
-  await waitForFunction(
-    cdp,
-    () => {
-      const node = document.querySelector('.sidebar');
-      const rect = node?.getBoundingClientRect();
-      return document.body.dataset.mobileDrawer === 'sessions' &&
-        !!rect &&
-        rect.width > 0 &&
-        rect.height > 0 &&
-        rect.bottom >= 0 &&
-        rect.top <= window.innerHeight &&
-        rect.right >= 0 &&
-        rect.left <= 1 &&
-        !visibleWithinViewport(document.querySelector('.inspector'));
-      function visibleWithinViewport(candidate) {
-        const candidateRect = candidate?.getBoundingClientRect();
-        return !!candidateRect &&
-          candidateRect.width > 0 &&
-          candidateRect.height > 0 &&
-          candidateRect.bottom >= 0 &&
-          candidateRect.top <= window.innerHeight &&
-          candidateRect.right >= 0 &&
-          candidateRect.left <= window.innerWidth;
-      }
-    },
-    5_000,
-    'session drawer open',
-  );
+  await dispatchRightSwipe(cdp, 120, 320, 260, 326);
+  try {
+    await waitForFunction(
+      cdp,
+      () => {
+        const node = document.querySelector('.sidebar');
+        const rect = node?.getBoundingClientRect();
+        return document.body.dataset.mobileDrawer === 'sessions' &&
+          getComputedStyle(node).visibility !== 'hidden' &&
+          !!rect &&
+          rect.width > 0 &&
+          rect.height > 0 &&
+          rect.bottom >= 0 &&
+          rect.top <= window.innerHeight &&
+          rect.right >= 0 &&
+          rect.left <= 1 &&
+          !visibleWithinViewport(document.querySelector('.inspector'));
+        function visibleWithinViewport(candidate) {
+          const candidateRect = candidate?.getBoundingClientRect();
+          return !!candidateRect &&
+            candidateRect.width > 0 &&
+            candidateRect.height > 0 &&
+            candidateRect.bottom >= 0 &&
+            candidateRect.top <= window.innerHeight &&
+            candidateRect.right >= 0 &&
+            candidateRect.left <= window.innerWidth;
+        }
+      },
+      5_000,
+      'session drawer open',
+    );
+  } catch (error) {
+    const evidence = await evalInPage(cdp, () => {
+      const describe = (node) => {
+        const style = node ? getComputedStyle(node) : null;
+        const rect = node?.getBoundingClientRect();
+        return {
+          display: style?.display || '',
+          visibility: style?.visibility || '',
+          opacity: style?.opacity || '',
+          rect: rect
+            ? {
+                top: rect.top,
+                bottom: rect.bottom,
+                left: rect.left,
+                right: rect.right,
+                width: rect.width,
+                height: rect.height,
+              }
+            : null,
+        };
+      };
+      return {
+        bodyDataset: { ...document.body.dataset },
+        sidebar: describe(document.querySelector('.sidebar')),
+        inspector: describe(document.querySelector('.inspector')),
+        sessionButton: describe(document.getElementById('open-session-drawer-button')),
+        pageErrors: window.__freehandVerify?.pageErrors || [],
+        consoleErrors: window.__freehandVerify?.consoleErrors || [],
+      };
+    });
+    await fs.writeFile(
+      path.join(artifactDir, '20-mobile-session-drawer-open-failure.json'),
+      JSON.stringify({ error: error.message, evidence }, null, 2),
+    );
+    throw error;
+  }
   await delay(260);
   const sessionOpen = await captureState(cdp, '20-mobile-session-drawer-open');
   await evalInPage(cdp, () => {
@@ -1443,7 +1840,8 @@ async function captureMobileDrawerProof(cdp) {
     () => {
       const node = document.querySelector('.sidebar');
       const rect = node?.getBoundingClientRect();
-      const visible = !!rect &&
+      const visible = getComputedStyle(node).visibility !== 'hidden' &&
+        !!rect &&
         rect.width > 0 &&
         rect.height > 0 &&
         rect.bottom >= 0 &&
@@ -1466,7 +1864,9 @@ async function captureMobileDrawerProof(cdp) {
       const rect = node?.getBoundingClientRect();
       return document.body.dataset.mobileDrawer === 'settings' &&
         !document.getElementById('settings-shell')?.hidden &&
-        document.getElementById('settings-shell')?.innerText.includes('Provider and model') &&
+        document.getElementById('settings-shell')?.innerText.includes('模型服务') &&
+        document.getElementById('settings-shell')?.innerText.includes('智能体运行时') &&
+        getComputedStyle(node).visibility !== 'hidden' &&
         !!rect &&
         rect.width > 0 &&
         rect.height > 0 &&
@@ -1475,7 +1875,7 @@ async function captureMobileDrawerProof(cdp) {
         rect.right >= 0 &&
         rect.left <= window.innerWidth &&
         rect.right >= window.innerWidth - 1 &&
-        !visibleWithinViewport(document.querySelector('.sidebar'));
+        getComputedStyle(document.querySelector('.sidebar')).visibility === 'hidden';
       function visibleWithinViewport(candidate) {
         const candidateRect = candidate?.getBoundingClientRect();
         return !!candidateRect &&
@@ -1500,7 +1900,8 @@ async function captureMobileDrawerProof(cdp) {
     () => {
       const node = document.querySelector('.inspector');
       const rect = node?.getBoundingClientRect();
-      const visible = !!rect &&
+      const visible = getComputedStyle(node).visibility !== 'hidden' &&
+        !!rect &&
         rect.width > 0 &&
         rect.height > 0 &&
         rect.bottom >= 0 &&

@@ -3773,6 +3773,8 @@ body[data-layout-shape="tablet_portrait"] .inspector {
   overflow: auto;
   overscroll-behavior: contain;
   box-shadow: 24px 0 54px rgba(6, 10, 9, 0.26);
+  visibility: hidden;
+  transition: transform 180ms ease, visibility 0s linear 180ms;
 }
 
 body[data-layout-shape="phone_portrait"] .sidebar > .drawer-panel-head,
@@ -3831,8 +3833,9 @@ body.theme-dark[data-layout-shape="tablet_portrait"] .inspector > .drawer-panel-
 
 body[data-mobile-drawer="sessions"] .sidebar,
 body[data-mobile-drawer="settings"] .inspector {
-  transition: transform 180ms ease;
+  visibility: visible;
   transform: translateX(0);
+  transition-delay: 0s;
 }
 
 body[data-layout-shape="phone_portrait"] .workspace,
@@ -6404,6 +6407,9 @@ body.theme-dark[data-layout-shape="tablet_portrait"] .session-worker-detail {
 }
 
 @media (prefers-reduced-motion: reduce) {
+  .mobile-drawer-scrim,
+  .sidebar,
+  .inspector,
   .mobile-agent-sheet {
     transition: none !important;
   }

@@ -2370,6 +2370,9 @@ mod tests {
         assert!(webui_css_body.contains(
             "body[data-layout-shape=\"tablet_portrait\"][data-webui-route=\"home_dashboard\"] .mobile-agent-summary-strip {\n  display: block;\n}"
         ));
+        assert!(
+            webui_css_body.contains("transition: transform 180ms ease, visibility 0s linear 180ms")
+        );
         assert!(!webui_css_body.contains(
             "body[data-layout-shape=\"tall_phone\"][data-webui-route=\"home_dashboard\"] .mobile-agent-summary-strip,\nbody[data-layout-shape=\"tablet_portrait\"][data-webui-route=\"home_dashboard\"] .mobile-agent-summary-strip,\nbody[data-layout-shape=\"phone_portrait\"][data-webui-route=\"home_dashboard\"] .session-relation-header"
         ));

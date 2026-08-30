@@ -7,6 +7,7 @@ health_url="${FREEHAND_WEBUI_HEALTH_URL:-http://127.0.0.1:4042/health}"
 adp_url="${FREEHAND_WEBUI_ADP_URL:-ws://127.0.0.1:4042/adp}"
 cli_path="${FREEHAND_WEBUI_CLI:-$HOME/.local/bin/freehand-cliS}"
 profile="${FREEHAND_WEBUI_PROFILE:-4042}"
+daemon_env="${FREEHAND_WEBUI_DAEMON_ENV:-$HOME/.freehand/daemonS.env}"
 
 cd "$repo_root"
 
@@ -24,6 +25,11 @@ run_verify_webui_online() {
     echo "missing executable CLI for WebUI online verification: $cli_path" >&2
     exit 2
   fi
+  if [[ -z "${FREEHAND_ADP_AUTH_TOKEN:-}" && -f "$daemon_env" ]]; then
+    # Reuse the installed S-profile ADP auth source for direct verifier queries.
+    # shellcheck disable=SC1090
+    . "$daemon_env"
+  fi
 
   echo "[freehand-webui-online] health: $health_url"
   curl -4fsS "$health_url" >/dev/null
@@ -36,6 +42,7 @@ run_verify_webui_online() {
     FREEHAND_WEBUI_ADP_URL="$adp_url" \
     FREEHAND_WEBUI_CLI="$cli_path" \
     FREEHAND_WEBUI_PROFILE="$profile" \
+    FREEHAND_ADP_AUTH_TOKEN="${FREEHAND_ADP_AUTH_TOKEN:-}" \
     node scripts/webui_verify_online.mjs
 }
 
