@@ -312,6 +312,29 @@
   - WebUI slave-card render smoke
   - CLI/WebUI divergence smoke via protocol projection
   - app dependency boundary smoke
+
+## 2026-08-30 UX Audit And Responsive Polish
+
+- target feature: `app.webui-smoke`
+- owner: `apps/freehand-server/assets/webui.css` for the visual and responsive
+  surface; `scripts/verify-webui-foundation-contracts.mjs` locks the CSS
+  contract
+- lifecycle: first paint -> responsive layout classification -> touch/keyboard
+  interaction -> reduced-motion presentation -> real WebUI screenshot
+- white-box:
+  - `node scripts/verify-webui-foundation-contracts.mjs` must require coarse
+    pointer targets of at least 44px, visible keyboard focus rings, and a
+    reduced-motion path for the conversation follow control
+- module black-box:
+  - `node scripts/verify-webui-mobile-ui-tree-online.mjs` covers 390px and
+    430px portrait, 844px landscape, and 1280px desktop layout contracts
+- project black-box:
+  - authenticated S-profile browser captures before/after screenshots from
+    `http://100.66.1.82:4042/`
+- known gaps:
+  - the existing mobile verifier's fixture requires live owner task truth and
+    currently cannot seed cancelled fixtures as active; this is a verifier
+    fixture gap, not a UI fallback permission
 - project black-box impact:
   - app boundary proves WebUI can consume `freehand-ui-protocol` without owning reason/provider semantics
   - app boundary gives 诊断 a repeatable way to generate success/failure ADP scenarios from WebUI without a second transport path or persistent composer buttons

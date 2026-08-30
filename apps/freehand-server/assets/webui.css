@@ -6734,7 +6734,86 @@ body.theme-dark[data-layout-shape="tablet_portrait"] .session-worker-detail {
 }
 
 @media (prefers-reduced-motion: reduce) {
-  .mobile-agent-sheet {
+  .mobile-agent-sheet,
+  .conversation-bottom-button[data-live="true"],
+  .dialog-block.running-state::after {
     transition: none !important;
+    animation: none !important;
   }
+
+  .conversation-bottom-button[data-live="true"] {
+    opacity: 1;
+  }
+}
+
+/* UX audit: keep interaction feedback visible and reliable across input modes. */
+:where(button, a, input, select, textarea, [tabindex]):focus-visible {
+  outline: 2px solid var(--master);
+  outline-offset: 2px;
+}
+
+@media (pointer: coarse) {
+  button,
+  [role="button"],
+  input[type="checkbox"],
+  input[type="radio"],
+  select {
+    min-height: 44px;
+  }
+
+  .mobile-corner-button,
+  .mobile-drawer-button,
+  .drawer-close-button,
+  .conversation-bottom-button,
+  .composer-command-menu-button,
+  .composer-attach-image {
+    width: 44px;
+    min-width: 44px;
+    height: 44px;
+  }
+
+  .conversation-bottom-button {
+    right: 12px;
+    bottom: 12px;
+  }
+}
+
+/* UX audit: reduce decorative weight so transcript content remains primary. */
+html,
+body {
+  background: var(--bg);
+}
+
+.conversation-region {
+  background: var(--panel);
+}
+
+body.theme-dark .conversation-region {
+  background: var(--canvas);
+}
+
+.region-card,
+.inspector-block,
+.turn-cycle-card,
+.composer-card,
+.chat-empty-state {
+  border-radius: 12px;
+}
+
+.turn-cycle-card,
+.composer-card {
+  box-shadow: var(--shadow);
+}
+
+.turn-cycle-card {
+  background: var(--panel-soft);
+}
+
+.composer-card {
+  background: var(--panel);
+}
+
+body.theme-dark .turn-cycle-card,
+body.theme-dark .composer-card {
+  background: var(--panel);
 }
