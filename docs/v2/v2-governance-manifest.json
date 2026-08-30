@@ -24,6 +24,8 @@
       "source_paths": ["playground/experiments/v2/contracts/**"],
       "test_paths": ["tests/v2/contracts/**"],
       "depends_on": [],
+      "test_design": "docs/v2/v2-test-design.md",
+      "project_blackbox": "docs/v2/v2-project-blackbox-verification.md",
       "mvp": true
     },
     {
@@ -33,6 +35,8 @@
       "source_paths": ["playground/experiments/v2/control-events/**"],
       "test_paths": ["tests/v2/control-events/**"],
       "depends_on": ["v2-contracts"],
+      "test_design": "docs/v2/v2-test-design.md",
+      "project_blackbox": "docs/v2/v2-project-blackbox-verification.md",
       "mvp": true
     },
     {
@@ -42,6 +46,8 @@
       "source_paths": ["playground/experiments/v2/reason-sessionlog/**"],
       "test_paths": ["tests/v2/reason-sessionlog/**"],
       "depends_on": ["v2-contracts", "v2-control-events"],
+      "test_design": "docs/v2/v2-test-design.md",
+      "project_blackbox": "docs/v2/v2-project-blackbox-verification.md",
       "mvp": true
     },
     {
@@ -51,6 +57,8 @@
       "source_paths": ["playground/experiments/v2/plugin-runtime/**"],
       "test_paths": ["tests/v2/plugin-runtime/**"],
       "depends_on": ["v2-contracts", "v2-control-events"],
+      "test_design": "docs/v2/v2-test-design.md",
+      "project_blackbox": "docs/v2/v2-project-blackbox-verification.md",
       "mvp": true
     },
     {
@@ -60,6 +68,19 @@
       "source_paths": ["playground/experiments/v2/ui-protocol/**"],
       "test_paths": ["tests/v2/ui-protocol/**"],
       "depends_on": ["v2-contracts", "v2-control-events"],
+      "test_design": "docs/v2/v2-test-design.md",
+      "project_blackbox": "docs/v2/v2-project-blackbox-verification.md",
+      "mvp": true
+    },
+    {
+      "module_id": "v2-orchestration",
+      "status": "planned",
+      "owner": "v2-orchestration",
+      "source_paths": ["playground/experiments/v2/orchestration/**"],
+      "test_paths": ["tests/v2/orchestration/**"],
+      "depends_on": ["v2-contracts", "v2-control-events", "v2-plugin-runtime", "v2-reason-sessionlog"],
+      "test_design": "docs/v2/v2-test-design.md",
+      "project_blackbox": "docs/v2/v2-project-blackbox-verification.md",
       "mvp": true
     },
     {
@@ -69,7 +90,9 @@
       "source_paths": ["playground/experiments/v2/network-extension/**"],
       "test_paths": ["tests/v2/network-extension/**"],
       "depends_on": ["v2-contracts", "v2-control-events", "v2-plugin-runtime"],
-      "mvp": false
+      "test_design": "docs/v2/v2-test-design.md",
+      "project_blackbox": "docs/v2/v2-project-blackbox-verification.md",
+      "mvp": true
     }
   ],
   "resources": [
@@ -78,6 +101,7 @@
     {"resource_id": "v2_reason_session", "owner": "v2-reason-sessionlog", "truth_store": "sessionlog adapter", "operations": ["append", "read", "restore", "replay"]},
     {"resource_id": "v2_plugin_capability", "owner": "v2-plugin-runtime", "truth_store": "compiled capability manifest", "operations": ["declare", "validate", "register", "invoke"]},
     {"resource_id": "v2_ui_projection", "owner": "v2-ui-protocol", "truth_store": "typed public projection", "operations": ["accept_command", "query", "subscribe", "project"]},
+    {"resource_id": "v2_orchestration_graph", "owner": "v2-orchestration", "truth_store": "typed adjacent-node transition state", "operations": ["admit", "invoke", "continue", "stop", "terminalize"]},
     {"resource_id": "v2_node_identity", "owner": "v2-network-extension", "truth_store": "typed node identity", "operations": ["declare", "authenticate", "negotiate"]},
     {"resource_id": "v2_network_frame", "owner": "v2-network-extension", "truth_store": "typed control/payload/error frame", "operations": ["encode", "decode", "sequence", "ack", "replay"]}
   ],
@@ -86,11 +110,13 @@
       "mainline_id": "v2-mvp-local",
       "status": "planned",
       "entry": "ui_command_ingress",
-      "nodes": ["ui_command_ingress", "orchestration_admitted", "plugin_invoked", "reason_turn_appended", "ui_projection_delivery"],
+      "nodes": ["ui_command_ingress", "orchestration_admitted", "plugin_invoked", "control_event_emitted", "payload_shared", "reason_turn_appended", "ui_projection_delivery"],
       "edges": [
         ["ui_command_ingress", "orchestration_admitted"],
         ["orchestration_admitted", "plugin_invoked"],
-        ["plugin_invoked", "reason_turn_appended"],
+        ["plugin_invoked", "control_event_emitted"],
+        ["control_event_emitted", "payload_shared"],
+        ["payload_shared", "reason_turn_appended"],
         ["reason_turn_appended", "ui_projection_delivery"]
       ],
       "terminal": "ui_projection_delivery"
@@ -108,14 +134,15 @@
     }
   ],
   "verification": [
-    {"gate_id": "v2_contract_boundary", "status": "planned", "required_for": ["v2-contracts"]},
-    {"gate_id": "v2_payload_control_isolation", "status": "planned", "required_for": ["v2-contracts", "v2-control-events", "v2-network-extension"]},
-    {"gate_id": "v2_control_event_positive_negative", "status": "planned", "required_for": ["v2-control-events"]},
-    {"gate_id": "v2_sessionlog_append_replay", "status": "planned", "required_for": ["v2-reason-sessionlog"]},
-    {"gate_id": "v2_plugin_registration", "status": "planned", "required_for": ["v2-plugin-runtime"]},
-    {"gate_id": "v2_ui_projection_boundary", "status": "planned", "required_for": ["v2-ui-protocol"]},
-    {"gate_id": "v2_network_capability_version", "status": "planned", "required_for": ["v2-network-extension"]},
-    {"gate_id": "v2_network_disconnect_explicit", "status": "planned", "required_for": ["v2-network-extension"]}
+    {"gate_id": "v2_contract_boundary", "status": "planned", "required_for": ["v2-contracts"], "test_design": "docs/v2/v2-test-design.md", "project_blackbox": "docs/v2/v2-project-blackbox-verification.md"},
+    {"gate_id": "v2_payload_control_isolation", "status": "planned", "required_for": ["v2-contracts", "v2-control-events", "v2-network-extension"], "test_design": "docs/v2/v2-test-design.md", "project_blackbox": "docs/v2/v2-project-blackbox-verification.md"},
+    {"gate_id": "v2_control_event_positive_negative", "status": "planned", "required_for": ["v2-control-events"], "test_design": "docs/v2/v2-test-design.md", "project_blackbox": "docs/v2/v2-project-blackbox-verification.md"},
+    {"gate_id": "v2_sessionlog_append_replay", "status": "planned", "required_for": ["v2-reason-sessionlog"], "test_design": "docs/v2/v2-test-design.md", "project_blackbox": "docs/v2/v2-project-blackbox-verification.md"},
+    {"gate_id": "v2_plugin_registration", "status": "planned", "required_for": ["v2-plugin-runtime"], "test_design": "docs/v2/v2-test-design.md", "project_blackbox": "docs/v2/v2-project-blackbox-verification.md"},
+    {"gate_id": "v2_orchestration_adjacency", "status": "planned", "required_for": ["v2-orchestration"], "test_design": "docs/v2/v2-test-design.md", "project_blackbox": "docs/v2/v2-project-blackbox-verification.md"},
+    {"gate_id": "v2_ui_projection_boundary", "status": "planned", "required_for": ["v2-ui-protocol"], "test_design": "docs/v2/v2-test-design.md", "project_blackbox": "docs/v2/v2-project-blackbox-verification.md"},
+    {"gate_id": "v2_network_capability_version", "status": "planned", "required_for": ["v2-network-extension"], "test_design": "docs/v2/v2-test-design.md", "project_blackbox": "docs/v2/v2-project-blackbox-verification.md"},
+    {"gate_id": "v2_network_disconnect_explicit", "status": "planned", "required_for": ["v2-network-extension"], "test_design": "docs/v2/v2-test-design.md", "project_blackbox": "docs/v2/v2-project-blackbox-verification.md"}
   ],
   "artifact_policy": {
     "committed": ["v2 source", "v2 tests", "v2 docs", ".appsdk contracts and records"],

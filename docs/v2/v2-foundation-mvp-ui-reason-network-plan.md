@@ -18,6 +18,9 @@ The MVP is a single-machine, one-agent vertical slice. It must still expose
 stable contracts for future multi-machine collaboration and network plugins.
 The future network path is an extension boundary, not an MVP implementation.
 
+The network extension is included in M0/M1 as typed contracts and in-memory
+transport tests only. Production network execution remains out of scope.
+
 ```text
 UI input
   -> UI protocol command
@@ -37,6 +40,11 @@ business payloads are physically separate types and paths.
 Each module has one owner, one resource boundary, one function map, one
 mainline call map, and one verification map. The module names below are the
 v2 semantic IDs used by AppSDK records.
+
+The formal test design and project black-box contract are:
+
+- `docs/v2/v2-test-design.md`
+- `docs/v2/v2-project-blackbox-verification.md`
 
 | Module | MVP responsibility | Future extension |
 | --- | --- | --- |
@@ -284,8 +292,8 @@ Required paired tests for control-sensitive work:
 ### M0: Governance and maps
 
 Create the v2 project contract, goal confirmation, module registry, resource
-map, function map, mainline call map, verification map, and this design.
-No product runtime code.
+map, function map, mainline call map, verification map, test design, project
+black-box contract and this design. No product runtime code.
 
 ### M1: Contracts and control path
 
