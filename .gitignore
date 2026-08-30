@@ -15,3 +15,10 @@
 /external/OpenMinis
 /gradle.zip
 /gradle-wrapper.zip
+
+# BEGIN APPSDK MANAGED
+.appsdk-control/
+.appsdk/sdk.bin
+/active/lib/
+/generated/
+# END APPSDK MANAGED

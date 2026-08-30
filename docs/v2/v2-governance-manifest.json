@@ -1,0 +1,124 @@
+{
+  "schema_version": 1,
+  "project_id": "freehand-v2",
+  "branch": "v2",
+  "baseline_commit": "5c879c6155d8c3e6febc3d0a13b4716b9f544948",
+  "governance": {
+    "sdk": "appsdk",
+    "sdk_version": "0.1.5",
+    "project_contract": ".appsdk/project.json",
+    "goal": ".appsdk/goal.json",
+    "canonical_maps": {
+      "resource": ".appsdk/maps/resource-map.json",
+      "function": ".appsdk/maps/function-map.json",
+      "mainline": ".appsdk/maps/mainline-call-map.json",
+      "verification": ".appsdk/maps/verification-map.json"
+    },
+    "business_manifest": "docs/v2/v2-governance-manifest.json"
+  },
+  "modules": [
+    {
+      "module_id": "v2-contracts",
+      "status": "planned",
+      "owner": "v2-contracts",
+      "source_paths": ["playground/experiments/v2/contracts/**"],
+      "test_paths": ["tests/v2/contracts/**"],
+      "depends_on": [],
+      "mvp": true
+    },
+    {
+      "module_id": "v2-control-events",
+      "status": "planned",
+      "owner": "v2-control-events",
+      "source_paths": ["playground/experiments/v2/control-events/**"],
+      "test_paths": ["tests/v2/control-events/**"],
+      "depends_on": ["v2-contracts"],
+      "mvp": true
+    },
+    {
+      "module_id": "v2-reason-sessionlog",
+      "status": "planned",
+      "owner": "v2-reason-sessionlog",
+      "source_paths": ["playground/experiments/v2/reason-sessionlog/**"],
+      "test_paths": ["tests/v2/reason-sessionlog/**"],
+      "depends_on": ["v2-contracts", "v2-control-events"],
+      "mvp": true
+    },
+    {
+      "module_id": "v2-plugin-runtime",
+      "status": "planned",
+      "owner": "v2-plugin-runtime",
+      "source_paths": ["playground/experiments/v2/plugin-runtime/**"],
+      "test_paths": ["tests/v2/plugin-runtime/**"],
+      "depends_on": ["v2-contracts", "v2-control-events"],
+      "mvp": true
+    },
+    {
+      "module_id": "v2-ui-protocol",
+      "status": "planned",
+      "owner": "v2-ui-protocol",
+      "source_paths": ["playground/experiments/v2/ui-protocol/**"],
+      "test_paths": ["tests/v2/ui-protocol/**"],
+      "depends_on": ["v2-contracts", "v2-control-events"],
+      "mvp": true
+    },
+    {
+      "module_id": "v2-network-extension",
+      "status": "planned",
+      "owner": "v2-network-extension",
+      "source_paths": ["playground/experiments/v2/network-extension/**"],
+      "test_paths": ["tests/v2/network-extension/**"],
+      "depends_on": ["v2-contracts", "v2-control-events", "v2-plugin-runtime"],
+      "mvp": false
+    }
+  ],
+  "resources": [
+    {"resource_id": "v2_payload", "owner": "v2-contracts", "truth_store": "typed immutable payload", "operations": ["create", "read", "share"]},
+    {"resource_id": "v2_control_event", "owner": "v2-control-events", "truth_store": "typed event ledger", "operations": ["emit", "route", "ack", "replay"]},
+    {"resource_id": "v2_reason_session", "owner": "v2-reason-sessionlog", "truth_store": "sessionlog adapter", "operations": ["append", "read", "restore", "replay"]},
+    {"resource_id": "v2_plugin_capability", "owner": "v2-plugin-runtime", "truth_store": "compiled capability manifest", "operations": ["declare", "validate", "register", "invoke"]},
+    {"resource_id": "v2_ui_projection", "owner": "v2-ui-protocol", "truth_store": "typed public projection", "operations": ["accept_command", "query", "subscribe", "project"]},
+    {"resource_id": "v2_node_identity", "owner": "v2-network-extension", "truth_store": "typed node identity", "operations": ["declare", "authenticate", "negotiate"]},
+    {"resource_id": "v2_network_frame", "owner": "v2-network-extension", "truth_store": "typed control/payload/error frame", "operations": ["encode", "decode", "sequence", "ack", "replay"]}
+  ],
+  "mainlines": [
+    {
+      "mainline_id": "v2-mvp-local",
+      "status": "planned",
+      "entry": "ui_command_ingress",
+      "nodes": ["ui_command_ingress", "orchestration_admitted", "plugin_invoked", "reason_turn_appended", "ui_projection_delivery"],
+      "edges": [
+        ["ui_command_ingress", "orchestration_admitted"],
+        ["orchestration_admitted", "plugin_invoked"],
+        ["plugin_invoked", "reason_turn_appended"],
+        ["reason_turn_appended", "ui_projection_delivery"]
+      ],
+      "terminal": "ui_projection_delivery"
+    },
+    {
+      "mainline_id": "v2-network-extension",
+      "status": "planned",
+      "entry": "node_handshake",
+      "nodes": ["node_handshake", "capability_negotiated", "event_or_payload_replay"],
+      "edges": [
+        ["node_handshake", "capability_negotiated"],
+        ["capability_negotiated", "event_or_payload_replay"]
+      ],
+      "terminal": "event_or_payload_replay"
+    }
+  ],
+  "verification": [
+    {"gate_id": "v2_contract_boundary", "status": "planned", "required_for": ["v2-contracts"]},
+    {"gate_id": "v2_payload_control_isolation", "status": "planned", "required_for": ["v2-contracts", "v2-control-events", "v2-network-extension"]},
+    {"gate_id": "v2_control_event_positive_negative", "status": "planned", "required_for": ["v2-control-events"]},
+    {"gate_id": "v2_sessionlog_append_replay", "status": "planned", "required_for": ["v2-reason-sessionlog"]},
+    {"gate_id": "v2_plugin_registration", "status": "planned", "required_for": ["v2-plugin-runtime"]},
+    {"gate_id": "v2_ui_projection_boundary", "status": "planned", "required_for": ["v2-ui-protocol"]},
+    {"gate_id": "v2_network_capability_version", "status": "planned", "required_for": ["v2-network-extension"]},
+    {"gate_id": "v2_network_disconnect_explicit", "status": "planned", "required_for": ["v2-network-extension"]}
+  ],
+  "artifact_policy": {
+    "committed": ["v2 source", "v2 tests", "v2 docs", ".appsdk contracts and records"],
+    "forbidden": ["target/**", "generated/**", "active/lib/**", "external/**", ".appsdk-control/**", "artifacts/**", "runtime logs", "credentials"]
+  }
+}
