@@ -20,12 +20,59 @@ use thiserror::Error;
 pub use rewrite_policy::*;
 pub use tool_display::*;
 
-const SEARCH_DOMAIN_PLAN_SCHEMA: &str = "search_evidence.domain_plan.v1";
+pub const SEARCH_DOMAIN_PLAN_SCHEMA: &str = "search_evidence.domain_plan.v1";
 const SEARCH_DISCOVERY_SCHEMA: &str = "search_evidence.discovery.v1";
 const SEARCH_VERIFICATION_SCHEMA: &str = "search_evidence.verification.v1";
-const SEARCH_SUPPLEMENT_SCHEMA: &str = "search_evidence.supplement_decision.v1";
-const SEARCH_FINAL_SCHEMA: &str = "search_evidence.final.v1";
+pub const SEARCH_SUPPLEMENT_SCHEMA: &str = "search_evidence.supplement_decision.v1";
+pub const SEARCH_FINAL_SCHEMA: &str = "search_evidence.final.v1";
 const SEARCH_TURN_SCHEMA: &str = "search_evidence.turn.v1";
+
+pub fn search_evidence_model_delivery_examples() -> Result<String, serde_json::Error> {
+    use freehand_contracts::{SearchClaimDelivery, SearchSupplementReason};
+    let plan = SearchDomainPlanDelivery {
+        schema: SEARCH_DOMAIN_PLAN_SCHEMA.to_owned(),
+        delivery_id: "plan-news-001".to_owned(),
+        domain: SearchDomain::News,
+        preferred_source_kinds: vec![
+            "official_publication".to_owned(),
+            "mainstream_news".to_owned(),
+        ],
+        social_platform_priority: vec![SearchSocialPlatform::Weibo, SearchSocialPlatform::X],
+        minimum_verified_sources: 2,
+        policy_version: "2026-08-15".to_owned(),
+    };
+    let supplement = SocialSupplementDecisionDelivery {
+        schema: SEARCH_SUPPLEMENT_SCHEMA.to_owned(),
+        delivery_id: "supplement-news-001".to_owned(),
+        domain_plan_ref: "plan-news-001".to_owned(),
+        required: true,
+        reasons: vec![SearchSupplementReason::InsufficientVerifiedSources],
+        platforms: vec![SearchSocialPlatform::Weibo],
+    };
+    let final_delivery = SearchFinalDelivery {
+        schema: SEARCH_FINAL_SCHEMA.to_owned(),
+        delivery_id: "final-news-001".to_owned(),
+        domain_plan_ref: "plan-news-001".to_owned(),
+        claim: SearchFinalClaimStatus::Complete,
+        summary: Some("Supported claim summary".to_owned()),
+        claims: vec![SearchClaimDelivery {
+            claim_id: "claim-news-001".to_owned(),
+            text: "Supported claim".to_owned(),
+            source_ids: vec!["src-official-1".to_owned()],
+        }],
+        unconfirmed: Vec::new(),
+        blocked_reason: None,
+    };
+    let plan_json = serde_json::to_string(&plan)?;
+    let supplement_json = serde_json::to_string(&supplement)?;
+    let final_json = serde_json::to_string(&final_delivery)?;
+    Ok(format!(
+        "{}\n{}\n{}",
+        plan_json.replace('\n', " "),
+        supplement_json.replace('\n', " "),
+        final_json.replace('\n', " "),
+    ))
+}
 
 #[derive(Debug, Error, PartialEq, Eq)]
 pub enum SearchEvidenceValidationError {
