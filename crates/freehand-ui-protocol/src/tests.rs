@@ -10,6 +10,17 @@ use freehand_contracts::{
 };
 use freehand_debug::{DebugEvent, DebugHub, DebugStateSnapshot};
 
+fn active_session_list_page_command() -> UiCommand {
+    UiCommand::QuerySessionListPage {
+        archived: false,
+        page: UiSessionListPageRequest {
+            direction: UiSessionListPageDirection::Latest,
+            cursor: None,
+            limit: 100,
+        },
+    }
+}
+
 fn base_source(stream_kind: UiStreamKind) -> UiSource {
     UiSource {
         source_agent_id: AgentId::new("agent-1"),
@@ -1242,12 +1253,6 @@ fn session_list_and_transcript_project_session_cwd() {
         slave_substream_card: false,
     }));
 
-    match state.query(&UiCommand::QuerySessionList).expect("list") {
-        UiQueryResult::SessionList(list) => {
-            assert_eq!(list.sessions[0].cwd.as_deref(), Some("/tmp/freehand-cwd"));
-        }
-        other => panic!("unexpected list result: {other:?}"),
-    }
     match state
         .query(&UiCommand::QuerySessionTurns {
             session_id: session_id.clone(),
@@ -1266,7 +1271,7 @@ fn session_list_and_transcript_project_session_cwd() {
 }
 
 #[test]
-fn session_list_hides_internal_lifecycle_sessions_but_transcript_is_queryable() {
+fn internal_lifecycle_transcripts_remain_queryable_while_list_is_runtime_owned() {
     let mut state = UiProtocolState::default();
     let user_session_id = SessionId::new("webui-visible-session");
     let lifecycle_session_id = SessionId::new("master-lifecycle-task-1");
@@ -1347,13 +1352,10 @@ fn session_list_hides_internal_lifecycle_sessions_but_transcript_is_queryable() 
         slave_substream_card: false,
     }));
 
-    match state.query(&UiCommand::QuerySessionList).expect("list") {
-        UiQueryResult::SessionList(list) => {
-            assert_eq!(list.sessions.len(), 1);
-            assert_eq!(list.sessions[0].session_id, user_session_id);
-        }
-        other => panic!("unexpected list result: {other:?}"),
-    }
+    assert_eq!(
+        state.query(&active_session_list_page_command()),
+        Err(UiProtocolError::StreamKindMismatch)
+    );
     match state
         .query(&UiCommand::QuerySessionTurns {
             session_id: lifecycle_session_id.clone(),
@@ -1445,6 +1447,76 @@ fn session_turn_page_command_validates_direction_cursor_and_limit() {
 }
 
 #[test]
+fn session_list_page_command_validates_direction_cursor_and_limit() {
+    let latest = UiCommand::QuerySessionListPage {
+        archived: false,
+        page: UiSessionListPageRequest {
+            direction: UiSessionListPageDirection::Latest,
+            cursor: None,
+            limit: 24,
+        },
+    };
+    validate_command(&latest).expect("latest list page");
+    let latest_wire = serde_json::to_string(&latest).expect("latest wire");
+    let latest_roundtrip: UiCommand = serde_json::from_str(&latest_wire).expect("latest roundtrip");
+    assert_eq!(latest, latest_roundtrip);
+
+    let older = UiCommand::QuerySessionListPage {
+        archived: false,
+        page: UiSessionListPageRequest {
+            direction: UiSessionListPageDirection::Older,
+            cursor: Some(
+                r#"{"last_activity_unix_seconds":200,"last_session_id":"session-a"}"#.to_owned(),
+            ),
+            limit: 24,
+        },
+    };
+    validate_command(&older).expect("older list page");
+    let older_wire = serde_json::to_string(&older).expect("older wire");
+    let older_roundtrip: UiCommand = serde_json::from_str(&older_wire).expect("older roundtrip");
+    assert_eq!(older, older_roundtrip);
+
+    let oversized = UiCommand::QuerySessionListPage {
+        archived: false,
+        page: UiSessionListPageRequest {
+            direction: UiSessionListPageDirection::Latest,
+            cursor: None,
+            limit: 101,
+        },
+    };
+    assert_eq!(
+        validate_command(&oversized).expect_err("list page limit"),
+        UiProtocolError::InvalidSessionListPageLimit
+    );
+
+    let latest_with_cursor = UiCommand::QuerySessionListPage {
+        archived: false,
+        page: UiSessionListPageRequest {
+            direction: UiSessionListPageDirection::Latest,
+            cursor: Some("cursor".to_owned()),
+            limit: 1,
+        },
+    };
+    assert_eq!(
+        validate_command(&latest_with_cursor).expect_err("latest cursor"),
+        UiProtocolError::InvalidSessionListPageCursor
+    );
+
+    let older_without_cursor = UiCommand::QuerySessionListPage {
+        archived: false,
+        page: UiSessionListPageRequest {
+            direction: UiSessionListPageDirection::Older,
+            cursor: None,
+            limit: 1,
+        },
+    };
+    assert_eq!(
+        validate_command(&older_without_cursor).expect_err("older cursor"),
+        UiProtocolError::InvalidSessionListPageCursor
+    );
+}
+
+#[test]
 fn session_search_query_is_runtime_owned_and_validated() {
     let command = UiCommand::QuerySessionSearch {
         query: "roadmap".to_owned(),
@@ -1473,7 +1545,7 @@ fn session_search_query_is_runtime_owned_and_validated() {
 }
 
 #[test]
-fn session_list_exposes_only_persisted_metadata_sessions() {
+fn session_list_page_is_runtime_owned_even_when_turns_exist() {
     let mut state = UiProtocolState::default();
     let persisted_session_id = SessionId::new("persisted-session");
     let turn_only_session_id = SessionId::new("turn-only-session");
@@ -1506,13 +1578,10 @@ fn session_list_exposes_only_persisted_metadata_sessions() {
         }));
     }
 
-    match state.query(&UiCommand::QuerySessionList).expect("list") {
-        UiQueryResult::SessionList(list) => {
-            assert_eq!(list.sessions.len(), 1);
-            assert_eq!(list.sessions[0].session_id, persisted_session_id);
-        }
-        other => panic!("unexpected list result: {other:?}"),
-    }
+    assert_eq!(
+        state.query(&active_session_list_page_command()),
+        Err(UiProtocolError::StreamKindMismatch)
+    );
     match state
         .query(&UiCommand::QuerySessionTurns {
             session_id: turn_only_session_id.clone(),
@@ -1524,100 +1593,6 @@ fn session_list_exposes_only_persisted_metadata_sessions() {
             assert_eq!(transcript.turns.len(), 1);
         }
         other => panic!("unexpected transcript result: {other:?}"),
-    }
-}
-
-#[test]
-fn session_list_active_turn_id_tracks_only_nonterminal_turns() {
-    let mut state = UiProtocolState::default();
-    let session_id = SessionId::new("session-active-terminal-filter");
-    let active_turn_id = TurnId::new("runtime-turn-1");
-    let terminal_turn_id = TurnId::new("runtime-turn-2");
-    let next_active_turn_id = TurnId::new("runtime-turn-3");
-    state.set_session_metadata(UiSessionMetadataProjection {
-        session_id: session_id.clone(),
-        title: Some("Active terminal filter".to_owned()),
-        archived: false,
-        cwd: None,
-    });
-
-    state.apply_model_request_waiting_kind(UiModelRequestWaiting {
-        source_agent_id: AgentId::new("agent-1"),
-        source_node_id: "node-1".to_owned(),
-        session_id: session_id.clone(),
-        turn_id: active_turn_id.clone(),
-        kind: UiModelRequestKind::Thinking,
-        detail: Some("Waiting for model response.".to_owned()),
-        transport: Some(UiModelTransportActivity {
-            kind: UiModelTransportKind::ProviderRetry,
-            detail: Some("provider retry 2/10".to_owned()),
-        }),
-        slave_substream_card: false,
-    });
-    match state.query(&UiCommand::QuerySessionList).expect("list") {
-        UiQueryResult::SessionList(list) => {
-            assert_eq!(
-                list.sessions[0].active_turn_id.as_ref(),
-                Some(&active_turn_id)
-            );
-        }
-        other => panic!("unexpected list result: {other:?}"),
-    }
-
-    state.replace_session_turn_projections(
-        &session_id,
-        vec![
-            active_refresh_projection(&session_id, &active_turn_id),
-            terminal_refresh_projection(&session_id, &terminal_turn_id, TerminalStatus::Success),
-        ],
-    );
-    match state
-        .query(&UiCommand::QuerySessionTurns {
-            session_id: session_id.clone(),
-        })
-        .expect("transcript")
-    {
-        UiQueryResult::SessionTurns(transcript) => {
-            let stale_round = transcript
-                .turns
-                .iter()
-                .find(|turn| turn.turn_id == active_turn_id)
-                .expect("stale round");
-            assert_eq!(stale_round.model_request, None);
-        }
-        other => panic!("unexpected transcript result: {other:?}"),
-    }
-    match state.query(&UiCommand::QuerySessionList).expect("list") {
-        UiQueryResult::SessionList(list) => {
-            assert_eq!(
-                list.sessions[0].latest_turn_id.as_ref(),
-                Some(&terminal_turn_id)
-            );
-            assert_eq!(list.sessions[0].latest_status, "success");
-            assert_eq!(list.sessions[0].active_turn_id, None);
-        }
-        other => panic!("unexpected list result: {other:?}"),
-    }
-
-    state.apply_model_request_waiting_kind(UiModelRequestWaiting {
-        source_agent_id: AgentId::new("agent-1"),
-        source_node_id: "node-1".to_owned(),
-        session_id: session_id.clone(),
-        turn_id: next_active_turn_id.clone(),
-        kind: UiModelRequestKind::Thinking,
-        detail: Some("provider request built".to_owned()),
-        transport: None,
-        slave_substream_card: false,
-    });
-    match state.query(&UiCommand::QuerySessionList).expect("list") {
-        UiQueryResult::SessionList(list) => {
-            assert_eq!(
-                list.sessions[0].active_turn_id.as_ref(),
-                Some(&next_active_turn_id)
-            );
-            assert_eq!(list.sessions[0].latest_status, "waiting_model");
-        }
-        other => panic!("unexpected list result: {other:?}"),
     }
 }
 
@@ -1959,35 +1934,6 @@ fn failed_terminal_marks_waiting_tool_activity_failed() {
     assert_eq!(tool.status, "failed");
     assert_eq!(tool.title, "List directory");
     assert_eq!(tool.body, "path=.\ntool failed explicitly");
-}
-
-#[test]
-fn session_latest_status_does_not_call_text_only_turn_streaming() {
-    let projection = UiTurnProjection {
-        source: base_source(UiStreamKind::Turn),
-        session_id: SessionId::new("session-1"),
-        turn_id: TurnId::new("turn-1"),
-        created_at: Some(70),
-        timing: None,
-        cwd: None,
-        user_text: Some("run the task".to_owned()),
-        attachments: Vec::new(),
-        model_request: None,
-        reasoning: vec!["thinking".to_owned()],
-        text: vec!["answer".to_owned()],
-        tool_calls: Vec::new(),
-        tool_activities: Vec::new(),
-        usage: Vec::new(),
-        usage_projection: None,
-        terminal_status: None,
-        terminal_text: None,
-        user_options: None,
-        errors: Vec::new(),
-        search_evidence: None,
-        slave_substream_card: false,
-    };
-
-    assert_eq!(session_latest_status(&projection), "active");
 }
 
 #[test]
@@ -2410,106 +2356,6 @@ fn paged_session_refresh_preserves_nonterminal_live_activity() {
 }
 
 #[test]
-fn persisted_session_merge_is_silent_and_preserves_live_projection() {
-    let mut state = UiProtocolState::default();
-    let session_id = SessionId::new("session-background-refresh");
-    let turn_id = TurnId::new("runtime-turn-1");
-    state.set_session_metadata(UiSessionMetadataProjection {
-        session_id: session_id.clone(),
-        title: Some("Background refresh".to_owned()),
-        archived: false,
-        cwd: None,
-    });
-    state.apply_model_request_waiting_kind(UiModelRequestWaiting {
-        source_agent_id: AgentId::new("agent-1"),
-        source_node_id: "node-1".to_owned(),
-        session_id: session_id.clone(),
-        turn_id: turn_id.clone(),
-        kind: UiModelRequestKind::Thinking,
-        detail: Some("live request".to_owned()),
-        transport: None,
-        slave_substream_card: false,
-    });
-    let mut receiver = state.subscribe();
-    state.merge_persisted_turn_projections_without_publish(vec![active_refresh_projection(
-        &session_id,
-        &turn_id,
-    )]);
-
-    assert!(receiver.try_recv().is_err());
-    match state
-        .query(&UiCommand::QuerySessionTurns {
-            session_id: session_id.clone(),
-        })
-        .expect("transcript")
-    {
-        UiQueryResult::SessionTurns(transcript) => {
-            assert!(transcript.turns[0].model_request.is_some());
-        }
-        other => panic!("unexpected transcript: {other:?}"),
-    }
-    match state.query(&UiCommand::QuerySessionList).expect("list") {
-        UiQueryResult::SessionList(list) => {
-            assert_eq!(list.sessions[0].active_turn_id.as_ref(), Some(&turn_id));
-        }
-        other => panic!("unexpected list: {other:?}"),
-    }
-}
-
-#[test]
-fn persisted_terminal_merge_silently_closes_live_projection() {
-    let mut state = UiProtocolState::default();
-    let session_id = SessionId::new("session-background-terminal");
-    let turn_id = TurnId::new("runtime-turn-2");
-    state.set_session_metadata(UiSessionMetadataProjection {
-        session_id: session_id.clone(),
-        title: Some("Background terminal".to_owned()),
-        archived: false,
-        cwd: None,
-    });
-    state.apply_model_request_waiting_kind(UiModelRequestWaiting {
-        source_agent_id: AgentId::new("agent-1"),
-        source_node_id: "node-1".to_owned(),
-        session_id: session_id.clone(),
-        turn_id: turn_id.clone(),
-        kind: UiModelRequestKind::Thinking,
-        detail: Some("live request".to_owned()),
-        transport: None,
-        slave_substream_card: false,
-    });
-    let mut receiver = state.subscribe();
-    state.merge_persisted_turn_projections_without_publish(vec![terminal_refresh_projection(
-        &session_id,
-        &turn_id,
-        TerminalStatus::Success,
-    )]);
-
-    assert!(receiver.try_recv().is_err());
-    match state
-        .query(&UiCommand::QuerySessionTurns {
-            session_id: session_id.clone(),
-        })
-        .expect("transcript")
-    {
-        UiQueryResult::SessionTurns(transcript) => {
-            assert!(transcript.turns[0].model_request.is_none());
-            assert_eq!(
-                transcript.turns[0].terminal_status,
-                Some(TerminalStatus::Success)
-            );
-        }
-        other => panic!("unexpected transcript: {other:?}"),
-    }
-    match state.query(&UiCommand::QuerySessionList).expect("list") {
-        UiQueryResult::SessionList(list) => {
-            assert_eq!(list.sessions[0].active_turn_id, None);
-            assert_eq!(list.sessions[0].latest_status, "success");
-        }
-        other => panic!("unexpected list: {other:?}"),
-    }
-}
-
-#[test]
 fn schema_mismatch_projects_as_model_polishing_activity() {
     let mut state = UiProtocolState::default();
     let session_id = SessionId::new("session-schema-retry");
@@ -2622,26 +2468,6 @@ fn session_queries_return_ordered_transcript_without_cross_session_leakage() {
     state.apply_turn_projection(tenth.clone());
     state.apply_turn_projection(first.clone());
 
-    let list = state
-        .query(&UiCommand::QuerySessionList)
-        .expect("session list query");
-    match list {
-        UiQueryResult::SessionList(list) => {
-            assert_eq!(list.sessions.len(), 2);
-            let session_a = list
-                .sessions
-                .iter()
-                .find(|session| session.session_id.as_str() == "session-a")
-                .expect("session-a summary");
-            assert_eq!(session_a.turn_count, 3);
-            assert_eq!(
-                session_a.latest_turn_id.as_ref(),
-                Some(&TurnId::new("runtime-turn-10-r2"))
-            );
-        }
-        other => panic!("unexpected query result: {other:?}"),
-    }
-
     let transcript = state
         .query(&UiCommand::QuerySessionTurns {
             session_id: SessionId::new("session-a"),
@@ -2687,6 +2513,47 @@ fn terminal_result_projection_smoke() {
         user_options: None,
     };
     assert_eq!(terminal_text_projection(&event), "only final text");
+}
+
+#[test]
+fn end_turn_uses_model_visible_text_as_human_friendly_summary() {
+    let event = ReasonResp03TerminalEvent {
+        session_id: SessionId::new("session-1"),
+        turn_id: TurnId::new("turn-1"),
+        trace_id: TraceId::new("trace-1"),
+        feature_id: FeatureId::new("ui.protocol"),
+        agent_id: AgentId::new("agent-1"),
+        status: TerminalStatus::Success,
+        summary: "end_turn".to_owned(),
+        user_options: None,
+    };
+    let text_chunks = vec![
+        "这里是你需要的信息。".to_owned(),
+        "<freehand_completion>\n{\"claim\":\"complete\",\"completion_reason\":\"done\",\"evidence\":\"verified online sample\",\"summary\":\"已完成搜索并给出结论\",\"learned\":\"ok\"}\n</freehand_completion>".to_owned(),
+    ];
+    assert_eq!(
+        human_friendly_terminal_text(&text_chunks, &event),
+        "已完成搜索并给出结论"
+    );
+}
+
+#[test]
+fn end_turn_falls_back_to_stripped_visible_text_when_no_completion_block() {
+    let event = ReasonResp03TerminalEvent {
+        session_id: SessionId::new("session-1"),
+        turn_id: TurnId::new("turn-1"),
+        trace_id: TraceId::new("trace-1"),
+        feature_id: FeatureId::new("ui.protocol"),
+        agent_id: AgentId::new("agent-1"),
+        status: TerminalStatus::Success,
+        summary: "end_turn".to_owned(),
+        user_options: None,
+    };
+    let text_chunks = vec!["搜索结果如下。".to_owned(), "参考来源已给出。".to_owned()];
+    assert_eq!(
+        human_friendly_terminal_text(&text_chunks, &event),
+        "搜索结果如下。参考来源已给出。"
+    );
 }
 
 #[test]
@@ -3240,52 +3107,6 @@ fn session_crud_validation_rejects_empty_title() {
 }
 
 #[test]
-fn session_metadata_projection_includes_empty_and_archived_sessions() {
-    let mut state = UiProtocolState::default();
-    state.set_session_metadata(UiSessionMetadataProjection {
-        session_id: SessionId::new("session-empty"),
-        title: Some("Empty session".to_owned()),
-        archived: false,
-        cwd: Some("/tmp".to_owned()),
-    });
-    state.set_session_metadata(UiSessionMetadataProjection {
-        session_id: SessionId::new("session-archived"),
-        title: Some("Archived session".to_owned()),
-        archived: true,
-        cwd: None,
-    });
-
-    match state
-        .query(&UiCommand::QuerySessionList)
-        .expect("active list")
-    {
-        UiQueryResult::SessionList(list) => {
-            assert_eq!(list.sessions.len(), 1);
-            assert_eq!(list.sessions[0].session_id, SessionId::new("session-empty"));
-            assert_eq!(list.sessions[0].title.as_deref(), Some("Empty session"));
-            assert!(!list.sessions[0].archived);
-            assert_eq!(list.sessions[0].turn_count, 0);
-        }
-        other => panic!("unexpected query result: {other:?}"),
-    }
-
-    match state
-        .query(&UiCommand::QueryArchivedSessionList)
-        .expect("archived list")
-    {
-        UiQueryResult::SessionList(list) => {
-            assert_eq!(list.sessions.len(), 1);
-            assert_eq!(
-                list.sessions[0].session_id,
-                SessionId::new("session-archived")
-            );
-            assert!(list.sessions[0].archived);
-        }
-        other => panic!("unexpected query result: {other:?}"),
-    }
-}
-
-#[test]
 fn static_dispatch_port_returns_dispatch_receipt() {
     let envelope = build_command_dispatch_envelope(&UiCommand::SubmitUserInput {
         text: "run task".to_owned(),
@@ -3828,7 +3649,7 @@ fn adp_request_and_response_frames_roundtrip() {
         query: UiCommand::QueryConfigStatus,
     };
     let request_json = serde_json::to_string(&request).expect("request json");
-    assert!(request_json.contains("\"protocol_version\":3"));
+    assert!(request_json.contains("\"protocol_version\":4"));
     assert!(request_json.contains("\"kind\":\"query\""));
     assert!(request_json.contains("QueryConfigStatus"));
     let decoded_request: UiAdpRequest =
@@ -3856,7 +3677,7 @@ fn adp_request_and_response_frames_roundtrip() {
         },
     };
     let response_json = serde_json::to_string(&response).expect("response json");
-    assert!(response_json.contains("\"protocol_version\":3"));
+    assert!(response_json.contains("\"protocol_version\":4"));
     assert!(response_json.contains("\"kind\":\"failure\""));
     let decoded_response: UiAdpResponse =
         serde_json::from_str(&response_json).expect("decoded response");
@@ -3948,7 +3769,7 @@ fn adp_protocol_manifest_covers_all_command_variants() {
     let js = adp_protocol_webui_module();
     assert!(js.contains("export function adpQueryOf"));
     assert!(js.contains("export function adpCommandOf"));
-    assert!(js.contains("\"protocol_version\": 3"));
+    assert!(js.contains("\"protocol_version\": 4"));
     assert!(js.contains("QueryConfigStatus"));
     assert!(!js.contains("target_owner_module"));
     assert!(!adp_protocol_manifest_json().contains("target_owner_module"));

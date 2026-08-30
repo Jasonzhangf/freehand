@@ -1,0 +1,21 @@
+{
+  "schema_version": 1,
+  "verification_map_id": "app.webui-smoke.verification",
+  "feature_id": "app.webui-smoke",
+  "status": "active",
+  "module_registry": "docs/module-registry/app.webui-smoke.json",
+  "function_map": "docs/function-maps/app.webui-smoke.md",
+  "mainline_call_map": "docs/mainline-calls/app.webui-smoke.json",
+  "test_design": "docs/testing/app.webui-smoke.md",
+  "gates": [
+    {"gate_id":"app.webui-smoke.unit","kind":"test","command":"cargo test -p freehand-server --lib webui -- --nocapture","binding_status":"active"},
+    {"gate_id":"app.webui-smoke.syntax","kind":"build","command":"node --check apps/freehand-server/assets/webui/legacy-monolith.js","binding_status":"active"},
+    {"gate_id":"app.webui-smoke.verifier-syntax","kind":"build","command":"node --check scripts/lib/adp-verifier-client.mjs && node --check scripts/lib/adp-verifier-client.test.mjs && node --check scripts/verify-model-group-ui-online.mjs && node --check scripts/verify-provider-hosted-web-search-online.mjs && node --check scripts/verify-provider-recovery-webui-online.mjs && node --check scripts/verify-provider-registry-ui-online.mjs && node --check scripts/verify-provider-web-search-settings-ui-online.mjs && node --check scripts/verify-web-fetch-tool-online.mjs && node --check scripts/verify-webui-ambiguous-submit-recovery.mjs && node --check scripts/verify-webui-diagnostics-online.mjs && node --check scripts/verify-webui-image-attachment-online.mjs && node --check scripts/verify-webui-live-tool-render-online.mjs && node --check scripts/verify-webui-mobile-ui-tree-online.mjs && node --check scripts/verify-webui-new-session-online.mjs && node --check scripts/verify-webui-path-diagnostic-online.mjs && node --check scripts/verify-webui-session-restore-error-exit-online.mjs && node --check scripts/verify-webui-session-search-online.mjs && node --check scripts/verify-webui-stop-continue-online.mjs && node --check scripts/verify-webui-timer-dashboard-online.mjs && node --check scripts/verify-webui-tools-registry-online.mjs && node --check scripts/verify-worker-recovered-history-online.mjs && node --check scripts/webui_verify_online.mjs","binding_status":"active"},
+    {"gate_id":"app.webui-smoke.verifier-adp-client","kind":"test","command":"node scripts/lib/adp-verifier-client.test.mjs","binding_status":"active"},
+    {"gate_id":"app.webui-smoke.clippy","kind":"lint","command":"cargo clippy -p freehand-server --all-targets -- -D warnings","binding_status":"active"},
+    {"gate_id":"app.webui-smoke.browser","kind":"project-blackbox","command":"node scripts/verify-webui-mobile-ui-tree-online.mjs","binding_status":"active"},
+    {"gate_id":"app.webui-smoke.session-paging-online","kind":"online-local","command":"node scripts/verify-webui-new-session-online.mjs","binding_status":"active"},
+    {"gate_id":"app.webui-smoke.mainline","kind":"architecture","command":"cargo run -p xtask -- mainlines check","binding_status":"active"},
+    {"gate_id":"app.webui-smoke.architecture","kind":"architecture","command":"cargo run -p xtask -- gates check","binding_status":"active"}
+  ]
+}

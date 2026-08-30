@@ -32,6 +32,7 @@ const messageList = document.getElementById("message-list");
 const sessionList = document.getElementById("session-list");
 const mobileDrawerScrim = document.getElementById("mobile-drawer-scrim");
 const openSessionDrawerButton = document.getElementById("open-session-drawer-button");
+const openSessionSearchButton = document.getElementById("open-session-search-button");
 const closeSessionDrawerButton = document.getElementById("close-session-drawer-button");
 const openDetailDrawerButton = document.getElementById("open-detail-drawer-button");
 const openSettingsDrawerButton = document.getElementById("open-settings-drawer-button");
@@ -183,6 +184,8 @@ const debugDetailsToggle = document.getElementById("debug-details-toggle");
 const attachFileButton = document.getElementById("attach-file-button");
 const attachImageButton = document.getElementById("attach-image-button");
 const attachVideoButton = document.getElementById("attach-video-button");
+const composerCommandMenuButton = document.getElementById("composer-command-menu-button");
+const composerCommandMenu = document.getElementById("composer-command-menu");
 const previewAttachmentsButton = document.getElementById("preview-attachments-button");
 const refreshSessionButton = document.getElementById("refresh-session-button");
 const modelSelector = document.getElementById("model-selector");
@@ -256,6 +259,12 @@ const state = {
   turn: null,
   sessions: [],
   sessionListLoaded: false,
+  sessionListNextCursor: null,
+  sessionListHasOlder: false,
+  sessionListOlderInFlight: false,
+  sessionListRequestSequence: 0,
+  sessionListPendingPages: [],
+  sessionListDeletedIds: new Set(),
   selectedSessionIds: new Set(),
   selectedSessionId: initialSelectedSessionId,
   selectedCwd: initialSelectedCwd,
@@ -428,6 +437,9 @@ function applyMobileDrawerState() {
   if (mobileDrawerScrim) {
     mobileDrawerScrim.setAttribute("aria-hidden", drawer || state.mobileAgentSheetOpen ? "false" : "true");
   }
+  if (composerCommandMenu && composerCommandMenu.hidden) {
+    mobileDrawerScrim.setAttribute("aria-hidden", drawer || state.mobileAgentSheetOpen ? "false" : "true");
+  }
 }
 
 function applyMobileAgentSheetState() {
@@ -511,6 +523,7 @@ function setMobileAgentSheetOpen(open) {
 function closeMobileOverlays() {
   state.mobileDrawer = null;
   state.mobileAgentSheetOpen = false;
+  setComposerCommandMenuOpen(false);
   applyMobileDrawerState();
   applyMobileAgentSheetState();
 }
@@ -2570,8 +2583,12 @@ function renderToolSection(section, row) {
   if (display && display.kind) {
     section.dataset.toolKind = toolKindLabel(display.kind);
   }
-  const head = document.createElement("div");
+  section.dataset.toolExpanded = "false";
+  const head = document.createElement("button");
+  head.type = "button";
   head.className = "tool-chat-head";
+  head.setAttribute("aria-expanded", "false");
+  head.setAttribute("aria-controls", `tool-detail-${section.dataset.toolCallId || section.dataset.turnId || "row"}`);
   const titleWrap = document.createElement("span");
   titleWrap.className = "tool-chat-title-wrap";
   const title = document.createElement("span");
@@ -2584,7 +2601,11 @@ function renderToolSection(section, row) {
   const state = document.createElement("span");
   state.className = `tool-chat-state ${stateClass}`;
   state.textContent = row.status || "";
-  head.append(titleWrap, state);
+  const chevron = document.createElement("span");
+  chevron.className = "tool-chat-chevron";
+  chevron.setAttribute("aria-hidden", "true");
+  chevron.textContent = "⌄";
+  head.append(titleWrap, state, chevron);
 
   const body = document.createElement("div");
   body.className = "tool-chat-body";
@@ -2599,7 +2620,88 @@ function renderToolSection(section, row) {
   toolSemanticLines(row).forEach((line) => {
     body.appendChild(toolSemanticLineNode(line));
   });
-  section.append(head, body);
+  const detail = toolDetailNode(row, display);
+  detail.id = `tool-detail-${section.dataset.toolCallId || section.dataset.turnId || "row"}`;
+  detail.hidden = true;
+  head.addEventListener("click", () => {
+    const expanded = section.dataset.toolExpanded !== "true";
+    section.dataset.toolExpanded = expanded ? "true" : "false";
+    detail.hidden = !expanded;
+    head.setAttribute("aria-expanded", expanded ? "true" : "false");
+  });
+  section.append(head, body, detail);
+}
+
+function toolDetailNode(sectionRow, display) {
+  const wrap = document.createElement("div");
+  wrap.className = "tool-chat-detail";
+  const summary = display && display.summary ? `${display.summary}`.trim() : "";
+  const result = display && display.result_summary ? `${display.result_summary}`.trim() : "";
+  const parameterSummary = display && display.parameter_summary ? `${display.parameter_summary}`.trim() : "";
+  const target = display && display.target ? `${display.target}`.trim() : "";
+  if (target) {
+    wrap.appendChild(toolDetailLabelValue("目标", target));
+  }
+  if (parameterSummary) {
+    wrap.appendChild(toolDetailLabelValue("参数", parameterSummary));
+  }
+  if (summary) {
+    wrap.appendChild(toolDetailLabelValue("摘要", summary));
+  }
+  if (result) {
+    wrap.appendChild(toolDetailLabelValue("结果", result));
+  }
+  if (display && display.diff) {
+    const diff = display.diff;
+    const diffBlock = document.createElement("section");
+    diffBlock.className = "tool-detail-diff";
+    diffBlock.appendChild(toolDetailLabelValue("修改文件", diff.target || ""));
+    if (diff.before) {
+      diffBlock.appendChild(toolDetailLabelValue("修改前", diff.before));
+    }
+    if (diff.after) {
+      diffBlock.appendChild(toolDetailLabelValue("修改后", diff.after));
+    }
+    wrap.appendChild(diffBlock);
+  }
+  if (display && Array.isArray(display.fields) && display.fields.length > 0) {
+    const fields = document.createElement("section");
+    fields.className = "tool-detail-fields";
+    display.fields.forEach((field) => {
+      const label = `${field && field.label ? field.label : "field"}`.trim();
+      const value = `${field && field.value ? field.value : ""}`.trim();
+      if (label && value) {
+        fields.appendChild(toolDetailLabelValue(label, value));
+      }
+    });
+    wrap.appendChild(fields);
+  }
+  const rawLines = toolSemanticLines(sectionRow);
+  if (rawLines.length > 0) {
+    const raw = document.createElement("section");
+    raw.className = "tool-detail-raw";
+    rawLines.forEach((line) => {
+      const node = document.createElement("div");
+      node.className = "tool-detail-raw-line";
+      node.textContent = line.text;
+      raw.appendChild(node);
+    });
+    wrap.appendChild(raw);
+  }
+  return wrap;
+}
+
+function toolDetailLabelValue(label, value) {
+  const row = document.createElement("div");
+  row.className = "tool-detail-row";
+  const labelNode = document.createElement("span");
+  labelNode.className = "tool-detail-label";
+  labelNode.textContent = label;
+  const valueNode = document.createElement("code");
+  valueNode.className = "tool-detail-value";
+  valueNode.textContent = value;
+  row.append(labelNode, valueNode);
+  return row;
 }
 
 function toolStateClass(status) {
@@ -4269,21 +4371,19 @@ async function startNewTask(options = {}) {
 }
 
 function setSessionList(projection) {
-  state.sessions = topLevelPersistedSessions((projection && projection.sessions) || []);
-  state.sessionListLoaded = true;
-  const knownSessionIds = new Set(state.sessions.map((session) => session.session_id));
-  for (const sessionId of Array.from(state.selectedSessionIds)) {
-    if (!knownSessionIds.has(sessionId)) {
-      state.selectedSessionIds.delete(sessionId);
+  for (const sessionId of state.sessionListDeletedIds) {
+    state.selectedSessionIds.delete(sessionId);
+    if (state.selectedSessionId === sessionId) {
+      setSelectedSessionId(null);
     }
   }
-  if (
-    state.selectedSessionId &&
-    !isDraftSessionId(state.selectedSessionId) &&
-    !sessionTruthAllowsSessionId(state.selectedSessionId)
-  ) {
-    setSelectedSessionId(null);
-  }
+  state.sessions = ((projection && projection.sessions) || [])
+    .filter((session) => !state.sessionListDeletedIds.has(session.session_id));
+  state.sessionListLoaded = true;
+  state.sessionListHasOlder = !!(projection && projection.page && projection.page.has_older);
+  state.sessionListNextCursor =
+    (projection && projection.page && projection.page.next_cursor) || null;
+  state.sessionListPendingPages = [];
   if (state.sessions.length === 0 && !state.draftSessionId && !state.submitInFlight && !state.pendingUserInput) {
     clearLocalConversationTruth();
   } else if (state.turn && !sessionTruthAllowsTurn(state.turn)) {
@@ -4293,17 +4393,6 @@ function setSessionList(projection) {
   if (selected) {
     syncSelectedCwdFromProjection(selected);
   }
-}
-
-function internalRuntimeSessionId(sessionId) {
-  const id = `${sessionId || ""}`.trim();
-  return id.startsWith("worker-task-") || id.startsWith("master-lifecycle-") || id.startsWith("master-timer-");
-}
-
-function topLevelPersistedSessions(sessions) {
-  return (sessions || []).filter((session) =>
-    session && session.session_id && !session.temporary && !internalRuntimeSessionId(session.session_id)
-  );
 }
 
 function selectedManagedSessionIds() {
@@ -4334,7 +4423,7 @@ function clearSessionSelection() {
 function selectAllSessions() {
   state.selectedSessionIds.clear();
   state.sessions.forEach((session) => {
-    if (session && session.session_id && !isDraftSessionId(session.session_id) && !internalRuntimeSessionId(session.session_id)) {
+    if (session && session.session_id && !isDraftSessionId(session.session_id)) {
       state.selectedSessionIds.add(session.session_id);
     }
   });
@@ -4365,6 +4454,7 @@ async function deleteSelectedSessions() {
     for (const sessionId of sessionIds) {
       dispatchWebUiEdge("home.delete_session", { session_id: sessionId });
       await adpCommand(adpCommandOf("DeleteSession", { session_id: sessionId }));
+      state.sessionListDeletedIds.add(sessionId);
     }
     const deletedSelected = sessionIds.includes(state.selectedSessionId);
     state.selectedSessionIds.clear();
@@ -4599,6 +4689,12 @@ function sessionTruthAllowsSessionId(sessionId) {
   if (!state.sessionListLoaded) {
     return true;
   }
+  if (state.sessionListDeletedIds.has(sessionId)) {
+    return false;
+  }
+  if (state.sessionListHasOlder || state.sessionListPendingPages.length > 0) {
+    return true;
+  }
   return (
     state.sessions.some((session) => session.session_id === sessionId) ||
     workerChildSessionForSessionId(sessionId) !== null
@@ -4804,12 +4900,6 @@ function applyAdpQueryResult(result) {
       setCommandStatus(`调试查询失败：${error.message}`);
       });
     }
-    return;
-  }
-  const sessionListResult = variantPayload(result, "SessionList");
-  if (sessionListResult !== undefined) {
-    setSessionList(sessionListResult);
-    renderAll();
     return;
   }
   const sessionTurns = variantPayload(result, "SessionTurns");
@@ -5533,6 +5623,78 @@ function renderComposerContextStrip() {
   setText("context-stat-compacted", compactedText);
 }
 
+function setComposerCommandMenuOpen(open) {
+  if (!composerCommandMenu || !composerCommandMenuButton) {
+    return;
+  }
+  const next = !!open;
+  composerCommandMenu.hidden = !next;
+  composerCommandMenuButton.setAttribute("aria-expanded", next ? "true" : "false");
+  if (next) {
+    document.body.dataset.mobileCommandMenu = "open";
+    if (shell) {
+      shell.dataset.mobileCommandMenu = "open";
+    }
+  } else {
+    delete document.body.dataset.mobileCommandMenu;
+    if (shell) {
+      delete shell.dataset.mobileCommandMenu;
+    }
+  }
+  if (mobileDrawerScrim) {
+    mobileDrawerScrim.setAttribute("aria-hidden", next ? "false" : "true");
+  }
+}
+
+function runComposerCommandMenuItem(item) {
+  if (!item) {
+    return;
+  }
+  const command = item.dataset.composerCommand;
+  const action = item.dataset.composerAction;
+  setComposerCommandMenuOpen(false);
+  if (command && runSlashCommand(command)) {
+    return;
+  }
+  if (action === "tools") {
+    openToolsDashboard().catch((error) => {
+      state.toolRegistryError = error.message;
+      setCommandStatus(`工具注册表面板打开失败: ${error.message}`, { stickyMs: 9000 });
+      renderToolsDashboard();
+    });
+    return;
+  }
+  if (action === "compact") {
+    requestContextCompaction();
+  }
+}
+
+if (composerCommandMenuButton) {
+  composerCommandMenuButton.addEventListener("click", () => {
+    setComposerCommandMenuOpen(composerCommandMenu.hidden);
+  });
+}
+
+if (composerCommandMenu) {
+  composerCommandMenu.addEventListener("click", (event) => {
+    const item = event.target instanceof Element ? event.target.closest("[data-composer-command], [data-composer-action]") : null;
+    if (item) {
+      runComposerCommandMenuItem(item);
+    }
+  });
+}
+
+document.addEventListener("click", (event) => {
+  if (!composerCommandMenu || composerCommandMenu.hidden) {
+    return;
+  }
+  const target = event.target instanceof Element ? event.target : null;
+  if (target && target.closest(".composer-command-port")) {
+    return;
+  }
+  setComposerCommandMenuOpen(false);
+});
+
 function requestContextCompaction() {
   const latest = currentSessionUsageProjections()[currentSessionUsageProjections().length - 1];
   const sessionId = state.selectedSessionId || (latest && latest.session_id) || "";
@@ -6093,6 +6255,19 @@ function renderSessions() {
   }
   sessionList.replaceChildren();
   renderSessionBulkToolbar();
+  if (state.sessionListPendingPages.length > 0 || state.sessionListHasOlder) {
+    const older = document.createElement("button");
+    older.type = "button";
+    older.className = "session-list-older";
+    older.textContent = state.sessionListOlderInFlight ? "加载中..." : "加载更早";
+    older.disabled = state.sessionListOlderInFlight;
+    older.addEventListener("click", () => {
+      loadOlderSessionListPage().catch((error) => {
+        setCommandStatus(`加载更早会话失败：${error.message}`, { stickyMs: 8000 });
+      });
+    });
+    sessionList.appendChild(older);
+  }
   if (state.sessions.length === 0) {
     if (state.draftSessionId) {
       renderDraftSessionItem();
@@ -6180,7 +6355,7 @@ function mobileHomeHistorySessions(activeSessions = activeSessionsForHome()) {
   );
   return (state.sessions || [])
     .filter((session) => session && session.session_id && !activeSessionIds.has(session.session_id))
-    .sort(compareSessionSummaryForDisplay);
+    ;
 }
 
 function mobileHomeHistoryBuckets(sessions) {
@@ -6197,7 +6372,7 @@ function mobileHomeHistoryBuckets(sessions) {
 }
 
 function mobileHomeHistoryBucketId(session, nowMs = Date.now()) {
-  const rank = sessionSummaryTimeRank(session);
+  const rank = Number(session && session.activity_unix_seconds) * 1000;
   if (!Number.isFinite(rank) || rank < 1000000000000) {
     return "older";
   }
@@ -6208,35 +6383,6 @@ function mobileHomeHistoryBucketId(session, nowMs = Date.now()) {
   }
   const weekStart = todayStart - 6 * 24 * 60 * 60 * 1000;
   return rank >= weekStart ? "week" : "older";
-}
-
-function compareSessionSummaryForDisplay(left, right) {
-  const leftTime = sessionSummaryTimeRank(left);
-  const rightTime = sessionSummaryTimeRank(right);
-  if (leftTime !== rightTime) {
-    return rightTime - leftTime;
-  }
-  return `${right && right.session_id || ""}`.localeCompare(`${left && left.session_id || ""}`);
-}
-
-function sessionSummaryTimeRank(session) {
-  const latestTurn = latestSessionTurnMatching(session && session.session_id);
-  const turnCreatedAt = timestampToMilliseconds(latestTurn && latestTurn.created_at) || 0;
-  if (turnCreatedAt) {
-    return turnCreatedAt;
-  }
-  const id = `${(session && session.session_id) || ""}`;
-  const stamp = id.match(/(20\d{12})/);
-  if (stamp) {
-    const raw = stamp[1];
-    const iso = `${raw.slice(0, 4)}-${raw.slice(4, 6)}-${raw.slice(6, 8)}T${raw.slice(8, 10)}:${raw.slice(10, 12)}:${raw.slice(12, 14)}Z`;
-    const parsed = Date.parse(iso);
-    if (Number.isFinite(parsed)) {
-      return parsed;
-    }
-  }
-  const turnOrdinal = turnOrderKey(session && session.latest_turn_id).ordinal || 0;
-  return turnOrdinal;
 }
 
 function activeSessionsForHome() {
@@ -6251,9 +6397,7 @@ function activeSessionsForHome() {
   if (selectedObservation && selectedObservation.sessionId) {
     bySession.set(selectedObservation.sessionId, selectedObservation);
   }
-  return Array.from(bySession.values()).sort((left, right) =>
-    compareSessionSummaryForDisplay(sessionSummaryById(left.sessionId), sessionSummaryById(right.sessionId))
-  );
+  return Array.from(bySession.values());
 }
 
 
@@ -6306,6 +6450,7 @@ async function deleteSessionFromHome(sessionId) {
   setCommandStatus("正在移除会话...", { stickyMs: 5000 });
   try {
     await adpCommand(adpCommandOf("DeleteSession", { session_id: sessionId }));
+    state.sessionListDeletedIds.add(sessionId);
     state.selectedSessionIds.delete(sessionId);
     if (state.selectedSessionId === sessionId) {
       setSelectedSessionId(null);
@@ -6336,13 +6481,11 @@ function mobileHomeSessionMeta(session) {
 }
 
 function mobileHomeSessionTimeLabel(session) {
-  const latestTurn = latestSessionTurnMatching(session && session.session_id);
-  const createdAt = timestampToMilliseconds(latestTurn && latestTurn.created_at);
+  const createdAt = Number(session && session.activity_unix_seconds) * 1000;
   if (createdAt) {
     return localChatTimeLabel(createdAt);
   }
-  const rank = sessionSummaryTimeRank(session);
-  return rank > 1000000000000 ? localChatTimeLabel(rank) : "时间未知";
+  return "时间未知";
 }
 
 function renderSettingsDiagnostics() {
@@ -7883,7 +8026,6 @@ function timerDashboardSurfaceContext() {
       sourceSessionInput: timerSourceSessionInput,
     },
     currentSourceSessionId: currentTimerSourceSessionId,
-    internalRuntimeSessionId,
     compactSentence,
     statusLabel,
     formatUnixTime,
@@ -7905,7 +8047,7 @@ function timerDashboardSurfaceContext() {
 
 function currentTimerSourceSessionId() {
   const selected = selectedParentSessionSummary() || sessionSummaryForSelected();
-  if (selected && selected.session_id && !internalRuntimeSessionId(selected.session_id)) {
+  if (selected && selected.session_id) {
     return selected.session_id;
   }
   return "";
@@ -9296,9 +9438,105 @@ async function refreshTurn() {
 }
 
 async function refreshSessions() {
-  const result = await adpQuery(adpQueryOf("QuerySessionList"));
-  setSessionList(variantPayload(result, "SessionList") || { sessions: [] });
+  const requestSequence = state.sessionListRequestSequence + 1;
+  state.sessionListRequestSequence = requestSequence;
+  const result = await adpQuery(adpQueryOf("QuerySessionListPage", {
+    archived: false,
+    page: { direction: "Latest", limit: 24 },
+  }));
+  if (state.sessionListRequestSequence !== requestSequence) {
+    return;
+  }
+  const projection = requireSessionListPageProjection(result, "refresh sessions");
+  setSessionList(projection);
   renderAll();
+  scheduleSessionListPrefetch();
+}
+
+function scheduleSessionListPrefetch() {
+  if (
+    !state.sessionListHasOlder ||
+    state.sessionListOlderInFlight ||
+    typeof window.requestIdleCallback !== "function"
+  ) {
+    return;
+  }
+  window.requestIdleCallback(() => {
+    loadOlderSessionListPage({ prefetch: true }).catch((error) => {
+      setCommandStatus(`会话列表加载失败: ${error.message}`, { stickyMs: 8000 });
+    });
+  });
+}
+
+async function loadOlderSessionListPage(options = {}) {
+  if (state.sessionListOlderInFlight) {
+    return;
+  }
+  const pendingCount = state.sessionListPendingPages.length;
+  if (!options.prefetch && pendingCount > 0) {
+    const pending = state.sessionListPendingPages.flat();
+    state.sessionListPendingPages = [];
+    appendSessionListPage(pending);
+    renderAll();
+    return;
+  }
+  if (!state.sessionListHasOlder || !state.sessionListNextCursor) {
+    return;
+  }
+  state.sessionListOlderInFlight = true;
+  renderSessions();
+  try {
+    const result = await adpQuery(adpQueryOf("QuerySessionListPage", {
+      archived: false,
+      page: {
+        direction: "Older",
+        cursor: state.sessionListNextCursor,
+        limit: 24,
+      },
+    }));
+    const projection = requireSessionListPageProjection(result, "load older sessions");
+    if (options.prefetch) {
+      state.sessionListPendingPages.push(projection.sessions);
+      state.sessionListHasOlder = projection.page.has_older;
+      state.sessionListNextCursor = projection.page.next_cursor;
+      return;
+    }
+    appendSessionListPage(projection.sessions);
+    state.sessionListHasOlder = projection.page.has_older;
+    state.sessionListNextCursor = projection.page.next_cursor;
+  } finally {
+    state.sessionListOlderInFlight = false;
+    renderAll();
+  }
+}
+
+function requireSessionListPageProjection(result, operation) {
+  const projection = variantPayload(result, "SessionListPage");
+  const page = projection && projection.page;
+  const cursor = page && page.next_cursor;
+  if (
+    !projection ||
+    !Array.isArray(projection.sessions) ||
+    !page ||
+    typeof page.has_older !== "boolean" ||
+    (cursor !== undefined && cursor !== null && typeof cursor !== "string") ||
+    !Array.isArray(page.unavailable_sessions) ||
+    (page.has_older && typeof cursor !== "string")
+  ) {
+    throw new Error(`${operation} returned malformed SessionListPage projection`);
+  }
+  if (!Object.prototype.hasOwnProperty.call(page, "next_cursor")) {
+    page.next_cursor = null;
+  }
+  return projection;
+}
+
+function appendSessionListPage(sessions) {
+  const known = new Set(state.sessions.map((session) => session.session_id));
+  state.sessions = [
+    ...state.sessions,
+    ...sessions.filter((session) => !known.has(session.session_id)),
+  ];
 }
 
 async function refreshSelectedSession() {
@@ -10009,6 +10247,12 @@ if (debugDetailsToggle) {
 }
 if (openSessionDrawerButton) {
   openSessionDrawerButton.addEventListener("click", () => {
+    setMobileDrawer("sessions");
+  });
+}
+if (openSessionSearchButton) {
+  openSessionSearchButton.addEventListener("click", () => {
+    closeMobileDrawer();
     openSessionSearchDashboard().catch((error) => {
       state.sessionSearchError = error.message;
       setCommandStatus(`会话搜索失败: ${error.message}`, { stickyMs: 9000 });
@@ -10521,6 +10765,7 @@ function installWebUiTestHooks() {
   if (!globalThis.__freehandEnableTestHooks) {
     return;
   }
+  globalThis.__freehandState = state;
   globalThis.__freehandWebUiTest = {
     projectHomeSharedStateForTest({ loaded, sessions }) {
       if (typeof loaded !== "boolean") {

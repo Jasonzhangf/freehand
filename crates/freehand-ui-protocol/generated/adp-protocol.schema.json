@@ -1,6 +1,6 @@
 {
-  "protocol_version": 3,
-  "handshake_capability": "adp.v3.handshake",
+  "protocol_version": 4,
+  "handshake_capability": "adp.v4.handshake",
   "request_kinds": [
     "handshake",
     "command",
@@ -113,14 +113,8 @@
       "target_owner_feature": "ui.protocol"
     },
     {
-      "serde_name": "QuerySessionList",
-      "semantic_kind": "query_session_list",
-      "frame_class": "query",
-      "target_owner_feature": "ui.protocol"
-    },
-    {
-      "serde_name": "QueryArchivedSessionList",
-      "semantic_kind": "query_archived_session_list",
+      "serde_name": "QuerySessionListPage",
+      "semantic_kind": "query_session_list_page",
       "frame_class": "query",
       "target_owner_feature": "ui.protocol"
     },

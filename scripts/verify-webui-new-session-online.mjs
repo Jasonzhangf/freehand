@@ -2,17 +2,20 @@ import { spawn } from 'node:child_process';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
+import { adpVerifierRequest, requireSessionListPage } from './lib/adp-verifier-client.mjs';
 
 const repo = process.cwd();
 const home = process.env.HOME;
 const baseUrl = normalizedBaseUrl(process.env.FREEHAND_NEW_SESSION_BASE_URL || 'http://127.0.0.1:4042/');
 const adpUrl = process.env.FREEHAND_NEW_SESSION_ADP_URL || adpUrlFromBaseUrl(baseUrl);
+const adpAuthToken = process.env.FREEHAND_ADP_AUTH_TOKEN || '';
+const adpProtocolVersion = 4;
 const chromePath = process.env.FREEHAND_NEW_SESSION_CHROME || defaultBrowserPath();
 const debugPort = Number.parseInt(process.env.FREEHAND_NEW_SESSION_DEBUG_PORT || '9278', 10);
 const conversationSessionId = process.env.FREEHAND_NEW_CONVERSATION_SESSION_ID || 'webui-new-conversation-fixed';
 const taskSessionId = process.env.FREEHAND_NEW_TASK_SESSION_ID || 'webui-new-task-fixed';
 const taskCwd = process.env.FREEHAND_NEW_TASK_CWD || repo;
-const assetVersion = '20260726-stale-lifecycle-reconcile';
+const assetVersion = '20260824-session-list-page';
 const runId = `webui-new-session-${Date.now()}`;
 const artifactDir = path.join(repo, 'artifacts', 'webui-online', runId);
 
@@ -28,7 +31,7 @@ let summary = null;
 try {
   await waitHealth();
   await assertProductionPageReachable();
-  const beforeSessions = sessionListPayload(await adpQuery('QuerySessionList'));
+  const beforeSessions = await activeSessionListPage();
   await fs.writeFile(path.join(artifactDir, 'session-list-before.json'), JSON.stringify(beforeSessions, null, 2));
 
   chromeProfileDir = await fs.mkdtemp(path.join(os.tmpdir(), 'freehand-new-session-'));
@@ -54,7 +57,7 @@ try {
   await cdp.send('Page.enable');
   await cdp.send('Runtime.enable');
   await cdp.send('Page.addScriptToEvaluateOnNewDocument', {
-    source: `window.__freehandEnableTestHooks = true; window.__freehandDraftSessionIdsForTest = ${JSON.stringify([conversationSessionId, taskSessionId])};`,
+    source: `window.__freehandEnableTestHooks = true; window.requestIdleCallback = () => 0; window.__freehandDraftSessionIdsForTest = ${JSON.stringify([conversationSessionId, taskSessionId])};`,
   });
   await cdp.send('Emulation.setDeviceMetricsOverride', { width: 390, height: 844, deviceScaleFactor: 2, mobile: true });
   await cdp.send('Page.navigate', { url: baseUrl });
@@ -84,7 +87,7 @@ try {
   const conversationOwnerRow = await waitForOwnerSession(conversationSessionId, (row) => row && !row.cwd, 30_000);
   const conversationDom = await waitForSelectedSession(conversationSessionId, 30_000);
   await captureScreenshot(cdp, 'new-conversation-selected.png');
-  const afterConversation = sessionListPayload(await adpQuery('QuerySessionList'));
+  const afterConversation = await activeSessionListPage();
   await fs.writeFile(path.join(artifactDir, 'session-list-after-conversation.json'), JSON.stringify(afterConversation, null, 2));
 
   await evalInPage(cdp, (cwd) => {
@@ -110,8 +113,31 @@ try {
   const taskOwnerRow = await waitForOwnerSession(taskSessionId, (row) => row && row.cwd === taskCwd, 30_000);
   const taskDom = await waitForSelectedSession(taskSessionId, 30_000);
   await captureScreenshot(cdp, 'new-task-selected.png');
-  const afterTask = sessionListPayload(await adpQuery('QuerySessionList'));
+  const afterTask = await activeSessionListPage();
   await fs.writeFile(path.join(artifactDir, 'session-list-after-task.json'), JSON.stringify(afterTask, null, 2));
+
+  const beforeOlderLoad = await evalInPage(cdp, () => ({
+    sessionIds: Array.from(document.querySelectorAll('.session-item.session-row'))
+      .map((row) => row.dataset.sessionId || ''),
+    buttonText: document.querySelector('button.session-list-older')?.innerText || '',
+    buttonDisabled: document.querySelector('button.session-list-older')?.disabled ?? true,
+  }));
+  await evalInPage(cdp, () => document.querySelector('button.session-list-older')?.click());
+  const afterOlderLoad = await waitForFunction(cdp, (beforeCount) => {
+    const sessionIds = Array.from(document.querySelectorAll('.session-item.session-row'))
+      .map((row) => row.dataset.sessionId || '');
+    if (sessionIds.length <= beforeCount) return null;
+    return {
+      sessionIds,
+      buttonText: document.querySelector('button.session-list-older')?.innerText || '',
+      buttonDisabled: document.querySelector('button.session-list-older')?.disabled ?? false,
+    };
+  }, 30_000, 'older session page appended', beforeOlderLoad.sessionIds.length);
+  await fs.writeFile(
+    path.join(artifactDir, 'session-list-older-dom.json'),
+    JSON.stringify({ before: beforeOlderLoad, after: afterOlderLoad }, null, 2),
+  );
+  await captureScreenshot(cdp, 'session-list-after-load-older.png');
 
   const conversationRow = findSession(afterTask, conversationSessionId);
   const taskRow = findSession(afterTask, taskSessionId);
@@ -140,6 +166,8 @@ try {
     taskOwnerRow,
     conversationDom,
     taskDom,
+    beforeOlderLoad,
+    afterOlderLoad,
     bodyState,
     checks: {
       assetVersionServed: true,
@@ -151,6 +179,9 @@ try {
       taskCreatedThroughOwnerTruth: !!taskOwnerRow && taskOwnerRow.archived !== true && taskOwnerRow.cwd === taskCwd,
       taskSelectedInUi: taskDom.selectedSession === taskSessionId,
       taskCwdProjectedInUi: taskDom.selectedCwd === taskCwd || bodyState.selectedCwd === taskCwd,
+      olderPageLoadedInUi: beforeOlderLoad.buttonText === '加载更早'
+        && beforeOlderLoad.buttonDisabled === false
+        && afterOlderLoad.sessionIds.length > beforeOlderLoad.sessionIds.length,
       noTopLevelWorkerSessions: topLevelWorkerRows.length === 0,
       noHorizontalOverflow: bodyState.noHorizontalOverflow === true,
     },
@@ -187,7 +218,7 @@ async function waitForSelectedSession(sessionId, timeoutMs) {
 
 async function waitForOwnerSession(sessionId, predicate, timeoutMs) {
   return await waitFor(async () => {
-    const list = sessionListPayload(await adpQuery('QuerySessionList'));
+    const list = await activeSessionListPage();
     const row = findSession(list, sessionId);
     if (predicate(row)) return row;
     return null;
@@ -199,41 +230,37 @@ function findSession(list, sessionId) {
 }
 
 function allSessionRows(list) {
-  if (Array.isArray(list?.active)) return list.active;
-  if (Array.isArray(list?.sessions)) return list.sessions;
-  return [];
+  return list.sessions;
 }
 
 function sessionListPayload(result) {
-  return result?.SessionList || result?.session_list || result;
+  return requireSessionListPage(result);
 }
 
 async function adpQuery(query) {
   return await adpRequest('query', 'query', query, 30_000);
 }
 
+async function activeSessionListPage() {
+  const result = await adpRequest('query', 'query', {
+    QuerySessionListPage: {
+      archived: false,
+      page: { direction: 'Latest', cursor: null, limit: 100 },
+    },
+  }, 30_000);
+  return sessionListPayload(result);
+}
+
 function adpRequest(kind, payloadKey, payload, timeoutMs) {
-  const socket = new WebSocket(adpUrl);
-  const requestId = `${kind}-${Date.now()}-${Math.random().toString(36).slice(2)}`;
-  return new Promise((resolve, reject) => {
-    const timer = setTimeout(() => {
-      socket.close();
-      reject(new Error(`ADP ${kind} timeout`));
-    }, timeoutMs);
-    socket.addEventListener('open', () => socket.send(JSON.stringify({ kind, request_id: requestId, [payloadKey]: payload })));
-    socket.addEventListener('message', (event) => {
-      const message = JSON.parse(event.data);
-      if (message.request_id !== requestId) return;
-      clearTimeout(timer);
-      socket.close();
-      if (message.kind === 'failure') return reject(new Error(message.failure?.message || message.failure?.code || 'ADP failure'));
-      if (message.kind === 'query_result') return resolve(message.result);
-      reject(new Error(`unexpected ADP ${kind} response: ${message.kind}`));
-    });
-    socket.addEventListener('error', () => {
-      clearTimeout(timer);
-      reject(new Error(`ADP ${kind} socket error`));
-    });
+  return adpVerifierRequest({
+    url: adpUrl,
+    authToken: adpAuthToken,
+    kind,
+    payloadKey,
+    payload,
+    timeoutMs,
+    clientName: 'freehand-new-session-verifier',
+    capabilities: ['query', 'command'],
   });
 }
 
@@ -301,7 +328,7 @@ async function writeFailure(error) {
   await fs.writeFile(path.join(failureDir, 'error.txt'), error.stack || error.message);
   await fs.writeFile(path.join(failureDir, 'chrome-stdout.txt'), chromeStdout);
   await fs.writeFile(path.join(failureDir, 'chrome-stderr.txt'), chromeStderr);
-  await adpQuery('QuerySessionList')
+  await activeSessionListPage()
     .then((value) => fs.writeFile(path.join(failureDir, 'session-list.json'), JSON.stringify(value, null, 2)))
     .catch((queryError) => fs.writeFile(path.join(failureDir, 'session-list-error.txt'), queryError.stack || queryError.message));
   if (cdp) {
@@ -334,7 +361,7 @@ function delay(ms) { return new Promise((resolve) => setTimeout(resolve, ms)); }
 function normalizedBaseUrl(value) { return value.endsWith('/') ? value : `${value}/`; }
 function adpUrlFromBaseUrl(value) { const url = new URL(value); url.protocol = url.protocol === 'https:' ? 'wss:' : 'ws:'; url.pathname = '/adp'; url.search = ''; return url.toString(); }
 function defaultBrowserPath() {
-  return path.join(home, 'Library/Caches/ms-playwright/chromium_headless_shell-1194/chrome-mac/headless_shell');
+  return '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
 }
 
 function createCdpClient(wsUrl) {

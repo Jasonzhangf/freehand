@@ -31,6 +31,7 @@
   - stable `worker`, `worker-2`, and `worker-3` identities render as Worker 1, Worker 2, and Worker 3 independent of Master row order
   - each independent Agent host labels its direct-session group from owner-backed `ConfigStatus.agent_name`; Worker hosts must never render the literal `Master` label for their own namespace
   - WebUI global session lists consume only persisted user sessions; Worker/subagent temporary sessions are allowed only inside the owning 主控会话 Header/session tree from TaskBoard 权威真源
+  - WebUI Home/drawer history consumes bounded `QuerySessionListPage` truth, exposes 加载更早 only when the owner page reports `has_older`, rejects stale responses, treats unavailable summaries as explicit facts without consuming other rows, and never proves deletion from partial list absence
   - app boundary renders a compact session rail with separate new-conversation and new-task affordances; new task requires a visible target cwd, while new conversation does not require cwd
   - app boundary renders protocol-owned debug query projection
   - app boundary renders slave-card visibility only for WebUI
@@ -74,13 +75,15 @@
   - WebUI exposes hidden success/failure diagnostic prompts through slash commands and keyboard shortcuts while preserving the normal ADP submit path; persistent Success/Failure composer buttons must not render
   - WebUI Android ready-host composer entry waits for canonical ADP protocol refresh, opens the valid persisted selected session or protocol-owned new conversation, and focuses the composer only in `SessionDetail`; it must not auto-send input, show a Home composer, or create a native input fallback
 - WebUI control strip and session rail expose session switching, `/new` New dialog, `/task` task mode in that dialog, refresh, cwd selection, model selection, attachment upload, file/image/video preview, slash commands, and keyboard shortcuts as input-layer affordances
+- WebUI composer image attachment entry stays visible at the lower-left of the input on desktop and phone focus states, and the command port exposes built-in tools plus Slash commands with compression context as one action, not the only action
+- WebUI mobile command-port menu must open from the command button left edge inside the viewport, stay above the composer, remain scrollable within the phone height, and must not create horizontal overflow
 - WebUI settings shell exposes only coarse top-level entries for 模型, 智能体运行时, 连接, 可观测性, 外观, and 关于 on initial open. Provider rows, registry cards, forms, primary/fallback selectors, model-group controls, Worker-limit controls, APK controls, and Diagnostics rows must all remain hidden until the matching owner page is opened through explicit drilldown navigation.
 - WebUI settings drilldown has an explicit return path at every detail level. 模型 first opens a second-level menu, then separates 模型服务配置, 模型服务切换与策略, and 模型组 into three independently visible pages; no completed detail page may remain visible after navigating to another page.
 - Diagnostics is independent from provider settings under 可观测性; 智能体运行时 owns Worker-limit 设置; 连接 owns daemon/remote and Android-shell grouping. The shell does not parse or directly mutate daemon config files, and settings status markers must stay hollow with green for 权威真源 implementation, orange for partial implementation, and red for placeholder/not implemented
 - WebUI aspect-ratio layout classifier applies presentation-only shape attributes for phone portrait, tall phone, phone landscape, tablet portrait, tablet landscape, foldable unfolded, and desktop large without 会修改 protocol/session state
 - WebUI root route renders `?client=android-webview` with server-side `tablet_portrait` initial layout attributes before JS loads, while the normal browser root remains unpinned
 - WebUI phone/tall-phone/tablet-portrait layout defaults to the conversation workspace; sessions and debug/config detail panels are hidden in explicit overlay drawers and never consume the normal conversation flow
-  - WebUI mobile session drawer can be opened by a right-swipe gesture from the main interface content area without 会修改 ADP/session truth, selected session, transcript state, composer draft, pending submit, scroll anchor, or lifecycle timers
+  - WebUI mobile session drawer can be opened by the bottom session entry or a right-swipe gesture from the main interface content area without modifying ADP/session truth, selected session, transcript state, composer draft, pending submit, scroll anchor, or lifecycle timers; its visible bulk-remove control routes through `DeleteSession`, while search remains a separate drawer-header action
   - WebUI mobile session/设置 drawers must keep a sticky visible header with close control while drawer content scrolls; Android/browser back intent must blur focused form controls first and then close the WebUI dialog/Header tree/Agent sheet/mobile drawer before app-level exit/navigation
   - WebUI session drawer renders persisted sessions as agent -> session hierarchy, with task/global labels derived from protocol cwd and CRUD still routed by protocol session id
   - WebUI Home exposes multi-select and remove via `DeleteSession`, while SessionDetail exposes current-session rename and double-Esc rollback as protocol commands instead of local session truth; archive/restore affordances are intentionally absent from WebUI
@@ -99,7 +102,7 @@
   - WebUI root shell smoke, including shared logo reference
   - WebUI theme and shared logo asset smoke
   - WebUI JS asset smoke
-  - WebUI Phase 1 mobile UI tree asset smoke for `open-settings-drawer-button`, `open-timer-dashboard-button`, `open-tools-dashboard-button`, `mobile-new-entry-button`, `open-session-drawer-button`, `mobile-home-dashboard`, `mobile-home-active-list`, `mobile-home-session-list`, `mobile-running-session-list`, `mobile-static-session-list`, `internalRuntimeSessionId`, `topLevelPersistedSessions`, `renderMobileHomeDashboard`, `activeSessionsForHome`, `mobileHomeHistorySessions`, `renderMobileHomeActiveList`, `renderMobileHomeSessionList`, `mobileHomeSessionButton`, `renderHomeDashboardSurface`, `createHomeDashboardModel`, `createHomeSessionRow`, `renderToolsRegistrySurface`, `renderTimerDashboardSurface`, `createAdpClient`, `openSettingsPage`, `renderSettingsNavigation`, coarse first-level settings groups, explicit drilldown/back controls, small hollow green/orange/red status markers, logo green, no root settings status-card duplicate, no settings implementation-audit tree duplicate, no home Timer/New duplicate body card, no floating session-tree overlay, disjoint running/history session ids, and no production UI storage-management wording for Android
+  - WebUI Phase 1 mobile UI tree asset smoke for `open-settings-drawer-button`, `open-timer-dashboard-button`, `open-tools-dashboard-button`, `mobile-new-entry-button`, `open-session-drawer-button`, `mobile-home-dashboard`, `mobile-home-active-list`, `mobile-home-session-list`, `mobile-running-session-list`, `mobile-static-session-list`, `renderMobileHomeDashboard`, `activeSessionsForHome`, `mobileHomeHistorySessions`, `renderMobileHomeActiveList`, `renderMobileHomeSessionList`, `mobileHomeSessionButton`, `renderHomeDashboardSurface`, `createHomeDashboardModel`, `createHomeSessionRow`, `renderToolsRegistrySurface`, `renderTimerDashboardSurface`, `createAdpClient`, `openSettingsPage`, `renderSettingsNavigation`, coarse first-level settings groups, explicit drilldown/back controls, small hollow green/orange/red status markers, logo green, no root settings status-card duplicate, no settings implementation-audit tree duplicate, no home Timer/New duplicate body card, no floating session-tree overlay, disjoint running/history session ids, and no production UI storage-management wording for Android
   - WebUI 定时任务面板 asset smoke for `QueryTimerList`,
     `ScheduleTimer`, `CancelTimer`, `openTimerDashboard`,
     `refreshTimerDashboard`, `renderTimerDashboard`,
@@ -127,11 +130,14 @@
     `renderDiagnosticLogRow`, and `refreshDiagnosticsStatus`
   - Android update route smoke for env/sidecar manifest JSON, explicit missing-sidecar failure, and explicit missing-APK 404
   - WebUI JS asset smoke locks ADP WebSocket command/query usage, protocol_version stamping, first-frame handshake gating, generated `adpQueryOf`/`adpCommandOf`/`adpSubscribeOf` constructor usage, rejects `fetch` as a live path, and requires `EventSource` only for latest-turn SSE display refresh
+  - WebUI JS asset smoke locks `refreshSessions` to `QuerySessionListPage` Latest limit 24, `loadOlderSessionListPage` to the owner-issued Older cursor, request-sequence staleness rejection, idle prefetch buffering, and `加载更早` visibility/disabled state
+  - WebUI JS asset smoke locks the inline SessionListPage validator to the shared protocol shape: an omitted terminal-page `next_cursor` is valid, `has_older` requires a string cursor, and non-string cursors or missing/unavailable session arrays are rejected
   - WebUI ADP subscription accepted/等待中 status rendering smoke
   - WebUI ADP failure frame visible-card/status smoke, with user-facing 连接/服务 wording instead of raw `ADP`
   - WebUI ADP request timeout visible-failure smoke
 - WebUI ADP failure card ordering smoke: failure card must not render ahead of the current conversation items
 - WebUI asset and online smoke must prove user-visible status text, failure cards, and verifier-submitted diagnostic prompts do not expose `ADP`; protocol naming is allowed only in internal code, docs, CLI, and test harness output
+- `node scripts/lib/adp-verifier-client.test.mjs` locks the shared verifier client positively for accepted v4 handshake/query settlement and negatively for rejected handshake frames; it also distinguishes valid empty SessionListPage projections (including an omitted terminal-page `next_cursor`) from missing/malformed sessions/page metadata.
   - WebUI hidden failure diagnostic prompts must stay within the active Master tool surface: current-cwd workspace tools such as `read_file` should succeed, so use cross-cwd workspace-boundary or 不可用-tool samples when a failed tool card is needed
   - WebUI hidden success/failure diagnostic prompt asset smoke and no persistent sample-button smoke
   - WebUI keyboard shortcut smoke for submit, cancel, refresh, focus composer, and sample 加载中
@@ -147,7 +153,7 @@
   - WebUI submit-success path refresh smoke
   - WebUI cancel button / Escape key command smoke
   - WebUI submit-in-flight latest-active cancel smoke
-  - WebUI current-session rename plus Home multi-select/remove asset smoke and negative archive/restore affordance smoke
+  - WebUI current-session rename plus Home multi-select/remove asset smoke, mobile entry-to-drawer reachability, and negative archive/restore affordance smoke
   - WebUI double-Esc rollback asset smoke proving first Esc arms rollback and second Esc calls `RollbackLatestSessionTurn`
   - WebUI per-turn action asset smoke proving every rendered `.chat-message` has Copy, Edit from here, and 新建会话 actions; Edit from here uses repeated `RollbackLatestSessionTurn` command dispatch until the selected logical turn is removed, while 新建会话 creates a protocol-owned conversation before prefilling the composer
   - WebUI command ingress dispatch receipt smoke
@@ -288,7 +294,7 @@
 - WebUI JS asset smoke locks that submitted input remains observable after composer clear: pending submit cards render after existing history, pending input is cleared only after the same user text is materialized in visible turn rows, a live protocol turn with no public rows renders an explicit observable 等待中 row, and a latest terminal/interrupted turn still renders when selected-session transcript state is empty instead of producing a blank transcript
 - WebUI JS asset smoke locks cycle-timeline order: pending and accepted submit receipt cards are inserted before the matching submit/live/recent same-session turn instead of being appended after all protocol turns, each request/model round renders one parent `.turn-cycle-card` containing the user/model/tool/final phase rows, pending/accepted receipts use `submit:<session_id>:<submit_id>` while every real protocol turn uses `turn:<session_id>:<turn_id>` even when several turns share one submit id, terminal cycles are frozen by reusing the existing DOM node so a later request cannot mutate a prior terminal cycle card, and the only classification refresh allowed on a frozen card is the same-key `ToolPending` owner-projection transition from lifecycle-waiting to user-choice waiting.
 - WebUI JS asset smoke locks that submit command timeout/transport failure is an unverified receipt: the catch path calls the owner-truth refresh helper first, materialized submitted text or same-parent 任务面板 task truth clears pending state, same-parent 任务面板 acceptance renders an accepted service receipt instead of a clean empty session while transcript truth is absent, unverified receipts keep the pending user card, selected/draft session, and draft 附件 visible, the status says service truth is being checked, and the UI tells the operator not to send a duplicate while verification continues instead of clearing into an empty session
-- `node scripts/verify-webui-ambiguous-submit-recovery.mjs` loads the served WebUI asset with fixed session ids and proves submit/attachment recovery without creating random persisted sessions: the WebUI 新建任务 path creates a cwd-bound task session through owner `QuerySessionList`, real image input renders a thumbnail/remove selected pool, forced offline submit keeps the selected session/cwd plus pending card and retained draft attachment for retry, materialized transcript truth clears pending state, same-parent 任务面板 task truth clears pending state and renders an accepted service receipt even when the task is already closed, while an unverified receipt keeps the fixed selected session plus pending card instead of rendering an empty conversation or a user-visible unknown state
+- `node scripts/verify-webui-ambiguous-submit-recovery.mjs` loads the served WebUI asset with fixed session ids and proves submit/attachment recovery without creating random persisted sessions: the WebUI 新建任务 path creates a cwd-bound task session through owner `QuerySessionListPage`, real image input renders a thumbnail/remove selected pool, forced offline submit keeps the selected session/cwd plus pending card and retained draft attachment for retry, materialized transcript truth clears pending state, same-parent 任务面板 task truth clears pending state and renders an accepted service receipt even when the task is already closed, while an unverified receipt keeps the fixed selected session plus pending card instead of rendering an empty conversation or a user-visible unknown state
 - WebUI JS asset smoke locks that an empty selected session remains visually clean: empty `SessionTurns` binds the selected session, clears the previous active turn/debug state, suppresses the generic 等待中-data card, and ignores latest-active turns from other sessions
 - WebUI JS asset smoke locks the shared session truth gate: `setSessionList`, `setTurnProjection`, ADP query results, ADP subscription events, latest-turn SSE events, and `setSessionTranscript` must all reject turns or transcripts whose session id is not listed after session-list truth has loaded, except for the current draft or pending-submit session
 - WebUI JS asset smoke locks that draft session id generation uses the shared browser-safe id helper and does not directly require `crypto.randomUUID`, because release/Tailscale HTTP is not a secure browser context
@@ -298,13 +304,37 @@
   - WebUI JS asset smoke locks chronological per-round rendering so `runtime-turn-N` and `runtime-turn-N-rM` render as separate lifecycle cards instead of one all-in summary card
   - WebUI JS asset smoke locks internal 运行时 continuation prompt hiding and raw completion-schema stripping while preserving Final card projection at the end of the round sequence
   - WebUI JS asset smoke locks that `/new` opens the New dialog, new conversation routes through `CreateSession` without cwd, new task requires a selected or typed cwd and routes through `CreateSession` with cwd, optional `SubmitUserInput.cwd` forwarding remains available, and the old selected-session/no-turns system chat card stays absent
-  - `node scripts/verify-webui-new-session-online.mjs` clicks the mobile New entry, uses fixed test-hook draft session ids, proves 新会话 and 新建任务 both route through ADP `CreateSession`, verifies `QuerySessionList` 权威真源 for no-cwd vs cwd-bound sessions, and checks worker temporary sessions are not top-level results
+  - `node scripts/verify-webui-new-session-online.mjs` completes authenticated ADP v4 handshake, clicks the mobile New entry, uses fixed test-hook draft session ids, proves 新会话 and 新建任务 both route through ADP `CreateSession`, verifies `QuerySessionListPage` 权威真源 for no-cwd vs cwd-bound sessions, clicks 加载更早 and proves visible DOM rows increase, and checks worker temporary sessions are not top-level results
+  - `app.webui-smoke.session-paging-online` binds the online-verifier module's served WebUI and authenticated ADP v4 consumption to that executable verifier; these are verification dependencies, not source import/call edges.
   - WebUI JS asset smoke locks that remove uses `DeleteSession`, archive/restore/query-archived paths are absent from the WebUI app, current-session rename uses `RenameSession`, and double-Esc rollback uses `RollbackLatestSessionTurn`
   - WebUI terminal status projection keeps cancelled/failed cards visually distinct from success
   - WebUI terminal/final summary rendering extracts the complete `Summary` block from terminal text before debug fields, then uses a dedicated final-summary renderer rather than generic paragraph rendering; it preserves source response formatting, renders plain single-line summaries as one readable block, renders explicit source newlines/line-start labels/numbering as multiple blocks, and keeps debug fields hidden unless debug details are enabled
   - WebUI slave-card render smoke
   - CLI/WebUI divergence smoke via protocol projection
   - app dependency boundary smoke
+
+## 2026-08-30 UX Audit And Responsive Polish
+
+- target feature: `app.webui-smoke`
+- owner: `apps/freehand-server/assets/webui.css` for the visual and responsive
+  surface; `scripts/verify-webui-foundation-contracts.mjs` locks the CSS
+  contract
+- lifecycle: first paint -> responsive layout classification -> touch/keyboard
+  interaction -> reduced-motion presentation -> real WebUI screenshot
+- white-box:
+  - `node scripts/verify-webui-foundation-contracts.mjs` must require coarse
+    pointer targets of at least 44px, visible keyboard focus rings, and a
+    reduced-motion path for the conversation follow control
+- module black-box:
+  - `node scripts/verify-webui-mobile-ui-tree-online.mjs` covers 390px and
+    430px portrait, 844px landscape, and 1280px desktop layout contracts
+- project black-box:
+  - authenticated S-profile browser captures before/after screenshots from
+    `http://100.66.1.82:4042/`
+- known gaps:
+  - the existing mobile verifier's fixture requires live owner task truth and
+    currently cannot seed cancelled fixtures as active; this is a verifier
+    fixture gap, not a UI fallback permission
 - project black-box impact:
   - app boundary proves WebUI can consume `freehand-ui-protocol` without owning reason/provider semantics
   - app boundary gives 诊断 a repeatable way to generate success/failure ADP scenarios from WebUI without a second transport path or persistent composer buttons
@@ -327,7 +357,7 @@
   - split theme/WebUI static assets are landed
   - HTTP query and continuous SSE subscribe transport smoke is landed
   - HTTP command ingress dispatch-receipt/failure smoke is landed
-  - WebUI root shell now exposes `/adp`, and WebUI JS uses protocol_version=3 first-frame handshake plus ADP WebSocket for command/query/subscription truth, while EventSource remains latest-turn SSE display refresh
+  - WebUI root shell now exposes `/adp`, and WebUI JS uses protocol_version=4 first-frame handshake plus ADP WebSocket for command/query/subscription truth, while EventSource remains latest-turn SSE display refresh
 - WebUI layout shape classifier and CSS shape rules are landed; `scripts/verify-webui-layout-shapes.mjs` locks the pure classifier, and `scripts/webui_verify_online.mjs` captures the online viewport matrix against S profile
 - WebUI Android WebView first paint is server-pinned through the root `client=android-webview` query so the app enters directly in portrait drawer layout instead of flashing the desktop grid before JS recalculates
 - WebUI mobile portrait drawer layout is landed: phone/tall-phone/tablet-portrait default to a phone-first conversation workspace, while session CRUD/list and debug/config detail panels open through mobile overlay controls without changing ADP/session truth

@@ -6,10 +6,10 @@ mod tool_display;
 use freehand_contracts::{
     ContextCachePolicy, ContextProvenance, ContextRewriteMode, ContextRole, ContextSegment,
     ContextSegmentId, ContextSegmentKind, ContextStability, SearchAccessStatus,
-    SearchCandidateStatus, SearchDiscoveryChannel, SearchDiscoveryDelivery, SearchDomain,
-    SearchDomainPlanDelivery, SearchEvidenceDelivery, SearchEvidenceTerminal,
-    SearchEvidenceTurnDelivery, SearchEvidenceTurnStatus, SearchFinalClaimStatus,
-    SearchFinalDelivery, SearchSocialPlatform, SearchVerificationDelivery,
+    SearchCandidateStatus, SearchDiscoveryCandidate, SearchDiscoveryChannel,
+    SearchDiscoveryDelivery, SearchDomain, SearchDomainPlanDelivery, SearchEvidenceDelivery,
+    SearchEvidenceTerminal, SearchEvidenceTurnDelivery, SearchEvidenceTurnStatus,
+    SearchFinalClaimStatus, SearchFinalDelivery, SearchSocialPlatform, SearchVerificationDelivery,
     SocialSupplementDecisionDelivery, TerminalStatus, ToolArgument, TurnId,
 };
 use serde::de::DeserializeOwned;
@@ -20,12 +20,104 @@ use thiserror::Error;
 pub use rewrite_policy::*;
 pub use tool_display::*;
 
-const SEARCH_DOMAIN_PLAN_SCHEMA: &str = "search_evidence.domain_plan.v1";
+pub const SEARCH_DOMAIN_PLAN_SCHEMA: &str = "search_evidence.domain_plan.v1";
 const SEARCH_DISCOVERY_SCHEMA: &str = "search_evidence.discovery.v1";
 const SEARCH_VERIFICATION_SCHEMA: &str = "search_evidence.verification.v1";
-const SEARCH_SUPPLEMENT_SCHEMA: &str = "search_evidence.supplement_decision.v1";
-const SEARCH_FINAL_SCHEMA: &str = "search_evidence.final.v1";
+pub const SEARCH_SUPPLEMENT_SCHEMA: &str = "search_evidence.supplement_decision.v1";
+pub const SEARCH_FINAL_SCHEMA: &str = "search_evidence.final.v1";
 const SEARCH_TURN_SCHEMA: &str = "search_evidence.turn.v1";
+
+pub fn search_evidence_model_delivery_examples() -> Result<String, serde_json::Error> {
+    use freehand_contracts::{
+        SearchClaimDelivery, SearchDomain, SearchDomainPlanDelivery, SearchFinalClaimStatus,
+        SearchFinalDelivery, SearchSocialPlatform, SearchSupplementReason,
+        SocialSupplementDecisionDelivery,
+    };
+    let plan = SearchDomainPlanDelivery {
+        schema: SEARCH_DOMAIN_PLAN_SCHEMA.to_owned(),
+        delivery_id: "plan-news-001".to_owned(),
+        domain: SearchDomain::News,
+        preferred_source_kinds: vec![
+            "official_publication".to_owned(),
+            "mainstream_news".to_owned(),
+        ],
+        social_platform_priority: vec![SearchSocialPlatform::Weibo, SearchSocialPlatform::X],
+        minimum_verified_sources: 2,
+        policy_version: "2026-08-15".to_owned(),
+    };
+    let supplement = SocialSupplementDecisionDelivery {
+        schema: SEARCH_SUPPLEMENT_SCHEMA.to_owned(),
+        delivery_id: "supplement-news-001".to_owned(),
+        domain_plan_ref: "plan-news-001".to_owned(),
+        required: true,
+        reasons: vec![SearchSupplementReason::InsufficientVerifiedSources],
+        platforms: vec![SearchSocialPlatform::Weibo],
+    };
+    let final_delivery = SearchFinalDelivery {
+        schema: SEARCH_FINAL_SCHEMA.to_owned(),
+        delivery_id: "final-news-001".to_owned(),
+        domain_plan_ref: "plan-news-001".to_owned(),
+        claim: SearchFinalClaimStatus::Complete,
+        summary: Some("Supported claim summary".to_owned()),
+        claims: vec![SearchClaimDelivery {
+            claim_id: "claim-news-001".to_owned(),
+            text: "Supported claim".to_owned(),
+            source_ids: vec!["src-official-1".to_owned()],
+        }],
+        unconfirmed: Vec::new(),
+        blocked_reason: None,
+    };
+    let plan_json = serde_json::to_string(&plan)?;
+    let supplement_json = serde_json::to_string(&supplement)?;
+    let final_json = serde_json::to_string(&final_delivery)?;
+    Ok(format!(
+        "{}\n{}\n{}",
+        plan_json.replace('\n', " "),
+        supplement_json.replace('\n', " "),
+        final_json.replace('\n', " "),
+    ))
+}
+
+pub fn search_evidence_contract_guidance() -> Result<String, serde_json::Error> {
+    Ok(format!(
+        "Worker search evidence delivery contract:\n\
+         - Each search delivery emits exactly one <freehand_search_delivery>...</freehand_search_delivery> block containing valid JSON only: double-quoted keys, double-quoted string values, no comments, no trailing commas, no markdown fence inside the tags.\n\
+         - Domain plan schema: {SEARCH_DOMAIN_PLAN_SCHEMA}. Required keys: delivery_id, domain, preferred_source_kinds, social_platform_priority, minimum_verified_sources, policy_version.\n\
+         - `minimum_verified_sources` is a JSON number. `domain` is one of: news, tutorial, operations, technical, policy, local_review, general. For news the first `social_platform_priority` must be `weibo`; for tutorial/operations the first must be `xhs`.\n\
+         - Supplement decision schema: {SEARCH_SUPPLEMENT_SCHEMA}. When `required` is false, `reasons` and `platforms` must both be empty. Valid reasons: missing_original_urls, insufficient_verified_sources, low_weight_coverage, single_source_only, source_conflict, insufficient_evidence, user_requested_more_sources, user_requested_social_source.\n\
+         - Final delivery schema: {SEARCH_FINAL_SCHEMA}. Required keys are schema, delivery_id, domain_plan_ref, claim, claims (always an array), unconfirmed (always an array), and either summary (for `claim=complete`) or blocked_reason (for `claim=blocked`). Each `unconfirmed` item requires both `source_id` and `reason`. Never omit `unconfirmed` and never use a non-array value for `claims` or `unconfirmed`.\n\
+         - Canonical JSON examples generated from the same contract types:\n{}\n\
+         - Never invent URLs, access results, page titles, excerpts, verified evidence, or source ids.\n\
+         - If no usable evidence is available, report the gap in the final delivery instead of fabricating sources.",
+        search_evidence_model_delivery_examples()?,
+    ))
+}
+
+pub fn web_fetch_search_discovery(
+    domain_plan_ref: &str,
+    url: &str,
+    title: &str,
+    snippet: &str,
+) -> SearchDiscoveryDelivery {
+    SearchDiscoveryDelivery {
+        schema: SEARCH_DISCOVERY_SCHEMA.to_owned(),
+        delivery_id: format!("discovery-web-fetch-{}", fnv1a_hex(url.as_bytes())),
+        discovery_channel: SearchDiscoveryChannel::WebFetch,
+        domain_plan_ref: Some(domain_plan_ref.to_owned()),
+        hosted_search_attempt: None,
+        candidates: vec![SearchDiscoveryCandidate {
+            candidate_id: format!("web-fetch-{}", fnv1a_hex(url.as_bytes())),
+            status: SearchCandidateStatus::Usable,
+            original_url: Some(url.to_owned()),
+            title: title.to_owned(),
+            snippet: snippet.chars().take(512).collect(),
+            discovered_by: Some(SearchDiscoveryChannel::WebFetch),
+            platform: None,
+            source_weight: Some(50),
+            reason: None,
+        }],
+    }
+}
 
 #[derive(Debug, Error, PartialEq, Eq)]
 pub enum SearchEvidenceValidationError {
@@ -339,6 +431,18 @@ pub fn validate_search_discovery_delivery(
                 );
             }
         }
+        SearchDiscoveryChannel::WebFetch => {
+            require_text(
+                delivery.domain_plan_ref.as_deref().unwrap_or_default(),
+                "domain_plan_ref",
+            )?;
+            if delivery.hosted_search_attempt.is_some() {
+                return invalid_search_field(
+                    "hosted_search_attempt",
+                    "must be absent for web_fetch discovery",
+                );
+            }
+        }
     }
     for candidate in &delivery.candidates {
         require_text(&candidate.candidate_id, "candidates.candidate_id")?;
@@ -597,12 +701,25 @@ pub fn validate_search_evidence_stage_append(
                             }
                         }
                         None => {
-                            // Non-sourced hosted discovery carries no domain plan and must be
-                            // the first delivery in the turn evidence stream.
-                            if !existing.is_empty() {
+                            // Non-sourced hosted discovery carries no domain plan. A single
+                            // provider response may contain more than one hosted
+                            // `server_tool_use` / `web_search_tool_result` pair (Anthropic
+                            // and OpenAI both support that shape), so each pair is emitted
+                            // as its own SearchDiscoveryDelivery. Multiple contiguous
+                            // HostedWebSearch deliveries are accepted, but no other stage
+                            // may open or re-open the non-sourced stream.
+                            let allowed_prev = match existing.last() {
+                                None => true,
+                                Some(SearchEvidenceDelivery::Discovery(previous)) => {
+                                    previous.discovery_channel
+                                        == SearchDiscoveryChannel::HostedWebSearch
+                                }
+                                _ => false,
+                            };
+                            if !allowed_prev {
                                 return invalid_search_field(
                                     "domain_plan_ref",
-                                    "non-sourced hosted discovery must be the first delivery",
+                                    "non-sourced hosted discovery must precede any other stage",
                                 );
                             }
                         }
@@ -637,6 +754,25 @@ pub fn validate_search_evidence_stage_append(
                                 "must be requested by the supplement decision",
                             );
                         }
+                    }
+                }
+                SearchDiscoveryChannel::WebFetch => {
+                    let plan = search_domain_plan(existing)?;
+                    if discovery.domain_plan_ref.as_deref() != Some(plan.delivery_id.as_str()) {
+                        return invalid_search_field(
+                            "domain_plan_ref",
+                            "must reference the persisted domain plan",
+                        );
+                    }
+                    if existing.len() != 1
+                        || existing.iter().any(|delivery| {
+                            matches!(delivery, SearchEvidenceDelivery::Discovery(_))
+                        })
+                    {
+                        return invalid_search_field(
+                            "discovery_channel",
+                            "web_fetch recovery must immediately follow the domain plan",
+                        );
                     }
                 }
             }
@@ -727,6 +863,9 @@ pub fn project_search_evidence_stage_status(
                     }
                     SearchDiscoveryChannel::CamoSocialSearch => {
                         SearchEvidenceTurnStatus::SocialDiscoveryValidated
+                    }
+                    SearchDiscoveryChannel::WebFetch => {
+                        SearchEvidenceTurnStatus::CamoVerificationRequired
                     }
                 })
             }
@@ -2053,6 +2192,26 @@ mod tests {
     use serde_json::json;
 
     #[test]
+    fn search_evidence_contract_guidance_uses_typed_examples_without_control_semantics() {
+        let guidance = search_evidence_contract_guidance().expect("contract guidance");
+
+        for schema in [
+            SEARCH_DOMAIN_PLAN_SCHEMA,
+            SEARCH_SUPPLEMENT_SCHEMA,
+            SEARCH_FINAL_SCHEMA,
+        ] {
+            assert!(guidance.contains(schema), "missing schema `{schema}`");
+        }
+        assert!(guidance.contains("\"unconfirmed\":[]"));
+        assert!(guidance.contains("\"minimum_verified_sources\":2"));
+        assert!(guidance.contains("Never invent URLs"));
+        assert!(!guidance.contains("Stage order:"));
+        assert!(!guidance.contains("current model-authored stage"));
+        assert!(!guidance.contains("retry"));
+        assert!(!guidance.contains("provider selection"));
+    }
+
+    #[test]
     fn accepts_completed_submission_with_terminal_text() {
         let decision = validate_completion_submission(&CompletionSubmission {
             claim: CompletionClaim::Complete,
@@ -3296,6 +3455,36 @@ mod tests {
     }
 
     #[test]
+    fn search_web_fetch_discovery_still_requires_camo_verification() {
+        let discovery = SearchDiscoveryDelivery {
+            schema: SEARCH_DISCOVERY_SCHEMA.to_owned(),
+            delivery_id: "discovery-web-fetch-1".to_owned(),
+            discovery_channel: SearchDiscoveryChannel::WebFetch,
+            domain_plan_ref: Some("domain-1".to_owned()),
+            hosted_search_attempt: None,
+            candidates: vec![freehand_contracts::SearchDiscoveryCandidate {
+                candidate_id: "web-fetch-1".to_owned(),
+                status: SearchCandidateStatus::Usable,
+                original_url: Some("https://example.com/news".to_owned()),
+                title: "News".to_owned(),
+                snippet: "Fetched page evidence".to_owned(),
+                discovered_by: Some(SearchDiscoveryChannel::WebFetch),
+                platform: None,
+                source_weight: Some(50),
+                reason: None,
+            }],
+        };
+
+        assert_eq!(
+            project_search_evidence_stage_status(
+                &[SearchEvidenceDelivery::DomainPlan(news_plan())],
+                &SearchEvidenceDelivery::Discovery(discovery),
+            ),
+            Ok(SearchEvidenceTurnStatus::CamoVerificationRequired)
+        );
+    }
+
+    #[test]
     fn search_verification_rejects_non_camo_or_empty_evidence() {
         validate_search_verification_delivery(&verified_source()).expect("valid source");
         let mut invalid = verified_source();
@@ -3304,6 +3493,26 @@ mod tests {
         invalid.verified_by = Some("camo".to_owned());
         invalid.evidence_excerpt = Some(" ".to_owned());
         assert!(validate_search_verification_delivery(&invalid).is_err());
+    }
+
+    #[test]
+    fn non_sourced_search_evidence_accepts_multiple_contiguous_hosted_deliveries() {
+        let mut first = hosted_discovery();
+        first.domain_plan_ref = None;
+        let mut second = hosted_discovery();
+        second.domain_plan_ref = None;
+        second.delivery_id = "hosted-2".to_owned();
+        second.candidates[0].candidate_id = "c2".to_owned();
+        second.candidates[0].original_url = Some("https://example.com/news-2".to_owned());
+
+        validate_search_evidence_stage_append(
+            &[SearchEvidenceDelivery::Discovery(first.clone())],
+            &SearchEvidenceDelivery::Discovery(second.clone()),
+        )
+        .expect("non-sourced provider response may preserve more than one hosted attempt");
+        assert_eq!(first.domain_plan_ref, None);
+        assert_eq!(second.delivery_id, "hosted-2");
+        assert_eq!(second.candidates[0].candidate_id, "c2");
     }
 
     #[test]

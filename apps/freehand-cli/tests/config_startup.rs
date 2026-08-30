@@ -16,8 +16,8 @@ use freehand_ui_protocol::{
     UiAgentLifecycleProjection, UiAgentProcessProjection, UiAgentSnapshotProjection, UiClientKind,
     UiCommand, UiCommandDispatchReceipt, UiExecutionFactKind, UiMasterPollClassificationProjection,
     UiMasterPollProjection, UiModelRequestActivity, UiModelRequestKind, UiModelRequestStatus,
-    UiProjection, UiQueryResult, UiSessionListProjection, UiSessionSummary,
-    UiSessionTranscriptProjection, UiSource, UiStreamKind, UiSubscriptionEvent,
+    UiProjection, UiQueryResult, UiSessionListPageInfo, UiSessionListPageProjection,
+    UiSessionSummary, UiSessionTranscriptProjection, UiSource, UiStreamKind, UiSubscriptionEvent,
     UiTaskBoardProjection, UiTaskDispatchCommand, UiTaskEventInboxEntryProjection,
     UiTaskEventInboxProjection, UiTaskHistoryProjection, UiTaskLedgerEventProjection,
     UiTaskListProjection, UiTaskSnapshotProjection, UiToolActivity, UiToolActivityStatus,
@@ -466,25 +466,36 @@ fn spawn_adp_session_mock_server() -> (String, thread::JoinHandle<()>) {
                     }
                     UiAdpRequest::Query {
                         request_id,
-                        query: UiCommand::QuerySessionList,
+                        query:
+                            UiCommand::QuerySessionListPage {
+                                archived: false, ..
+                            },
                     } => {
                         send_adp_response(
                             &mut socket,
                             UiAdpResponse::QueryResult {
                                 request_id,
-                                result: UiQueryResult::SessionList(UiSessionListProjection {
-                                    sessions: vec![UiSessionSummary {
-                                        session_id: SessionId::new("cli-session"),
-                                        title: None,
-                                        archived: false,
-                                        cwd: Some("/tmp/cli-session".to_owned()),
-                                        latest_turn_id: Some(TurnId::new("runtime-turn-10")),
-                                        active_turn_id: None,
-                                        turn_count: 2,
-                                        latest_status: "success".to_owned(),
-                                        latest_summary: Some("second answer".to_owned()),
-                                    }],
-                                }),
+                                result: UiQueryResult::SessionListPage(
+                                    UiSessionListPageProjection {
+                                        sessions: vec![UiSessionSummary {
+                                            session_id: SessionId::new("cli-session"),
+                                            activity_unix_seconds: 1,
+                                            title: None,
+                                            archived: false,
+                                            cwd: Some("/tmp/cli-session".to_owned()),
+                                            latest_turn_id: Some(TurnId::new("runtime-turn-10")),
+                                            active_turn_id: None,
+                                            turn_count: 2,
+                                            latest_status: "success".to_owned(),
+                                            latest_summary: Some("second answer".to_owned()),
+                                        }],
+                                        page: UiSessionListPageInfo {
+                                            has_older: false,
+                                            next_cursor: None,
+                                            unavailable_sessions: Vec::new(),
+                                        },
+                                    },
+                                ),
                             },
                         )
                         .await;

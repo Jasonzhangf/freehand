@@ -50,7 +50,7 @@
 - metadata producer writes may persist durably when the injected metadata center is ledger-backed
 - turn truth broadcasts semantic events for reasoning, text, tool, tool-result, usage, terminal, and error
 - turn lifecycle and provider-output milestones may emit debug events into `debug.core`
-- terminal result is projected from validated completion schema, not raw provider finish reason
+- terminal result is projected from provider terminal truth when no completion schema is available; validated completion schema remains the authoritative semantic summary when present
 - cancel requests become explicit cancelled terminal events through the reason owner rather than failed terminal events
 - completion schema is extracted from `<freehand_completion>...</freehand_completion>` tagged JSON before validation
 - invalid completion schema feedback identifies concrete invalid schema entries and reports non-string field types explicitly
@@ -59,8 +59,8 @@
 ## Error Mainline
 
 - invalid completion schema is rejected and reprompted with type-aware field-level feedback
-- invalid completion schema retries are capped at 3 before a failed terminal outcome is written
-- provider `finish_reason=stop` or `finish_reason=end_turn` does not end the turn by itself
+- invalid completion schema retries are capped at 3 before runtime closes with provider terminal truth when present
+- provider `finish_reason=stop` or `finish_reason=end_turn` is accepted as terminal by the turn engine; `ToolPending` remains nonterminal until a tool result round follows
 - UI/runtime cancellation is represented as `TerminalStatus::Cancelled`, not as a failed or successful terminal outcome
 - raw provider events go to debug ledger, not session truth
 - debug emission is observation-only and must not mutate turn/session truth

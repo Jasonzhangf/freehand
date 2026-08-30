@@ -10,6 +10,7 @@
     "input_attachment.prepare_provider_input",
     "input_attachment.project_to_ui",
     "session.restore",
+    "session.list_persisted_page",
     "debug_trace.read_snapshot",
     "turn.project_runtime_agent_activity"
   ],
@@ -954,6 +955,17 @@
       "caller": "RuntimeCommandDispatcher::query_runtime",
       "callee": "ReasonPersistence::restore_turn_snapshots_page_for_ui plus UiProtocolState::preserve_live_activity_on_page_refresh",
       "binding_status": "bound"
+    },
+    {
+      "step": "10t",
+      "symbol_path": "visible_session_list_page / session_list_page_request_from_ui / session_summary_to_ui",
+      "file_path": "crates/freehand-runtime/src/session_paging.rs",
+      "responsibility": "route QuerySessionListPage through runtime-owned visible-page compaction into reason summary paging, map validated protocol direction/cursor/limit, compact internal worker-task/master-lifecycle/master-timer rows before the public page boundary, refresh metadata sidecars, and project only bounded top-level metadata summaries with a cursor anchored to the last visible session; unavailable user sessions remain explicit facts and no full transcript restore occurs in the list path",
+      "input_semantic": "archived space plus validated latest/older page request",
+      "output_semantic": "UiSessionListPageProjection with ordered summaries, cursor, has-older, and unavailable ids",
+      "caller": "RuntimeCommandDispatcher::query_runtime / ADP query transport / WebUI",
+      "callee": "visible_session_list_page -> ReasonPersistence::list_persisted_sessions_page plus ui.protocol DTO mapping",
+      "binding_status": "bound"
     }
   ],
   "sync_status": [
@@ -995,6 +1007,7 @@
     "runtime Tools dashboard query bridge is covered by runtime_query_projects_tool_registry_owner_truth",
     "runtime Search dashboard query bridge is covered by runtime_query_session_search_returns_worker_hits_under_parent_session",
     "runtime Diagnostics query bridge is implemented as a thin projection route to runtime log metadata/redacted tail truth and is covered by runtime_query_projects_diagnostics_without_raw_secrets_or_absolute_home.",
+    "runtime paged session-list bridge is covered by runtime_session_list_page_avoids_full_transcript_restore, never restores full transcripts for the list path, and compacts internal-only persistence pages before projecting an empty public page or advancing past a visible user session; that boundary is locked by runtime_session_list_page_skips_internal_only_pages_without_empty_ui_page",
     "runtime CompactSessionContext dispatch bridge routes the protocol-owned mutation command to reason.rewrite-policy truth via session.restore plus apply_compaction_policy and returns an explicit hold/stale/soft/staged receipt, never fabricating a rewrite result; missing recovery truth fails dispatch explicitly; covered by runtime_compact_session_context_hold_when_no_provider_summary_payload and runtime_compact_session_context_rejects_missing_recovery_truth_explicitly"
     ,
     "runtime PullAccountConfig/PushAccountConfig dispatch bridges route through config.account-config-sync client and mirror owners and are covered by runtime_account_config_sync_pull_projects_synced_mirror, runtime_account_config_sync_pull_not_found_marks_not_configured, runtime_account_config_sync_push_conflict_persists_server_document, runtime_account_config_sync_without_relay_connection_is_unsupported, and runtime_account_config_push_without_local_config_fails_without_writing_mirror",

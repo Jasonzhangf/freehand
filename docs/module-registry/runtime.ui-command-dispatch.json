@@ -1,0 +1,37 @@
+{
+  "schema_version": 1,
+  "registry_id": "runtime.ui-command-dispatch.modules",
+  "feature_id": "runtime.ui-command-dispatch",
+  "status": "active",
+  "coverage_roots": [
+    "crates/freehand-runtime/src/session_paging.rs"
+  ],
+  "modules": [
+    {
+      "module_id": "runtime.ui-command-dispatch.bridge",
+      "owner_feature_id": "runtime.ui-command-dispatch",
+      "status": "active",
+      "owned_paths": [
+        "crates/freehand-runtime/src/session_paging.rs"
+      ],
+      "allowed_dependencies": [
+        "rust.std",
+        "freehand-contracts",
+        "freehand-reason",
+        "freehand-ui-protocol",
+        "third_party.serde-json"
+      ],
+      "forbidden_dependencies": [
+        "freehand-provider-anthropic",
+        "freehand-provider-openai",
+        "freehand-server"
+      ]
+    }
+  ],
+  "declared_edges": [
+    {"edge_id":"runtime.ui-command-dispatch.bridge.import_freehand-contracts","from_module_id":"runtime.ui-command-dispatch.bridge","to_module_id":"freehand-contracts","import_name":"freehand_contracts"},
+    {"edge_id":"runtime.ui-command-dispatch.bridge.import_freehand-reason","from_module_id":"runtime.ui-command-dispatch.bridge","to_module_id":"freehand-reason","import_name":"freehand_reason"},
+    {"edge_id":"runtime.ui-command-dispatch.bridge.import_freehand-ui-protocol","from_module_id":"runtime.ui-command-dispatch.bridge","to_module_id":"freehand-ui-protocol","import_name":"freehand_ui_protocol"},
+    {"edge_id":"runtime.ui-command-dispatch.bridge.import_third-party-serde-json","from_module_id":"runtime.ui-command-dispatch.bridge","to_module_id":"third_party.serde-json","import_name":"serde_json"}
+  ]
+}

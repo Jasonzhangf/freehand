@@ -25,6 +25,7 @@
     "front-end Home session lists expose multi-select and remove via `DeleteSession`, while SessionDetail exposes protocol-owned current-session rename and double-Esc rollback controls without storing session truth locally; archive/restore are intentionally absent from WebUI",
     "front-end selected empty-session rendering binds empty `SessionTurns` to the selected session, clears previous active turn and debug state, and suppresses generic 等待中-data system cards so new sessions do not leak prior session content",
     "front-end keeps success and failure scenario prompts as hidden slash/keyboard diagnostic affordances without rendering persistent sample buttons in the composer",
+    "front-end composer exposes a persistent lower-left image attachment entry plus a command port for built-in tools and Slash commands; compression context stays one command inside that port instead of defining the port",
     "front-end composer control strip exposes attachment buttons, preview, selected-session refresh, cwd input, model selector, slash commands, and keyboard shortcuts as UI-layer affordances over ADP",
     "front-end provider definition form submits UpsertProviderConfig through ADP without switching the selected provider; the primary/fallback selector submits UpdateAgentProviderSelection; provider test buttons submit TestProviderWebSearch; config mutations re-query QueryConfigStatus for restart-required saved projection, and WebUI never reads or writes ~/.freehand/config.toml directly or accepts raw API-key values",
     "front-end 模型组 form submits UpsertModelGroupConfig through ADP without changing provider definitions; the active group selector submits UpdateAgentModelGroupSelection; config mutations re-query QueryConfigStatus for restart-required saved projection, and WebUI never reads or writes ~/.freehand/config.toml directly or synthesizes provider/模型组 truth locally",
@@ -103,7 +104,7 @@
     "front-end script preserves the operator's manual scroll position when the transcript is not near bottom and does not call scrollIntoView from ordinary render updates",
     "front-end script renders a neutral non-animated 等待中 state when a turn has no terminal status, no 等待中 tool activity, and no protocol-projected model request; it must not invent streaming from text-only or restored inactive state",
     "front-end script renders runtime-turn-N plus later runtime-turn-N-rM round projections as chronological per-round lifecycle cards instead of merging the whole execution into one summary card; each request/model round is wrapped by one .turn-cycle-card parent whose child chat messages show user, model 等待中, tool calls, tool results, and final rows; pending/accepted receipts reconcile by submit id, every real protocol turn reconciles by session id plus turn id even when several rounds share one submit id, and terminal cards freeze by reusing the existing DOM node except for same-key ToolPending waiting_lifecycle to waiting_user classification refresh",
-    "front-end Header, session list, and Agent observation surfaces derive active session/turn identity from persisted SessionList active-turn status, selected transcript model_request truth, waiting tool activity, and loaded owner projections for open task/timer lifecycle state; a later same-session terminal transcript turn or closed owner projection invalidates an older active_turn_id or ToolPending observation; after TaskBoard/TimerList load with no open owner, ToolPending renders 等待用户选择 instead of a running lifecycle and normalizes stale visible Waiting for lifecycle detail prefixes; selected sessions never fall back to unrelated global active sessions",
+    "front-end Header, session list, and Agent observation surfaces derive active session/turn identity from UiSessionListPageProjection active-turn status, selected transcript model_request truth, waiting tool activity, and loaded owner projections for open task/timer lifecycle state; a later same-session terminal transcript turn or closed owner projection invalidates an older active_turn_id or ToolPending observation; after TaskBoard/TimerList load with no open owner, ToolPending renders 等待用户选择 instead of a running lifecycle and normalizes stale visible Waiting for lifecycle detail prefixes; selected sessions never fall back to unrelated global active sessions",
     "front-end script projects checkpoint summaries into a secondary inspector card and sends explicit rewind commands through command ingress",
     "main conversation cards render only `public_conversation`; internal reasoning, usage, raw completion schema, provider payload, and debug lines stay outside the public stream while the user prompt remains visible",
     "context statistics render current and aggregate cache-hit percentages from cache-read over normalized total-input counters with exactly three decimal places, while the Header uses explicit Chinese lifecycle labels instead of unexplained A/R/B/C abbreviations",
@@ -390,11 +391,11 @@
     },
     {
       "step": "11h",
-      "symbol_path": "internalRuntimeSessionId / topLevelPersistedSessions / renderMobileHomeDashboard / mobileHomeHistorySessions / compareSessionSummaryForDisplay / sessionSummaryTimeRank / taskKeepsSessionLifecycleRunning / activeSessionsForHome / renderMobileHomeActiveList / renderMobileHomeSessionList / mobileHomeHistorySessionNode / mobileHomeSessionButton / mobileHomeSessionMeta / mobileHomeSessionTimeLabel / renderHomeDashboardSurface / createHomeDashboardModel / createHomeSessionRow / renderToolsRegistrySurface / renderTimerDashboardSurface / createAdpClient / renderSettingsNavigation / openSettingsPage",
+    "symbol_path": "renderMobileHomeDashboard / mobileHomeHistorySessions / taskKeepsSessionLifecycleRunning / activeSessionsForHome / renderMobileHomeActiveList / renderMobileHomeSessionList / mobileHomeHistorySessionNode / mobileHomeSessionButton / mobileHomeSessionMeta / mobileHomeSessionTimeLabel / renderSettingsNavigation / openSettingsPage",
       "file_path": "apps/freehand-server/assets/webui/legacy-monolith.js",
-      "responsibility": "implement Phase 1 mobile UI tree presentation only: exclude internal 运行时 sessions from global session projections, render the home dashboard as exactly two page sections, 正在运行 plus persisted 历史会话, with running/static list classes, disjoint running/history session ids, every live session visible without a fixed cap, and no drawer or floating session overlay as the main session list; keep Timer and New Session as corner-entry surfaces outside the home body, split Home/Tools/Timer rendering into own surface modules plus a dedicated ADP client shell, and render a settings root whose first level is only 模型, 智能体运行时, 连接, 可观测性, 外观, and 关于 while 模型服务配置, provider switching and strategy, 模型组, token usage, skills, memory, MCP, env vars, 运行时 dirs, daemon connection, Worker capability, Android update/permissions, and logs remain child pages or rows",
-      "input_semantic": "SessionList projection plus selected-session/task projections plus settings nav/back click state",
-      "output_semantic": "global session list without worker-task, master-lifecycle, or master-timer entries; mobile home 正在运行 list excluding blocked-only stale lifecycle sessions; mobile home persisted 历史会话 list ordered by display time with no duplicate ids from the running list; no absolute/fixed session tree overlay; modular Home/Tools/Timer surface modules plus ADP client shell; settings root without provider/model/运行时/detail controls, duplicate implementation audit tree, or extra settings status card; drilldown pages with small hollow green 权威真源, orange partial, and red placeholder status markers",
+    "responsibility": "implement Phase 1 mobile UI tree presentation only: consume the runtime-filtered top-level session projection without browser-side internal-session filtering, render the home dashboard as exactly two page sections, 正在运行 plus persisted 历史会话, preserve owner-backed activity order without client sorting, keep running/history ids disjoint, show every live session without a fixed cap, and use no drawer or floating session overlay as the main session list; keep Timer and New Session as corner-entry surfaces outside the home body, split Home/Tools/Timer rendering into own surface modules plus a dedicated ADP client shell, and render a settings root whose first level is only 模型, 智能体运行时, 连接, 可观测性, 外观, and 关于 while model/provider/model-group/observability/connection/Android/log details remain child pages or rows",
+      "input_semantic": "runtime-filtered SessionListPage projection plus selected-session/task projections plus settings nav/back click state",
+      "output_semantic": "runtime-filtered top-level session list rendered as owner-provided; mobile home 正在运行 list excluding blocked-only stale lifecycle sessions; mobile home persisted 历史会话 list ordered by display time with no duplicate ids from the running list; no absolute/fixed session tree overlay; modular Home/Tools/Timer surface modules plus ADP client shell; settings root without provider/model/运行时/detail controls, duplicate implementation audit tree, or extra settings status card; drilldown pages with small hollow green 权威真源, orange partial, and red placeholder status markers",
       "caller": "WebUI shell",
       "callee": "ui.protocol projections plus reviewed prototype contract",
       "binding_status": "bound"
@@ -678,6 +679,17 @@
       "binding_status": "bound"
     },
     {
+      "step": "11r",
+      "symbol_path": "refreshSessions / appendSessionListPage / loadOlderSessionListPage / scheduleSessionListPrefetch / renderSessions",
+      "file_path": "apps/freehand-server/assets/webui/legacy-monolith.js",
+      "responsibility": "query the owner-backed Latest session-list page with limit 24, append explicit Older pages through the returned cursor, prefetch only when idle, expose 加载更早, preserve request ordering, filter top-level persisted sessions without timestamp/sort inference, and keep partial list absence from proving deletion; explicit delete receipts remain deletion evidence until refresh",
+      "input_semantic": "UiSessionListPageProjection, operator load/prefetch/delete intent, and current page state",
+      "output_semantic": "bounded Home/drawer history projection with an explicit older control, stale-response rejection, unavailable-session facts not blocking other rows, and no full transcript restore for listing",
+      "caller": "WebUI startup/foreground/session mutation callbacks",
+      "callee": "QuerySessionListPage through generated ADP constructors",
+      "binding_status": "bound"
+    },
+    {
       "step": "11i-module-timer-view",
       "symbol_path": "renderTimerDashboardSurface",
       "file_path": "apps/freehand-server/assets/webui/surfaces/timer-dashboard/view.js",
@@ -778,13 +790,24 @@
       "target_resource": "ui_projection",
       "resource_operation": "ui_projection.bind_protocol_call",
       "binding_status": "bound"
+    },
+    {
+      "step": "11h-adp-verifier-shared",
+      "symbol_path": "adpVerifierRequest / requireQueryVariant / requireSessionListPage",
+      "file_path": "scripts/lib/adp-verifier-client.mjs",
+      "responsibility": "own verifier-side ADP v4 auth/handshake/request state machine and strict SessionListPage observation",
+      "input_semantic": "endpoint/token options plus query or command payload and ADP response frame",
+      "output_semantic": "query result, command receipt, typed failure rejection, or validated SessionListPage projection",
+      "caller": "app.webui-smoke online verifier wrappers",
+      "callee": "daemon /adp WebSocket",
+      "binding_status": "bound"
     }
   ],
   "sync_status": [
     "app boundary now renders a usable WebUI shell instead of a minimal text-only smoke",
     "theme code is split into `assets/theme.css` and `assets/theme.js`",
     "WebUI layout and protocol-consumer code is split into `assets/webui.css` and `assets/webui.js`",
-    "WebUI shell now advertises data-adp-endpoint=\"/adp\"; the front-end opens a WebSocket, sends protocol_version=3 handshake first, waits for handshake_accepted, and uses user-facing 连接/服务 wording for failures",
+    "WebUI shell now advertises data-adp-endpoint=\"/adp\"; the front-end opens a WebSocket, sends protocol_version=4 handshake first, waits for handshake_accepted, and uses user-facing 连接/服务 wording for failures",
     "WebUI success/failure diagnostic prompts remain available through slash commands and shortcuts, while persistent Success/Failure composer buttons are intentionally absent",
     "WebUI shell now exposes composer controls for file, image, video, preview, selected-session refresh, and read-only model selection",
     "WebUI layout shape classifier and CSS shape rules are landed for phone portrait, tall phone, phone landscape, tablet portrait, tablet landscape, foldable unfolded, and desktop large",
@@ -814,6 +837,7 @@
     "WebUI 工具面板 now queries QueryToolRegistry, renders owner projection rows and guidance, proves no local web_search function row, and keeps session-specific tool turns in conversation rendering instead of this registry/设置 surface",
     "WebUI 搜索面板 now queries QuerySessionSearch, renders owner persisted session rows plus nested 工作器子项 matches, and keeps global session history free of worker/subagent temporary sessions",
     "generated wiki must be regenerated from `docs/mainline-calls/app.webui-smoke.json` when this function-map truth changes",
+    "global session history now consumes bounded QuerySessionListPage projections and does not infer ordering or deletion from client-side timestamps or partial absence",
     "WebUI 取消 button and Escape key now send CancelTurn through protocol command ingress instead of only clearing local input",
     "WebUI cancel path now covers the submit-in-flight window with CancelLatestActiveTurn",
     "scripts/verify-webui-stop-continue-online.mjs proves fixed-session provider retry renders before 取消, cancellation materializes ADP cancelled truth and clears browser live state before retry backoff completes, the cancelled card remains visible, a later prompt appends a distinct Success turn in the same persisted session, and no random persisted session id is created",

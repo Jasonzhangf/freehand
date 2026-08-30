@@ -274,9 +274,7 @@ fn yaml_mapping_value<'a>(
 }
 
 pub(super) fn git_stdout(repository: &Path, args: &[&str]) -> Result<String, String> {
-    let output = Command::new("git")
-        .arg("-C")
-        .arg(repository)
+    let output = isolated_git_command(repository)
         .args(args)
         .output()
         .map_err(|err| format!("run git in {}: {err}", repository.display()))?;

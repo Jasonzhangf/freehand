@@ -15,7 +15,7 @@ use std::process::{Command, Stdio};
 use std::thread;
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
-use freehand_blocks::render_tool_arguments_json;
+use freehand_blocks::{render_tool_arguments_json, web_fetch_search_discovery};
 use freehand_contracts::{
     ReasonReq04ToolCall, SearchEvidenceDelivery, ToolArgument, ToolPreviewChangeKind,
     ToolPreviewContract, ToolPreviewFileChange,
@@ -758,6 +758,7 @@ pub fn reasonix_aligned_builtin_specs() -> Vec<BuiltinToolSpec> {
                 "type": "object",
                 "properties": {
                     "url": {"type": "string", "description": "Absolute http:// or https:// URL to fetch."},
+                    "domain_plan_ref": {"type": "string", "description": "Sourced-search recovery only: persisted search domain plan delivery id."},
                     "timeout_seconds": {"type": "integer", "minimum": 1, "maximum": 60},
                     "limit": {"type": "integer", "minimum": 1, "maximum": 64000}
                 },
@@ -1361,6 +1362,20 @@ fn execute_web_fetch(arguments: &[ToolArgument]) -> Result<ToolExecutionOutput, 
             ),
         });
     }
+    let discovery = arguments
+        .iter()
+        .find(|argument| argument.name == "domain_plan_ref")
+        .and_then(|argument| argument.value.as_str())
+        .filter(|domain_plan_ref| !domain_plan_ref.trim().is_empty())
+        .map(|domain_plan_ref| {
+            web_fetch_search_discovery(
+                domain_plan_ref,
+                url,
+                url,
+                snippet.lines().next().unwrap_or(&snippet),
+            )
+        });
+    let discovery = discovery.map(SearchEvidenceDelivery::Discovery);
     Ok(ToolExecutionOutput {
         text: format!(
             "Fetched `{url}` status={} content_type={content_type} bytes={}{}\n{}",
@@ -1369,7 +1384,7 @@ fn execute_web_fetch(arguments: &[ToolArgument]) -> Result<ToolExecutionOutput, 
             if truncated { " truncated=true" } else { "" },
             snippet
         ),
-        search_evidence: None,
+        search_evidence: discovery,
     })
 }
 fn execute_read_file(arguments: &[ToolArgument]) -> Result<ToolExecutionOutput, ToolRegistryError> {

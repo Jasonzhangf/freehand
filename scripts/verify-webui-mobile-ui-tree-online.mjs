@@ -2,6 +2,7 @@ import { spawn } from 'node:child_process';
 import fs from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
+import { adpVerifierRequest } from './lib/adp-verifier-client.mjs';
 
 const chromePath = process.env.FREEHAND_WEBUI_CHROME ||
   '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
@@ -9,7 +10,7 @@ const debugPort = Number.parseInt(process.env.FREEHAND_WEBUI_DEBUG_PORT || '9247
 const baseUrl = normalizedBaseUrl(process.env.FREEHAND_WEBUI_BASE_URL || 'http://127.0.0.1:4042/');
 const adpUrl = process.env.FREEHAND_WEBUI_ADP_URL || adpUrlFromBaseUrl(baseUrl);
 const adpAuthToken = process.env.FREEHAND_ADP_AUTH_TOKEN || '';
-const adpProtocolVersion = 3;
+const adpProtocolVersion = 4;
 const runId = `mobile-ui-tree-phase1-${new Date().toISOString().replace(/[-:.]/g, '').slice(0, 15)}-${process.pid}`;
 const artifactDir = path.join(process.cwd(), 'artifacts', 'webui-online', runId);
 let assetVersion = '';
@@ -1452,50 +1453,14 @@ async function adpQueryVariant(query, variant, timeoutMs = 30_000) {
 }
 
 function adpRequest(kind, payloadKey, payload, timeoutMs, targetAdpUrl = adpUrl) {
-  const socket = new WebSocket(
-    targetAdpUrl,
-    adpAuthToken ? { headers: { Authorization: `Bearer ${adpAuthToken}` } } : undefined,
-  );
-  const requestId = `${kind}-${Date.now()}-${Math.random().toString(36).slice(2)}`;
-  const handshakeId = `${requestId}-handshake`;
-  let handshakeAccepted = false;
-  return new Promise((resolve, reject) => {
-    const timer = setTimeout(() => {
-      socket.close();
-      reject(new Error(`ADP ${kind} timeout`));
-    }, timeoutMs);
-    socket.addEventListener('open', () => socket.send(JSON.stringify({
-      protocol_version: adpProtocolVersion,
-      kind: 'handshake',
-      request_id: handshakeId,
-      client_name: 'freehand-mobile-verifier',
-      capabilities: ['query', 'command', 'subscribe'],
-    })));
-    socket.addEventListener('message', (event) => {
-      const message = JSON.parse(event.data);
-      if (!handshakeAccepted) {
-        if (message.kind !== 'handshake_accepted' || message.request_id !== handshakeId) {
-          clearTimeout(timer);
-          socket.close();
-          reject(new Error(`ADP handshake failed: ${JSON.stringify(message)}`));
-          return;
-        }
-        handshakeAccepted = true;
-        socket.send(JSON.stringify({ protocol_version: adpProtocolVersion, kind, request_id: requestId, [payloadKey]: payload }));
-        return;
-      }
-      if (message.request_id !== requestId) return;
-      clearTimeout(timer);
-      socket.close();
-      if (message.kind === 'failure') {
-        reject(new Error(message.failure?.message || message.error?.message || JSON.stringify(message.failure || message.error || message)));
-        return;
-      }
-      resolve(message.result || message.receipt || message);
-    });
-    socket.addEventListener('error', (event) => {
-      clearTimeout(timer);
-      reject(new Error(event.message || `ADP ${kind} socket error`));
-    });
+  return adpVerifierRequest({
+    url: targetAdpUrl,
+    authToken: adpAuthToken,
+    kind,
+    payloadKey,
+    payload,
+    timeoutMs,
+    clientName: 'freehand-mobile-verifier',
+    capabilities: ['query', 'command', 'subscribe'],
   });
 }

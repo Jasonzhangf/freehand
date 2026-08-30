@@ -666,11 +666,12 @@ Non-violation pending items live in `docs/architecture/architecture-gaps.md`. Ea
 ### `app.webui-smoke`
 
 - owner: `apps/freehand-server`
-- allowed_paths: `apps/freehand-server/**`, `crates/freehand-ui-protocol/**`, `scripts/verify-webui-foundation-contracts.mjs`, `scripts/verify-webui-mobile-ui-tree-online.mjs`, `scripts/verify-webui-image-attachment-online.mjs`, `docs/function-maps/**`, `docs/testing/**`, `docs/design/**`, `docs/goals/**`, `docs/mainline-calls/**`, `docs/wiki/**`, `docs/resource-maps/core.json`
+- allowed_paths: `apps/freehand-server/**`, `crates/freehand-ui-protocol/**`, `scripts/verify-webui-foundation-contracts.mjs`, `scripts/lib/adp-verifier-client.mjs`, `scripts/lib/adp-verifier-client.test.mjs`, `scripts/verify-model-group-ui-online.mjs`, `scripts/verify-provider-hosted-web-search-online.mjs`, `scripts/verify-provider-recovery-webui-online.mjs`, `scripts/verify-provider-registry-ui-online.mjs`, `scripts/verify-provider-web-search-settings-ui-online.mjs`, `scripts/verify-web-fetch-tool-online.mjs`, `scripts/verify-webui-ambiguous-submit-recovery.mjs`, `scripts/verify-webui-diagnostics-online.mjs`, `scripts/verify-webui-image-attachment-online.mjs`, `scripts/verify-webui-live-tool-render-online.mjs`, `scripts/verify-webui-mobile-ui-tree-online.mjs`, `scripts/verify-webui-new-session-online.mjs`, `scripts/verify-webui-path-diagnostic-online.mjs`, `scripts/verify-webui-session-restore-error-exit-online.mjs`, `scripts/verify-webui-session-search-online.mjs`, `scripts/verify-webui-stop-continue-online.mjs`, `scripts/verify-webui-timer-dashboard-online.mjs`, `scripts/verify-webui-tools-registry-online.mjs`, `scripts/verify-worker-recovered-history-online.mjs`, `scripts/webui_verify_online.mjs`, `docs/function-maps/**`, `docs/testing/**`, `docs/design/**`, `docs/goals/**`, `docs/mainline-calls/**`, `docs/wiki/**`, `docs/resource-maps/core.json`
 - forbidden_paths: `crates/freehand-runtime/**`, `crates/freehand-reason/**`, `crates/freehand-node/**`, `crates/freehand-config/**`, `crates/freehand-provider-*/**` except consuming already-owned UI protocol projections
 - required_checks:
   - `cargo test -p freehand-server`
   - `node scripts/verify-webui-foundation-contracts.mjs`
+  - `make session-paging-online`
   - `cargo run -p xtask -- mainlines check`
   - `cargo run -p xtask -- gates check`
 - required_white_box_tests:
@@ -1241,6 +1242,7 @@ Non-violation pending items live in `docs/architecture/architecture-gaps.md`. Ea
   - task query DTO validation and runtime-query-port shape tests
   - subscription selector and match tests
   - public turn projection tests
+  - paged session list command validation positive/reverse tests
   - client-specific projection gating tests
   - debug-state projection and receiver-drain tests
 - required_module_black_box_tests:
@@ -1424,6 +1426,7 @@ Non-violation pending items live in `docs/architecture/architecture-gaps.md`. Ea
   - `cargo test -p freehand-cli`
 - required_white_box_tests:
   - session snapshot render/load tests
+  - session summary page order, cursor, metadata-only, archive, and unavailable-session tests
   - persistence cursor serialization tests
   - reason-ledger sequence ordering tests
   - snapshot-plus-tail recovery tests
@@ -1670,6 +1673,7 @@ Non-violation pending items live in `docs/architecture/architecture-gaps.md`. Ea
   - resume-turn unsupported dispatch tests
   - runtime task query bridge tests
   - runtime ui-state projection update tests
+  - runtime paged session list bridge avoids full transcript restore
   - Worker-selected identity, Master-only command rejection, and typed activity
     projection merge tests
 - required_module_black_box_tests:

@@ -1994,6 +1994,12 @@ mod tests {
         assert!(html.contains("id=\"cwd-input\""));
         assert!(html.contains("id=\"model-selector\""));
         assert!(html.contains("id=\"attachment-tray\""));
+        assert!(html.contains("class=\"composer-input-shell\""));
+        assert!(html.contains("id=\"composer-command-menu-button\""));
+        assert!(html.contains("id=\"composer-command-menu\""));
+        assert!(html.contains("data-composer-command=\"/help\""));
+        assert!(html.contains("data-composer-action=\"tools\""));
+        assert!(html.contains("data-composer-action=\"compact\""));
         assert!(!html.contains("work-context-tags"));
         assert!(!html.contains("topbar-strip"));
         assert!(!html.contains("slave-drawer"));
@@ -2140,6 +2146,7 @@ mod tests {
         assert!(root_body.contains("id=\"open-timer-dashboard-button\""));
         assert!(root_body.contains("id=\"open-tools-dashboard-button\""));
         assert!(root_body.contains("id=\"mobile-new-entry-button\""));
+        assert!(root_body.contains("id=\"open-session-search-button\""));
         assert!(root_body.contains("class=\"mobile-bottom-entries\""));
         assert!(root_body.contains("id=\"mobile-home-dashboard\""));
         assert!(root_body.contains("id=\"mobile-home-active-list\""));
@@ -2392,8 +2399,29 @@ mod tests {
         assert!(webui_css_body.contains(".path-preset-button"));
         assert!(webui_css_body.contains("body[data-layout-shape=\"phone_portrait\"][data-composer-focused=\"true\"] .composer-card"));
         assert!(webui_css_body.contains("body[data-layout-shape=\"phone_portrait\"][data-composer-focused=\"true\"] .composer-control-strip"));
+        assert!(webui_css_body.contains(".composer-input-shell"));
+        assert!(webui_css_body.contains(".composer-attach-image"));
+        assert!(webui_css_body.contains(".composer-command-menu"));
+        assert!(
+            webui_css_body
+                .contains("body[data-layout-shape=\"phone_portrait\"] .composer-command-menu")
+        );
+        assert!(
+            webui_css_body
+                .contains("body[data-layout-shape=\"tall_phone\"] .composer-command-menu")
+        );
+        assert!(
+            webui_css_body
+                .contains("body[data-layout-shape=\"tablet_portrait\"] .composer-command-menu")
+        );
+        assert!(webui_css_body.contains("position: fixed;\n  left: 0;\n  right: 0;\n  bottom: 0;"));
+        assert!(
+            webui_css_body
+                .contains("body[data-layout-shape=\"phone_portrait\"] .composer-command-strip")
+        );
+        assert!(webui_css_body.contains("body[data-layout-shape=\"phone_portrait\"][data-composer-focused=\"true\"] .composer-command-strip"));
         assert!(webui_css_body.contains("max-height: min(20svh, 158px)"));
-        assert!(webui_css_body.contains("max-height: 132px"));
+        assert!(webui_css_body.contains("max-height: min(30svh, 208px)"));
         assert!(
             webui_css_body.contains("padding-bottom: calc(112px + env(safe-area-inset-bottom))")
         );
@@ -2454,6 +2482,24 @@ mod tests {
             .expect("legacy response");
         assert_eq!(legacy.status(), StatusCode::OK);
         let legacy_body = legacy.text().await.expect("legacy body");
+        assert!(
+            legacy_body.contains("function requireSessionListPageProjection"),
+            "legacy WebUI must expose the SessionListPage projection validator",
+        );
+        assert!(
+            legacy_body.contains(
+                "cursor !== undefined && cursor !== null && typeof cursor !== \"string\"",
+            ),
+            "legacy SessionListPage validator must accept omitted/undefined next_cursor",
+        );
+        assert!(
+            legacy_body.contains("!Array.isArray(page.unavailable_sessions)"),
+            "legacy SessionListPage validator must require unavailable_sessions array",
+        );
+        assert!(
+            legacy_body.contains("(page.has_older && typeof cursor !== \"string\")"),
+            "legacy SessionListPage validator must require a cursor when older pages exist",
+        );
         assert!(legacy_body.contains("function renderMobileHomeDashboard"));
         assert!(legacy_body.contains("function mobileHomeSessionButton"));
         assert!(legacy_body.contains("renderHomeDashboardSurface"));
@@ -2475,6 +2521,9 @@ mod tests {
         assert!(legacy_body.contains("adpCommandOf"));
         assert!(legacy_body.contains("generated/adp-protocol.js"));
         assert!(legacy_body.contains("dispatchWebUiEdge"));
+        assert!(legacy_body.contains("function setComposerCommandMenuOpen"));
+        assert!(legacy_body.contains("composerCommandMenuButton"));
+        assert!(legacy_body.contains("data-composer-action"));
         assert!(legacy_body.contains("__freehandOpenAndroidComposerForReadyHost"));
         assert!(legacy_body.contains("openAndroidComposerForReadyHost"));
         assert!(legacy_body.contains("scheduleAndroidComposerFocus"));
@@ -2644,7 +2693,7 @@ mod tests {
         let adp_protocol_body = adp_protocol.text().await.expect("adp-protocol body");
         assert!(adp_protocol_body.contains("export function adpQueryOf"));
         assert!(adp_protocol_body.contains("export function adpCommandOf"));
-        assert!(adp_protocol_body.contains("\"protocol_version\": 3"));
+        assert!(adp_protocol_body.contains("\"protocol_version\": 4"));
         assert!(adp_protocol_body.contains("QueryConfigStatus"));
         assert!(adp_protocol_body.contains("CreateSession"));
 
@@ -2731,6 +2780,18 @@ mod tests {
         assert!(legacy_body.contains("QueryWorkerControl"));
         assert!(legacy_body.contains("function renderMobileHomeDashboard"));
         assert!(legacy_body.contains("function mobileHomeSessionButton"));
+        let session_entry_start = legacy_body
+            .find("if (openSessionDrawerButton)")
+            .expect("mobile session entry handler");
+        let session_entry_end = legacy_body[session_entry_start..]
+            .find("if (mobileNewEntryButton)")
+            .map(|offset| session_entry_start + offset)
+            .expect("mobile new entry handler after session entry");
+        let session_entry_handler = &legacy_body[session_entry_start..session_entry_end];
+        assert!(
+            session_entry_handler.contains("setMobileDrawer(\"sessions\")"),
+            "mobile session entry must open the sessions drawer"
+        );
         assert!(legacy_body.contains("function renderToolsDashboard"));
         assert!(legacy_body.contains("function renderTimerDashboard"));
         assert!(legacy_body.contains("function renderSettingsDiagnostics"));

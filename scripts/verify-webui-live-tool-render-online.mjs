@@ -4,6 +4,7 @@ import fss from 'node:fs';
 import http from 'node:http';
 import os from 'node:os';
 import path from 'node:path';
+import { adpVerifierRequest, requireSessionListPage } from './lib/adp-verifier-client.mjs';
 
 const repo = process.cwd();
 const home = process.env.HOME;
@@ -13,6 +14,7 @@ const envPath = process.env.FREEHAND_LIVE_TOOL_RENDER_ENV || path.join(runtimeHo
 const cli = process.env.FREEHAND_LIVE_TOOL_RENDER_CLI || path.join(home, '.local/bin/freehand-cliS');
 const baseUrl = normalizedBaseUrl(process.env.FREEHAND_LIVE_TOOL_RENDER_BASE_URL || 'http://127.0.0.1:4042/');
 const adpUrl = process.env.FREEHAND_LIVE_TOOL_RENDER_ADP_URL || adpUrlFromBaseUrl(baseUrl);
+const adpAuthToken = process.env.FREEHAND_ADP_AUTH_TOKEN || '';
 const fixedSessionId = process.env.FREEHAND_LIVE_TOOL_RENDER_SESSION || 'webui-live-tool-render-fixed';
 const fixturePort = Number.parseInt(process.env.FREEHAND_LIVE_TOOL_RENDER_FIXTURE_PORT || '18139', 10);
 const debugPort = Number.parseInt(process.env.FREEHAND_LIVE_TOOL_RENDER_DEBUG_PORT || '9241', 10);
@@ -518,13 +520,23 @@ function finalCompletionBody() {
 }
 
 async function ensureFixedSession() {
-  const activeList = await adpQuery('QuerySessionList');
-  const activeSessions = (activeList && activeList.SessionList && activeList.SessionList.sessions) || [];
+  const activeList = await adpQuery({
+    QuerySessionListPage: {
+      archived: false,
+      page: { direction: 'Latest', cursor: null, limit: 100 },
+    },
+  });
+  const activeSessions = requireSessionListPage(activeList, 'active session list').sessions;
   if (activeSessions.some((session) => session.session_id === fixedSessionId)) {
     return;
   }
-  const archivedList = await adpQuery('QueryArchivedSessionList');
-  const archivedSessions = (archivedList && archivedList.SessionList && archivedList.SessionList.sessions) || [];
+  const archivedList = await adpQuery({
+    QuerySessionListPage: {
+      archived: true,
+      page: { direction: 'Latest', cursor: null, limit: 100 },
+    },
+  });
+  const archivedSessions = requireSessionListPage(archivedList, 'archived session list').sessions;
   if (archivedSessions.some((session) => session.session_id === fixedSessionId)) {
     await adpCommand({ RestoreSession: { session_id: fixedSessionId } });
     return;
@@ -875,41 +887,13 @@ async function adpCommand(command) {
 }
 
 function adpRequest(kind, payloadKey, payload) {
-  const socket = new WebSocket(adpUrl);
-  const requestId = `${kind}-${Date.now()}-${Math.random().toString(36).slice(2)}`;
-  return new Promise((resolve, reject) => {
-    const timer = setTimeout(() => {
-      socket.close();
-      reject(new Error(`ADP ${kind} timeout`));
-    }, 20_000);
-    socket.addEventListener('open', () => {
-      socket.send(JSON.stringify({ kind, request_id: requestId, [payloadKey]: payload }));
-    });
-    socket.addEventListener('message', (event) => {
-      const message = JSON.parse(event.data);
-      if (message.request_id !== requestId) {
-        return;
-      }
-      clearTimeout(timer);
-      socket.close();
-      if (message.kind === 'failure') {
-        reject(new Error((message.failure && (message.failure.message || message.failure.code)) || 'ADP failure'));
-        return;
-      }
-      if (message.kind === 'query_result') {
-        resolve(message.result);
-        return;
-      }
-      if (message.kind === 'command_receipt') {
-        resolve(message.receipt);
-        return;
-      }
-      reject(new Error(`unexpected ADP ${kind} response: ${message.kind}`));
-    });
-    socket.addEventListener('error', () => {
-      clearTimeout(timer);
-      reject(new Error(`ADP ${kind} socket error`));
-    });
+  return adpVerifierRequest({
+    url: adpUrl,
+    authToken: adpAuthToken,
+    kind,
+    payloadKey,
+    payload,
+    clientName: 'freehand-live-tool-render-verifier',
   });
 }
 
