@@ -1,0 +1,33 @@
+{
+  "$schema": "https://appsdk.local/contracts/records/evidence-record.schema.json",
+  "evidence_id": "ev-v2-contracts-m1a-r2-negative-20260831",
+  "issue_id": "v2-contracts-m1a-20260831",
+  "experiment_id": "v2-contracts-m1a-20260831",
+  "phase": "negative_intervention",
+  "kind": "negative_test",
+  "source_commit": "44a8111190de5acee5b2407e8c81a181dca726e4",
+  "artifact_hash": "sha256:34a850ac60a64d3cf9d87eca8fce3f1d7f1076d1836cd8712f1b37df376a98a7",
+  "execution_surface": "deployed_blackbox",
+  "environment_id": "local-freehand-v2-contracts-m1a-r2-20260831",
+  "entrypoint": "temporary installed v2-contracts-public NDJSON stdin/stdout probe",
+  "scope": {
+    "module_id": "v2-contracts",
+    "feature_id": "v2-contracts",
+    "entrypoint": "/tmp/freehand-v2-contracts-m1a-r2/v2-contracts-public"
+  },
+  "producer": {
+    "adapter": "installed-artifact-probe",
+    "identity": "freehand-v2-contracts-m1a-r2-deployed-probe"
+  },
+  "result": "pass",
+  "confidence": 0.99,
+  "confidence_rationale": "The deployed current candidate rejected an empty correlation id with an explicit error and emitted no accepted command result.",
+  "created_at": "2026-08-31T14:00:26Z",
+  "expires_at": "2026-09-01T14:00:26Z",
+  "input_hashes": [
+    "sha256:6a1d33d1cf9f08bfc267a6fd921b527112df5a6a54b4eaaff80149b69b437488",
+    "sha256:4c891336bb97b45f4da488c4b53851b3f7e5333e35a61547fe3e1962a52d0b41",
+    "git:44a8111190de5acee5b2407e8c81a181dca726e4"
+  ],
+  "scope_hash": "sha256:28361473065c201b3ac961acbfd5fe44ce95a949fa899a44810a8ea653c661ac"
+}
