@@ -237,6 +237,12 @@ pub fn validate_command(command: &UiCommand) -> Result<(), UiProtocolError> {
         UiCommand::QuerySessionSearch { query, .. } if query.trim().is_empty() => {
             Err(UiProtocolError::EmptyUserInput)
         }
+        UiCommand::QueryMemory {
+            query: Some(query), ..
+        } if query.trim().is_empty() => Err(UiProtocolError::EmptyUserInput),
+        UiCommand::QueryMemory {
+            limit: Some(limit), ..
+        } if !(1..=100).contains(limit) => Err(UiProtocolError::InvalidMemoryQueryLimit),
         UiCommand::QuerySessionTurnsPage { session_id, page }
             if session_id.as_str().trim().is_empty() =>
         {
@@ -638,6 +644,7 @@ pub fn protocol_rejection(err: UiProtocolError) -> UiProtocolRejection {
         UiProtocolError::StreamKindMismatch => "stream_kind_mismatch",
         UiProtocolError::InvalidSessionListPageLimit => "invalid_session_list_page_limit",
         UiProtocolError::InvalidSessionListPageCursor => "invalid_session_list_page_cursor",
+        UiProtocolError::InvalidMemoryQueryLimit => "invalid_memory_query_limit",
     };
     UiProtocolRejection {
         code: code.to_owned(),

@@ -44,6 +44,7 @@ pub use persistence::{
     ReasonPersistenceError, ReasonSessionLatestStatus, ReasonSessionListCursor,
     ReasonSessionListPage, ReasonSessionListPageRequest, ReasonTurnPage, ReasonTurnPageDirection,
     ReasonTurnPageRequest, RestoredReasonSession, SessionRollbackMarker, ToolResultMemoryEntry,
+    ToolResultMemoryPage, ToolResultMemoryQuery, ToolResultMemorySort,
 };
 pub use rewrite_runtime::{
     CompactionPolicyOutcome, CompactionPolicyRequest, CompactionRewritePayload,

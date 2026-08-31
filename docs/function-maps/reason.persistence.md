@@ -10,6 +10,8 @@
   - `session.list_persisted`
   - `session.list_persisted_page`
   - `runtime_command.append_tool_result`
+  - `memory.query_tool_results`
+  - `memory.migrate_legacy_tool_results`
 - owner entry symbols:
   - `ReasonPersistence::record_turn_started`
   - `ReasonPersistence::record_provider_output_applied`
@@ -20,6 +22,7 @@
   - `ReasonPersistence::restore`
   - `ReasonPersistence::append_tool_result_memory`
   - `ReasonPersistence::load_tool_result_memory`
+  - `ReasonPersistence::query_tool_result_memory`
   - `ReasonPersistence::restore_turn_start_snapshots`
   - `ReasonPersistence::restore_turn_snapshots_for_ui`
   - `ReasonPersistence::restore_turn_snapshots_page_for_ui`
@@ -46,6 +49,8 @@
   - `session.list_persisted`
   - `session.list_persisted_page`
   - `runtime_command.append_tool_result` (`runtime_command` -> `memory`)
+  - `memory.query_tool_results` (`memory` -> `ui_projection`)
+  - `memory.migrate_legacy_tool_results` (`memory` -> `memory`)
 - forbidden shortcuts:
   - UI projection must not synthesize persisted sessions from turn-only or worker sessions.
   - Session truth must not be recovered from provider raw ledgers or UI sidecars.
@@ -201,6 +206,9 @@
 | 17a | `ReasonPersistence::restore_turn_snapshots_page_for_ui` | `crates/freehand-reason/src/persistence.rs` | select bounded newest or strictly older effective UI snapshots for selected-session incremental transcript restore | session id + validated latest/older page request | bounded ordered turn page plus has-older and owner-issued oldest/newest cursor facts, or explicit invalid limit/cursor/recovery error | runtime `QuerySessionTurnsPage` bridge | persistence owner | bound |
 | 18 | `ReasonPersistence::list_persisted_sessions` | `crates/freehand-reason/src/persistence.rs` | expose derived persisted session index rows and session metadata sidecar truth for UI-safe search/bootstrap projection without reading provider raw ledgers or treating worker transcripts as global sessions | session index sidecar plus metadata sidecar | persisted session index/metadata rows for runtime search and startup-turn restore | runtime.ui-command-dispatch `QuerySessionSearch`; runtime bootstrap/turn-projection restore consumes the same owner API without making it a public list fallback | persistence owner | bound |
 | 18p | `ReasonPersistence::list_persisted_sessions_page` / `load_or_migrate_session_summary_index` | `crates/freehand-reason/src/persistence.rs` | maintain the versioned session summary index and return one ordered metadata-only page with an opaque cursor; unavailable poisoned sessions stay explicit facts without blocking other rows | archived space + latest/older request + summary index/metadata truth | bounded `ReasonSessionListPage` with page facts and unavailable ids | runtime.ui-command-dispatch `QuerySessionListPage` | persistence owner | bound |
+| 19m | `ReasonPersistence::append_tool_result_memory` | `crates/freehand-reason/src/persistence.rs` | append complete tool-result Markdown and provenance to SQLite memory truth, preserving the legacy source file for audit and one-time migration | configured memory path + session/turn/tool identity + Markdown | durable SQLite row with FTS index and row id | runtime.ui-command-dispatch `AddToMemory` | SQLite memory owner | bound |
+| 19q | `ReasonPersistence::query_tool_result_memory` | `crates/freehand-reason/src/persistence.rs` | query SQLite memory truth through FTS5, optional session scope, deterministic ordering, and bounded offset pagination | configured memory path + query/scope/sort/page | bounded `ToolResultMemoryPage` | runtime.ui-command-dispatch `QueryMemory` | SQLite memory owner | bound |
+| 19mig | `migrate_legacy_tool_result_memory` | `crates/freehand-reason/src/persistence.rs` | import legacy JSONL rows into SQLite once without deleting or rewriting the source file | legacy JSONL + empty derived SQLite database | SQLite rows plus FTS index | SQLite database open | SQLite memory owner | bound |
 
 ## Metadata / Request Isolation Notes
 

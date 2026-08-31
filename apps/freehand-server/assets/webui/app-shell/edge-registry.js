@@ -6,6 +6,7 @@ export const WebUiSurface = Object.freeze({
   TimerDashboard: "timer_dashboard",
   Settings: "settings",
   SessionSearch: "session_search",
+  Memory: "memory",
   NewSession: "new_session",
 });
 
@@ -63,6 +64,24 @@ export const webuiEdges = Object.freeze([
     requires: [],
     allowedEffects: ["set_route", "focus_search_input"],
     forbiddenEffects: ["browser_local_session_search", "create_session"],
+  },
+  {
+    id: "home.open_memory",
+    from: WebUiSurface.HomeDashboard,
+    event: "memory.open",
+    to: WebUiSurface.Memory,
+    requires: [],
+    allowedEffects: ["set_route", "focus_memory_query", "query_memory"],
+    forbiddenEffects: ["browser_local_memory_search", "direct_filesystem_write", "mutate_session_truth"],
+  },
+  {
+    id: "memory.close",
+    from: WebUiSurface.Memory,
+    event: "home.open",
+    to: WebUiSurface.HomeDashboard,
+    requires: [],
+    allowedEffects: ["set_route"],
+    forbiddenEffects: ["mutate_session_truth"],
   },
   {
     id: "home.open_new",

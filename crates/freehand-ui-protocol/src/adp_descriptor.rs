@@ -184,6 +184,14 @@ pub(crate) const UI_COMMAND_DESCRIPTORS: &[UiCommandDescriptor] = &[
         exposure: UiAdpCommandExposure::Public,
     },
     UiCommandDescriptor {
+        serde_name: "QueryMemory",
+        semantic_kind: "query_memory",
+        frame_class: UiCommandFrameClass::Query,
+        target_owner_feature: "reason.persistence",
+        target_owner_module: "crates/freehand-reason",
+        exposure: UiAdpCommandExposure::Public,
+    },
+    UiCommandDescriptor {
         serde_name: "QueryConfigStatus",
         semantic_kind: "query_config_status",
         frame_class: UiCommandFrameClass::Query,
@@ -610,6 +618,7 @@ pub(crate) fn command_descriptor(command: &UiCommand) -> &'static UiCommandDescr
         UiCommand::QuerySessionSearch { .. } => {
             command_descriptor_by_serde_name("QuerySessionSearch")
         }
+        UiCommand::QueryMemory { .. } => command_descriptor_by_serde_name("QueryMemory"),
         UiCommand::QueryConfigStatus => command_descriptor_by_serde_name("QueryConfigStatus"),
         UiCommand::QueryTaskList { .. } => command_descriptor_by_serde_name("QueryTaskList"),
         UiCommand::QueryTaskBoard { .. } => command_descriptor_by_serde_name("QueryTaskBoard"),

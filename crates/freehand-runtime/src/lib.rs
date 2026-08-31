@@ -160,7 +160,7 @@ use freehand_reason::{
     ReasonResp04CompletionSchemaRejected, ReasonResp05ModelContinuationWaiting,
     ReasonResp06SearchEvidenceSchemaRejected, ReasonRewriteRuntime, ReasonTurnEngine,
     ReasonTurnPageDirection, ReasonTurnPageRequest, RewriteRuntimeState, SessionHistory,
-    SessionRollbackMarker, TurnRecord, TurnStartInput,
+    SessionRollbackMarker, ToolResultMemoryQuery, ToolResultMemorySort, TurnRecord, TurnStartInput,
 };
 use freehand_task::{
     AgentCreateRequest, AgentLifecycleActivity, AgentLifecycleSnapshot, AgentLifecycleState,
@@ -189,12 +189,13 @@ use freehand_ui_protocol::{
     UiConfigPeerProjection, UiConfigStatusProjection, UiDiagnosticLogFileProjection,
     UiDiagnosticsProjection, UiErrorCenterEventListProjection, UiErrorCenterEventProjection,
     UiExecutionFactCommand, UiExecutionFactKind, UiInputAttachmentKind, UiLocalAgentProjection,
-    UiMasterPollClassificationProjection, UiMasterPollProjection, UiModelGroupConfigProjection,
-    UiModelGroupConfigUpdate, UiModelRequestKind, UiModelRequestWaiting, UiModelRouteProjection,
-    UiModelRouteUpdate, UiModelTransportActivity, UiModelTransportKind,
-    UiModelWeightedRouteProjection, UiModelWeightedRouteUpdate, UiProtocolState,
-    UiProviderConfigSummaryProjection, UiProviderConfigUpdate, UiQueryAccessScope, UiQueryResult,
-    UiRuntimeQueryPort, UiSchedulerTickCommand, UiSessionListPageInfo, UiSessionListPageProjection,
+    UiMasterPollClassificationProjection, UiMasterPollProjection, UiMemoryEntryProjection,
+    UiMemoryProjection, UiMemorySort, UiModelGroupConfigProjection, UiModelGroupConfigUpdate,
+    UiModelRequestKind, UiModelRequestWaiting, UiModelRouteProjection, UiModelRouteUpdate,
+    UiModelTransportActivity, UiModelTransportKind, UiModelWeightedRouteProjection,
+    UiModelWeightedRouteUpdate, UiProtocolState, UiProviderConfigSummaryProjection,
+    UiProviderConfigUpdate, UiQueryAccessScope, UiQueryResult, UiRuntimeQueryPort,
+    UiSchedulerTickCommand, UiSessionListPageInfo, UiSessionListPageProjection,
     UiSessionMetadataProjection, UiSessionSearchChildProjection, UiSessionSearchProjection,
     UiSessionSearchResultProjection, UiSessionTranscriptPageProjection,
     UiSessionTurnsPageDirection, UiSessionTurnsPageInfo, UiSubmitMetadata,
@@ -4448,6 +4449,57 @@ impl RuntimeCommandDispatcher {
                     query_session_search_for_ui(&state.config, live, query, *limit)?,
                 )))
             }
+            UiCommand::QueryMemory {
+                query,
+                session_id,
+                sort,
+                limit,
+                offset,
+            } => {
+                let Some(live) = state.config.live.as_ref() else {
+                    return Ok(None);
+                };
+                let persistence = ReasonPersistence::new(
+                    live.runtime_home.clone(),
+                    state.config.reason_agent_id.clone(),
+                );
+                let result = persistence
+                    .query_tool_result_memory(
+                        &live.memory_path,
+                        &ToolResultMemoryQuery {
+                            query: query.clone(),
+                            session_id: session_id.clone(),
+                            sort: sort.map(tool_result_memory_sort_from_ui),
+                            limit: *limit,
+                            offset: *offset,
+                        },
+                    )
+                    .map_err(|error| {
+                        UiCommandDispatchPortError::DispatchFailed(format!(
+                            "failed to query durable memory: {error}"
+                        ))
+                    })?;
+                Ok(Some(UiQueryResult::Memory(UiMemoryProjection {
+                    query: query.clone(),
+                    sort: sort.unwrap_or(UiMemorySort::Recent),
+                    entries: result
+                        .entries
+                        .into_iter()
+                        .map(|entry| UiMemoryEntryProjection {
+                            id: entry.id,
+                            created_at_unix_seconds: entry.created_at_unix_seconds,
+                            agent_id: entry.agent_id,
+                            session_id: entry.session_id,
+                            turn_id: entry.turn_id,
+                            tool_call_id: entry.tool_call_id,
+                            content: entry.content,
+                        })
+                        .collect(),
+                    total_matching: result.total_matching,
+                    has_older: result.has_older,
+                    next_offset: result.next_offset,
+                })))
+            }
             UiCommand::QuerySessionTurns { session_id } => {
                 let Some(live) = state.config.live.as_ref() else {
                     return Ok(None);
@@ -7903,6 +7955,14 @@ fn map_session_search_persistence_error(err: ReasonPersistenceError) -> UiComman
     UiCommandDispatchPortError::DispatchFailed(format!(
         "failed to query persisted session index: {err}"
     ))
+}
+
+fn tool_result_memory_sort_from_ui(sort: UiMemorySort) -> ToolResultMemorySort {
+    match sort {
+        UiMemorySort::Recent => ToolResultMemorySort::Recent,
+        UiMemorySort::Oldest => ToolResultMemorySort::Oldest,
+        UiMemorySort::Relevance => ToolResultMemorySort::Relevance,
+    }
 }
 
 type WorkerParentSessionMap = BTreeMap<SessionId, (SessionId, String, Option<String>)>;

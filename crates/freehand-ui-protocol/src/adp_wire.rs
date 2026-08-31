@@ -55,6 +55,7 @@ pub enum UiQueryResult {
     SessionTurns(UiSessionTranscriptProjection),
     SessionTurnsPage(UiSessionTranscriptPageProjection),
     SessionSearch(UiSessionSearchProjection),
+    Memory(UiMemoryProjection),
     NodeStatus(Option<NodeStatusSnapshot>),
     Progress(Option<TaskProgressSnapshot>),
     Debug(Option<DebugStateSnapshot>),

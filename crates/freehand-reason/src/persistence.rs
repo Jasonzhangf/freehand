@@ -10,6 +10,7 @@ use freehand_contracts::{
 };
 use freehand_provider_core::{ProviderFamily, ProviderSemanticOutput};
 use fs2::FileExt;
+use rusqlite::{Connection, params};
 use serde::{Deserialize, Serialize};
 use thiserror::Error;
 
@@ -17,6 +18,38 @@ use crate::{ReasonTurnEngine, SessionHistory, TurnProjection, TurnRecord};
 
 const PERSISTENCE_SCHEMA_VERSION: u32 = 1;
 const PROVIDER_RAW_LEDGER_SCHEMA_VERSION: u32 = 1;
+const TOOL_RESULT_MEMORY_SCHEMA_VERSION: u32 = 2;
+pub const TOOL_RESULT_MEMORY_SEARCH_LIMIT_MIN: usize = 1;
+pub const TOOL_RESULT_MEMORY_SEARCH_LIMIT_MAX: usize = 100;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub enum ToolResultMemorySort {
+    Recent,
+    Oldest,
+    Relevance,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ToolResultMemoryQuery {
+    #[serde(default)]
+    pub query: Option<String>,
+    #[serde(default)]
+    pub session_id: Option<SessionId>,
+    #[serde(default)]
+    pub sort: Option<ToolResultMemorySort>,
+    #[serde(default)]
+    pub limit: Option<usize>,
+    #[serde(default)]
+    pub offset: Option<usize>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ToolResultMemoryPage {
+    pub entries: Vec<ToolResultMemoryEntry>,
+    pub total_matching: u64,
+    pub has_older: bool,
+    pub next_offset: Option<usize>,
+}
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ReasonPersistenceCursor {
@@ -153,6 +186,8 @@ pub struct PersistedSessionSummaryIndex {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ToolResultMemoryEntry {
+    #[serde(default)]
+    pub id: u64,
     pub created_at_unix_seconds: u64,
     pub agent_id: AgentId,
     pub session_id: SessionId,
@@ -279,6 +314,14 @@ pub enum ReasonPersistenceError {
     InvalidLedgerCoherence(String),
     #[error("reason ledger sequence is invalid: expected {expected}, got {actual}")]
     LedgerSequenceGap { expected: u64, actual: u64 },
+    #[error("tool result memory storage failed: {0}")]
+    ToolResultMemoryStorage(String),
+    #[error("tool result memory search limit must be between {min} and {max}, got {actual}")]
+    InvalidToolResultMemorySearchLimit {
+        min: usize,
+        max: usize,
+        actual: usize,
+    },
     #[error("no authoritative snapshot or reason ledger exists for session `{0}`")]
     MissingRecoveryTruth(String),
     #[error("session metadata mutation target was not found: {0}")]
@@ -347,40 +390,39 @@ impl ReasonPersistence {
                 .filter(|value| !value.is_empty())
                 .map(str::to_owned),
             content: content.to_owned(),
+            id: 0,
         };
-        ensure_parent_dir(path)?;
-        let payload = serde_json::to_string(&entry)
-            .map_err(|err| ReasonPersistenceError::JsonRenderFailed(err.to_string()))?;
-        let mut file = fs::OpenOptions::new()
-            .create(true)
-            .append(true)
-            .open(path)
-            .map_err(|err| ReasonPersistenceError::FileIoFailed(err.to_string()))?;
-        use std::io::Write;
-        file.write_all(payload.as_bytes())
-            .and_then(|_| file.write_all(b"\n"))
-            .and_then(|_| file.sync_all())
-            .map_err(|err| ReasonPersistenceError::FileIoFailed(err.to_string()))?;
-        Ok(entry)
+        let database_path = memory_database_path(path);
+        let mut connection = open_tool_result_memory_database(path, &database_path)?;
+        insert_tool_result_memory_entry(&mut connection, &entry)
     }
 
     pub fn load_tool_result_memory(
         path: &Path,
     ) -> Result<Vec<ToolResultMemoryEntry>, ReasonPersistenceError> {
-        if !path.is_file() {
-            return Ok(Vec::new());
-        }
-        let payload = fs::read_to_string(path)
-            .map_err(|err| ReasonPersistenceError::FileIoFailed(err.to_string()))?;
-        payload
-            .lines()
-            .filter(|line| !line.trim().is_empty())
-            .map(|line| {
-                serde_json::from_str(line).map_err(|err| {
-                    ReasonPersistenceError::JsonParseFailed(format!("{}: {err}", path.display()))
-                })
-            })
-            .collect()
+        let database_path = memory_database_path(path);
+        let connection = open_tool_result_memory_database(path, &database_path)?;
+        query_tool_result_memory(
+            &connection,
+            &ToolResultMemoryQuery {
+                query: None,
+                session_id: None,
+                sort: Some(ToolResultMemorySort::Oldest),
+                limit: None,
+                offset: None,
+            },
+        )
+        .map(|page| page.entries)
+    }
+
+    pub fn query_tool_result_memory(
+        &self,
+        path: &Path,
+        query: &ToolResultMemoryQuery,
+    ) -> Result<ToolResultMemoryPage, ReasonPersistenceError> {
+        let database_path = memory_database_path(path);
+        let connection = open_tool_result_memory_database(path, &database_path)?;
+        query_tool_result_memory(&connection, query)
     }
 
     pub fn record_turn_started(
@@ -2484,6 +2526,324 @@ fn ensure_parent_dir(path: &Path) -> Result<(), ReasonPersistenceError> {
     Ok(())
 }
 
+fn memory_database_path(configured_path: &Path) -> PathBuf {
+    let parent = configured_path.parent().unwrap_or_else(|| Path::new("."));
+    let stem = configured_path
+        .file_name()
+        .map(|name| name.to_string_lossy().into_owned())
+        .unwrap_or_else(|| "memory".to_owned());
+    parent.join(format!("{stem}.sqlite3"))
+}
+
+fn open_tool_result_memory_database(
+    configured_path: &Path,
+    database_path: &Path,
+) -> Result<Connection, ReasonPersistenceError> {
+    ensure_parent_dir(database_path)?;
+    if database_path.exists() {
+        let connection = Connection::open(database_path)
+            .map_err(|err| ReasonPersistenceError::ToolResultMemoryStorage(err.to_string()))?;
+        ensure_tool_result_memory_schema(&connection)?;
+        Ok(connection)
+    } else {
+        ensure_parent_dir(configured_path)?;
+        let mut connection = Connection::open(database_path)
+            .map_err(|err| ReasonPersistenceError::ToolResultMemoryStorage(err.to_string()))?;
+        ensure_tool_result_memory_schema(&connection)?;
+        if configured_path.is_file() {
+            migrate_legacy_tool_result_memory(&mut connection, configured_path)?;
+        }
+        Ok(connection)
+    }
+}
+
+fn ensure_tool_result_memory_schema(connection: &Connection) -> Result<(), ReasonPersistenceError> {
+    connection
+        .execute_batch(
+            "PRAGMA journal_mode = WAL;\
+             PRAGMA synchronous = NORMAL;\
+             CREATE TABLE IF NOT EXISTS tool_result_memory (\
+                id INTEGER PRIMARY KEY AUTOINCREMENT,\
+                agent_id TEXT NOT NULL,\
+                session_id TEXT NOT NULL,\
+                turn_id TEXT,\
+                tool_call_id TEXT,\
+                content TEXT NOT NULL,\
+                created_at_unix_seconds INTEGER NOT NULL,\
+                schema_version INTEGER NOT NULL\
+             );\
+             CREATE INDEX IF NOT EXISTS tool_result_memory_session_id ON tool_result_memory(session_id);\
+             CREATE INDEX IF NOT EXISTS tool_result_memory_created_at ON tool_result_memory(created_at_unix_seconds DESC);\
+             CREATE VIRTUAL TABLE IF NOT EXISTS tool_result_memory_fts USING fts5(\
+                agent_id UNINDEXED,\
+                session_id UNINDEXED,\
+                turn_id UNINDEXED,\
+                tool_call_id UNINDEXED,\
+                content,\
+                tokenize = 'unicode61 remove_diacritics 2'\
+             );",
+        )
+        .map_err(|err| ReasonPersistenceError::ToolResultMemoryStorage(err.to_string()))?;
+    connection
+        .execute_batch(&format!(
+            "PRAGMA user_version = {TOOL_RESULT_MEMORY_SCHEMA_VERSION};"
+        ))
+        .map_err(|err| ReasonPersistenceError::ToolResultMemoryStorage(err.to_string()))?;
+    Ok(())
+}
+
+fn insert_tool_result_memory_entry(
+    connection: &mut Connection,
+    entry: &ToolResultMemoryEntry,
+) -> Result<ToolResultMemoryEntry, ReasonPersistenceError> {
+    let tx = connection
+        .transaction()
+        .map_err(|err| ReasonPersistenceError::ToolResultMemoryStorage(err.to_string()))?;
+    tx.execute(
+        "INSERT INTO tool_result_memory (agent_id, session_id, turn_id, tool_call_id, content, created_at_unix_seconds, schema_version) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+        params![
+            entry.agent_id.as_str(),
+            entry.session_id.as_str(),
+            entry.turn_id.as_ref().map(TurnId::as_str),
+            entry.tool_call_id.as_deref(),
+            entry.content,
+            entry.created_at_unix_seconds,
+            TOOL_RESULT_MEMORY_SCHEMA_VERSION,
+        ],
+    )
+    .map_err(|err| ReasonPersistenceError::ToolResultMemoryStorage(err.to_string()))?;
+    let id = tx
+        .query_row("SELECT last_insert_rowid()", [], |row| row.get::<_, i64>(0))
+        .map_err(|err| ReasonPersistenceError::ToolResultMemoryStorage(err.to_string()))?;
+    tx.execute(
+        "INSERT INTO tool_result_memory_fts (rowid, agent_id, session_id, turn_id, tool_call_id, content) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+        params![
+            id,
+            entry.agent_id.as_str(),
+            entry.session_id.as_str(),
+            entry.turn_id.as_ref().map(TurnId::as_str),
+            entry.tool_call_id.as_deref(),
+            entry.content,
+        ],
+    )
+    .map_err(|err| ReasonPersistenceError::ToolResultMemoryStorage(err.to_string()))?;
+    tx.commit()
+        .map_err(|err| ReasonPersistenceError::ToolResultMemoryStorage(err.to_string()))?;
+    Ok(ToolResultMemoryEntry {
+        id: id as u64,
+        ..entry.clone()
+    })
+}
+
+fn migrate_legacy_tool_result_memory(
+    connection: &mut Connection,
+    legacy_path: &Path,
+) -> Result<(), ReasonPersistenceError> {
+    let payload = fs::read_to_string(legacy_path)
+        .map_err(|err| ReasonPersistenceError::FileIoFailed(err.to_string()))?;
+    let mut entries = Vec::<ToolResultMemoryEntry>::new();
+    for line in payload.lines().filter(|line| !line.trim().is_empty()) {
+        match serde_json::from_str::<ToolResultMemoryEntry>(line) {
+            Ok(mut entry) => {
+                entry.id = 0;
+                entries.push(entry);
+            }
+            Err(err) => {
+                return Err(ReasonPersistenceError::JsonParseFailed(format!(
+                    "{}: {err}",
+                    legacy_path.display()
+                )));
+            }
+        }
+    }
+    let tx = connection
+        .transaction()
+        .map_err(|err| ReasonPersistenceError::ToolResultMemoryStorage(err.to_string()))?;
+    for entry in &entries {
+        tx.execute(
+            "INSERT INTO tool_result_memory (agent_id, session_id, turn_id, tool_call_id, content, created_at_unix_seconds, schema_version) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)",
+            params![
+                entry.agent_id.as_str(),
+                entry.session_id.as_str(),
+                entry.turn_id.as_ref().map(TurnId::as_str),
+                entry.tool_call_id.as_deref(),
+                entry.content,
+                entry.created_at_unix_seconds,
+                TOOL_RESULT_MEMORY_SCHEMA_VERSION,
+            ],
+        )
+        .map_err(|err| ReasonPersistenceError::ToolResultMemoryStorage(err.to_string()))?;
+        let rowid = tx
+            .query_row("SELECT last_insert_rowid()", [], |row| row.get::<_, i64>(0))
+            .map_err(|err| ReasonPersistenceError::ToolResultMemoryStorage(err.to_string()))?;
+        tx.execute(
+            "INSERT INTO tool_result_memory_fts (rowid, agent_id, session_id, turn_id, tool_call_id, content) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+            params![
+                rowid,
+                entry.agent_id.as_str(),
+                entry.session_id.as_str(),
+                entry.turn_id.as_ref().map(TurnId::as_str),
+                entry.tool_call_id.as_deref(),
+                entry.content,
+            ],
+        )
+        .map_err(|err| ReasonPersistenceError::ToolResultMemoryStorage(err.to_string()))?;
+    }
+    tx.commit()
+        .map_err(|err| ReasonPersistenceError::ToolResultMemoryStorage(err.to_string()))?;
+    Ok(())
+}
+
+fn validate_tool_result_memory_query(
+    query: &ToolResultMemoryQuery,
+) -> Result<(), ReasonPersistenceError> {
+    if let Some(limit) = query.limit
+        && !(TOOL_RESULT_MEMORY_SEARCH_LIMIT_MIN..=TOOL_RESULT_MEMORY_SEARCH_LIMIT_MAX)
+            .contains(&limit)
+    {
+        return Err(ReasonPersistenceError::InvalidToolResultMemorySearchLimit {
+            min: TOOL_RESULT_MEMORY_SEARCH_LIMIT_MIN,
+            max: TOOL_RESULT_MEMORY_SEARCH_LIMIT_MAX,
+            actual: limit,
+        });
+    }
+    if let Some(offset) = query.offset
+        && offset > i64::MAX as usize
+    {
+        return Err(ReasonPersistenceError::ToolResultMemoryStorage(
+            "tool result memory search offset exceeds SQLite range".to_owned(),
+        ));
+    }
+    Ok(())
+}
+
+fn quote_fts_token(query: &str) -> String {
+    query
+        .split_whitespace()
+        .filter_map(|token| {
+            let sanitized = token
+                .chars()
+                .filter(|ch| !matches!(ch, '"' | '\''))
+                .collect::<String>();
+            (!sanitized.is_empty()).then(|| format!("\"{sanitized}\""))
+        })
+        .collect::<Vec<_>>()
+        .join(" AND ")
+}
+
+fn query_tool_result_memory(
+    connection: &Connection,
+    query: &ToolResultMemoryQuery,
+) -> Result<ToolResultMemoryPage, ReasonPersistenceError> {
+    validate_tool_result_memory_query(query)?;
+    let sort = query.sort.unwrap_or(ToolResultMemorySort::Recent);
+    let limit = query
+        .limit
+        .unwrap_or(TOOL_RESULT_MEMORY_SEARCH_LIMIT_MAX)
+        .min(TOOL_RESULT_MEMORY_SEARCH_LIMIT_MAX);
+    let offset = query.offset.unwrap_or(0);
+    let search_query = query
+        .query
+        .as_ref()
+        .map(|value| value.trim())
+        .filter(|value| !value.is_empty())
+        .map(quote_fts_token)
+        .unwrap_or_default();
+    let session_filter = query.session_id.as_ref().map(|_| "m.session_id = ?1");
+    let (from_clause, where_clause, order_clause) = if !search_query.is_empty() {
+        let order_clause = match sort {
+            ToolResultMemorySort::Recent => "ORDER BY m.created_at_unix_seconds DESC, m.id DESC",
+            ToolResultMemorySort::Oldest => "ORDER BY m.created_at_unix_seconds ASC, m.id ASC",
+            ToolResultMemorySort::Relevance => {
+                "ORDER BY bm25(tool_result_memory_fts) ASC, m.created_at_unix_seconds DESC, m.id DESC"
+            }
+        };
+        (
+            "tool_result_memory m JOIN tool_result_memory_fts ON tool_result_memory_fts.rowid = m.id",
+            match session_filter {
+                Some(_) => "tool_result_memory_fts MATCH ?2 AND m.session_id = ?1",
+                None => "tool_result_memory_fts MATCH ?1",
+            },
+            order_clause,
+        )
+    } else {
+        (
+            "tool_result_memory m",
+            match session_filter {
+                Some(_) => "m.session_id = ?1",
+                None => "1 = 1",
+            },
+            match sort {
+                ToolResultMemorySort::Recent => {
+                    "ORDER BY m.created_at_unix_seconds DESC, m.id DESC"
+                }
+                ToolResultMemorySort::Oldest => "ORDER BY m.created_at_unix_seconds ASC, m.id ASC",
+                ToolResultMemorySort::Relevance => {
+                    "ORDER BY m.created_at_unix_seconds DESC, m.id DESC"
+                }
+            },
+        )
+    };
+    let mut bind_values = Vec::<String>::new();
+    if let Some(session_id) = query.session_id.as_ref() {
+        bind_values.push(session_id.as_str().to_owned());
+    }
+    if !search_query.is_empty() {
+        bind_values.push(search_query);
+    }
+    let total_matching: u64 = connection
+        .query_row(
+            &format!("SELECT COUNT(*) FROM {from_clause} WHERE {where_clause};"),
+            rusqlite::params_from_iter(bind_values.iter()),
+            |row| row.get::<_, i64>(0),
+        )
+        .map_err(|err| ReasonPersistenceError::ToolResultMemoryStorage(err.to_string()))?
+        as u64;
+    let sql = format!(
+        "SELECT m.id, m.agent_id, m.session_id, m.turn_id, m.tool_call_id, m.content, m.created_at_unix_seconds FROM {from_clause} WHERE {where_clause} {order_clause} LIMIT {limit} OFFSET {offset};"
+    );
+    let mut statement = connection
+        .prepare(&sql)
+        .map_err(|err| ReasonPersistenceError::ToolResultMemoryStorage(err.to_string()))?;
+    let rows = statement
+        .query_map(rusqlite::params_from_iter(bind_values.iter()), |row| {
+            Ok((
+                row.get::<_, i64>(0)?,
+                row.get::<_, String>(1)?,
+                row.get::<_, String>(2)?,
+                row.get::<_, Option<String>>(3)?,
+                row.get::<_, Option<String>>(4)?,
+                row.get::<_, String>(5)?,
+                row.get::<_, i64>(6)?,
+            ))
+        })
+        .map_err(|err| ReasonPersistenceError::ToolResultMemoryStorage(err.to_string()))?;
+    let mut entries = Vec::<ToolResultMemoryEntry>::new();
+    for row in rows {
+        let row =
+            row.map_err(|err| ReasonPersistenceError::ToolResultMemoryStorage(err.to_string()))?;
+        let id = row.0;
+        entries.push(ToolResultMemoryEntry {
+            id: id as u64,
+            agent_id: AgentId::new(row.1),
+            session_id: SessionId::new(row.2),
+            turn_id: row.3.map(TurnId::new),
+            tool_call_id: row.4,
+            content: row.5,
+            created_at_unix_seconds: row.6 as u64,
+        });
+    }
+    let page_end = offset.saturating_add(entries.len());
+    let has_older = total_matching > page_end as u64;
+    let next_offset = if has_older { Some(page_end) } else { None };
+    Ok(ToolResultMemoryPage {
+        entries,
+        total_matching,
+        has_older,
+        next_offset,
+    })
+}
+
 fn remove_if_exists(path: &Path) -> Result<(), ReasonPersistenceError> {
     match fs::remove_file(path) {
         Ok(()) => Ok(()),
@@ -3901,7 +4261,7 @@ mod tests {
             )
             .expect("append tool result memory");
         assert_eq!(entry.content, "```markdown\nfull tool output\n```");
-        assert!(memory_path.is_file());
+        assert!(memory_database_path(&memory_path).is_file());
         let reloaded = ReasonPersistence::load_tool_result_memory(&memory_path)
             .expect("reload tool result memory");
         assert_eq!(reloaded, vec![entry]);
@@ -5069,7 +5429,76 @@ mod tests {
         assert_eq!(reloaded.len(), 2);
         assert_eq!(reloaded[0].content, "first entry");
         assert_eq!(reloaded[1].content, "second entry");
+        assert!(memory_database_path(&memory_path).is_file());
         let _ = fresh;
+        fs::remove_dir_all(runtime_home).expect("cleanup");
+    }
+
+    #[test]
+    fn tool_result_memory_searches_fts_and_sorts_recent() {
+        let runtime_home = temp_runtime_home();
+        let coordinator = ReasonPersistence::new(&runtime_home, AgentId::new("agent-1"));
+        let memory_path = runtime_home.join("memory").join("tool-results.jsonl");
+        coordinator
+            .append_tool_result_memory(
+                &memory_path,
+                &SessionId::new("session-a"),
+                None,
+                Some("call-a"),
+                "# deployment\nSQLite migration passed",
+            )
+            .expect("append first");
+        coordinator
+            .append_tool_result_memory(
+                &memory_path,
+                &SessionId::new("session-b"),
+                None,
+                Some("call-b"),
+                "# unrelated\nprovider output",
+            )
+            .expect("append second");
+        let page = coordinator
+            .query_tool_result_memory(
+                &memory_path,
+                &ToolResultMemoryQuery {
+                    query: Some("SQLite".to_owned()),
+                    session_id: None,
+                    sort: Some(ToolResultMemorySort::Relevance),
+                    limit: Some(10),
+                    offset: None,
+                },
+            )
+            .expect("search memory");
+        assert_eq!(page.total_matching, 1);
+        assert_eq!(page.entries[0].session_id, SessionId::new("session-a"));
+        assert!(!page.has_older);
+        fs::remove_dir_all(runtime_home).expect("cleanup");
+    }
+
+    #[test]
+    fn tool_result_memory_migrates_legacy_jsonl_without_losing_source() {
+        let runtime_home = temp_runtime_home();
+        let memory_path = runtime_home.join("memory").join("tool-results.jsonl");
+        ensure_parent_dir(&memory_path).expect("memory directory");
+        let entry = ToolResultMemoryEntry {
+            id: 0,
+            created_at_unix_seconds: 10,
+            agent_id: AgentId::new("agent-1"),
+            session_id: SessionId::new("legacy-session"),
+            turn_id: None,
+            tool_call_id: Some("legacy-call".to_owned()),
+            content: "legacy markdown".to_owned(),
+        };
+        fs::write(
+            &memory_path,
+            format!("{}\n", serde_json::to_string(&entry).expect("entry json")),
+        )
+        .expect("legacy jsonl");
+        let loaded = ReasonPersistence::load_tool_result_memory(&memory_path)
+            .expect("migrate legacy memory");
+        assert_eq!(loaded, vec![ToolResultMemoryEntry { id: 1, ..entry }]);
+        assert!(memory_path.is_file());
+        assert!(memory_database_path(&memory_path).is_file());
         fs::remove_dir_all(runtime_home).expect("cleanup");
     }
 }

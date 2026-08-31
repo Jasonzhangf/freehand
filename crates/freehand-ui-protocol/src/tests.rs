@@ -1545,6 +1545,52 @@ fn session_search_query_is_runtime_owned_and_validated() {
 }
 
 #[test]
+fn memory_query_is_runtime_owned_and_validated() {
+    let command = UiCommand::QueryMemory {
+        query: Some("SQLite".to_owned()),
+        session_id: Some(SessionId::new("session-memory")),
+        sort: Some(UiMemorySort::Relevance),
+        limit: Some(20),
+        offset: Some(0),
+    };
+    validate_command(&command).expect("valid memory query");
+    assert_eq!(command_kind(&command), "query_memory");
+    assert_eq!(command_frame_class(&command), UiCommandFrameClass::Query);
+    assert!(is_public_adp_command(&command));
+    assert_eq!(
+        UiProtocolState::default()
+            .query(&command)
+            .expect_err("runtime-owned memory query must not use local UI truth"),
+        UiProtocolError::StreamKindMismatch
+    );
+    let wire = serde_json::to_string(&command).expect("memory query wire");
+    assert!(wire.contains("\"QueryMemory\""));
+
+    assert_eq!(
+        validate_command(&UiCommand::QueryMemory {
+            query: Some("   ".to_owned()),
+            session_id: None,
+            sort: None,
+            limit: None,
+            offset: None,
+        })
+        .expect_err("empty memory query"),
+        UiProtocolError::EmptyUserInput
+    );
+    assert_eq!(
+        validate_command(&UiCommand::QueryMemory {
+            query: None,
+            session_id: None,
+            sort: None,
+            limit: Some(101),
+            offset: None,
+        })
+        .expect_err("oversized memory page"),
+        UiProtocolError::InvalidMemoryQueryLimit
+    );
+}
+
+#[test]
 fn tool_result_memory_command_is_public_mutation_and_requires_content() {
     let command = UiCommand::AddToMemory {
         session_id: SessionId::new("session-memory"),

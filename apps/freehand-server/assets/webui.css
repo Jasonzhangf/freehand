@@ -6594,6 +6594,130 @@ body[data-layout-shape="tablet_portrait"] .mobile-home-card p {
   font-size: 10.5px;
 }
 
+.memory-dialog {
+  width: min(860px, calc(100vw - 24px));
+  max-height: min(820px, calc(100vh - 28px));
+  padding: 0;
+  border: 1px solid rgba(31, 108, 88, 0.18);
+  border-radius: 22px;
+  background: rgba(255, 255, 255, 0.96);
+  color: var(--text);
+  box-shadow: 0 28px 72px rgba(20, 33, 29, 0.20);
+}
+
+.memory-dialog::backdrop {
+  background: rgba(12, 20, 17, 0.22);
+  backdrop-filter: blur(2px);
+}
+
+.memory-panel {
+  display: grid;
+  gap: 12px;
+  max-height: inherit;
+  padding: 18px;
+  overflow: auto;
+}
+
+.memory-control {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 160px auto;
+  gap: 10px;
+  align-items: end;
+}
+
+.memory-control label {
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+  color: var(--text-soft);
+  font-size: 11px;
+}
+
+.memory-control input,
+.memory-control select {
+  width: 100%;
+  min-width: 0;
+  border: 1px solid rgba(31, 108, 88, 0.18);
+  border-radius: 12px;
+  background: rgba(247, 251, 248, 0.86);
+  color: var(--text);
+  padding: 9px 10px;
+}
+
+.memory-results {
+  display: grid;
+  gap: 10px;
+  max-height: 520px;
+  overflow: auto;
+  color: var(--text-soft);
+  font-size: 11px;
+}
+
+.memory-card {
+  display: grid;
+  gap: 8px;
+  padding: 12px;
+  border: 1px solid rgba(31, 108, 88, 0.14);
+  border-radius: 14px;
+  background: rgba(247, 251, 248, 0.72);
+}
+
+.memory-card-head {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+}
+
+.memory-card-head strong {
+  overflow: hidden;
+  color: var(--text);
+  font-size: 12px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.memory-card-head small {
+  overflow: hidden;
+  color: var(--text-soft);
+  font-size: 10.5px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.memory-card-content {
+  max-height: 240px;
+  margin: 0;
+  overflow: auto;
+  border: 1px solid rgba(31, 108, 88, 0.10);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.65);
+  color: var(--text);
+  padding: 10px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.memory-card-actions {
+  display: flex;
+  justify-content: flex-end;
+}
+
+.memory-card-copy {
+  border: 1px solid rgba(31, 108, 88, 0.18);
+  border-radius: 9px;
+  background: transparent;
+  color: var(--master);
+  cursor: pointer;
+  padding: 6px 9px;
+  font: inherit;
+  font-size: 10.5px;
+}
+
+.memory-card-copy:hover,
+.memory-card-copy:focus-visible {
+  background: rgba(31, 108, 88, 0.08);
+}
+
 .tools-dashboard-dialog {
   width: min(760px, calc(100vw - 24px));
   max-height: min(780px, calc(100vh - 28px));
@@ -6743,6 +6867,9 @@ body[data-layout-shape="tablet_portrait"] .mobile-home-card p {
 body[data-layout-shape="phone_portrait"] .timer-dashboard-dialog,
 body[data-layout-shape="tall_phone"] .timer-dashboard-dialog,
 body[data-layout-shape="tablet_portrait"] .timer-dashboard-dialog,
+body[data-layout-shape="phone_portrait"] .memory-dialog,
+body[data-layout-shape="tall_phone"] .memory-dialog,
+body[data-layout-shape="tablet_portrait"] .memory-dialog,
 body[data-layout-shape="phone_portrait"] .session-search-dialog,
 body[data-layout-shape="tall_phone"] .session-search-dialog,
 body[data-layout-shape="tablet_portrait"] .session-search-dialog,
@@ -6796,6 +6923,9 @@ body[data-layout-shape="tablet_portrait"] .tool-registry-schema pre {
 body[data-layout-shape="phone_portrait"] .timer-form-grid,
 body[data-layout-shape="tall_phone"] .timer-form-grid,
 body[data-layout-shape="tablet_portrait"] .timer-form-grid,
+body[data-layout-shape="phone_portrait"] .memory-control,
+body[data-layout-shape="tall_phone"] .memory-control,
+body[data-layout-shape="tablet_portrait"] .memory-control,
 body[data-layout-shape="phone_portrait"] .session-search-control,
 body[data-layout-shape="tall_phone"] .session-search-control,
 body[data-layout-shape="tablet_portrait"] .session-search-control {

@@ -30,6 +30,7 @@
         "freehand-metadata",
         "freehand-provider-core",
         "third_party.fs2",
+        "third_party.rusqlite",
         "third_party.serde",
         "third_party.serde-json",
         "third_party.thiserror"
@@ -52,6 +53,7 @@
     {"edge_id":"reason.persistence.library.import_freehand-metadata","from_module_id":"reason.persistence.library","to_module_id":"freehand-metadata","import_name":"freehand_metadata"},
     {"edge_id":"reason.persistence.library.import_freehand-provider-core","from_module_id":"reason.persistence.library","to_module_id":"freehand-provider-core","import_name":"freehand_provider_core"},
     {"edge_id":"reason.persistence.library.import_third-party-fs2","from_module_id":"reason.persistence.library","to_module_id":"third_party.fs2","import_name":"fs2"},
+    {"edge_id":"reason.persistence.library.import_third-party-rusqlite","from_module_id":"reason.persistence.library","to_module_id":"third_party.rusqlite","import_name":"rusqlite"},
     {"edge_id":"reason.persistence.library.import_third-party-serde","from_module_id":"reason.persistence.library","to_module_id":"third_party.serde","import_name":"serde"},
     {"edge_id":"reason.persistence.library.import_third-party-serde-json","from_module_id":"reason.persistence.library","to_module_id":"third_party.serde-json","import_name":"serde_json"},
     {"edge_id":"reason.persistence.library.import_third-party-thiserror","from_module_id":"reason.persistence.library","to_module_id":"third_party.thiserror","import_name":"thiserror"}

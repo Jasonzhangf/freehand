@@ -1,5 +1,20 @@
 # MEMORY
 
+## 2026-08-31 - SQLite tool-result memory
+
+- Durable tool-result memory is owned by `reason.persistence`: the configured
+  JSONL path remains an audit source and a sibling SQLite database owns
+  indexed reads through FTS5. Runtime access is typed `AddToMemory` mutation
+  plus `QueryMemory` query; WebUI never reads the filesystem directly.
+- The installed S profile online verifier proved complete Markdown retention,
+  keyword search, recent/oldest/relevance ordering, offset pagination,
+  copy-enabled memory cards, survival after session deletion, and survival
+  across daemon restart. Evidence:
+  `artifacts/webui-online/webui-memory-1788170988657/summary.json`.
+- Verifier samples must use a unique per-run search term and clean up only the
+  exact test session; browser checks must use real pointer events because
+  direct DOM `.click()` is not reliable for this WebUI path.
+
 # 2026-07-28
 
 - OpenMinis migration gate passed Codex Review round 10 with an unambiguous semantic PASS (53/53 OpenMinis focused tests, 103/103 xtask tests, workspace build/clippy clean, manifest `design_baseline` with zero promoted nodes, map/call-graph/SOP/AGENTS/wiki in sync, no fallback/P0/MAP-DRIFT/ARCH findings). Round 9 fixes that produced this state: repository reports use `cargo run -p xtask -- openminis-ui verify-node <node_id>` instead of `cargo run -p xtask -- gates check`, eliminating self-certification; raw reports bind exact `node_id`/`migration_unit_id`; direct call-edge discovery has no callee-name whitelist; and nested Rust functions fail explicitly after cfg admission so their calls cannot be attributed to the outer caller. All migration Rust files remain at or below 500 lines. Reviewer did not emit the literal `VERDICT: PASS` line in round 10; per AGENTS.md rule 36 the unambiguous semantic PASS qualifies. No migration node was advanced; manifest remains `design_baseline` (32 inventoried + 9 blocked).

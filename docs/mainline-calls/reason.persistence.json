@@ -8,6 +8,8 @@
   "generated_wiki_doc": "docs/wiki/reason.persistence.md",
   "resource_operations": [
     "runtime_command.append_tool_result",
+    "memory.query_tool_results",
+    "memory.migrate_legacy_tool_results",
     "session.restore",
     "session.append_turn_to_turn",
     "session.list_persisted",
@@ -20,7 +22,7 @@
     "runtime persistence appends semantic reason-ledger rows before advancing durable snapshot cursors",
     "terminal turn close materializes immutable turn truth files and only then updates derived UI and index sidecars",
     "provider raw ledgers may be appended for debug, but they are not part of the authoritative request or recovery chain",
-    "tool-result memory entries append the complete owner-projected Markdown content as independent JSONL records under the configured memory path, outside session truth"
+    "tool-result memory entries append the complete owner-projected Markdown content to the configured SQLite memory database, outside session truth; legacy JSONL is migrated once and retained as an audit source"
   ],
   "response_mainline": [
     "`SessionHistory` JSON/file helpers render and restore authoritative session rewrite truth",
@@ -36,7 +38,9 @@
     "persisted session index reads expose only derived index rows and session metadata sidecars for UI list/search projection; worker task transcripts are not promoted to top-level persisted user sessions by this owner operation",
     "session display metadata (`title`, `archived`) is persisted as reason-owned sidecar truth for multi-UI session management and stays separate from provider-visible session history",
     "session rollback appends a durable marker, filters effective transcript restore by logical turn key, and retains raw closed-turn files for audit; later durable writes rebuild derived sidecars from rollback-filtered effective turns while raw rolled-back files remain reserved for audit and id allocation",
-    "tool-result memory append creates parent directories, appends one serialized entry, syncs the file, and reloads independently after session archive/delete or dispatcher restart"
+    "tool-result memory append creates the configured SQLite database and FTS5 index, writes one durable row, and reloads independently after session archive/delete or dispatcher restart",
+    "tool-result memory query uses owner-side FTS5 matching, optional session scope, deterministic recent/oldest/relevance ordering, and bounded offset pagination",
+    "legacy tool-result JSONL is imported into SQLite exactly once without deleting or rewriting the source file"
   ],
   "error_mainline": [
     "invalid persisted snapshot JSON is rejected explicitly",
@@ -488,6 +492,34 @@
       "source_resource": "runtime_command",
       "target_resource": "memory",
       "resource_operation": "runtime_command.append_tool_result",
+      "binding_status": "bound"
+    },
+    {
+      "step": "19q",
+      "symbol_path": "ReasonPersistence::query_tool_result_memory",
+      "file_path": "crates/freehand-reason/src/persistence.rs",
+      "responsibility": "query SQLite memory truth through FTS5 with optional session scope, deterministic ordering, and bounded pagination",
+      "input_semantic": "configured memory path plus query, scope, sort, limit, and offset",
+      "output_semantic": "bounded ToolResultMemoryPage with total match count and next offset",
+      "caller": "runtime.ui-command-dispatch QueryMemory",
+      "callee": "persistence owner",
+      "source_resource": "memory",
+      "target_resource": "ui_projection",
+      "resource_operation": "memory.query_tool_results",
+      "binding_status": "bound"
+    },
+    {
+      "step": "19mig",
+      "symbol_path": "migrate_legacy_tool_result_memory",
+      "file_path": "crates/freehand-reason/src/persistence.rs",
+      "responsibility": "migrate legacy JSONL memory rows into SQLite once while retaining the audit source",
+      "input_semantic": "legacy JSONL memory path plus empty SQLite database",
+      "output_semantic": "SQLite rows and FTS5 index",
+      "caller": "SQLite memory database open",
+      "callee": "persistence owner",
+      "source_resource": "memory",
+      "target_resource": "memory",
+      "resource_operation": "memory.migrate_legacy_tool_results",
       "binding_status": "bound"
     }
   ],

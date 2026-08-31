@@ -138,6 +138,12 @@ export const ADP_PROTOCOL_MANIFEST = Object.freeze({
       "target_owner_feature": "ui.protocol"
     },
     {
+      "serde_name": "QueryMemory",
+      "semantic_kind": "query_memory",
+      "frame_class": "query",
+      "target_owner_feature": "reason.persistence"
+    },
+    {
       "serde_name": "QueryConfigStatus",
       "semantic_kind": "query_config_status",
       "frame_class": "query",

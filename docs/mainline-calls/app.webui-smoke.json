@@ -54,6 +54,7 @@
     "front-end 工具面板 queries QueryToolRegistry through ADP/运行时 权威真源 and renders only 权威投影 schema, examples, guidance, execution scope, and Master/Worker exposure without executing tools, rendering session-specific tool turns, synthesizing a local web_search tool, or storing browser-local registry truth",
     "front-end 搜索面板 queries QuerySessionSearch through ADP/运行时 权威真源 and renders only 权威投影 persisted session search rows; it must not search browser-local session state, create a new session, or promote Worker/subagent sessions into top-level global results",
     "front-end Diagnostics top-level settings entry queries QueryDiagnostics through ADP/运行时 权威真源 and renders only 权威投影 log file 元数据 and redacted tail lines without browser-local log truth, session creation, raw provider payloads, secrets, or absolute paths.",
+    "front-end Memory surface queries QueryMemory through ADP/运行时 reason.persistence truth, renders complete Markdown rows with recent/oldest/relevance ordering and offset paging, and exposes copy without reading SQLite, legacy JSONL, or browser storage.",
     "front-end Worker labels derive from Worker-only resource ordinals; the Master 智能体面板 row must not offset configured Worker labels",
     "transport-facing app routes expose SSE subscribe for latest turn and per-turn debug snapshot",
     "HTTP query and POST command ingress remain compatibility routes; SSE latest-turn subscribe is consumed by WebUI as a display-refresh mirror without owning command dispatch",
@@ -807,6 +808,17 @@
       "output_semantic": "query result, command receipt, typed failure rejection, or validated SessionListPage projection",
       "caller": "app.webui-smoke online verifier wrappers",
       "callee": "daemon /adp WebSocket",
+      "binding_status": "bound"
+    },
+    {
+      "step": "11p-memory-surface",
+      "symbol_path": "renderMemoryDashboard / submitMemoryQuery / renderMemorySurface / renderMemoryEntry",
+      "file_path": "apps/freehand-server/assets/webui/legacy-monolith.js / apps/freehand-server/assets/webui/surfaces/memory/index.js / apps/freehand-server/assets/webui/surfaces/memory/view.js",
+      "responsibility": "open the protocol-only memory surface, query SQLite-backed memory truth through generated QueryMemory, render complete Markdown with explicit loading/empty/error states and copy actions, and keep pagination state in the current render projection",
+      "input_semantic": "memory surface open/search/sort/load-more intent plus UiQueryResult::Memory",
+      "output_semantic": "memory dialog with owner-projected rows, sort/paging status, complete Markdown, copy action, or explicit query failure",
+      "caller": "WebUI memory entry and ADP query result handler",
+      "callee": "generated ADP QueryMemory constructor and memory surface view",
       "binding_status": "bound"
     }
   ],

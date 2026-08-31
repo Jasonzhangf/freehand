@@ -1,5 +1,22 @@
 # note.md
 
+# 2026-08-31 SQLite tool-result memory plugin
+
+- `reason.persistence` owns durable tool-result memory at the configured
+  `memory/tool-results.jsonl` path, with a sibling SQLite database and FTS5
+  index. `QueryMemory` is a typed ADP query; `AddToMemory` is the mutation
+  path. Session deletion does not delete memory rows.
+- The installed S profile at `http://100.66.1.82:4042/` passed the real
+  memory roundtrip: keyword search, recent/oldest/relevance ordering,
+  offset paging, complete Markdown, browser memory cards with copy buttons,
+  survival after session deletion, and survival after daemon restart.
+- Online evidence:
+  `artifacts/webui-online/webui-memory-1788170988657/summary.json`.
+- Source and installed debug daemon SHA-256:
+  `7f4b2a7f6995a6c259b0cb8714a9549483e78ff3d12e7821e05a6bd9fc4290ec`.
+- AGY Review final task `memory-sqlite-plugin-20260831-final-oauth2` passed
+  with no blocking findings.
+
 # 2026-08-09 ui.protocol large-lib split audit
 
 - Owner: `ui.protocol`; resource owners remain `ui_projection` and `input_attachment` from `docs/resource-maps/core.json`.

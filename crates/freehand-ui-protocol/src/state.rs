@@ -145,6 +145,8 @@ pub enum UiProtocolError {
     InvalidSessionListPageLimit,
     #[error("session list page cursor is invalid")]
     InvalidSessionListPageCursor,
+    #[error("memory query limit must be between 1 and 100")]
+    InvalidMemoryQueryLimit,
 }
 
 #[derive(Debug, Error, PartialEq, Eq)]
@@ -699,6 +701,7 @@ impl UiProtocolState {
             }
             UiCommand::QuerySessionTurnsPage { .. } => Err(UiProtocolError::StreamKindMismatch),
             UiCommand::QuerySessionSearch { .. }
+            | UiCommand::QueryMemory { .. }
             | UiCommand::QueryTaskList { .. }
             | UiCommand::QueryTaskBoard { .. }
             | UiCommand::QueryEventInbox { .. }

@@ -5,6 +5,7 @@ import { renderRunningList as renderHomeRunningList, renderHistoryList as render
 import { openToolsRegistrySurface, refreshToolsRegistrySurface, renderSurface as renderToolsRegistrySurface } from "./surfaces/tools-registry/index.js?v=__WEBUI_ASSET_VERSION__";
 import { cancelTimerFromSurface, openTimerDashboardSurface, refreshTimerDashboardSurface, renderSurface as renderTimerDashboardSurface, scheduleTimerFromSurface } from "./surfaces/timer-dashboard/index.js?v=__WEBUI_ASSET_VERSION__";
 import { renderSurface as renderSessionSearchSurface, renderSessionSearchResult as renderSessionSearchResultSurface } from "./surfaces/session-search/index.js?v=__WEBUI_ASSET_VERSION__";
+import { renderSurface as renderMemorySurface } from "./surfaces/memory/index.js?v=__WEBUI_ASSET_VERSION__";
 import { renderDiagnosticLogRow as renderDiagnosticLogRowSurface, renderSurface as renderSettingsShellSurface, renderNavigation as renderSettingsNavigationSurface, renderDiagnostics as renderSettingsDiagnosticsSurface } from "./surfaces/settings/index.js?v=__WEBUI_ASSET_VERSION__";
 import { chooseNewTaskDirectory as chooseNewTaskDirectoryFromSurface, openNewSessionSurface, closeNewSessionSurface, selectedNewSessionKind as selectedNewSessionKindFromSurface, submitNewSessionSurface, syncNewSessionDialogMode as syncNewSessionDialogModeFromSurface } from "./surfaces/new-session/index.js?v=__WEBUI_ASSET_VERSION__";
 import { setSelectedSessionId as setSelectedSessionIdInSurface, clearConversationForSessionSwitch as clearConversationForSessionSwitchInSurface, switchConversationSession as switchConversationSessionInSurface } from "./surfaces/session-detail/index.js?v=__WEBUI_ASSET_VERSION__";
@@ -33,6 +34,7 @@ const sessionList = document.getElementById("session-list");
 const mobileDrawerScrim = document.getElementById("mobile-drawer-scrim");
 const openSessionDrawerButton = document.getElementById("open-session-drawer-button");
 const openSessionSearchButton = document.getElementById("open-session-search-button");
+const openMemoryButton = document.getElementById("open-memory-button");
 const closeSessionDrawerButton = document.getElementById("close-session-drawer-button");
 const openDetailDrawerButton = document.getElementById("open-detail-drawer-button");
 const openSettingsDrawerButton = document.getElementById("open-settings-drawer-button");
@@ -165,6 +167,15 @@ const sessionSearchInput = document.getElementById("session-search-input");
 const sessionSearchSubmitButton = document.getElementById("session-search-submit-button");
 const sessionSearchStatus = document.getElementById("session-search-status");
 const sessionSearchResults = document.getElementById("session-search-results");
+const memoryDialog = document.getElementById("memory-dialog");
+const memoryForm = document.getElementById("memory-form");
+const memoryCloseButton = document.getElementById("memory-close-button");
+const memoryQueryInput = document.getElementById("memory-query-input");
+const memorySortSelect = document.getElementById("memory-sort-select");
+const memorySubmitButton = document.getElementById("memory-submit-button");
+const memoryStatus = document.getElementById("memory-status");
+const memoryResults = document.getElementById("memory-results");
+const memoryLoadMoreButton = document.getElementById("memory-load-more-button");
 const timerModeInput = document.getElementById("timer-mode-input");
 const timerDelayInput = document.getElementById("timer-delay-input");
 const timerRunAtInput = document.getElementById("timer-run-at-input");
@@ -292,6 +303,10 @@ const state = {
   sessionSearch: null,
   sessionSearchError: null,
   sessionSearchInFlight: false,
+  memory: null,
+  memoryError: null,
+  memoryInFlight: false,
+  memoryAppendRequested: false,
   phase2StatusError: null,
   phase2LastRefreshAt: null,
   phase2LiveRefreshInFlight: false,
@@ -6696,6 +6711,23 @@ function applyPhase2QueryResult(result) {
     renderSessionSearchDashboard();
     return true;
   }
+  const memory = variantPayload(result, "Memory");
+  if (memory !== undefined) {
+    const append = state.memoryAppendRequested
+      && state.memory
+      && state.memory.query === memory.query
+      && state.memory.sort === memory.sort;
+    state.memory = append
+      ? {
+          ...memory,
+          entries: [...(state.memory.entries || []), ...(memory.entries || [])],
+        }
+      : memory;
+    state.memoryAppendRequested = false;
+    state.memoryError = null;
+    renderMemoryDashboard();
+    return true;
+  }
   return false;
 }
 
@@ -8262,6 +8294,72 @@ async function refreshToolsDashboard() {
 
 function renderSessionSearchDashboard() {
   renderSessionSearchSurface(sessionSearchSurfaceContext());
+}
+
+function renderMemoryDashboard() {
+  renderMemorySurface(memorySurfaceContext());
+}
+
+function memorySurfaceContext() {
+  return {
+    state,
+    dom: {
+      status: memoryStatus,
+      submitButton: memorySubmitButton,
+      results: memoryResults,
+      loadMoreButton: memoryLoadMoreButton,
+    },
+    formatMemoryTime(unixSeconds) {
+      if (!unixSeconds) return "";
+      return new Date(unixSeconds * 1000).toLocaleString();
+    },
+    copyMemory(content, button) {
+      navigator.clipboard.writeText(content).then(() => {
+        button.textContent = "已复制";
+        window.setTimeout(() => {
+          button.textContent = "复制";
+        }, 1200);
+      }).catch((error) => {
+        state.memoryError = error.message;
+        renderMemoryDashboard();
+      });
+    },
+  };
+}
+
+async function openMemoryDashboard() {
+  dispatchWebUiEdge("home.open_memory");
+  if (memoryDialog && typeof memoryDialog.showModal === "function" && !memoryDialog.open) {
+    memoryDialog.showModal();
+  }
+  window.setTimeout(() => memoryQueryInput?.focus(), 0);
+  renderMemoryDashboard();
+}
+
+async function submitMemoryQuery(event, append = false) {
+  event?.preventDefault?.();
+  const query = `${memoryQueryInput?.value || ""}`.trim();
+  state.memoryAppendRequested = append;
+  state.memoryInFlight = true;
+  state.memoryError = null;
+  renderMemoryDashboard();
+  try {
+    const result = await adpQuery(adpQueryOf("QueryMemory", {
+      query: query || undefined,
+      sort: memorySortSelect?.value || "recent",
+      limit: 20,
+      offset: append ? state.memory?.next_offset : undefined,
+    }));
+    applyPhase2QueryResult(result);
+    setCommandStatus("SQLite 记忆已刷新。");
+  } catch (error) {
+    state.memoryError = error.message;
+    setCommandStatus(`记忆查询失败: ${error.message}`, { stickyMs: 9000 });
+  } finally {
+    state.memoryInFlight = false;
+    state.memoryAppendRequested = false;
+    renderMemoryDashboard();
+  }
 }
 
 function sessionSearchResultsList() {
@@ -10334,6 +10432,16 @@ if (openSessionSearchButton) {
     });
   });
 }
+if (openMemoryButton) {
+  openMemoryButton.addEventListener("click", () => {
+    closeMobileDrawer();
+    openMemoryDashboard().catch((error) => {
+      state.memoryError = error.message;
+      setCommandStatus(`记忆面板打开失败: ${error.message}`, { stickyMs: 9000 });
+      renderMemoryDashboard();
+    });
+  });
+}
 if (mobileNewEntryButton) {
   mobileNewEntryButton.addEventListener("click", () => openNewSessionDialog("conversation"));
 }
@@ -10392,6 +10500,27 @@ if (sessionSearchCloseButton) {
 if (sessionSearchForm) {
   sessionSearchForm.addEventListener("submit", (event) => {
     submitSessionSearch(event);
+  });
+}
+if (memoryCloseButton) {
+  memoryCloseButton.addEventListener("click", () => {
+    memoryDialog?.close();
+    dispatchWebUiEdge("memory.close");
+  });
+}
+if (memoryForm) {
+  memoryForm.addEventListener("submit", (event) => {
+    submitMemoryQuery(event);
+  });
+}
+if (memorySortSelect) {
+  memorySortSelect.addEventListener("change", () => {
+    submitMemoryQuery();
+  });
+}
+  if (memoryLoadMoreButton) {
+    memoryLoadMoreButton.addEventListener("click", () => {
+    submitMemoryQuery(undefined, true);
   });
 }
 if (closeSessionDrawerButton) {

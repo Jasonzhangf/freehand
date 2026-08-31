@@ -54,6 +54,7 @@ assert.deepEqual(registeredSurfaces, [
   'timer_dashboard',
   'settings',
   'session_search',
+  'memory',
   'new_session',
 ]);
 assert(Object.isFrozen(surfaceContracts));

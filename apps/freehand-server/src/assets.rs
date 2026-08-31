@@ -183,6 +183,16 @@ const WEBUI_SURFACE_SESSION_SEARCH_VIEW_JS: Asset = Asset {
     body: include_str!("../assets/webui/surfaces/session-search/view.js"),
 };
 
+const WEBUI_SURFACE_MEMORY_JS: Asset = Asset {
+    content_type: "application/javascript; charset=utf-8",
+    body: include_str!("../assets/webui/surfaces/memory/index.js"),
+};
+
+const WEBUI_SURFACE_MEMORY_VIEW_JS: Asset = Asset {
+    content_type: "application/javascript; charset=utf-8",
+    body: include_str!("../assets/webui/surfaces/memory/view.js"),
+};
+
 const WEBUI_SURFACE_NEW_SESSION_JS: Asset = Asset {
     content_type: "application/javascript; charset=utf-8",
     body: include_str!("../assets/webui/surfaces/new-session/index.js"),
@@ -230,6 +240,8 @@ pub fn asset_response(path: &str) -> Result<Response, StatusCode> {
         "webui/surfaces/settings/diagnostics.js" => &WEBUI_SURFACE_SETTINGS_DIAGNOSTICS_JS,
         "webui/surfaces/session-search/index.js" => &WEBUI_SURFACE_SESSION_SEARCH_JS,
         "webui/surfaces/session-search/view.js" => &WEBUI_SURFACE_SESSION_SEARCH_VIEW_JS,
+        "webui/surfaces/memory/index.js" => &WEBUI_SURFACE_MEMORY_JS,
+        "webui/surfaces/memory/view.js" => &WEBUI_SURFACE_MEMORY_VIEW_JS,
         "webui/surfaces/new-session/index.js" => &WEBUI_SURFACE_NEW_SESSION_JS,
         "webui/surfaces/new-session/controls.js" => &WEBUI_SURFACE_NEW_SESSION_CONTROLS_JS,
         "logo.png" => {

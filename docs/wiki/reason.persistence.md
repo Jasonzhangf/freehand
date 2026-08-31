@@ -11,6 +11,8 @@ Generated from `docs/mainline-calls/reason.persistence.json`. Do not edit by han
 ## Resource Operation Backlinks
 
 - runtime_command.append_tool_result
+- memory.query_tool_results
+- memory.migrate_legacy_tool_results
 - session.restore
 - session.append_turn_to_turn
 - session.list_persisted
@@ -24,7 +26,7 @@ Generated from `docs/mainline-calls/reason.persistence.json`. Do not edit by han
 - runtime persistence appends semantic reason-ledger rows before advancing durable snapshot cursors
 - terminal turn close materializes immutable turn truth files and only then updates derived UI and index sidecars
 - provider raw ledgers may be appended for debug, but they are not part of the authoritative request or recovery chain
-- tool-result memory entries append the complete owner-projected Markdown content as independent JSONL records under the configured memory path, outside session truth
+- tool-result memory entries append the complete owner-projected Markdown content to the configured SQLite memory database, outside session truth; legacy JSONL is migrated once and retained as an audit source
 
 ## Response Mainline
 
@@ -41,7 +43,9 @@ Generated from `docs/mainline-calls/reason.persistence.json`. Do not edit by han
 - persisted session index reads expose only derived index rows and session metadata sidecars for UI list/search projection; worker task transcripts are not promoted to top-level persisted user sessions by this owner operation
 - session display metadata (`title`, `archived`) is persisted as reason-owned sidecar truth for multi-UI session management and stays separate from provider-visible session history
 - session rollback appends a durable marker, filters effective transcript restore by logical turn key, and retains raw closed-turn files for audit; later durable writes rebuild derived sidecars from rollback-filtered effective turns while raw rolled-back files remain reserved for audit and id allocation
-- tool-result memory append creates parent directories, appends one serialized entry, syncs the file, and reloads independently after session archive/delete or dispatcher restart
+- tool-result memory append creates the configured SQLite database and FTS5 index, writes one durable row, and reloads independently after session archive/delete or dispatcher restart
+- tool-result memory query uses owner-side FTS5 matching, optional session scope, deterministic recent/oldest/relevance ordering, and bounded offset pagination
+- legacy tool-result JSONL is imported into SQLite exactly once without deleting or rewriting the source file
 
 ## Error Mainline
 
@@ -157,6 +161,8 @@ Generated from `docs/mainline-calls/reason.persistence.json`. Do not edit by han
 | 18 | `ReasonPersistence::list_persisted_sessions` | `crates/freehand-reason/src/persistence.rs` | expose derived persisted session index rows and session metadata sidecar truth for runtime search projection, startup stale-lifecycle recovery, and bootstrap UI projection restore without reading provider raw ledgers or treating worker transcripts as global sessions | session index sidecar plus metadata sidecar | persisted session index/metadata rows for runtime search projection | runtime.ui-command-dispatch QuerySessionSearch / recover_stale_lifecycle_waits_on_bootstrap / restore_all_persisted_sessions_into_ui | persistence owner | session | ui_projection | session.list_persisted | bound |
 | 18p | `ReasonPersistence::list_persisted_sessions_page` | `crates/freehand-reason/src/persistence.rs` | maintain the versioned session summary index and return one ordered metadata-only page with an opaque cursor; unavailable poisoned sessions stay explicit facts without blocking other rows | archived space plus latest/older request plus summary index/metadata truth | bounded ReasonSessionListPage with page facts and unavailable ids | runtime.ui-command-dispatch QuerySessionListPage | persistence owner | session | ui_projection | session.list_persisted_page | bound |
 | 19m | `ReasonPersistence::append_tool_result_memory` | `crates/freehand-reason/src/persistence.rs` | append the complete tool-result Markdown plus typed session/turn/tool identity to the config-selected durable memory JSONL | memory path plus session id, optional turn id, optional tool call id, and complete content | persisted ToolResultMemoryEntry with explicit created_at_unix_seconds | runtime.ui-command-dispatch AddToMemory | persistence owner | runtime_command | memory | runtime_command.append_tool_result | bound |
+| 19q | `ReasonPersistence::query_tool_result_memory` | `crates/freehand-reason/src/persistence.rs` | query SQLite memory truth through FTS5 with optional session scope, deterministic ordering, and bounded pagination | configured memory path plus query, scope, sort, limit, and offset | bounded ToolResultMemoryPage with total match count and next offset | runtime.ui-command-dispatch QueryMemory | persistence owner | memory | ui_projection | memory.query_tool_results | bound |
+| 19mig | `migrate_legacy_tool_result_memory` | `crates/freehand-reason/src/persistence.rs` | migrate legacy JSONL memory rows into SQLite once while retaining the audit source | legacy JSONL memory path plus empty SQLite database | SQLite rows and FTS5 index | SQLite memory database open | persistence owner | memory | memory | memory.migrate_legacy_tool_results | bound |
 
 ## Sync Status Against Mainline Call
 

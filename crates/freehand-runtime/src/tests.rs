@@ -8,8 +8,9 @@ use freehand_metadata::MetadataEnvelope;
 use freehand_provider_core::{ProviderInputAttachment, ProviderInputAttachmentKind};
 use freehand_reason::ProviderRawLedgerRow;
 use freehand_ui_protocol::{
-    UiConversationItemKind, UiModelRequestKind, UiModelRequestWaiting, UiModelTransportActivity,
-    UiModelTransportKind, UiQueryResult, UiToolActivityStatus, build_command_dispatch_envelope,
+    UiConversationItemKind, UiMemorySort, UiModelRequestKind, UiModelRequestWaiting,
+    UiModelTransportActivity, UiModelTransportKind, UiQueryResult, UiToolActivityStatus,
+    build_command_dispatch_envelope,
 };
 use serde_json::{Value, json};
 use std::fs;
@@ -16855,7 +16856,8 @@ fn add_to_memory_dispatch_routes_full_tool_markdown_to_configured_owner_path() {
         )
         .expect("memory dispatch");
     assert_eq!(receipt.dispatch_status, "memory_entry_persisted");
-    assert!(memory_path.is_file());
+    let database_path = memory_path.with_file_name("tool-results.md.sqlite3");
+    assert!(database_path.is_file());
     let reloaded = ReasonPersistence::load_tool_result_memory(&memory_path)
         .expect("reload tool result memory");
     assert_eq!(reloaded.len(), 1);
@@ -16867,4 +16869,79 @@ fn add_to_memory_dispatch_routes_full_tool_markdown_to_configured_owner_path() {
     assert_eq!(reloaded[0].tool_call_id.as_deref(), Some("tool-call-1"));
     assert_eq!(reloaded[0].content, "```markdown\nfull tool output\n```");
     fs::remove_dir_all(runtime_home).expect("cleanup");
+}
+
+#[test]
+fn query_memory_dispatch_returns_fts_projection_with_scope_and_pagination() {
+    let runtime_home = temp_runtime_home();
+    let memory_path = runtime_home.join("memory").join("tool-results.md");
+    let selected = selected_master_agent();
+    let runtime = RuntimeCommandDispatcher::from_selected_agent_with_live_and_memory_path(
+        &selected,
+        runtime_home.clone(),
+        memory_path,
+        false,
+    )
+    .expect("runtime");
+
+    for (session_id, content) in [
+        (
+            "session-memory-a",
+            "SQLite FTS keeps the complete Markdown result",
+        ),
+        ("session-memory-b", "SQLite pagination keeps another result"),
+    ] {
+        runtime
+            .dispatch(
+                build_command_dispatch_envelope(&UiCommand::AddToMemory {
+                    session_id: SessionId::new(session_id),
+                    turn_id: None,
+                    tool_call_id: None,
+                    content: content.to_owned(),
+                })
+                .expect("memory command envelope"),
+            )
+            .expect("memory dispatch");
+    }
+
+    let result = runtime
+        .query_runtime(&UiCommand::QueryMemory {
+            query: Some("complete Markdown".to_owned()),
+            session_id: Some(SessionId::new("session-memory-a")),
+            sort: Some(UiMemorySort::Relevance),
+            limit: Some(1),
+            offset: None,
+        })
+        .expect("memory query")
+        .expect("memory projection");
+    let UiQueryResult::Memory(projection) = result else {
+        panic!("unexpected query result");
+    };
+    assert_eq!(projection.total_matching, 1);
+    assert!(!projection.has_older);
+    assert_eq!(projection.entries.len(), 1);
+    assert_eq!(
+        projection.entries[0].session_id,
+        SessionId::new("session-memory-a")
+    );
+    assert_eq!(
+        projection.entries[0].content,
+        "SQLite FTS keeps the complete Markdown result"
+    );
+
+    let error = runtime
+        .query_runtime(&UiCommand::QueryMemory {
+            query: None,
+            session_id: None,
+            sort: Some(UiMemorySort::Recent),
+            limit: Some(0),
+            offset: None,
+        })
+        .expect_err("invalid memory limit must fail");
+    let UiCommandDispatchPortError::DispatchFailed(message) = error else {
+        panic!("unexpected memory limit error");
+    };
+    assert!(message.contains("between 1 and 100"));
+
+    fs::remove_dir_all(runtime_home).expect("cleanup runtime home");
 }

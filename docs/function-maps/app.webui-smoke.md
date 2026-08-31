@@ -206,6 +206,7 @@
 - front-end script renders completed/failed tool lifecycle inside the assistant bubble and keeps the status/outcome in the tool block status line; the block body also shows success/failure result text and raw detail lines when owner projection provides them
 - front-end tool-result cards render a dedicated `复制结果` action inside the tool body, copying the owner-projected tool summary through the existing clipboard helper without nesting controls inside the expandable header button
 - front-end tool-result cards render a sibling `加入记忆` action that sends the complete `toolSummaryBody(row)` plus typed session/turn/tool identity through generated `AddToMemory`; the app never writes local files or session truth
+- front-end memory surface renders SQLite-backed search, sort, paging, complete Markdown, and copy actions from `UiQueryResult::Memory`; it sends only generated `QueryMemory`/`AddToMemory` frames and never reads browser storage or filesystem paths
 - front-end script renders tool rows as protocol-structured execution cards from `UiToolActivity.display`: action/kind/status in the header, action-to-target primary line, `target`, `parameter_summary`, `result_summary`, `summary`, all structured fields, command, diff before/after, and raw detail lines. JavaScript must not read obsolete `display.result`, classify tools from raw strings, collapse details into hidden sections, or truncate the displayed tool turn.
 - front-end conversation projection orders each turn's tool activities before assistant text and the terminal final summary, preserving the observed tool-call -> summary sequence
 - front-end script renders model/request continuation rows as italic reasoning text, while assistant/public answer text uses normal body typography
@@ -433,6 +434,7 @@
   - Timer dashboard: `surfaces/timer-dashboard/{index,view,controls}.js`
   - Settings shell/diagnostics/navigation: `surfaces/settings/{index,view,diagnostics}.js`
   - SessionSearch: `surfaces/session-search/{index,view}.js`
+  - Memory: `surfaces/memory/{index,view}.js`
   - NewSession: `surfaces/new-session/{index,controls}.js`
 - compatibility boundary:
   - `legacy-monolith.js` may still host transcript rendering and older owner-projection wiring during strangler migration, but the above surface entry/render/control paths are now delegated to modules and served as independent assets.

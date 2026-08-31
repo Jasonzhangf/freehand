@@ -37,6 +37,9 @@ export function createRouteController({ state, document }) {
       case "home.open_search":
         setRoute(WebUiSurface.SessionSearch);
         break;
+      case "home.open_memory":
+        setRoute(WebUiSurface.Memory);
+        break;
       case "home.open_new":
         setRoute(WebUiSurface.NewSession);
         break;

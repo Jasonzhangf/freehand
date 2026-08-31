@@ -328,15 +328,17 @@
       "resource_type": "memory",
       "owner_feature_id": "reason.persistence",
       "owner_crate": "crates/freehand-reason",
-      "identity": "agent_id plus append sequence",
-      "truth_store": "config-selected local JSONL memory path, defaulting to ~/.freehand/memory/tool-results.jsonl",
+      "identity": "SQLite row id with agent/session/turn/tool provenance",
+      "truth_store": "config-selected local SQLite database derived from the memory path, defaulting to ~/.freehand/memory/tool-results.jsonl.sqlite3; legacy JSONL is migrated once and retained as an audit source",
       "operations": [
         "append_tool_result",
-        "load_tool_results"
+        "query_tool_results",
+        "migrate_legacy_tool_results"
       ],
       "projections": [
         "durable tool-result memory entry",
-        "memory reload after session archive/delete or runtime restart"
+        "FTS5 keyword search with recent/oldest/relevance ordering",
+        "paged memory projection after session archive/delete or runtime restart"
       ]
     },
     {
@@ -866,7 +868,25 @@
       "owner_feature_id": "reason.persistence",
       "source_resource": "runtime_command",
       "target_resource": "memory",
-      "effect": "append complete tool-result Markdown and typed session/turn/tool identity to the config-selected durable memory JSONL without mutating session truth",
+      "effect": "append complete tool-result Markdown and typed session/turn/tool identity to the reason.persistence-owned SQLite memory database without mutating session truth",
+      "mainline_call_doc": "docs/mainline-calls/reason.persistence.json",
+      "binding_status": "bound"
+    },
+    {
+      "operation_id": "memory.query_tool_results",
+      "owner_feature_id": "reason.persistence",
+      "source_resource": "memory",
+      "target_resource": "ui_projection",
+      "effect": "query the SQLite memory owner with optional FTS5 keywords, session scope, deterministic sort, and bounded offset pagination",
+      "mainline_call_doc": "docs/mainline-calls/reason.persistence.json",
+      "binding_status": "bound"
+    },
+    {
+      "operation_id": "memory.migrate_legacy_tool_results",
+      "owner_feature_id": "reason.persistence",
+      "source_resource": "memory",
+      "target_resource": "memory",
+      "effect": "migrate legacy JSONL tool-result rows into SQLite exactly once while retaining the original file",
       "mainline_call_doc": "docs/mainline-calls/reason.persistence.json",
       "binding_status": "bound"
     },
@@ -1836,6 +1856,28 @@
       "call_table_step": "19m",
       "file_path": "crates/freehand-reason/src/persistence.rs",
       "symbol_path": "ReasonPersistence::append_tool_result_memory",
+      "binding_status": "bound"
+    },
+    {
+      "edge_id": "reason.persistence#19q",
+      "operation_id": "memory.query_tool_results",
+      "source_resource": "memory",
+      "target_resource": "ui_projection",
+      "mainline_call_doc": "docs/mainline-calls/reason.persistence.json",
+      "call_table_step": "19q",
+      "file_path": "crates/freehand-reason/src/persistence.rs",
+      "symbol_path": "ReasonPersistence::query_tool_result_memory",
+      "binding_status": "bound"
+    },
+    {
+      "edge_id": "reason.persistence#19mig",
+      "operation_id": "memory.migrate_legacy_tool_results",
+      "source_resource": "memory",
+      "target_resource": "memory",
+      "mainline_call_doc": "docs/mainline-calls/reason.persistence.json",
+      "call_table_step": "19mig",
+      "file_path": "crates/freehand-reason/src/persistence.rs",
+      "symbol_path": "migrate_legacy_tool_result_memory",
       "binding_status": "bound"
     },
     {
@@ -3095,6 +3137,22 @@
       "allowed_direct": true,
       "via_resources": [],
       "reason": "Runtime dispatch may route a validated AddToMemory mutation to the reason.persistence memory owner; UI never writes the memory file directly."
+    },
+    {
+      "rule_id": "memory-projects-query-direct",
+      "source_resource": "memory",
+      "target_resource": "ui_projection",
+      "allowed_direct": true,
+      "via_resources": [],
+      "reason": "The memory owner may project bounded SQLite search results to UI-safe DTOs; the browser never reads or searches the database directly."
+    },
+    {
+      "rule_id": "memory-migrates-legacy-direct",
+      "source_resource": "memory",
+      "target_resource": "memory",
+      "allowed_direct": true,
+      "via_resources": [],
+      "reason": "The memory owner may migrate its legacy JSONL source into its SQLite truth store while retaining the source file."
     },
     {
       "rule_id": "turn-plans-request-context-direct",

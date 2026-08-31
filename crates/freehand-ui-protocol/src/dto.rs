@@ -113,6 +113,18 @@ pub enum UiCommand {
         #[serde(default, skip_serializing_if = "Option::is_none")]
         limit: Option<usize>,
     },
+    QueryMemory {
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        query: Option<String>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        session_id: Option<SessionId>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        sort: Option<UiMemorySort>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        limit: Option<usize>,
+        #[serde(default, skip_serializing_if = "Option::is_none")]
+        offset: Option<usize>,
+    },
     QueryConfigStatus,
     QueryTaskList {
         #[serde(default, skip_serializing_if = "Option::is_none")]
@@ -768,6 +780,39 @@ pub struct UiSessionSearchChildProjection {
     pub latest_status: String,
     pub snippet: String,
     pub matched_fields: Vec<String>,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum UiMemorySort {
+    Recent,
+    Oldest,
+    Relevance,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct UiMemoryProjection {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub query: Option<String>,
+    pub sort: UiMemorySort,
+    pub entries: Vec<UiMemoryEntryProjection>,
+    pub total_matching: u64,
+    pub has_older: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub next_offset: Option<usize>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct UiMemoryEntryProjection {
+    pub id: u64,
+    pub created_at_unix_seconds: u64,
+    pub agent_id: AgentId,
+    pub session_id: SessionId,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub turn_id: Option<TurnId>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tool_call_id: Option<String>,
+    pub content: String,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

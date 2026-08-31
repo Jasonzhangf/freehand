@@ -4,6 +4,7 @@ import { surfaceContract as toolsRegistrySurface } from "../surfaces/tools-regis
 import { surfaceContract as timerDashboardSurface } from "../surfaces/timer-dashboard/index.js?v=__WEBUI_ASSET_VERSION__";
 import { surfaceContract as settingsSurface } from "../surfaces/settings/index.js?v=__WEBUI_ASSET_VERSION__";
 import { surfaceContract as sessionSearchSurface } from "../surfaces/session-search/index.js?v=__WEBUI_ASSET_VERSION__";
+import { surfaceContract as memorySurface } from "../surfaces/memory/index.js?v=__WEBUI_ASSET_VERSION__";
 import { surfaceContract as newSessionSurface } from "../surfaces/new-session/index.js?v=__WEBUI_ASSET_VERSION__";
 
 const surfaceContractRegistry = Object.freeze({
@@ -13,6 +14,7 @@ const surfaceContractRegistry = Object.freeze({
   timer_dashboard: timerDashboardSurface,
   settings: settingsSurface,
   session_search: sessionSearchSurface,
+  memory: memorySurface,
   new_session: newSessionSurface,
 });
 
