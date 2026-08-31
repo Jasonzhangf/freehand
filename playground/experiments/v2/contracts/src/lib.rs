@@ -215,13 +215,12 @@ pub enum ProtocolVersion {
     V1,
 }
 
-#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(deny_unknown_fields)]
+#[derive(Debug, Clone, PartialEq, Eq)]
 pub struct UiCommand {
     correlation_id: CorrelationId,
     session_id: SessionId,
     capability_id: CapabilityId,
-    payload: ImmutablePayloadWire,
+    payload: ImmutablePayload,
 }
 
 impl UiCommand {
@@ -235,24 +234,51 @@ impl UiCommand {
             correlation_id,
             session_id,
             capability_id,
-            payload: ImmutablePayloadWire(payload.to_wire()),
+            payload,
         }
+    }
+
+    pub fn payload(&self) -> &ImmutablePayload {
+        &self.payload
+    }
+
+    pub fn to_wire(&self) -> UiCommandWire {
+        UiCommandWire {
+            correlation_id: self.correlation_id.clone(),
+            session_id: self.session_id.clone(),
+            capability_id: self.capability_id.clone(),
+            payload: self.payload.to_wire(),
+        }
+    }
+
+    pub fn from_wire(wire: UiCommandWire) -> Result<Self, ContractError> {
+        Ok(Self::new(
+            wire.correlation_id,
+            wire.session_id,
+            wire.capability_id,
+            ImmutablePayload::from_wire(wire.payload)?,
+        ))
     }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
-#[serde(transparent)]
-struct ImmutablePayloadWire(PayloadWire);
+#[serde(deny_unknown_fields)]
+pub struct UiCommandWire {
+    correlation_id: CorrelationId,
+    session_id: SessionId,
+    capability_id: CapabilityId,
+    payload: PayloadWire,
+}
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 #[serde(deny_unknown_fields)]
 pub struct PayloadFrame {
     version: ProtocolVersion,
-    command: UiCommand,
+    command: UiCommandWire,
 }
 
 impl PayloadFrame {
-    pub fn new(version: ProtocolVersion, command: UiCommand) -> Self {
+    pub fn new(version: ProtocolVersion, command: UiCommandWire) -> Self {
         Self { version, command }
     }
 }

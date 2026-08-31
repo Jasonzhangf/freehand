@@ -38,6 +38,20 @@ fn adjacent_consumers_share_one_immutable_payload_allocation() {
 }
 
 #[test]
+fn local_ui_command_shares_payload_without_crossing_wire_boundary() {
+    let payload = ImmutablePayload::new("local-command-payload").expect("valid payload");
+    let command = UiCommand::new(
+        CorrelationId::try_new("corr-local").expect("correlation id"),
+        SessionId::try_new("session-local").expect("session id"),
+        CapabilityId::try_new("capability-local").expect("capability id"),
+        payload.clone(),
+    );
+
+    assert!(Arc::ptr_eq(payload.arc(), command.payload().arc()));
+    assert_eq!(command.payload().body(), payload.body());
+}
+
+#[test]
 fn explicit_wire_copy_rebuilds_immutable_value_without_changing_content() {
     let payload = ImmutablePayload::new("wire-boundary-payload").expect("valid payload");
     let wire = payload.to_wire();
@@ -76,15 +90,22 @@ fn control_and_error_frames_cannot_embed_business_payload_bytes() {
 
 #[test]
 fn frame_class_and_protocol_version_are_explicit() {
-    let frame = WireFrame::Payload(PayloadFrame::new(
-        ProtocolVersion::V1,
-        UiCommand::new(
-            CorrelationId::try_new("corr-002").expect("correlation id"),
-            SessionId::try_new("session-002").expect("session id"),
-            CapabilityId::try_new("capability-001").expect("capability id"),
-            ImmutablePayload::new("frame-payload").expect("valid payload"),
-        ),
+    let command = UiCommand::new(
+        CorrelationId::try_new("corr-002").expect("correlation id"),
+        SessionId::try_new("session-002").expect("session id"),
+        CapabilityId::try_new("capability-001").expect("capability id"),
+        ImmutablePayload::new("frame-payload").expect("valid payload"),
+    );
+    let command_wire = command.to_wire();
+    let rebuilt_command =
+        UiCommand::from_wire(command_wire.clone()).expect("rebuild command across wire");
+    assert_eq!(rebuilt_command.payload().body(), command.payload().body());
+    assert!(!Arc::ptr_eq(
+        rebuilt_command.payload().arc(),
+        command.payload().arc()
     ));
+
+    let frame = WireFrame::Payload(PayloadFrame::new(ProtocolVersion::V1, command_wire));
     let encoded = serde_json::to_string(&frame).expect("serialize frame");
     let decoded = WireFrame::decode(&encoded).expect("decode frame");
     assert_eq!(decoded, frame);
@@ -107,7 +128,7 @@ fn ui_command_rejects_empty_payload_during_wire_decode() {
         "capability_id":"capability-003",
         "payload":{"body":""}
     }"#;
-    assert!(serde_json::from_str::<UiCommand>(raw).is_err());
+    assert!(serde_json::from_str::<freehand_v2_contracts::UiCommandWire>(raw).is_err());
 }
 
 #[test]
