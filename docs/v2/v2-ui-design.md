@@ -3,7 +3,7 @@
 Status: design-admitted
 Project: `freehand-v2`
 Branch: `v2`
-Governance: AppSDK `0.1.5`
+Governance: AppSDK `0.1.6`
 Reference: `http://127.0.0.1:4173/docs/design/multi-agent-console-prototype.html`
 Related plan: `docs/v2/v2-foundation-mvp-ui-reason-network-plan.md`
 Test design: `docs/v2/v2-test-design.md`

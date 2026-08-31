@@ -3,7 +3,7 @@
 Status: planned
 Project: `freehand-v2`
 Branch: `v2`
-Governance: AppSDK `0.1.5`
+Governance: AppSDK `0.1.6`
 Test design: `docs/v2/v2-test-design.md`
 UI design: `docs/v2/v2-ui-design.md`
 
@@ -45,11 +45,12 @@ Expected local path:
 ```text
 UI command
   -> UI protocol ingress
-  -> Cordis orchestration
-  -> local Rust plugin
+  -> fixed Cordis design orchestration plugin
+  -> local Rust capability plugin
   -> typed ControlEvent
   -> Arc immutable payload handoff
-  -> sessionlog reasoning append
+  -> canonical Session Log surface
+  -> selected Reasoning Service backend
   -> typed UI projection
 ```
 
@@ -60,8 +61,10 @@ The harness must assert these observations independently:
 2. The plugin receives the typed payload value unchanged.
 3. The control event identifies lifecycle/plugin/reasoning facts without being
    serialized inside the business payload.
-4. The payload has one immutable handoff and remains equal for every consumer.
-5. The sessionlog contains one ordered accepted input and one result turn.
+4. The local path passes `Arc::clone` handles, and adjacent consumers satisfy
+   `Arc::ptr_eq` while observing the same immutable payload value.
+5. The canonical Session Log contains one ordered accepted input, one derived
+   model surface and one result/recovery fact.
 6. A query returns the owner-backed session/projection truth.
 7. A subscription receives the same projection in order and does not become a
    second query truth source.
@@ -89,6 +92,11 @@ The same harness must run the following failures:
 | unsupported network version/capability | explicit negotiation rejection; no local fallback |
 | network disconnect during replay | explicit disconnect/replay state; no fabricated completion |
 | non-terminal reason result | running/waiting projection; no premature final state |
+| OpenCode adaptor output cannot be normalized | typed backend error; no Session Log success fact |
+| backend replacement during an active request | explicit replacement boundary; no silent provider migration |
+| Registry invalid token or capability manifest | explicit registration rejection; no endpoint discovery |
+| ChannelSession reattach with a stale generation | explicit rebind failure; no invocation or local success |
+| local payload deep-copy or mutable-sharing implementation | contract rejection; no adjacent-node handoff is accepted |
 
 Every negative scenario must assert absence of the forbidden side effect. A
 visible error string alone is insufficient evidence.
@@ -117,15 +125,24 @@ is implemented.
 The project harness and static gates must fail if:
 
 - UI code writes session, event, plugin, reason or network truth;
-- Cordis contains payload validation, event policy, reason persistence or
-  plugin semantic logic;
+- Cordis composition contains payload validation, event policy, Session Log
+  persistence or plugin semantic logic;
 - `Arc` is used as a mutable global context or truth store;
+- adjacent local nodes deep-copy an immutable payload instead of sharing its
+  `Arc` allocation;
+- a mutable payload is hidden behind `Arc<Mutex<_>>`, `Arc<RwLock<_>>` or an
+  equivalent shared container;
+- a process or network boundary is reported as zero-copy merely because the
+  source side used `Arc`;
 - control event, metadata, debug or error fields are embedded in a business
   request/response payload;
 - sessionlog is double-written or silently replaced by another adapter;
 - a network adapter owns task/reason/UI/payload truth;
 - a production network path is used to satisfy the local MVP without an
   explicit contract;
+- a ChannelSession is reconstructed from UI/payload state or lost when its
+  Connection is replaced;
+- a backend adaptor makes its native database a second Session Log truth source;
 - build outputs, generated outputs, external checkouts or runtime evidence are
   staged for commit.
 
@@ -160,8 +177,8 @@ The v2 MVP is black-box accepted only when:
 2. every negative scenario rejects the correct boundary without side effects;
 3. restart/replay proves durable owner truth;
 4. UI/reason and control/payload separation is observed through public outputs;
-5. network extension tests prove explicit rejection without claiming distributed
-   runtime;
+5. Registry/channel tests prove explicit rejection and reconnect semantics
+   without claiming distributed runtime;
 6. the exact candidate source passes module and project gates;
 7. AppSDK architecture review and unchanged-source effectiveness replay pass.
 

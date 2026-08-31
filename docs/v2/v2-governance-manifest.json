@@ -5,7 +5,7 @@
   "baseline_commit": "5c879c6155d8c3e6febc3d0a13b4716b9f544948",
   "governance": {
     "sdk": "appsdk",
-    "sdk_version": "0.1.5",
+    "sdk_version": "0.1.6",
     "project_contract": ".appsdk/project.json",
     "goal": ".appsdk/goal.json",
     "canonical_maps": {
@@ -41,56 +41,67 @@
       "mvp": true
     },
     {
-      "module_id": "v2-reason-sessionlog",
+      "module_id": "v2-sessionlog",
       "status": "planned",
-      "owner": "v2-reason-sessionlog",
-      "source_paths": ["playground/experiments/v2/reason-sessionlog/**"],
-      "test_paths": ["tests/v2/reason-sessionlog/**"],
+      "owner": "v2-sessionlog",
+      "source_paths": ["playground/experiments/v2/sessionlog/**"],
+      "test_paths": ["tests/v2/sessionlog/**"],
       "depends_on": ["v2-contracts", "v2-control-events"],
       "test_design": "docs/v2/v2-test-design.md",
       "project_blackbox": "docs/v2/v2-project-blackbox-verification.md",
       "mvp": true
     },
     {
-      "module_id": "v2-plugin-runtime",
+      "module_id": "v2-reasoning-backend",
       "status": "planned",
-      "owner": "v2-plugin-runtime",
-      "source_paths": ["playground/experiments/v2/plugin-runtime/**"],
-      "test_paths": ["tests/v2/plugin-runtime/**"],
+      "owner": "v2-reasoning-backend",
+      "source_paths": ["playground/experiments/v2/reasoning-backend/**"],
+      "test_paths": ["tests/v2/reasoning-backend/**"],
       "depends_on": ["v2-contracts", "v2-control-events"],
       "test_design": "docs/v2/v2-test-design.md",
       "project_blackbox": "docs/v2/v2-project-blackbox-verification.md",
       "mvp": true
     },
     {
-      "module_id": "v2-ui-protocol",
+      "module_id": "v2-plugin-capabilities",
       "status": "planned",
-      "owner": "v2-ui-protocol",
-      "source_paths": ["playground/experiments/v2/ui-protocol/**"],
-      "test_paths": ["tests/v2/ui-protocol/**"],
+      "owner": "v2-plugin-capabilities",
+      "source_paths": ["playground/experiments/v2/plugin-capabilities/**"],
+      "test_paths": ["tests/v2/plugin-capabilities/**"],
       "depends_on": ["v2-contracts", "v2-control-events"],
       "test_design": "docs/v2/v2-test-design.md",
       "project_blackbox": "docs/v2/v2-project-blackbox-verification.md",
       "mvp": true
     },
     {
-      "module_id": "v2-orchestration",
+      "module_id": "v2-cordis-ecosystem",
       "status": "planned",
-      "owner": "v2-orchestration",
-      "source_paths": ["playground/experiments/v2/orchestration/**"],
-      "test_paths": ["tests/v2/orchestration/**"],
-      "depends_on": ["v2-contracts", "v2-control-events", "v2-plugin-runtime", "v2-reason-sessionlog"],
+      "owner": "v2-cordis-ecosystem",
+      "source_paths": ["playground/experiments/v2/cordis-ecosystem/**"],
+      "test_paths": ["tests/v2/cordis-ecosystem/**"],
+      "depends_on": ["v2-contracts", "v2-control-events", "v2-plugin-capabilities", "v2-sessionlog", "v2-reasoning-backend"],
       "test_design": "docs/v2/v2-test-design.md",
       "project_blackbox": "docs/v2/v2-project-blackbox-verification.md",
       "mvp": true
     },
     {
-      "module_id": "v2-network-extension",
+      "module_id": "v2-ui-adaptor",
       "status": "planned",
-      "owner": "v2-network-extension",
-      "source_paths": ["playground/experiments/v2/network-extension/**"],
-      "test_paths": ["tests/v2/network-extension/**"],
-      "depends_on": ["v2-contracts", "v2-control-events", "v2-plugin-runtime"],
+      "owner": "v2-ui-adaptor",
+      "source_paths": ["playground/experiments/v2/ui-adaptor/**"],
+      "test_paths": ["tests/v2/ui-adaptor/**"],
+      "depends_on": ["v2-contracts", "v2-control-events", "v2-cordis-ecosystem"],
+      "test_design": "docs/v2/v2-test-design.md",
+      "project_blackbox": "docs/v2/v2-project-blackbox-verification.md",
+      "mvp": true
+    },
+    {
+      "module_id": "v2-channel-registry",
+      "status": "planned",
+      "owner": "v2-channel-registry",
+      "source_paths": ["playground/experiments/v2/channel-registry/**"],
+      "test_paths": ["tests/v2/channel-registry/**"],
+      "depends_on": ["v2-contracts", "v2-control-events", "v2-plugin-capabilities"],
       "test_design": "docs/v2/v2-test-design.md",
       "project_blackbox": "docs/v2/v2-project-blackbox-verification.md",
       "mvp": true
@@ -99,51 +110,60 @@
   "resources": [
     {"resource_id": "v2_payload", "owner": "v2-contracts", "truth_store": "typed immutable payload", "operations": ["create", "read", "share"]},
     {"resource_id": "v2_control_event", "owner": "v2-control-events", "truth_store": "typed event ledger", "operations": ["emit", "route", "ack", "replay"]},
-    {"resource_id": "v2_reason_session", "owner": "v2-reason-sessionlog", "truth_store": "sessionlog adapter", "operations": ["append", "read", "restore", "replay"]},
-    {"resource_id": "v2_plugin_capability", "owner": "v2-plugin-runtime", "truth_store": "compiled capability manifest", "operations": ["declare", "validate", "register", "invoke"]},
-    {"resource_id": "v2_ui_projection", "owner": "v2-ui-protocol", "truth_store": "typed public projection", "operations": ["accept_command", "query", "subscribe", "project"]},
-    {"resource_id": "v2_orchestration_graph", "owner": "v2-orchestration", "truth_store": "typed adjacent-node transition state", "operations": ["admit", "invoke", "continue", "stop", "terminalize"]},
-    {"resource_id": "v2_node_identity", "owner": "v2-network-extension", "truth_store": "typed node identity", "operations": ["declare", "authenticate", "negotiate"]},
-    {"resource_id": "v2_network_frame", "owner": "v2-network-extension", "truth_store": "typed control/payload/error frame", "operations": ["encode", "decode", "sequence", "ack", "replay"]}
+    {"resource_id": "v2_reason_session", "owner": "v2-sessionlog", "truth_store": "canonical Session Log adapter", "operations": ["append", "read", "derive_surface", "restore", "replay", "fork", "recover"]},
+    {"resource_id": "v2_reasoning_backend", "owner": "v2-reasoning-backend", "truth_store": "Cordis-injected provider-neutral Reasoning Service", "operations": ["bind", "start", "resume", "interrupt", "inspect", "subscribe", "switch"]},
+    {"resource_id": "v2_plugin_capability", "owner": "v2-plugin-capabilities", "truth_store": "compiled capability manifest", "operations": ["declare", "validate", "register", "invoke"]},
+    {"resource_id": "v2_ui_projection", "owner": "v2-ui-adaptor", "truth_store": "typed public projection", "operations": ["accept_command", "query", "subscribe", "project"]},
+    {"resource_id": "v2_orchestration_graph", "owner": "v2-cordis-ecosystem", "truth_store": "Cordis composition and injected Service graph", "operations": ["compose", "activate", "replace", "unload"]},
+    {"resource_id": "v2_registry", "owner": "v2-channel-registry", "truth_store": "central Registry control-plane state", "operations": ["register", "renew", "discover", "publish_change", "resolve_route"]},
+    {"resource_id": "v2_channel_session", "owner": "v2-channel-registry", "truth_store": "channel-session plugin state", "operations": ["open", "attach", "suspend", "reattach", "invoke", "close"]}
   ],
   "mainlines": [
     {
       "mainline_id": "v2-mvp-local",
       "status": "planned",
       "entry": "ui_command_ingress",
-      "nodes": ["ui_command_ingress", "orchestration_admitted", "plugin_invoked", "control_event_emitted", "payload_shared", "reason_turn_appended", "ui_projection_delivery"],
+      "nodes": ["ui_command_ingress", "design_plugin_admitted", "capability_invoked", "control_event_emitted", "payload_shared", "sessionlog_surface_derived", "reasoning_backend_executed", "sessionlog_result_appended", "ui_projection_delivery"],
       "edges": [
-        ["ui_command_ingress", "orchestration_admitted"],
-        ["orchestration_admitted", "plugin_invoked"],
-        ["plugin_invoked", "control_event_emitted"],
+        ["ui_command_ingress", "design_plugin_admitted"],
+        ["design_plugin_admitted", "capability_invoked"],
+        ["capability_invoked", "control_event_emitted"],
         ["control_event_emitted", "payload_shared"],
-        ["payload_shared", "reason_turn_appended"],
-        ["reason_turn_appended", "ui_projection_delivery"]
+        ["payload_shared", "sessionlog_surface_derived"],
+        ["sessionlog_surface_derived", "reasoning_backend_executed"],
+        ["reasoning_backend_executed", "sessionlog_result_appended"],
+        ["sessionlog_result_appended", "ui_projection_delivery"]
       ],
       "terminal": "ui_projection_delivery"
     },
     {
-      "mainline_id": "v2-network-extension",
+      "mainline_id": "v2-channel-registry",
       "status": "planned",
-      "entry": "node_handshake",
-      "nodes": ["node_handshake", "capability_negotiated", "event_or_payload_replay"],
+      "entry": "endpoint_registered",
+      "nodes": ["endpoint_registered", "endpoint_discovered", "capability_reconciled", "channel_session_attached", "event_or_payload_replay"],
       "edges": [
-        ["node_handshake", "capability_negotiated"],
-        ["capability_negotiated", "event_or_payload_replay"]
+        ["endpoint_registered", "endpoint_discovered"],
+        ["endpoint_discovered", "capability_reconciled"],
+        ["capability_reconciled", "channel_session_attached"],
+        ["channel_session_attached", "event_or_payload_replay"]
       ],
       "terminal": "event_or_payload_replay"
     }
   ],
   "verification": [
     {"gate_id": "v2_contract_boundary", "status": "planned", "required_for": ["v2-contracts"], "test_design": "docs/v2/v2-test-design.md", "project_blackbox": "docs/v2/v2-project-blackbox-verification.md"},
-    {"gate_id": "v2_payload_control_isolation", "status": "planned", "required_for": ["v2-contracts", "v2-control-events", "v2-network-extension"], "test_design": "docs/v2/v2-test-design.md", "project_blackbox": "docs/v2/v2-project-blackbox-verification.md"},
+    {"gate_id": "v2_payload_control_isolation", "status": "planned", "required_for": ["v2-contracts", "v2-control-events", "v2-channel-registry"], "test_design": "docs/v2/v2-test-design.md", "project_blackbox": "docs/v2/v2-project-blackbox-verification.md"},
+    {"gate_id": "v2_arc_payload_sharing", "status": "planned", "required_for": ["v2-contracts", "v2-control-events"], "test_design": "docs/v2/v2-test-design.md", "project_blackbox": "docs/v2/v2-project-blackbox-verification.md"},
     {"gate_id": "v2_control_event_positive_negative", "status": "planned", "required_for": ["v2-control-events"], "test_design": "docs/v2/v2-test-design.md", "project_blackbox": "docs/v2/v2-project-blackbox-verification.md"},
-    {"gate_id": "v2_sessionlog_append_replay", "status": "planned", "required_for": ["v2-reason-sessionlog"], "test_design": "docs/v2/v2-test-design.md", "project_blackbox": "docs/v2/v2-project-blackbox-verification.md"},
-    {"gate_id": "v2_plugin_registration", "status": "planned", "required_for": ["v2-plugin-runtime"], "test_design": "docs/v2/v2-test-design.md", "project_blackbox": "docs/v2/v2-project-blackbox-verification.md"},
-    {"gate_id": "v2_orchestration_adjacency", "status": "planned", "required_for": ["v2-orchestration"], "test_design": "docs/v2/v2-test-design.md", "project_blackbox": "docs/v2/v2-project-blackbox-verification.md"},
-    {"gate_id": "v2_ui_projection_boundary", "status": "planned", "required_for": ["v2-ui-protocol"], "test_design": "docs/v2/v2-test-design.md", "project_blackbox": "docs/v2/v2-project-blackbox-verification.md"},
-    {"gate_id": "v2_network_capability_version", "status": "planned", "required_for": ["v2-network-extension"], "test_design": "docs/v2/v2-test-design.md", "project_blackbox": "docs/v2/v2-project-blackbox-verification.md"},
-    {"gate_id": "v2_network_disconnect_explicit", "status": "planned", "required_for": ["v2-network-extension"], "test_design": "docs/v2/v2-test-design.md", "project_blackbox": "docs/v2/v2-project-blackbox-verification.md"}
+    {"gate_id": "v2_sessionlog_surface_recovery", "status": "planned", "required_for": ["v2-sessionlog"], "test_design": "docs/v2/v2-test-design.md", "project_blackbox": "docs/v2/v2-project-blackbox-verification.md"},
+    {"gate_id": "v2_reasoning_backend_conformance", "status": "planned", "required_for": ["v2-reasoning-backend"], "test_design": "docs/v2/v2-test-design.md", "project_blackbox": "docs/v2/v2-project-blackbox-verification.md"},
+    {"gate_id": "v2_reasoning_backend_switch", "status": "planned", "required_for": ["v2-reasoning-backend"], "test_design": "docs/v2/v2-test-design.md", "project_blackbox": "docs/v2/v2-project-blackbox-verification.md"},
+    {"gate_id": "v2_plugin_registration", "status": "planned", "required_for": ["v2-plugin-capabilities"], "test_design": "docs/v2/v2-test-design.md", "project_blackbox": "docs/v2/v2-project-blackbox-verification.md"},
+    {"gate_id": "v2_cordis_composition_boundary", "status": "planned", "required_for": ["v2-cordis-ecosystem"], "test_design": "docs/v2/v2-test-design.md", "project_blackbox": "docs/v2/v2-project-blackbox-verification.md"},
+    {"gate_id": "v2_plugin_hot_replace", "status": "planned", "required_for": ["v2-cordis-ecosystem"], "test_design": "docs/v2/v2-test-design.md", "project_blackbox": "docs/v2/v2-project-blackbox-verification.md"},
+    {"gate_id": "v2_ui_projection_boundary", "status": "planned", "required_for": ["v2-ui-adaptor"], "test_design": "docs/v2/v2-test-design.md", "project_blackbox": "docs/v2/v2-project-blackbox-verification.md"},
+    {"gate_id": "v2_registry_registration", "status": "planned", "required_for": ["v2-channel-registry"], "test_design": "docs/v2/v2-test-design.md", "project_blackbox": "docs/v2/v2-project-blackbox-verification.md"},
+    {"gate_id": "v2_channel_session_reconnect", "status": "planned", "required_for": ["v2-channel-registry"], "test_design": "docs/v2/v2-test-design.md", "project_blackbox": "docs/v2/v2-project-blackbox-verification.md"}
   ],
   "artifact_policy": {
     "committed": ["v2 source", "v2 tests", "v2 docs", ".appsdk contracts and records"],

@@ -2,7 +2,7 @@
 
 Status: design-admitted
 Branch: `v2`
-Governance: AppSDK `0.1.5`
+Governance: AppSDK `0.1.6`
 Baseline: `5c879c6155d8c3e6febc3d0a13b4716b9f544948`
 
 ## 1. Decision Summary
@@ -14,21 +14,44 @@ and reviewed lifecycle evidence may be committed. Build outputs, generated
 runtime state, external checkouts, credentials, and local AppSDK control state
 must remain outside the committed change set.
 
-The MVP is a single-machine, one-agent vertical slice. It must still expose
-stable contracts for future multi-machine collaboration and network plugins.
-The future network path is an extension boundary, not an MVP implementation.
+Cordis is the architecture foundation and the complete plugin ecosystem.
+Every Freehand capability is a Cordis plugin. The fixed design orchestration
+component is itself a Cordis plugin; it is not a privileged host outside
+Cordis. Cordis provides plugin composition, Service dependency activation,
+typed events, effects, child plugins, scope isolation, unload, replacement
+and hot-reload lifecycle.
 
-The network extension is included in M0/M1 as typed contracts and in-memory
-transport tests only. Production network execution remains out of scope.
+The MVP is a single-machine, one-agent vertical slice. It must still expose
+stable contracts for multiple runtime groups, multiple reasoning backends,
+centralized channel discovery, reconnectable channel sessions, future
+multi-machine collaboration and network plugins.
+
+The reasoning implementation is a replaceable Cordis backend seam. The first
+backend candidates are the native Freehand reasoning backend and an OpenCode
+adaptor backend. They use one provider-neutral Reasoning Service contract, so
+different runtime groups may use different bases at the same time.
+
+Every channel endpoint registers with a configured central Registry endpoint at
+startup. The Registry owns discovery, endpoint route advertisements,
+capability generations and change notifications. A transport connection is
+independent from the logical ChannelSession, so a connection can be replaced
+without losing the channel session state.
+
+The central Registry, channel session and network transport are included in
+the design contracts. Production cloud deployment and distributed execution
+remain out of scope for the first local MVP.
 
 ```text
 UI input
   -> UI protocol command
-  -> Cordis orchestration
-  -> Rust plugin capability
+  -> design-orchestration-plugin
+  -> runtime-group Reasoning Service
+  -> Cordis-selected reasoning backend
   -> typed control event
   -> Arc immutable payload handoff
-  -> sessionlog-backed reasoning
+  -> canonical sessionlog
+  -> derived model surface
+  -> reasoning result
   -> typed UI projection
 ```
 
@@ -49,24 +72,26 @@ The formal test design and project black-box contract are:
 
 | Module | MVP responsibility | Future extension |
 | --- | --- | --- |
-| `v2-contracts` | IDs, typed commands/events, payload nodes, errors, capability declarations | protocol versioning, node identity, payload references |
-| `v2-orchestration` | Cordis-facing node lifecycle, sequencing, continuation and stop wiring | distributed scheduling and remote node coordination |
-| `v2-control-events` | typed control event creation, routing, ordering and terminal/error paths | event replication, acknowledgements and replay across nodes |
-| `v2-reason-sessionlog` | reasoning adapter, session truth, cursor, append/replay and recovery | shared session views and remote session ownership |
-| `v2-plugin-runtime` | Rust plugin trait, capability manifest, local registration and execution | remote plugin discovery, attestation and delegated execution |
-| `v2-ui-protocol` | UI ingress, query/subscribe, public projections and redaction | multi-client and remote UI transport |
-| `v2-network-extension` | MVP protocol skeleton and test transport boundary only | authenticated node transport, remote plugins and event/payload transfer |
+| `v2-contracts` | provider-neutral IDs, commands/events, payloads, errors, capability and session contracts | protocol versioning and payload references |
+| `v2-cordis-ecosystem` | fixed design orchestration plugin, runtime-group composition and Cordis bindings | hot replacement and multi-runtime composition |
+| `v2-control-events` | Cordis typed control events, ordering, replay and error-chain boundary | event replication and acknowledgements |
+| `v2-sessionlog` | canonical append/replay/surface/fork/recovery Session Log | persistence adapters and shared session views |
+| `v2-reasoning-backend` | provider-neutral Reasoning Service and Freehand/OpenCode backend adaptors | additional reasoning bases and runtime-specific bindings |
+| `v2-plugin-capabilities` | Rust leaf/composition capability plugins and manifests | remote plugin execution and attestation |
+| `v2-ui-adaptor` | UI ingress, query/subscribe, public projections and backend-neutral adaptor | multi-client and remote UI transport |
+| `v2-channel-registry` | central Registry, link/transport/channel session contracts and capability reconciliation | cloud deployment, relay and multi-machine execution |
 
 Dependency direction:
 
 ```text
 v2-contracts
   -> v2-control-events
-  -> v2-reason-sessionlog
-  -> v2-plugin-runtime
-  -> v2-orchestration
-  -> v2-ui-protocol
-  -> v2-network-extension
+  -> v2-sessionlog
+  -> v2-reasoning-backend
+  -> v2-plugin-capabilities
+  -> v2-cordis-ecosystem
+  -> v2-ui-adaptor
+  -> v2-channel-registry
 ```
 
 The arrows are dependency permission, not a promise that every module must
@@ -86,20 +111,22 @@ owner of reasoning, task, UI, or business payload truth.
 It does not own provider wire DTOs, UI rendering, storage implementation,
 network sockets, debug envelopes, or metadata.
 
-### 2.2 Cordis orchestration
+### 2.2 Cordis ecosystem and fixed design orchestration plugin
 
-`v2-orchestration` owns the executable graph:
+`v2-cordis-ecosystem` owns only the Freehand bindings around Cordis:
 
-- node admission and adjacent-node transitions;
-- lifecycle start, wait, continue, stop, retry and terminal handling;
-- dispatch of plugin capabilities;
-- consumption of control events;
-- creation of UI projections from owner-backed truth.
+- runtime-group composition;
+- Service Definition and `inject` bindings;
+- fixed design orchestration plugin;
+- child-plugin and scope boundaries;
+- unload/replacement lifecycle wiring;
+- adjacent Service/event connections.
 
-Cordis is an orchestration owner only. Semantic validation remains in
-`v2-contracts`, event decisions remain in `v2-control-events`, reasoning truth
-remains in `v2-reason-sessionlog`, and plugin behavior remains in
-`v2-plugin-runtime`.
+Cordis itself owns plugin loading, dependency activation, typed event dispatch,
+effects and hot replacement. Freehand does not duplicate those mechanisms.
+Semantic validation remains in `v2-contracts`, Session Log truth remains in
+`v2-sessionlog`, reasoning decisions remain in `v2-reasoning-backend`, and
+capability behavior remains in `v2-plugin-capabilities`.
 
 ### 2.3 Control events
 
@@ -121,7 +148,7 @@ The families share catalog rules, IDs, ordering and replay contracts, but do
 not collapse into one universal event payload. Control fields cannot be
 mirrored into business payload or metadata.
 
-### 2.4 Rust plugins
+### 2.4 Rust capability plugins
 
 The first plugin is a local Rust capability with:
 
@@ -132,45 +159,83 @@ The first plugin is a local Rust capability with:
 - deterministic registration;
 - typed failure returned to the error chain.
 
-The plugin runtime must not contain reasoning policy, UI parsing, retry policy,
-or network fallback. A remote plugin later uses the same capability contract
-through a network adapter; it does not create a second plugin semantic model.
+Rust is one plugin implementation language, not a separate runtime model. A
+Rust plugin may be a leaf implementation or a composition plugin. Cordis owns
+its registration and lifecycle; the capability contract owns its typed input,
+output and error semantics. No plugin may contain hidden reasoning policy, UI
+parsing or network fallback.
 
 ### 2.5 Arc payload sharing
 
-`Arc<T>` is an in-process ownership optimization for immutable payloads only.
-It is not a truth store, persistence mechanism, control channel, or global
-context container.
+`Arc<T>` is the default local Rust transport for immutable business payloads.
+It is an ownership and handoff contract, not merely a performance hint:
 
 ```text
-typed payload value
+typed input
+  -> construct exactly one ImmutablePayload
   -> Arc<ImmutablePayload>
-  -> adjacent consumers
-
-typed ControlEvent / ErrorEvent remain separate
+  -> clone Arc handle across adjacent local consumers
+  -> each consumer reads the same allocation
 ```
 
+An `Arc::clone` only increments the reference count. Adjacent local plugins,
+Services and orchestrator edges must not deep-copy the payload. `ImmutablePayload`
+must not expose interior mutation through `Arc<Mutex<_>>`, `Arc<RwLock<_>>` or
+an equivalent shared mutable container.
+
+The contract has explicit copy points:
+
+1. initial typed payload construction;
+2. serialization at a process, persistence or network boundary;
+3. an explicit schema transformation where the receiving contract differs.
+
+No additional deep copy is allowed between local adjacent nodes. A remote
+endpoint reconstructs its own immutable value after wire transfer; `Arc` does
+not imply zero-copy across processes or machines. ControlEvent and ErrorEvent
+remain separate and never embed payload bytes. A typed payload reference may
+associate a control fact with a payload without carrying its business content.
+
 Every shared type must state whether it is immutable, who creates it, who
-owns persistence, and when the last consumer may release it. Mutable
-coordination state uses its own typed owner and synchronization boundary.
+owns persistence, which boundary serializes it, and when the last consumer may
+release it. `Arc<T>` is not a truth store, persistence mechanism, control
+channel, global context container or distributed memory.
 
-### 2.6 Sessionlog reasoning
+### 2.6 Canonical Session Log and reasoning
 
-The reasoning owner exposes a storage-neutral sessionlog contract:
+`v2-sessionlog` exposes the canonical DSH-inspired Session Log contract:
 
 - append turn/event;
+- derive the ordered model-visible surface;
+- append surface replacement/recovery facts;
 - read ordered session history;
 - persist and restore cursor;
 - replay a bounded session;
+- fork from a stable closed boundary;
 - recover an interrupted turn;
 - report explicit corruption, lock, permission and version errors.
 
-The runtime uses the contract, not a hard-coded directory. An external
-`~/code/sessionlog` implementation is a future adapter and must not be read
-directly by Cordis, UI, plugins or network code. There is no silent fallback
-or double-write truth path.
+The runtime uses the contract, not a hard-coded directory. The DSH Session Log
+model is the design reference. The external `~/code/sessionlog` integration is
+an adapter milestone and must not be opened directly by Cordis, UI, plugins or
+network code. There is no silent fallback or double-write truth path.
 
-### 2.7 UI and reasoning split
+The reasoning backend reads the derived surface and appends normalized results
+through this owner. OpenCode's native storage cannot become a second Freehand
+truth source.
+
+### 2.7 Reasoning backend seam
+
+The reasoning contract is provider-neutral. At least two backends must fit it:
+
+- native Freehand reasoning;
+- OpenCode adaptor reasoning.
+
+Each runtime group binds exactly one active backend at a time, while multiple
+runtime groups may use different backends concurrently. Backend replacement
+is a Cordis unload/reactivation operation at a safe Session boundary. The
+backend identity is control/session state and never business payload.
+
+### 2.8 UI and reasoning split
 
 ```text
 UI app
@@ -187,16 +252,20 @@ reasoning state, event truth, plugin state, or network state.
 Reasoning consumes typed input and emits owner-backed facts. It does not import
 UI code or depend on a browser/mobile rendering model.
 
-## 3. Multi-machine and Network Extension Contract
+## 3. Central Registry, ChannelSession and Network Contract
 
-The MVP reserves, but does not implement, these network concepts:
+The v2 channel system reserves, but does not implement production distributed
+execution, these concepts:
 
 | Contract | Required invariant |
 | --- | --- |
 | node identity | stable `NodeId`, declared role/capability set, no inferred peer identity |
 | capability discovery | versioned manifest, explicit owner, permission and input/output contract |
-| authentication | authenticated transport/session before control or payload admission |
+| authentication | stateless bearer/API-key admission before control or payload admission |
 | protocol version | explicit negotiation; unknown version fails closed |
+| central registry | configured local/cloud Registry for registration, discovery and route changes |
+| channel session | logical controller/controlled session independent of transport connection |
+| capability generation | explicit change generation checked before invocation |
 | event transport | ordered event sequence, source identity, correlation ID, replay boundary |
 | acknowledgement | control acknowledgement is separate from business result |
 | payload transfer | payload reference/hash or explicit transfer frame; control data never embedded |
@@ -207,7 +276,8 @@ The MVP reserves, but does not implement, these network concepts:
 Network frames are divided into three physically separate classes:
 
 ```text
-ControlFrame: identity, handshake, capability, event sequence, ack, cancel
+RegistryControl: registration, discovery, route/capability generation
+ChannelControl: handshake, session attach, event sequence, ack, cancel
 PayloadFrame: immutable business payload or payload reference
 ErrorFrame: correlated typed transport/plugin/error-chain failure
 ```
@@ -219,11 +289,12 @@ execution.
 
 MVP network work is limited to:
 
-1. contract definitions;
-2. an in-memory transport test double;
-3. positive and negative protocol tests;
+1. Registry, channel and ChannelSession contract definitions;
+2. an in-memory Registry and transport test double;
+3. positive and negative registration/discovery/reconciliation tests;
 4. capability/version rejection tests;
-5. explicit disconnect and replay semantics.
+5. connection replacement while ChannelSession state is retained;
+6. explicit disconnect and replay semantics.
 
 It does not include sockets, TLS deployment, remote scheduling, production
 Relay, cross-machine filesystem access, or distributed consensus.
@@ -233,21 +304,22 @@ Relay, cross-machine filesystem access, or distributed consensus.
 ### In scope
 
 1. One UI client and one local agent.
-2. One Cordis orchestration graph with start, plugin call, reason turn and
-   terminal projection.
-3. One Rust plugin with deterministic local registration.
+2. One Cordis composition with start, plugin call, reason turn and terminal
+   projection.
+3. One Rust capability plugin with deterministic local registration.
 4. One typed event control path with positive and negative terminal tests.
 5. One immutable `Arc` payload handoff with ownership tests.
-6. One sessionlog adapter with append, restore and replay tests.
+6. One canonical Session Log adapter with append, surface, restore and replay
+   tests.
 7. One UI protocol surface with command, query and projection tests.
-8. Network contract and in-memory transport tests described above.
+8. Registry, ChannelSession and in-memory transport tests described above.
 9. AppSDK records and maps for every implemented module and milestone.
 
 ### Out of scope
 
 - multi-machine task scheduling;
 - remote plugin execution over production sockets;
-- Relay deployment and account federation;
+- central cloud Registry deployment;
 - distributed locks or consensus;
 - full v1 UI/Android migration;
 - provider-specific wire protocol in contracts;
@@ -298,32 +370,44 @@ black-box contract and this design. No product runtime code.
 
 ### M1: Contracts and control path
 
-Implement the minimal typed IDs, payload envelope, control event, error chain,
-and in-memory event ledger. Prove physical separation from payload.
+Implement the minimal typed IDs, immutable payload envelope, `Arc` handoff
+contract, control event, error chain and in-memory event ledger. Prove both
+physical control/payload separation and pointer-sharing across adjacent local
+consumers.
 
-### M2: Sessionlog reason path
+### M2: Canonical Session Log
 
-Implement the storage-neutral sessionlog trait/contract and one local adapter.
-Close append -> reason turn -> replay -> restore without double-write.
+Implement the DSH-inspired canonical Session Log contract and one local
+adapter. Close append -> surface derivation -> replay -> restore without
+double-write, including explicit replacement and interrupted-turn repair.
 
-### M3: Rust plugin and Cordis graph
+### M3: Reasoning backend seam
 
-Implement one local Rust plugin and the smallest Cordis graph that invokes it,
-receives its result event, runs one reason turn, and emits terminal truth.
+Implement the provider-neutral Reasoning Service and one native backend
+adaptor. Add the OpenCode adaptor contract and an isolated conformance
+fixture; do not claim OpenCode runtime integration until its transport and
+session-state ownership are verified.
 
-### M4: UI protocol
+### M4: Rust capability plugin and Cordis composition
+
+Implement one local Rust capability plugin and the smallest Cordis composition
+that invokes it, receives its result event, runs one selected reasoning
+backend, and emits terminal truth.
+
+### M5: UI adaptor
 
 Implement the UI adaptor and the first compact operating console. Expose one
 command, one query and one subscription/projection. Prove UI is only
 ingress/read-only projection and cannot mutate reason or event truth. Use
 `docs/v2/v2-ui-design.md` as the layout, state and adaptor contract.
 
-### M5: Network extension skeleton
+### M6: Central Registry and ChannelSession skeleton
 
-Implement only typed node/capability/version/frame contracts and an in-memory
-transport test double. No production sockets or remote execution.
+Implement only typed Registry registration/discovery, ChannelSession attach and
+in-memory transport contracts. Prove connection replacement retains
+ChannelSession state. No production cloud deployment or remote execution.
 
-### M6: MVP closeout
+### M7: MVP closeout
 
 Run full module verification, public-entrypoint black-box proof, AppSDK review
 and effectiveness replay. Promote only the exact reviewed source artifact.
@@ -370,5 +454,5 @@ The design is accepted when:
 - the single-machine vertical slice passes positive and negative tests;
 - network extension contracts are present without pretending distributed
   runtime exists;
-- AppSDK 0.1.5 verifies the project and the exact v2 branch contains no
+- AppSDK 0.1.6 verifies the project and the exact v2 branch contains no
   build, external, runtime or secret artifact.
