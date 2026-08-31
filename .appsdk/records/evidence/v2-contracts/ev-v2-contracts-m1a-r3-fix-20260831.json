@@ -1,0 +1,31 @@
+{
+  "$schema": "https://appsdk.local/contracts/records/evidence-record.schema.json",
+  "evidence_id": "ev-v2-contracts-m1a-r3-fix-20260831",
+  "issue_id": "v2-contracts-m1a-20260831",
+  "experiment_id": "v2-contracts-m1a-20260831",
+  "phase": "fix_candidate",
+  "kind": "gate",
+  "source_commit": "8839130ec559eb5b96789470ca2bab605c50b97b",
+  "artifact_hash": "sha256:8ae3f7b6a24cc6443d8cd62e88bc0fcbd02f2a611a9ac7302b98954e51f67d0e",
+  "execution_surface": "development_whitebox",
+  "scope": {
+    "module_id": "v2-contracts",
+    "feature_id": "v2-contracts",
+    "entrypoint": "candidate identity and controlled diff verification"
+  },
+  "producer": {
+    "adapter": "git-and-appsdk",
+    "identity": "freehand-v2-contracts-m1a-r3-candidate"
+  },
+  "result": "pass",
+  "confidence": 0.99,
+  "confidence_rationale": "The candidate commit, tree, controlled diff and declared module scope were verified before the candidate evidence set was recorded.",
+  "created_at": "2026-08-31T14:23:36Z",
+  "expires_at": "2026-09-01T14:23:36Z",
+  "input_hashes": [
+    "git:8839130ec559eb5b96789470ca2bab605c50b97b",
+    "tree:07f9227990a626b1d29eae2b075c57ce0a7562ba",
+    "diff:63fe8f061d925771893d45e87df43e486c49fe5c8953eaf54f58cd671b5c2b6e"
+  ],
+  "scope_hash": "sha256:28361473065c201b3ac961acbfd5fe44ce95a949fa899a44810a8ea653c661ac"
+}

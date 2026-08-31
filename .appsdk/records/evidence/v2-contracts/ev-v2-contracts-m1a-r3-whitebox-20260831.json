@@ -1,0 +1,30 @@
+{
+  "$schema": "https://appsdk.local/contracts/records/evidence-record.schema.json",
+  "evidence_id": "ev-v2-contracts-m1a-r3-whitebox-20260831",
+  "issue_id": "v2-contracts-m1a-20260831",
+  "experiment_id": "v2-contracts-m1a-20260831",
+  "phase": "development_whitebox",
+  "kind": "gate",
+  "source_commit": "8839130ec559eb5b96789470ca2bab605c50b97b",
+  "artifact_hash": "sha256:8ae3f7b6a24cc6443d8cd62e88bc0fcbd02f2a611a9ac7302b98954e51f67d0e",
+  "execution_surface": "development_whitebox",
+  "scope": {
+    "module_id": "v2-contracts",
+    "feature_id": "v2-contracts",
+    "entrypoint": "cargo test --manifest-path playground/experiments/v2/contracts/Cargo.toml --test v2_contract_boundary"
+  },
+  "producer": {
+    "adapter": "cargo-test",
+    "identity": "freehand-v2-contracts-m1a-r3-whitebox"
+  },
+  "result": "pass",
+  "confidence": 0.99,
+  "confidence_rationale": "The exact candidate passed all 8 contract boundary tests, including Arc sharing, wire copying, control isolation and typed validation.",
+  "created_at": "2026-08-31T14:24:00Z",
+  "expires_at": "2026-09-01T14:24:00Z",
+  "input_hashes": [
+    "cargo-test:v2-contract-boundary:8-pass",
+    "git:8839130ec559eb5b96789470ca2bab605c50b97b"
+  ],
+  "scope_hash": "sha256:28361473065c201b3ac961acbfd5fe44ce95a949fa899a44810a8ea653c661ac"
+}

@@ -5,25 +5,24 @@
   "module_id": "v2-contracts",
   "fix_candidate_id": "FIX-20260831-FREEHAND-V2-CONTRACTS-M1A-001",
   "architecture_review_id": "REV-20260831-FREEHAND-V2-CONTRACTS-M1A-AGY-001",
-  "reviewed_commit": "44a8111190de5acee5b2407e8c81a181dca726e4",
-  "reviewed_tree_hash": "193783d08e458bdb130dce3751358ef1e4d19c51",
+  "reviewed_commit": "8839130ec559eb5b96789470ca2bab605c50b97b",
+  "reviewed_tree_hash": "07f9227990a626b1d29eae2b075c57ce0a7562ba",
   "reproduction_input_hashes": [
-    "sha256:25c8cba36550ac11993146663c7a120b1884f9ed5d5ca7560b215b6007c71fa5",
-    "sha256:74df6a29dfa1129a5418863ab2bcdecc05f2ba59a7d725efa76cdf6cba01bf43",
-    "sha256:6a1d33d1cf9f08bfc267a6fd921b527112df5a6a54b4eaaff80149b69b437488"
+    "sha256:65e2f01f21bfb16060f07b64781646599e409d6d0e6f2bc794b9bb2339da1cdc",
+    "git:8839130ec559eb5b96789470ca2bab605c50b97b"
   ],
-  "baseline_evidence_id": "ev-v2-contracts-m1a-baseline-20260831",
-  "fixed_replay_evidence_id": "ev-v2-contracts-m1a-r2-effectiveness-replay-20260831",
+  "baseline_evidence_id": "ev-v2-contracts-m1a-r3-baseline-20260831",
+  "fixed_replay_evidence_id": "ev-v2-contracts-m1a-r3-effectiveness-replay-20260831",
   "positive_evidence_ids": [
-    "ev-v2-contracts-m1a-r2-effectiveness-positive-20260831"
+    "ev-v2-contracts-m1a-r3-effective-postpositive-20260831"
   ],
   "negative_evidence_ids": [
-    "ev-v2-contracts-m1a-r2-effectiveness-negative-20260831"
+    "ev-v2-contracts-m1a-r3-effective-postnegative-20260831"
   ],
   "blackbox_evidence_ids": [
-    "ev-v2-contracts-m1a-r2-effectiveness-replay-20260831"
+    "ev-v2-contracts-m1a-r3-effectiveness-replay-20260831"
   ],
   "source_unchanged_since_review": true,
   "result": "pass",
-  "created_at": "2026-08-31T14:08:06Z"
+  "created_at": "2026-08-31T14:36:00Z"
 }
