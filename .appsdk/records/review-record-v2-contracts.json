@@ -1,0 +1,29 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "review_id": "REV-20260831-FREEHAND-V2-CONTRACTS-M1A-AGY-001",
+  "review_kind": "architecture",
+  "issue_id": "v2-contracts-m1a-20260831",
+  "promotion_id": "PROMO-20260831-FREEHAND-V2-CONTRACTS-M1A-001",
+  "fix_candidate_id": "FIX-20260831-FREEHAND-V2-CONTRACTS-M1A-001",
+  "pre_review_validation_id": "PRV-20260831-FREEHAND-V2-CONTRACTS-M1A-001",
+  "reviewer": {
+    "adapter": "agy-review",
+    "identity": "v2-contracts-m1a-20260831-agy-4efeace"
+  },
+  "verdict": "pass",
+  "evidence_ids": [
+    "agy-review:v2-contracts-m1a-20260831-agy-4efeace"
+  ],
+  "reviewed_commit": "4efeace301f028b2e0f8fd9869a57a151c2ee801",
+  "reviewed_tree_hash": "a93b2ed5ac897ee1c21a392dca49a48526d2de40",
+  "reviewed_diff_hash": "sha256:b950a4d85fa8cb83e7238ff02be9a97a89c1e1c7caacdcb8e5259e844b099c44",
+  "reviewed_artifact_hash": "sha256:06c11d6da0cf661802fe2db9a38db7e26edb7aa2a174ca127c97a46f48a046fa",
+  "reviewed_scope_hash": "sha256:28361473065c201b3ac961acbfd5fe44ce95a949fa899a44810a8ea653c661ac",
+  "resource_map_hash": "sha256:f6acff041c1826b3108e51bd0327074edec380e72f9a0c5aa217bdf7321663b0",
+  "function_map_hash": "sha256:19be986ab3ec2f56ee8efd4b2a6256c69f70a6adab801725d02d9264a5948dcd",
+  "mainline_call_map_hash": "sha256:1650f58333fa49fcd80a24b0d6f0b50d1c7aa5825c68d0aaaee493f18c7275d9",
+  "verification_map_hash": "sha256:1ca6da5f74a8537b20fe089e3d98d3ad131352b56b216a9e428e9773678c423b",
+  "ai_confidence": 0.99,
+  "confidence_rationale": "AGY controller returned pass with zero findings for the exact candidate commit, base, module boundary and governance scope.",
+  "created_at": "2026-08-31T10:37:42Z"
+}

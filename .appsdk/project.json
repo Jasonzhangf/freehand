@@ -131,6 +131,72 @@
       },
       "source_owner": "v2-foundation-plan",
       "stage": "draft"
+    },
+    {
+      "active_artifact": "active/lib/v2-contracts/**",
+      "artifact_paths": [
+        "v2-contracts.module"
+      ],
+      "build": {
+        "args": [
+          "-c",
+          "cargo test --manifest-path playground/experiments/v2/contracts/Cargo.toml --test v2_contract_boundary && cargo build --manifest-path playground/experiments/v2/contracts/Cargo.toml --bin v2-contracts-public && mkdir -p generated/modules/v2-contracts/lib && cp playground/experiments/v2/contracts/target/debug/v2-contracts-public generated/modules/v2-contracts/lib/v2-contracts.module"
+        ],
+        "program": "sh",
+        "working_directory": "."
+      },
+      "contract_paths": [
+        ".appsdk/goal.json",
+        ".appsdk/project.json",
+        ".appsdk/contracts/**",
+        "docs/v2/v2-governance-manifest.json",
+        "docs/v2/v2-test-design.md",
+        "docs/v2/v2-project-blackbox-verification.md"
+      ],
+      "dependency_modules": [],
+      "generated_outputs": [
+        "generated/**"
+      ],
+      "module_id": "v2-contracts",
+      "owned_paths": [
+        "playground/experiments/v2/contracts/Cargo.lock",
+        "playground/experiments/v2/contracts/Cargo.toml",
+        "playground/experiments/v2/contracts/src/**",
+        "tests/v2/contracts/**"
+      ],
+      "regression": {
+        "allow_skipped": false,
+        "command": {
+          "args": [
+            "test",
+            "--manifest-path",
+            "playground/experiments/v2/contracts/Cargo.toml",
+            "--test",
+            "v2_contract_boundary"
+          ],
+          "program": "cargo",
+          "working_directory": "."
+        },
+        "input_paths": [
+          "playground/experiments/v2/contracts/Cargo.lock",
+          "playground/experiments/v2/contracts/Cargo.toml",
+          "playground/experiments/v2/contracts/src/**",
+          "tests/v2/contracts/**"
+        ],
+        "minimum_test_count": 8,
+        "ordinary_mode_after_freeze": "disabled",
+        "reenable_on": [
+          "source_change",
+          "contract_change",
+          "public_api_change",
+          "artifact_change",
+          "dependency_change"
+        ],
+        "required_before_freeze": true,
+        "suite_id": "v2-contracts-regression"
+      },
+      "source_owner": "v2-contracts",
+      "stage": "draft"
     }
   ],
   "project_id": "freehand-v2",
