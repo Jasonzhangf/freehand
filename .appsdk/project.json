@@ -159,7 +159,9 @@
       ],
       "module_id": "v2-contracts",
       "owned_paths": [
-        "playground/experiments/v2/contracts/**",
+        "playground/experiments/v2/contracts/Cargo.lock",
+        "playground/experiments/v2/contracts/Cargo.toml",
+        "playground/experiments/v2/contracts/src/**",
         "tests/v2/contracts/**"
       ],
       "regression": {
@@ -176,7 +178,9 @@
           "working_directory": "."
         },
         "input_paths": [
-          "playground/experiments/v2/contracts/**",
+          "playground/experiments/v2/contracts/Cargo.lock",
+          "playground/experiments/v2/contracts/Cargo.toml",
+          "playground/experiments/v2/contracts/src/**",
           "tests/v2/contracts/**"
         ],
         "minimum_test_count": 8,
