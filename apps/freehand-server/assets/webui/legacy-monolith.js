@@ -2640,6 +2640,19 @@ function renderToolSection(section, row) {
   toolSemanticLines(row).forEach((line) => {
     body.appendChild(toolSemanticLineNode(line));
   });
+  const copyButton = document.createElement("button");
+  copyButton.type = "button";
+  copyButton.className = "tool-chat-copy";
+  copyButton.setAttribute("aria-label", "复制工具结果");
+  copyButton.title = "复制工具结果";
+  copyButton.textContent = "复制结果";
+  copyButton.addEventListener("click", () => {
+    copyTextToClipboard(toolSummaryBody(row)).then(
+      () => setCommandStatus("已复制工具结果", { stickyMs: 3000 }),
+      (error) => setCommandStatus(`复制工具结果失败：${error.message}`, { stickyMs: 6000 }),
+    );
+  });
+  body.appendChild(copyButton);
   const detail = toolDetailNode(row, display);
   detail.id = `tool-detail-${section.dataset.toolCallId || section.dataset.turnId || "row"}`;
   detail.hidden = true;
@@ -3732,6 +3745,17 @@ function derivePublicConversation(turn) {
       status: "已提交",
     });
   }
+  (turn.tool_activities || []).forEach((tool) => {
+    const status = `${tool.status || "waiting"}`.toLowerCase();
+    items.push({
+      kind: "ToolSummary",
+      title: tool.display && tool.display.action ? tool.display.action : tool.tool_name || "工具",
+      body: tool.detail || status,
+      status,
+      tool_call_id: tool.tool_call_id,
+      display: tool.display || null,
+    });
+  });
   const assistantBodies = [];
   (turn.text || []).forEach((text) => {
     const visibleText = stripFreehandCompletionBlock(text);
@@ -3747,17 +3771,6 @@ function derivePublicConversation(turn) {
       status: "流式响应中",
     });
   }
-  (turn.tool_activities || []).forEach((tool) => {
-    const status = `${tool.status || "waiting"}`.toLowerCase();
-    items.push({
-      kind: "ToolSummary",
-      title: tool.display && tool.display.action ? tool.display.action : tool.tool_name || "工具",
-      body: tool.detail || status,
-      status,
-      tool_call_id: tool.tool_call_id,
-      display: tool.display || null,
-    });
-  });
   if (turn.terminal_text) {
     const terminalStatus = `${turn.terminal_status || "Success"}`.toLowerCase();
     const isToolPending = isToolPendingStatus(terminalStatus);

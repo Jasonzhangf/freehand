@@ -5,7 +5,7 @@ use axum::response::{IntoResponse, Response};
 /// Single source of truth for the WebUI cache-busting version. Asset files and
 /// the page template reference `__WEBUI_ASSET_VERSION__`; the server stamps
 /// this value at serve time, so bumping the version is a one-line change here.
-pub const WEBUI_ASSET_VERSION: &str = "20260830-ux-audit-v3-state-feedback";
+pub const WEBUI_ASSET_VERSION: &str = "20260831-tool-composer-followups";
 
 const WEBUI_ASSET_VERSION_TOKEN: &str = "__WEBUI_ASSET_VERSION__";
 

@@ -157,18 +157,43 @@ try {
   });
   await delay(300);
 
+  await evalInPage(cdp, () => {
+    window.__copiedToolText = "";
+    Object.defineProperty(navigator, "clipboard", {
+      configurable: true,
+      value: {
+        writeText: async (text) => {
+          window.__copiedToolText = text;
+        },
+      },
+    });
+  });
+
   const toolInitial = await evalInPage(cdp, () => {
     const section = document.querySelector('.chat-section-tool');
     const detail = section?.querySelector('.tool-chat-detail');
     const head = section?.querySelector('.tool-chat-head');
+    const final = document.querySelector('.chat-section-final');
+    const tool = document.querySelector('.chat-section-tool');
     return {
       toolCount: document.querySelectorAll('.chat-section-tool').length,
       detailExists: !!detail,
       detailHidden: detail?.hidden === true,
       expanded: section?.dataset.toolExpanded || '',
       headType: head?.tagName || '',
+      copyButtonVisible: !!section?.querySelector('.tool-chat-copy'),
+      toolBeforeFinal: !!(tool && final && tool.compareDocumentPosition(final) & Node.DOCUMENT_POSITION_FOLLOWING),
     };
   });
+
+  await evalInPage(cdp, () => {
+    document.querySelector('.chat-section-tool .tool-chat-copy')?.click();
+  });
+  await delay(100);
+
+  const toolCopied = await evalInPage(cdp, () => ({
+    copiedText: window.__copiedToolText || "",
+  }));
 
   await evalInPage(cdp, () => {
     document.querySelector('.chat-section-tool .tool-chat-head')?.click();
@@ -211,6 +236,9 @@ try {
       toolInitial.toolCount === 1 &&
       toolInitial.detailExists &&
       toolInitial.detailHidden &&
+      toolInitial.copyButtonVisible &&
+      toolInitial.toolBeforeFinal &&
+      toolCopied.copiedText.includes("result: hello") &&
       toolExpanded.expanded === 'true' &&
       toolExpanded.detailHidden === false &&
       toolExpanded.detailText.includes('diff') &&

@@ -2373,6 +2373,7 @@ mod tests {
         assert!(webui_css_body.contains(".tool-raw-details"));
         assert!(webui_css_body.contains(".tool-chat-line-secondary.tool-chat-line-success"));
         assert!(webui_css_body.contains(".tool-chat-line-secondary.tool-chat-line-failed"));
+        assert!(webui_css_body.contains(".tool-chat-copy"));
         assert!(
             webui_css_body.contains("body[data-mobile-agent-sheet=\"open\"] .mobile-agent-sheet")
         );
@@ -2414,6 +2415,7 @@ mod tests {
         assert!(webui_css_body.contains(".composer-input-shell"));
         assert!(webui_css_body.contains(".composer-attach-image"));
         assert!(webui_css_body.contains(".composer-command-menu"));
+        assert!(webui_css_body.contains(".composer-command-menu-button"));
         assert!(
             webui_css_body
                 .contains("body[data-layout-shape=\"phone_portrait\"] .composer-command-menu")
