@@ -2237,6 +2237,9 @@ function chatAssistantSection(row, renderTurn) {
     renderTextLines(body, row.body || []);
   }
   section.appendChild(body);
+  if (row.kind === "final") {
+    appendFinalSummaryActionBar(section, renderTurn, row);
+  }
   renderUserOptionButtons(section, row);
   return section;
 }
@@ -2530,6 +2533,79 @@ function renderFinalSummary(container, lines) {
   });
 }
 
+function appendFinalSummaryActionBar(section, renderTurn, row) {
+  if (!finalSummaryActionsAllowed(renderTurn, row)) {
+    return;
+  }
+  const text = finalSummaryActionText(row);
+  if (!text) {
+    return;
+  }
+  const actions = document.createElement("div");
+  actions.className = "final-summary-actions";
+
+  const copyButton = turnActionButton("复制");
+  copyButton.classList.add("final-summary-copy");
+  copyButton.setAttribute("aria-label", "复制 summary");
+  copyButton.title = "复制 summary";
+  copyButton.addEventListener("click", () => {
+    copyTextToClipboard(text).then(
+      () => setCommandStatus("已复制 summary", { stickyMs: 3000 }),
+      (error) => setCommandStatus(`复制 summary 失败：${error.message}`, { stickyMs: 6000 }),
+    );
+  });
+
+  const memoryButton = turnActionButton("加入记忆");
+  memoryButton.classList.add("final-summary-memory");
+  memoryButton.setAttribute("aria-label", "把 summary 加入记忆");
+  memoryButton.title = "把 summary 加入记忆";
+  memoryButton.addEventListener("click", async () => {
+    if (memoryButton.disabled) {
+      return;
+    }
+    const sessionId = (renderTurn && renderTurn.sessionId) || state.selectedSessionId || "";
+    if (!sessionId) {
+      setCommandStatus("当前 summary 没有会话 ID，无法加入记忆", { stickyMs: 6000 });
+      return;
+    }
+    memoryButton.disabled = true;
+    memoryButton.textContent = "正在加入...";
+    try {
+      const receipt = await adpCommand(adpCommandOf("AddToMemory", {
+        session_id: sessionId,
+        turn_id: (renderTurn && renderTurn.turnId) || null,
+        tool_call_id: null,
+        content: text,
+      }));
+      memoryButton.textContent = "已加入记忆";
+      setCommandStatus(commandReceiptStatus(receipt), { stickyMs: 4000 });
+    } catch (error) {
+      memoryButton.disabled = false;
+      memoryButton.textContent = "加入记忆";
+      setCommandStatus(`加入记忆失败：${error && error.message ? error.message : error}`, { stickyMs: 8000 });
+    }
+  });
+
+  actions.append(copyButton, memoryButton);
+  section.appendChild(actions);
+}
+
+function finalSummaryActionsAllowed(renderTurn, row) {
+  const sourceTurn = renderTurn && renderTurn.sourceTurn;
+  return Boolean(
+    row &&
+      row.kind === "final" &&
+      sourceTurn &&
+      `${sourceTurn.terminal_status || ""}`.toLowerCase() === "success",
+  );
+}
+
+function finalSummaryActionText(row) {
+  return (Array.isArray(row && row.body) ? row.body : [`${(row && row.body) || ""}`])
+    .join("\n")
+    .trim();
+}
+
 function finalSummaryBlocks(text) {
   return `${text || ""}`
     .split(/\n+/)
@@ -2669,43 +2745,6 @@ function renderToolSection(section, row, renderTurn) {
     );
   });
   body.appendChild(copyButton);
-
-  const memoryButton = document.createElement("button");
-  memoryButton.type = "button";
-  memoryButton.className = "tool-chat-memory";
-  memoryButton.setAttribute("aria-label", "把工具结果加入记忆");
-  memoryButton.title = "把工具结果加入记忆";
-  memoryButton.textContent = "加入记忆";
-  memoryButton.addEventListener("click", async () => {
-    if (memoryButton.disabled) {
-      return;
-    }
-    const sessionId = (renderTurn && renderTurn.sessionId) || state.selectedSessionId || "";
-    if (!sessionId) {
-      setCommandStatus("当前 turn 没有会话 ID，无法加入记忆", { stickyMs: 6000 });
-      return;
-    }
-    const turnId = (renderTurn && renderTurn.turnId) || (row && row.identity && row.identity.turnId) || "";
-    const toolCallId = (row && row.identity && row.identity.toolCallId) || "";
-    memoryButton.disabled = true;
-    memoryButton.textContent = "正在加入...";
-    try {
-      const payload = {
-        session_id: sessionId,
-        turn_id: turnId || null,
-        tool_call_id: toolCallId || null,
-        content: toolSummaryBody(row),
-      };
-      const receipt = await adpCommand(adpCommandOf("AddToMemory", payload));
-      memoryButton.textContent = "已加入记忆";
-      setCommandStatus(commandReceiptStatus(receipt), { stickyMs: 4000 });
-    } catch (error) {
-      memoryButton.disabled = false;
-      memoryButton.textContent = "加入记忆";
-      setCommandStatus(`加入记忆失败：${error && error.message ? error.message : error}`, { stickyMs: 8000 });
-    }
-  });
-  body.appendChild(memoryButton);
 
   const detail = toolDetailNode(row, display);
   detail.id = `tool-detail-${section.dataset.toolCallId || section.dataset.turnId || "row"}`;
@@ -5647,12 +5686,12 @@ function updateComposerClearance() {
   if (!composerCard || !shell) {
     return;
   }
-  const height = Math.ceil(composerCard.getBoundingClientRect().height);
-  const clearance = Math.max(96, height + 28);
-  const conversationRegion = document.querySelector(".conversation-region");
-  if (conversationRegion) {
-    conversationRegion.style.setProperty("--measured-composer-clearance", `${clearance}px`);
-  }
+  const rect = composerCard.getBoundingClientRect();
+  const viewportHeight =
+    (window.visualViewport && window.visualViewport.height) ||
+    document.documentElement.clientHeight ||
+    window.innerHeight;
+  const clearance = Math.max(96, Math.ceil(viewportHeight - rect.top + 20));
   shell.style.setProperty("--composer-clearance", `${clearance}px`);
   document.documentElement.style.setProperty("--composer-clearance", `${clearance}px`);
 }

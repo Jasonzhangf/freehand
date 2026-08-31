@@ -28,6 +28,7 @@ const runTaskId = `definitely-missing-live-tool-render-${runMarker}`;
 const finalTextMarker = `live tool render completed ${runMarker}`;
 const artifactDir = path.join(repo, 'artifacts', 'webui-online', runId);
 const fixtureKeyName = 'FREEHAND_LIVE_TOOL_RENDER_FIXTURE_KEY';
+const fixtureProviderId = 'live-tool-render-fixture';
 
 let chrome;
 let cdp;
@@ -47,7 +48,7 @@ try {
   await fs.writeFile(path.join(artifactDir, 'daemonS.before.env'), redactEnv(originalEnv));
   await fs.writeFile(
     envPath,
-    `${stripFixtureEnv(originalEnv)}\n${fixtureKeyName}="fixture-key"\n`,
+    `${stripFixtureEnv(originalEnv)}\n${fixtureKeyName}="fixture-key"\nFREEHAND_TEST_DISABLE_MASTER_LIFECYCLE_RUNNER="1"\n`,
   );
 
   await must(['scripts/install-launchd.sh', 'restartS']);
@@ -60,7 +61,7 @@ try {
     '--agent',
     'master',
     '--provider',
-    'cc',
+    fixtureProviderId,
     '--type',
     'openai',
     '--protocol',
@@ -200,12 +201,11 @@ try {
       const state = await readDomState(cdp, scope);
       if (
         state.currentRunTerminalSuccessPresent &&
-        state.currentRunSelectedTurn &&
-        state.selectedTerminalStatus.toLowerCase() === 'success' &&
-        state.turnStatus.toLowerCase() === 'completed' &&
+        state.currentRunFinalRows.length > 0 &&
+        state.currentRunSelectedCycleTerminal &&
+        state.currentRunSelectedCycleFrozen &&
         state.liveCount === 0 &&
-        state.currentRunLiveCount === 0 &&
-        !state.finalStatusStillDispatching
+        state.currentRunLiveCount === 0
       ) {
         return state;
       }
@@ -275,13 +275,20 @@ try {
         duringContinuation.currentRunUserCycleBeforeModelCycle &&
         duringContinuation.previousCyclesBeforeCurrent,
       finalStillShowsToolCard: finalState.currentRunToolCardCount > 0,
-      eachToolCardExposesCopyAndMemoryButtons:
+      eachToolCardExposesCopyOnly:
         finalState.currentRunToolCards.length > 0 &&
         finalState.currentRunToolCards.every((card) =>
           card.copyButtonCount === 1 &&
-          card.memoryButtonCount === 1 &&
-          card.copyButtonLabel === '复制工具结果' &&
-          card.memoryButtonLabel === '把工具结果加入记忆'
+          card.memoryButtonCount === 0 &&
+          card.copyButtonLabel === '复制工具结果'
+        ),
+      finalSummaryExposesCopyAndMemory:
+        finalState.currentRunFinalRows.length > 0 &&
+        finalState.currentRunFinalRows.some((row) =>
+          row.copyButtonCount === 1 &&
+          row.memoryButtonCount === 1 &&
+          row.copyButtonLabel === '复制 summary' &&
+          row.memoryButtonLabel === '把 summary 加入记忆'
         ),
       finalCycleCardFrozen:
         finalState.currentRunSelectedCycleTerminal &&
@@ -293,7 +300,7 @@ try {
         finalState.currentRunTerminalSuccessPresent &&
         finalState.currentRunSelectedTurn &&
         finalState.selectedTerminalStatus.toLowerCase() === 'success' &&
-        finalState.turnStatus.toLowerCase() === 'completed' &&
+        /^(completed|已完成)$/i.test(finalState.turnStatus.trim()) &&
         finalState.liveCount === 0 &&
         finalState.currentRunLiveCount === 0 &&
         !finalState.finalStatusStillDispatching &&
@@ -303,20 +310,20 @@ try {
   };
   await fs.writeFile(path.join(artifactDir, 'summary.json'), JSON.stringify(summary, null, 2));
 
-  const firstToolCard = finalState.currentRunToolCards[0];
-  if (firstToolCard) {
+  const firstFinalRow = finalState.currentRunFinalRows[0];
+  if (firstFinalRow) {
     const clickMemory = await evalInPage(
       cdp,
-      (target) => {
-        const section = document.querySelector(`.chat-section-tool[data-tool-call-id="${target}"]`);
-        const button = section?.querySelector('.tool-chat-memory');
+      (turnId) => {
+        const section = document.querySelector(`.chat-section-final[data-turn-id="${turnId}"]`);
+        const button = section?.querySelector('.final-summary-memory');
         if (!section || !button) {
           return { clicked: false, reason: 'memory button missing' };
         }
         button.click();
         return { clicked: true };
       },
-      firstToolCard.dataToolCallId || firstToolCard.toolCallId || '',
+      firstFinalRow.turnId,
     );
     await fs.writeFile(
       path.join(artifactDir, 'memory-button-click.json'),
@@ -669,6 +676,21 @@ async function readDomState(cdpClient, scope = {}) {
       toolCallId: node.dataset.toolCallId || '',
       text: node.innerText || '',
       className: node.className || '',
+      copyButtonCount: node.querySelectorAll('.tool-chat-copy').length,
+      memoryButtonCount: node.querySelectorAll('.final-summary-memory').length,
+      copyButtonLabel: node.querySelector('.tool-chat-copy')?.getAttribute('aria-label') || '',
+    }));
+    const finalRows = Array.from(document.querySelectorAll('.chat-section-final')).map((node) => ({
+      turnId: node.dataset.turnId || '',
+      messageTurnId: node.closest('.chat-message')?.dataset.turnId || '',
+      cycleTurnId: node.closest('.turn-cycle-card')?.dataset.turnId || '',
+      cycleIndex: cycleIndexForNode(node),
+      messageIndex: chatNodes.indexOf(node.closest('.chat-message')),
+      text: node.innerText || '',
+      copyButtonCount: node.querySelectorAll('.final-summary-copy').length,
+      memoryButtonCount: node.querySelectorAll('.final-summary-memory').length,
+      copyButtonLabel: node.querySelector('.final-summary-copy')?.getAttribute('aria-label') || '',
+      memoryButtonLabel: node.querySelector('.final-summary-memory')?.getAttribute('aria-label') || '',
     }));
     const modelRows = Array.from(document.querySelectorAll('.chat-section-system')).map((node) => ({
       turnId: node.dataset.turnId || '',
@@ -677,13 +699,6 @@ async function readDomState(cdpClient, scope = {}) {
       cycleIndex: cycleIndexForNode(node),
       messageIndex: chatNodes.indexOf(node.closest('.chat-message')),
       text: node.innerText || '',
-      copyButtonCount: node.querySelectorAll('.tool-chat-copy').length,
-      memoryButtonCount: node.querySelectorAll('.tool-chat-memory').length,
-      copyButtonLabel: node.querySelector('.tool-chat-copy')?.getAttribute('aria-label') || '',
-      memoryButtonLabel: node.querySelector('.tool-chat-memory')?.getAttribute('aria-label') || '',
-      copyButtonText: node.querySelector('.tool-chat-copy')?.textContent || '',
-      memoryButtonText: node.querySelector('.tool-chat-memory')?.textContent || '',
-      dataToolCallId: node.dataset.toolCallId || '',
     }));
     const currentRunTurnIds = new Set();
     const includeTurn = (turnId) => {
@@ -745,6 +760,11 @@ async function readDomState(cdpClient, scope = {}) {
         isCurrentRunTurn(card.turnId) ||
         isCurrentRunTurn(card.messageTurnId) ||
         isCurrentRunTurn(card.cycleTurnId),
+    );
+    const currentRunFinalRows = finalRows.filter((row) =>
+      isCurrentRunTurn(row.turnId) ||
+        isCurrentRunTurn(row.messageTurnId) ||
+        isCurrentRunTurn(row.cycleTurnId),
     );
     const currentRunModelRows = modelRows.filter((row) =>
       isCurrentRunTurn(row.turnId) ||
@@ -886,6 +906,8 @@ async function readDomState(cdpClient, scope = {}) {
       currentRunFailedToolCardCount: currentRunToolCards.filter((card) => /failed|执行失败/i.test(`${card.className} ${card.text}`)).length,
       currentRunRunningToolCardCount: currentRunToolCards.filter((card) => /running|等待中|waiting/i.test(`${card.className} ${card.text}`)).length,
       currentRunToolCards,
+      finalRows,
+      currentRunFinalRows,
       modelRows,
       currentRunModelRows,
       modelWaitingPresent: modelRows.some((row) =>
@@ -1160,6 +1182,7 @@ function parseJsonOrNull(value) {
 function stripFixtureEnv(value) {
   return value
     .replace(/\n?FREEHAND_LIVE_TOOL_RENDER_FIXTURE_KEY=.*$/gm, '')
+    .replace(/\n?FREEHAND_TEST_DISABLE_MASTER_LIFECYCLE_RUNNER=.*$/gm, '')
     .replace(/\n+$/g, '');
 }
 

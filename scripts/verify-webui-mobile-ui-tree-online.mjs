@@ -18,17 +18,41 @@ const multiSelectSessionIds = [
   'webui-home-multiselect-fixed-a',
   'webui-home-multiselect-fixed-b',
 ];
-const workerRailSessionId = 'webui-header-worker-rail-fixed';
+const workerRailSessionId = `webui-header-worker-rail-${runId}`;
 const workerRailTaskIds = [
-  'task-webui-header-worker-rail-a',
-  'task-webui-header-worker-rail-b',
+  `task-webui-header-worker-rail-a-${runId}`,
+  `task-webui-header-worker-rail-b-${runId}`,
 ];
 const agentDirectoryIds = ['master', 'worker', 'worker-2', 'worker-3'];
 const localAgentTargets = [
-  { agentId: 'worker', origin: 'http://127.0.0.1:4043', label: 'Worker 1', markerSessionId: 'webui-local-agent-namespace-worker' },
-  { agentId: 'worker-2', origin: 'http://127.0.0.1:4044', label: 'Worker 2', markerSessionId: 'webui-local-agent-namespace-worker-2' },
-  { agentId: 'worker-3', origin: 'http://127.0.0.1:4046', label: 'Worker 3', markerSessionId: 'webui-local-agent-namespace-worker-3' },
-  { agentId: 'master', origin: 'http://127.0.0.1:4042', label: 'Master', markerSessionId: 'webui-local-agent-namespace-master' },
+  {
+    agentId: 'worker',
+    origin: 'http://127.0.0.1:4043',
+    label: 'Worker 1',
+    markerSessionId: 'webui-local-agent-namespace-worker',
+    authEnvFile: path.join(os.homedir(), '.freehand', 'workerS.worker.env'),
+  },
+  {
+    agentId: 'worker-2',
+    origin: 'http://127.0.0.1:4044',
+    label: 'Worker 2',
+    markerSessionId: 'webui-local-agent-namespace-worker-2',
+    authEnvFile: path.join(os.homedir(), '.freehand', 'workerS.worker-2.env'),
+  },
+  {
+    agentId: 'worker-3',
+    origin: 'http://127.0.0.1:4046',
+    label: 'Worker 3',
+    markerSessionId: 'webui-local-agent-namespace-worker-3',
+    authEnvFile: path.join(os.homedir(), '.freehand', 'workerS.worker-3.env'),
+  },
+  {
+    agentId: 'master',
+    origin: 'http://127.0.0.1:4042',
+    label: 'Master',
+    markerSessionId: 'webui-local-agent-namespace-master',
+    authEnvFile: path.join(os.homedir(), '.freehand', 'daemonS.env'),
+  },
 ];
 const forbiddenUiTerms = [
   /rootfs/i,
@@ -306,8 +330,7 @@ async function captureSessionDetailRoute(cdp) {
     window.__freehandLayout?.applyLayoutShape?.();
   });
   await delay(350);
-  const clickResult = await evalInPage(cdp, () => {
-    const targetSessionId = 'webui-header-worker-rail-fixed';
+  const clickResult = await evalInPage(cdp, (targetSessionId) => {
     const row = document.querySelector(`#mobile-home-dashboard [data-session-id="${targetSessionId}"] .mobile-home-session-open`) ||
       document.querySelector('#mobile-home-dashboard [data-session-id] .mobile-home-session-open');
     if (!row) {
@@ -316,7 +339,7 @@ async function captureSessionDetailRoute(cdp) {
     const host = row.closest('[data-session-id]');
     row.click();
     return { clicked: true, sessionId: host?.dataset.sessionId || '' };
-  });
+  }, workerRailSessionId);
   if (!clickResult.clicked) {
     const state = await evalInPage(cdp, collectPhaseOneState, assetVersion);
     const result = { skipped: true, reason: clickResult.reason, state };
@@ -1388,12 +1411,26 @@ async function ensureHeaderWorkerRailTruth() {
             target_cwd: '/tmp/freehand-header-worker-rail',
             execution_profile: 'workspace',
             session_id: workerRailSessionId,
-            dispatch: { mode: 'agent', agent_id: agentId },
+            dispatch: { mode: 'none' },
           },
         },
       }, 20_000);
     } catch (error) {
       if (!/already exists|already_exists|TaskAlreadyExists|exists/i.test(error.message || '')) {
+        throw error;
+      }
+    }
+    try {
+      await adpCommand({
+        AssignTask: {
+          assignment: {
+            task_id: taskId,
+            agent_id: agentId,
+          },
+        },
+      }, 20_000);
+    } catch (error) {
+      if (!/already assigned|already_assigned|TaskAlreadyAssigned|assigned/i.test(error.message || '')) {
         throw error;
       }
     }
@@ -1411,19 +1448,20 @@ async function ensureHeaderWorkerRailTruth() {
 async function ensureWorkerOneNamespaceSessions() {
   for (const target of localAgentTargets) {
     const targetAdpUrl = adpUrlFromBaseUrl(`${target.origin}/`);
+    const targetAuthToken = await readAdpAuthToken(target.authEnvFile);
     const title = `${target.label} namespace proof`;
     try {
       await adpCommandAt(targetAdpUrl, {
         CreateSession: { session_id: target.markerSessionId, title },
-      }, 20_000);
+      }, 20_000, targetAuthToken);
     } catch (error) {
       await adpCommandAt(targetAdpUrl, {
         RenameSession: { session_id: target.markerSessionId, title },
-      }, 20_000);
+      }, 20_000, targetAuthToken);
     }
     await adpCommandAt(targetAdpUrl, {
       RestoreSession: { session_id: target.markerSessionId },
-    }, 20_000);
+    }, 20_000, targetAuthToken);
   }
 }
 
@@ -1440,22 +1478,29 @@ async function adpCommand(command, timeoutMs = 30_000) {
   return await adpRequest('command', 'command', command, timeoutMs);
 }
 
-async function adpCommandAt(targetAdpUrl, command, timeoutMs = 30_000) {
-  return await adpRequest('command', 'command', command, timeoutMs, targetAdpUrl);
+async function adpCommandAt(targetAdpUrl, command, timeoutMs = 30_000, authToken = adpAuthToken) {
+  return await adpRequest('command', 'command', command, timeoutMs, targetAdpUrl, authToken);
 }
 
-async function adpQueryVariant(query, variant, timeoutMs = 30_000) {
-  const result = await adpRequest('query', 'query', query, timeoutMs);
+async function adpQueryVariant(query, variant, timeoutMs = 30_000, authToken = adpAuthToken) {
+  const result = await adpRequest('query', 'query', query, timeoutMs, adpUrl, authToken);
   if (!result || typeof result !== 'object' || !Object.prototype.hasOwnProperty.call(result, variant)) {
     throw new Error(`ADP query expected ${variant}, got ${JSON.stringify(result)}`);
   }
   return result[variant];
 }
 
-function adpRequest(kind, payloadKey, payload, timeoutMs, targetAdpUrl = adpUrl) {
+function adpRequest(
+  kind,
+  payloadKey,
+  payload,
+  timeoutMs,
+  targetAdpUrl = adpUrl,
+  authToken = adpAuthToken,
+) {
   return adpVerifierRequest({
     url: targetAdpUrl,
-    authToken: adpAuthToken,
+    authToken,
     kind,
     payloadKey,
     payload,
@@ -1463,4 +1508,17 @@ function adpRequest(kind, payloadKey, payload, timeoutMs, targetAdpUrl = adpUrl)
     clientName: 'freehand-mobile-verifier',
     capabilities: ['query', 'command', 'subscribe'],
   });
+}
+
+async function readAdpAuthToken(envFile) {
+  const contents = await fs.readFile(envFile, 'utf8');
+  const line = contents.split('\n').find((entry) => entry.startsWith('FREEHAND_ADP_AUTH_TOKEN='));
+  if (!line) {
+    throw new Error(`missing FREEHAND_ADP_AUTH_TOKEN in ${envFile}`);
+  }
+  const token = line.slice('FREEHAND_ADP_AUTH_TOKEN='.length).trim().replace(/^"|"$/g, '');
+  if (!token) {
+    throw new Error(`empty FREEHAND_ADP_AUTH_TOKEN in ${envFile}`);
+  }
+  return token;
 }

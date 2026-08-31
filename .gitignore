@@ -1,4 +1,5 @@
 /target
+/playground/
 /.idea
 /.DS_Store
 /.beads/*.db

@@ -2374,6 +2374,8 @@ mod tests {
         assert!(webui_css_body.contains(".tool-chat-line-secondary.tool-chat-line-success"));
         assert!(webui_css_body.contains(".tool-chat-line-secondary.tool-chat-line-failed"));
         assert!(webui_css_body.contains(".tool-chat-copy"));
+        assert!(webui_css_body.contains(".final-summary-actions"));
+        assert!(!webui_css_body.contains(".tool-chat-memory"));
         assert!(
             webui_css_body.contains("body[data-mobile-agent-sheet=\"open\"] .mobile-agent-sheet")
         );
@@ -2436,9 +2438,9 @@ mod tests {
         assert!(webui_css_body.contains("body[data-layout-shape=\"phone_portrait\"][data-composer-focused=\"true\"] .composer-command-strip"));
         assert!(webui_css_body.contains("max-height: min(20svh, 158px)"));
         assert!(webui_css_body.contains("max-height: min(30svh, 208px)"));
-        assert!(
-            webui_css_body.contains("padding-bottom: calc(112px + env(safe-area-inset-bottom))")
-        );
+        assert!(webui_css_body.contains(
+            "padding-bottom: calc(var(--composer-clearance, 96px) + env(safe-area-inset-bottom))"
+        ));
         assert!(!webui_css_body.contains("padding-bottom: min(46svh, 330px)"));
         assert!(!webui_css_body.contains("inset 2px 0 0"));
         assert!(
@@ -2496,6 +2498,11 @@ mod tests {
             .expect("legacy response");
         assert_eq!(legacy.status(), StatusCode::OK);
         let legacy_body = legacy.text().await.expect("legacy body");
+        assert!(legacy_body.contains("function appendFinalSummaryActionBar"));
+        assert!(legacy_body.contains("final-summary-memory"));
+        assert!(legacy_body.contains("sourceTurn.terminal_status"));
+        assert!(legacy_body.contains("row.kind === \"final\""));
+        assert!(!legacy_body.contains("function appendToolMemoryAction"));
         assert!(
             legacy_body.contains("function requireSessionListPageProjection"),
             "legacy WebUI must expose the SessionListPage projection validator",

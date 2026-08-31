@@ -2219,6 +2219,17 @@ body.theme-dark .chat-reasoning-body .md-link {
   white-space: normal;
 }
 
+.final-summary-actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 4px;
+}
+
+.final-summary-actions .turn-action-button {
+  min-height: 32px;
+}
+
 .final-summary-item {
   display: grid;
   grid-template-columns: auto minmax(0, 1fr);
@@ -2418,32 +2429,6 @@ body.theme-dark .chat-reasoning-body .md-link {
 .tool-chat-copy:focus-visible {
   border-color: rgba(31, 108, 88, 0.30);
   color: var(--master);
-}
-
-.tool-chat-memory {
-  justify-self: start;
-  margin-top: 3px;
-  border: 1px solid rgba(43, 66, 58, 0.14);
-  border-radius: 8px;
-  background: rgba(255, 255, 255, 0.58);
-  color: var(--text-soft);
-  padding: 4px 8px;
-  font: inherit;
-  font-size: 10.5px;
-  font-weight: 700;
-  cursor: pointer;
-}
-
-.tool-chat-memory:hover,
-.tool-chat-memory:focus-visible {
-  border-color: rgba(31, 108, 88, 0.30);
-  color: var(--master);
-}
-
-.tool-chat-memory:disabled {
-  cursor: default;
-  opacity: 0.72;
-  color: var(--success);
 }
 
 .tool-chat-line-success {
@@ -3858,7 +3843,7 @@ body[data-layout-shape="phone_portrait"] .conversation-region,
 body[data-layout-shape="tall_phone"] .conversation-region {
   min-height: calc(100svh - 28px);
   border-radius: 0;
-  padding-bottom: calc(18px + var(--measured-composer-clearance, 112px) + env(safe-area-inset-bottom));
+  padding-bottom: calc(18px + var(--composer-clearance, 96px) + env(safe-area-inset-bottom));
 }
 
 body[data-layout-shape="phone_portrait"] .composer-card,
@@ -3954,11 +3939,11 @@ body[data-layout-shape="phone_landscape"] .composer-card {
 body[data-layout-shape="phone_portrait"] .conversation-region,
 body[data-layout-shape="tall_phone"] .conversation-region,
 body[data-layout-shape="tablet_portrait"] .conversation-region {
-  padding-bottom: calc(var(--composer-clearance, 118px) + env(safe-area-inset-bottom));
+  padding-bottom: calc(var(--composer-clearance, 96px) + env(safe-area-inset-bottom));
 }
 
 body[data-layout-shape="phone_landscape"] .conversation-region {
-  padding-bottom: min(calc(var(--composer-clearance, 190px) + 18px), 62svh);
+  padding-bottom: calc(var(--composer-clearance, 96px) + 18px + env(safe-area-inset-bottom));
 }
 
 body[data-layout-shape="phone_portrait"] .composer-input,
@@ -4061,7 +4046,7 @@ body[data-layout-shape="phone_landscape"] .conversation-region {
   min-height: 0;
   grid-template-rows: auto minmax(0, 1fr);
   gap: 8px;
-  padding: 8px 10px min(calc(var(--composer-clearance, 172px) + 10px), 48svh);
+  padding: 8px 10px calc(var(--composer-clearance, 96px) + 10px + env(safe-area-inset-bottom));
   overflow: hidden;
 }
 
@@ -4301,7 +4286,7 @@ body[data-layout-shape="tablet_portrait"] .conversation-region {
   display: grid;
   grid-template-rows: auto minmax(0, 1fr);
   gap: 6px;
-  padding: 8px 8px min(24svh, 190px);
+  padding: 8px 8px calc(18px + var(--composer-clearance, 96px) + env(safe-area-inset-bottom));
   border: 0;
   border-radius: 0;
   overflow: hidden;
@@ -4531,7 +4516,7 @@ body[data-layout-shape="phone_portrait"] .conversation-region,
 body[data-layout-shape="tall_phone"] .conversation-region,
 body[data-layout-shape="tablet_portrait"] .conversation-region {
   gap: 5px;
-  padding: 6px 7px min(22svh, 172px);
+  padding: 6px 7px calc(18px + var(--composer-clearance, 96px) + env(safe-area-inset-bottom));
 }
 
 body[data-layout-shape="phone_portrait"] .region-header,
@@ -4702,7 +4687,7 @@ body[data-layout-shape="tablet_portrait"] #send-button {
 body[data-layout-shape="phone_portrait"][data-composer-focused="true"] .conversation-region,
 body[data-layout-shape="tall_phone"][data-composer-focused="true"] .conversation-region,
 body[data-layout-shape="tablet_portrait"][data-composer-focused="true"] .conversation-region {
-  padding-bottom: min(22svh, 172px);
+  padding-bottom: calc(var(--composer-clearance, 96px) + env(safe-area-inset-bottom));
 }
 
 body[data-layout-shape="phone_portrait"][data-composer-focused="true"] .message-list,
@@ -4856,7 +4841,7 @@ body[data-layout-shape="tablet_portrait"] .topbar {
 body[data-layout-shape="phone_portrait"] .conversation-region,
 body[data-layout-shape="tall_phone"] .conversation-region,
 body[data-layout-shape="tablet_portrait"] .conversation-region {
-  padding: 2px 0 min(22svh, 172px);
+  padding: 2px 0 calc(18px + var(--composer-clearance, 96px) + env(safe-area-inset-bottom));
   background: linear-gradient(180deg, rgba(255, 255, 255, 0.82), rgba(248, 251, 248, 0.96));
 }
 
@@ -5042,7 +5027,7 @@ body[data-layout-shape="phone_portrait"] .conversation-region,
 body[data-layout-shape="tall_phone"] .conversation-region,
 body[data-layout-shape="tablet_portrait"] .conversation-region {
   grid-template-rows: minmax(0, 1fr);
-  padding: 0 0 calc(76px + env(safe-area-inset-bottom));
+  padding: 0 0 calc(var(--composer-clearance, 96px) + env(safe-area-inset-bottom));
   background: linear-gradient(180deg, #f7f5ee 0%, #fbfaf5 100%);
 }
 
@@ -5415,7 +5400,7 @@ body[data-layout-shape="tablet_portrait"] #send-button {
 body[data-layout-shape="phone_portrait"][data-composer-focused="true"] .conversation-region,
 body[data-layout-shape="tall_phone"][data-composer-focused="true"] .conversation-region,
 body[data-layout-shape="tablet_portrait"][data-composer-focused="true"] .conversation-region {
-  padding-bottom: calc(112px + env(safe-area-inset-bottom));
+  padding-bottom: calc(var(--composer-clearance, 96px) + env(safe-area-inset-bottom));
 }
 
 body[data-layout-shape="phone_portrait"][data-composer-focused="true"] .composer-card,
