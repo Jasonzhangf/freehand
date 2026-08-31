@@ -1,29 +1,33 @@
 {
   "goal_id": "goal-freehand-v2-foundation",
-  "raw_request": "建立 Freehand v2 独立项目，以 AppSDK 0.1.5 治理，采用 Cordis 编排、typed event 控制路径、Rust 插件实现、Arc 不可变 payload 共享、sessionlog 推理持久化，并保持 UI 与推理解耦；MVP 先闭合单机链路，同时预留多机器协作和网络插件扩展。",
+  "raw_request": "建立 Freehand v2 独立项目，以 AppSDK 0.1.6 治理，采用 Cordis 编排、typed event 控制路径、Rust 插件实现、Arc 不可变 payload 共享、sessionlog 推理持久化，并保持 UI 与推理解耦；MVP 先闭合单机链路，同时预留多机器协作和网络插件扩展。",
   "understood_objective": "在独立 v2 worktree 中建立可审计的基础模块边界、最小 MVP、开发流程和 UI/reason 分离合同；MVP 不实现分布式调度，但必须提前锁定节点身份、能力发现、网络 transport、认证、事件同步、断线恢复和版本协商的扩展边界。",
   "acceptance_criteria": [
     "v2 使用独立 worktree，现有 main 不被修改。",
-    "v2 项目锁定 AppSDK 0.1.5，治理数据位于 .appsdk，运行态位于 .appsdk-control。",
+    "v2 项目锁定 AppSDK 0.1.6，治理数据位于 .appsdk，运行态位于 .appsdk-control。",
     "目标模块、资源 owner、主线调用边和验证入口在开发前可机器校验。",
-    "MVP 闭合 UI input -> typed command -> Cordis orchestration -> Rust plugin -> typed control event -> Arc immutable payload -> sessionlog reasoning -> UI projection。",
+    "MVP 闭合 UI input -> typed command -> Cordis 固定设计编排插件 -> Rust capability plugin -> typed control event -> Arc immutable payload -> canonical Session Log -> selected Reasoning Service backend -> UI projection。",
     "UI 不拥有推理、session、控制、插件或网络 truth；推理不依赖 UI。",
-    "多机器扩展通过 typed node identity、capability manifest、network plugin contract、authenticated transport、event sequence/ack、payload reference/transfer 和 protocol version contract 预留。",
+    "多机器扩展通过 central Registry、stateless token、typed node identity、capability manifest、link/transport plugin、ChannelSession reconnect、event sequence/ack、payload reference/transfer 和 protocol version contract 预留。",
+    "多个 Cordis runtime group 可以同时绑定不同 reasoning backend；Freehand native backend 与 OpenCode adaptor 使用同一 provider-neutral Reasoning Service contract。",
     "控制面、网络控制帧、metadata/debug 与业务 payload 物理隔离。",
+    "本地 Rust 相邻节点默认通过 Arc 共享同一不可变 payload allocation；Arc::clone 不得触发深拷贝，禁止 Arc<Mutex<_>>、Arc<RwLock<_>> 等可变共享；仅允许在构造、持久化/进程/网络序列化和显式 schema 转换边界复制。",
     "每个实现里程碑遵循 AppSDK 的 reproduce -> candidate -> whitebox -> install/restart -> deployed blackbox -> architecture review -> effectiveness -> merge/promotion 生命周期。"
   ],
   "non_goals": [
-    "本计划阶段不实现 Cordis runtime、跨机器任务调度、生产网络 transport 或远端插件执行。",
+    "本计划阶段不实现 Cordis runtime、跨机器任务调度、生产云端 Registry、生产网络 transport 或远端插件执行。",
     "本计划阶段不迁移现有 v1 全部 UI、Android、Relay 和历史兼容路径。",
     "不引入万能 EventBus、全局 Arc Context、双写 sessionlog 或静默 fallback。",
+    "不把可变共享 payload 作为跨插件数据模型；Arc 不代表跨进程或跨机器零拷贝。",
     "不把开发 worker 协作场景等同于产品运行时多机器协作。"
   ],
   "assumptions": [
     "v2 以当前 main 的代码和文档为只读参考基线，所有新实现先进入 v2 Playground 生命周期。",
     "AppSDK 是外部治理实现；v2 只提交治理合同、记录、maps 和项目代码，不复制 SDK 源码。",
-    "sessionlog 是推理 truth 的候选唯一 owner，具体目录、锁和迁移方式必须在 sessionlog adapter 设计中确定。",
-    "网络插件属于 transport/capability owner，不得直接写 reason、task、UI 或业务 payload truth。",
-    "跨机器能力优先采用显式协议版本和能力声明，未知能力或版本必须显式失败。"
+    "canonical Session Log 是 Freehand 推理事实唯一 owner；外部 ~/code/sessionlog 只能通过 adapter 接入，OpenCode 原生数据库不能成为第二真源。",
+    "网络插件属于 Registry/link/channel owner，不得直接写 reason、task、UI 或业务 payload truth。",
+    "Central Registry 只拥有注册、租约、路由、能力生成和发现，不拥有认证会话、推理 Session Log 或业务 payload。",
+    "跨机器能力优先采用显式协议版本、无状态 token 和能力声明；未知能力、版本或 generation 必须显式失败。"
   ],
   "ambiguities": [],
   "questions": [],
