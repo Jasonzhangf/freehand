@@ -13,4 +13,8 @@ thiserror = "2"
 name = "v2_contract_boundary"
 path = "../../../../tests/v2/contracts/contract_boundary.rs"
 
+[[bin]]
+name = "v2-contracts-public"
+path = "src/bin/v2-contracts-public.rs"
+
 [workspace]
