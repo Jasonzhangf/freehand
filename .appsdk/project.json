@@ -69,7 +69,7 @@
     "zone_transition_contract": "contracts/transitions/zone-transition-manifest.json"
   },
   "lifecycle": {
-    "stage": "draft"
+    "stage": "contract_bound"
   },
   "lifecycles": {
     "artifact": "generated",
@@ -196,7 +196,7 @@
         "suite_id": "v2-contracts-regression"
       },
       "source_owner": "v2-contracts",
-      "stage": "draft"
+      "stage": "controlled_verified"
     }
   ],
   "project_id": "freehand-v2",
