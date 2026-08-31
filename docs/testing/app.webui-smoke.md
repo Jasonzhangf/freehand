@@ -455,3 +455,10 @@
 
 - When SessionList arrives before ConfigStatus, accepting owner identity must invalidate and re-render the direct-session group. Positive Master/Worker labels and the negative absence of 当前 Agent after config settles are required.
 - The online replay is pinned to Master 4042, Worker 1 4043, Worker 2 4044, and Worker 3 4046. Stock Chrome 390x844 must click the Dashboard Agent directory and prove exact-origin navigation, namespace-only SessionList rows, correct direct-session group labels, no horizontal overflow, and no bootstrap/resource failures.
+## Tool Result Copy and Memory Buttons
+
+### Resource Operation Test Coverage
+
+| Resource Operation | Status | White-Box | Module Black-Box | Project Black-Box |
+| --- | --- | --- | --- | --- |
+| `app.webui-smoke.render.tool_card_actions` | bound | renderToolSection must emit both `.tool-chat-copy` and `.tool-chat-memory` per row, copy must call `toolSummaryBody(row)`, memory must send `AddToMemory` with session_id / turn_id / tool_call_id / content | `node --check apps/freehand-server/assets/webui/legacy-monolith.js` | restart S profile then run online roundtrip: select a turn with tool call, click 复制 → clipboard contains markdown; click 加入记忆 → JSONL appended under `runtime_home/memory/tool-results.jsonl` |

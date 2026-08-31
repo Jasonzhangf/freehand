@@ -7,6 +7,7 @@
   "mainline_call_doc": "docs/mainline-calls/reason.persistence.json",
   "generated_wiki_doc": "docs/wiki/reason.persistence.md",
   "resource_operations": [
+    "runtime_command.append_tool_result",
     "session.restore",
     "session.append_turn_to_turn",
     "session.list_persisted",
@@ -18,7 +19,8 @@
     "turn execution consumes restored session truth through `ReasonTurnEngine::start_turn`",
     "runtime persistence appends semantic reason-ledger rows before advancing durable snapshot cursors",
     "terminal turn close materializes immutable turn truth files and only then updates derived UI and index sidecars",
-    "provider raw ledgers may be appended for debug, but they are not part of the authoritative request or recovery chain"
+    "provider raw ledgers may be appended for debug, but they are not part of the authoritative request or recovery chain",
+    "tool-result memory entries append the complete owner-projected Markdown content as independent JSONL records under the configured memory path, outside session truth"
   ],
   "response_mainline": [
     "`SessionHistory` JSON/file helpers render and restore authoritative session rewrite truth",
@@ -33,7 +35,8 @@
     "derived UI and index sidecars are regenerated from authoritative reason truth after durable writes complete",
     "persisted session index reads expose only derived index rows and session metadata sidecars for UI list/search projection; worker task transcripts are not promoted to top-level persisted user sessions by this owner operation",
     "session display metadata (`title`, `archived`) is persisted as reason-owned sidecar truth for multi-UI session management and stays separate from provider-visible session history",
-    "session rollback appends a durable marker, filters effective transcript restore by logical turn key, and retains raw closed-turn files for audit; later durable writes rebuild derived sidecars from rollback-filtered effective turns while raw rolled-back files remain reserved for audit and id allocation"
+    "session rollback appends a durable marker, filters effective transcript restore by logical turn key, and retains raw closed-turn files for audit; later durable writes rebuild derived sidecars from rollback-filtered effective turns while raw rolled-back files remain reserved for audit and id allocation",
+    "tool-result memory append creates parent directories, appends one serialized entry, syncs the file, and reloads independently after session archive/delete or dispatcher restart"
   ],
   "error_mainline": [
     "invalid persisted snapshot JSON is rejected explicitly",
@@ -471,6 +474,20 @@
       "source_resource": "session",
       "target_resource": "ui_projection",
       "resource_operation": "session.list_persisted_page",
+      "binding_status": "bound"
+    },
+    {
+      "step": "19m",
+      "symbol_path": "ReasonPersistence::append_tool_result_memory",
+      "file_path": "crates/freehand-reason/src/persistence.rs",
+      "responsibility": "append the complete tool-result Markdown plus typed session/turn/tool identity to the config-selected durable memory JSONL",
+      "input_semantic": "memory path plus session id, optional turn id, optional tool call id, and complete content",
+      "output_semantic": "persisted ToolResultMemoryEntry with explicit created_at_unix_seconds",
+      "caller": "runtime.ui-command-dispatch AddToMemory",
+      "callee": "persistence owner",
+      "source_resource": "runtime_command",
+      "target_resource": "memory",
+      "resource_operation": "runtime_command.append_tool_result",
       "binding_status": "bound"
     }
   ],

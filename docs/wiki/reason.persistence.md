@@ -10,6 +10,7 @@ Generated from `docs/mainline-calls/reason.persistence.json`. Do not edit by han
 
 ## Resource Operation Backlinks
 
+- runtime_command.append_tool_result
 - session.restore
 - session.append_turn_to_turn
 - session.list_persisted
@@ -23,6 +24,7 @@ Generated from `docs/mainline-calls/reason.persistence.json`. Do not edit by han
 - runtime persistence appends semantic reason-ledger rows before advancing durable snapshot cursors
 - terminal turn close materializes immutable turn truth files and only then updates derived UI and index sidecars
 - provider raw ledgers may be appended for debug, but they are not part of the authoritative request or recovery chain
+- tool-result memory entries append the complete owner-projected Markdown content as independent JSONL records under the configured memory path, outside session truth
 
 ## Response Mainline
 
@@ -39,6 +41,7 @@ Generated from `docs/mainline-calls/reason.persistence.json`. Do not edit by han
 - persisted session index reads expose only derived index rows and session metadata sidecars for UI list/search projection; worker task transcripts are not promoted to top-level persisted user sessions by this owner operation
 - session display metadata (`title`, `archived`) is persisted as reason-owned sidecar truth for multi-UI session management and stays separate from provider-visible session history
 - session rollback appends a durable marker, filters effective transcript restore by logical turn key, and retains raw closed-turn files for audit; later durable writes rebuild derived sidecars from rollback-filtered effective turns while raw rolled-back files remain reserved for audit and id allocation
+- tool-result memory append creates parent directories, appends one serialized entry, syncs the file, and reloads independently after session archive/delete or dispatcher restart
 
 ## Error Mainline
 
@@ -153,6 +156,7 @@ Generated from `docs/mainline-calls/reason.persistence.json`. Do not edit by han
 | 16 | `ReasonPersistence::rollback_latest_session_turn` | `crates/freehand-reason/src/persistence.rs` | append latest-logical-turn rollback marker and advance effective cursor/projection state without deleting raw turn files | session id | rollback marker with target turn, previous effective head, and restored user text | runtime UI command dispatch | persistence owner |  |  |  | bound |
 | 18 | `ReasonPersistence::list_persisted_sessions` | `crates/freehand-reason/src/persistence.rs` | expose derived persisted session index rows and session metadata sidecar truth for runtime search projection, startup stale-lifecycle recovery, and bootstrap UI projection restore without reading provider raw ledgers or treating worker transcripts as global sessions | session index sidecar plus metadata sidecar | persisted session index/metadata rows for runtime search projection | runtime.ui-command-dispatch QuerySessionSearch / recover_stale_lifecycle_waits_on_bootstrap / restore_all_persisted_sessions_into_ui | persistence owner | session | ui_projection | session.list_persisted | bound |
 | 18p | `ReasonPersistence::list_persisted_sessions_page` | `crates/freehand-reason/src/persistence.rs` | maintain the versioned session summary index and return one ordered metadata-only page with an opaque cursor; unavailable poisoned sessions stay explicit facts without blocking other rows | archived space plus latest/older request plus summary index/metadata truth | bounded ReasonSessionListPage with page facts and unavailable ids | runtime.ui-command-dispatch QuerySessionListPage | persistence owner | session | ui_projection | session.list_persisted_page | bound |
+| 19m | `ReasonPersistence::append_tool_result_memory` | `crates/freehand-reason/src/persistence.rs` | append the complete tool-result Markdown plus typed session/turn/tool identity to the config-selected durable memory JSONL | memory path plus session id, optional turn id, optional tool call id, and complete content | persisted ToolResultMemoryEntry with explicit created_at_unix_seconds | runtime.ui-command-dispatch AddToMemory | persistence owner | runtime_command | memory | runtime_command.append_tool_result | bound |
 
 ## Sync Status Against Mainline Call
 

@@ -39,10 +39,12 @@
   - `RemoteDaemonRegistryConfig::build_bootstrap_bundle_for_selected_route`
   - `build_remote_daemon_bootstrap_link`
   - `parse_remote_daemon_bootstrap_link`
+  - `LoadedConfig::memory_path`
+  - `resolve_memory_path`
 
 ## Resource Map Binding
 
-- owned resources: `config`, `remote_daemon_registry`
+ - owned resources: `config`, `remote_daemon_registry`, `memory`
 - touched resources: `config`, `remote_daemon_registry`, `account_config_document`
 - resource operations: `config.compile_agent_relay_connection`, `config.mutate_provider_config`, `config.mutate_model_group_config`, `config.compile_remote_daemon_registry`, `config.project_shared_account_config`, `account_config_document.apply_shared_account_config`
 - operation source/target: `config` -> `config`; `config` -> `remote_daemon_registry`; `config` -> `account_config_document`; `account_config_document` -> `config`

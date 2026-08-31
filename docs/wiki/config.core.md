@@ -10,6 +10,7 @@ Generated from `docs/mainline-calls/config.core.json`. Do not edit by hand.
 
 ## Resource Operation Backlinks
 
+- memory.compile_path
 - config.compile_agent_relay_connection
 - config.mutate_provider_config
 - config.mutate_model_group_config
@@ -57,6 +58,7 @@ Generated from `docs/mainline-calls/config.core.json`. Do not edit by hand.
 - legacy provider/model updates persist to the canonical config path with env-var auth only, switch the selected primary provider, preserve fallback selection when valid, return a selected-agent safe projection, and mark restart-required semantics for runtime/UI consumers
 - Agent resource-count updates persist reciprocal Master/Worker topology to the canonical config path, preserve surviving peer order, clone the first Worker as the shared-provider template when growing, remove trailing Worker tables when shrinking, and return a restart-required selected-agent projection
 - restart is required before config changes take effect
+- validated config returns one owner-scoped memory location used by reason persistence for tool-result memory writes; the memory location resolves through `LoadedConfig::memory_path` and defaults to `memory/tool-results.jsonl` under the config parent runtime home, may be overridden by an absolute or relative `[memory] path` entry, and is exposed read-only without exposing the resolved filesystem bytes
 
 ## Error Mainline
 
@@ -67,6 +69,7 @@ Generated from `docs/mainline-calls/config.core.json`. Do not edit by hand.
 - invalid provider definition updates, missing env-var auth, missing selected agent, invalid provider selections, disabled providers, and same-primary fallback selection fail before overwrite; failed updates must leave previous config bytes intact
 - invalid model group definitions, missing route providers/models, unknown or disabled route providers, zero load-balance weights, missing selected agent, unknown selected group, and disabled selected group fail before overwrite; failed updates must leave previous config bytes intact
 - invalid Agent resource-count updates, non-Master targets, and missing targets fail before overwrite; failed updates must leave previous config bytes intact
+- invalid `[memory] path` entries (empty or unparsable) return explicit `EmptyMemoryPath` errors before LoadedConfig compilation; missing entries default to the runtime-home `memory/tool-results.jsonl` location
 - fallback provider selection fails explicitly when the referenced provider is missing, disabled, or equal to the primary provider
 - provider capability-test selection fails explicitly when the requested provider id is missing or disabled
 - safe config projection must not expose resolved provider secrets

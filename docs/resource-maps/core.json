@@ -325,6 +325,21 @@
       ]
     },
     {
+      "resource_type": "memory",
+      "owner_feature_id": "reason.persistence",
+      "owner_crate": "crates/freehand-reason",
+      "identity": "agent_id plus append sequence",
+      "truth_store": "config-selected local JSONL memory path, defaulting to ~/.freehand/memory/tool-results.jsonl",
+      "operations": [
+        "append_tool_result",
+        "load_tool_results"
+      ],
+      "projections": [
+        "durable tool-result memory entry",
+        "memory reload after session archive/delete or runtime restart"
+      ]
+    },
+    {
       "resource_type": "turn",
       "owner_feature_id": "reason.turn",
       "owner_crate": "crates/freehand-reason",
@@ -693,7 +708,8 @@
         "dispatch",
         "route_to_owner",
         "return_receipt",
-        "rewind_checkpoint"
+        "rewind_checkpoint",
+        "append_tool_result"
       ],
       "projections": [
         "UI command receipt",
@@ -842,6 +858,15 @@
       "source_resource": "session",
       "target_resource": "ui_projection",
       "effect": "read one reason-owned ordered session summary page with an opaque cursor, preserving metadata-only rows and explicit unavailable-session facts without restoring full transcripts",
+      "mainline_call_doc": "docs/mainline-calls/reason.persistence.json",
+      "binding_status": "bound"
+    },
+    {
+      "operation_id": "runtime_command.append_tool_result",
+      "owner_feature_id": "reason.persistence",
+      "source_resource": "runtime_command",
+      "target_resource": "memory",
+      "effect": "append complete tool-result Markdown and typed session/turn/tool identity to the config-selected durable memory JSONL without mutating session truth",
       "mainline_call_doc": "docs/mainline-calls/reason.persistence.json",
       "binding_status": "bound"
     },
@@ -1800,6 +1825,17 @@
       "call_table_step": "18p",
       "file_path": "crates/freehand-reason/src/persistence.rs",
       "symbol_path": "ReasonPersistence::list_persisted_sessions_page",
+      "binding_status": "bound"
+    },
+    {
+      "edge_id": "reason.persistence#19m",
+      "operation_id": "runtime_command.append_tool_result",
+      "source_resource": "runtime_command",
+      "target_resource": "memory",
+      "mainline_call_doc": "docs/mainline-calls/reason.persistence.json",
+      "call_table_step": "19m",
+      "file_path": "crates/freehand-reason/src/persistence.rs",
+      "symbol_path": "ReasonPersistence::append_tool_result_memory",
       "binding_status": "bound"
     },
     {
@@ -3051,6 +3087,14 @@
       "allowed_direct": true,
       "via_resources": [],
       "reason": "Session persistence owner may project persisted session index and metadata to UI-safe list/search DTOs while UI remains read-only."
+    },
+    {
+      "rule_id": "runtime-command-appends-memory-direct",
+      "source_resource": "runtime_command",
+      "target_resource": "memory",
+      "allowed_direct": true,
+      "via_resources": [],
+      "reason": "Runtime dispatch may route a validated AddToMemory mutation to the reason.persistence memory owner; UI never writes the memory file directly."
     },
     {
       "rule_id": "turn-plans-request-context-direct",

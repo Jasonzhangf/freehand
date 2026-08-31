@@ -215,6 +215,12 @@
       "target_owner_feature": "config.account-config-sync"
     },
     {
+      "serde_name": "AddToMemory",
+      "semantic_kind": "add_to_memory",
+      "frame_class": "mutation",
+      "target_owner_feature": "reason.persistence"
+    },
+    {
       "serde_name": "QueryErrorCenterEvents",
       "semantic_kind": "query_error_center_events",
       "frame_class": "query",

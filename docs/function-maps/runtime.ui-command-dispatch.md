@@ -8,6 +8,7 @@
   - `RuntimeCommandDispatcher::from_selected_agent`
   - `RuntimeCommandDispatcher::from_default_config`
   - `RuntimeCommandDispatcher::dispatch`
+  - `RuntimeCommandDispatcher::dispatch_add_to_memory`
   - `RuntimeCommandDispatcher::query_runtime`
   - `restore_session_turns_page_for_ui_query`
   - `RuntimeCommandDispatcher::ui_state`
@@ -30,11 +31,13 @@
   - `tool_call`
   - `debug_trace`
   - `account_config_document`
+  - `memory`
 - resource operations:
   - `input_attachment.prepare_provider_input` (`input_attachment` -> `provider_request`)
   - `input_attachment.project_to_ui` (`input_attachment` -> `ui_projection`)
   - `debug_trace.read_snapshot` (`debug_trace` -> `ui_projection`)
   - `turn.project_runtime_agent_activity` (`turn` -> `runtime_agent_activity`)
+  - `runtime_command.append_tool_result` (`runtime_command` -> `memory`) bridges validated AddToMemory to reason.persistence memory owner without direct file writes
   - session transcript bridge references `reason.persistence` owner operation `session.restore`
   - timer bridge references `runtime.master-worker-loop` owner operations `timer.schedule`, `timer.cancel`, and `timer.list`
   - tool registry bridge references `tool.registry` owner operation `tool_call.project_registry_to_ui`
@@ -44,7 +47,8 @@
 - forbidden shortcuts:
   - Runtime must not persist image base64 in reason/session history or project it to UI history.
   - Runtime activity is a typed control-side projection only; it must not be copied into ADP or UI business payloads.
-  - Provider adapters must consume only provider-neutral attachment semantics; runtime must not construct protocol-specific image wire payloads.
+- Provider adapters must consume only provider-neutral attachment semantics; runtime must not construct protocol-specific image wire payloads.
+- Runtime must not write memory files directly; it only bridges validated AddToMemory envelopes to `ReasonPersistence::append_tool_result_memory`.
 
 ## Request Mainline
 

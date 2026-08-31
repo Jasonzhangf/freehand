@@ -1958,7 +1958,7 @@ function assistantChatBubble(renderTurn, rows) {
   article.appendChild(meta);
 
   rows.forEach((row) => {
-    article.appendChild(chatAssistantSection(row));
+    article.appendChild(chatAssistantSection(row, renderTurn));
   });
   // Assistant output has no editable/forkable/rerunnable input: the edit,
   // fork and rerun actions belong to the user message that started the turn,
@@ -2179,7 +2179,7 @@ function chatAssistantStatusLabel(lifecycle, rows) {
   return lifecycle.label || "已接收";
 }
 
-function chatAssistantSection(row) {
+function chatAssistantSection(row, renderTurn) {
   const section = document.createElement("section");
   section.className = `chat-section chat-section-${row.kind}`;
   if (row.identity && row.identity.turnId) {
@@ -2190,7 +2190,7 @@ function chatAssistantSection(row) {
   }
 
   if (row.kind === "tool") {
-    renderToolSection(section, row);
+    renderToolSection(section, row, renderTurn);
     return section;
   }
 
@@ -2596,7 +2596,7 @@ function renderUserOptionButtons(section, row) {
   section.appendChild(wrap);
 }
 
-function renderToolSection(section, row) {
+function renderToolSection(section, row, renderTurn) {
   const stateClass = toolStateClass(row.status);
   section.classList.add(stateClass);
   const display = row.display || null;
@@ -2647,12 +2647,51 @@ function renderToolSection(section, row) {
   copyButton.title = "复制工具结果";
   copyButton.textContent = "复制结果";
   copyButton.addEventListener("click", () => {
-    copyTextToClipboard(toolSummaryBody(row)).then(
+    const body = toolSummaryBody(row);
+    copyTextToClipboard(body).then(
       () => setCommandStatus("已复制工具结果", { stickyMs: 3000 }),
       (error) => setCommandStatus(`复制工具结果失败：${error.message}`, { stickyMs: 6000 }),
     );
   });
   body.appendChild(copyButton);
+
+  const memoryButton = document.createElement("button");
+  memoryButton.type = "button";
+  memoryButton.className = "tool-chat-memory";
+  memoryButton.setAttribute("aria-label", "把工具结果加入记忆");
+  memoryButton.title = "把工具结果加入记忆";
+  memoryButton.textContent = "加入记忆";
+  memoryButton.addEventListener("click", async () => {
+    if (memoryButton.disabled) {
+      return;
+    }
+    const sessionId = (renderTurn && renderTurn.sessionId) || state.selectedSessionId || "";
+    if (!sessionId) {
+      setCommandStatus("当前 turn 没有会话 ID，无法加入记忆", { stickyMs: 6000 });
+      return;
+    }
+    const turnId = (renderTurn && renderTurn.turnId) || (row && row.identity && row.identity.turnId) || "";
+    const toolCallId = (row && row.identity && row.identity.toolCallId) || "";
+    memoryButton.disabled = true;
+    memoryButton.textContent = "正在加入...";
+    try {
+      const payload = {
+        session_id: sessionId,
+        turn_id: turnId || null,
+        tool_call_id: toolCallId || null,
+        content: toolSummaryBody(row),
+      };
+      const receipt = await adpCommand(adpCommandOf("AddToMemory", payload));
+      memoryButton.textContent = "已加入记忆";
+      setCommandStatus(commandReceiptStatus(receipt), { stickyMs: 4000 });
+    } catch (error) {
+      memoryButton.disabled = false;
+      memoryButton.textContent = "加入记忆";
+      setCommandStatus(`加入记忆失败：${error && error.message ? error.message : error}`, { stickyMs: 8000 });
+    }
+  });
+  body.appendChild(memoryButton);
+
   const detail = toolDetailNode(row, display);
   detail.id = `tool-detail-${section.dataset.toolCallId || section.dataset.turnId || "row"}`;
   detail.hidden = true;
@@ -2849,6 +2888,8 @@ function commandReceiptStatus(receipt) {
       return "任务已更新";
     case "queued_by_static_dispatch_port":
       return "命令已排队";
+    case "memory_entry_persisted":
+      return "已加入记忆";
     default:
       return `不支持的命令回执：${truncateForChat(statusCode, 80)}`;
   }

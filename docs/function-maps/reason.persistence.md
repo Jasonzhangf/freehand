@@ -9,6 +9,7 @@
   - `session.append_turn_to_turn`
   - `session.list_persisted`
   - `session.list_persisted_page`
+  - `runtime_command.append_tool_result`
 - owner entry symbols:
   - `ReasonPersistence::record_turn_started`
   - `ReasonPersistence::record_provider_output_applied`
@@ -17,6 +18,8 @@
   - `ReasonPersistence::record_rewrite_state_updated`
   - `ReasonPersistence::record_provider_raw_event`
   - `ReasonPersistence::restore`
+  - `ReasonPersistence::append_tool_result_memory`
+  - `ReasonPersistence::load_tool_result_memory`
   - `ReasonPersistence::restore_turn_start_snapshots`
   - `ReasonPersistence::restore_turn_snapshots_for_ui`
   - `ReasonPersistence::restore_turn_snapshots_page_for_ui`
@@ -32,6 +35,8 @@
 - resource map: `docs/resource-maps/core.json`
 - owned resources:
   - `session`
+  - `memory`
+  - `session`
 - touched resources:
   - `turn`
   - `ui_projection`
@@ -40,6 +45,7 @@
   - `session.append_turn_to_turn`
   - `session.list_persisted`
   - `session.list_persisted_page`
+  - `runtime_command.append_tool_result` (`runtime_command` -> `memory`)
 - forbidden shortcuts:
   - UI projection must not synthesize persisted sessions from turn-only or worker sessions.
   - Session truth must not be recovered from provider raw ledgers or UI sidecars.

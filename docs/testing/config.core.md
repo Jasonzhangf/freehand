@@ -3,6 +3,8 @@
 - feature_id: `config.core`
 - owner: `crates/freehand-config`
 - resource map: `docs/resource-maps/core.json`
+- resource operation coverage:
+  - `memory.config_path`
 - lifecycle path under test:
   - load `~/.freehand/config.toml`
   - resolve `[agents.<name>]`

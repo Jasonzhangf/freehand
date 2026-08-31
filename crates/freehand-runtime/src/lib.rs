@@ -3602,6 +3602,7 @@ pub struct RuntimeCommandDispatcherConfig {
 pub struct RuntimeLiveDispatcherConfig {
     pub selected_agent: SelectedAgentConfig,
     pub runtime_home: PathBuf,
+    pub memory_path: PathBuf,
     pub stream: bool,
 }
 
@@ -3609,6 +3610,7 @@ pub struct RuntimeLiveDispatcherConfig {
 pub struct RuntimeAgentBootstrap {
     pub selected_agent: SelectedAgentConfig,
     pub runtime_home: PathBuf,
+    pub memory_path: PathBuf,
     pub local_web_url: Option<String>,
 }
 
@@ -3724,6 +3726,7 @@ pub fn load_default_runtime_agent(
     Ok(RuntimeAgentBootstrap {
         selected_agent: selected,
         runtime_home,
+        memory_path: config.memory_path().to_path_buf(),
         local_web_url: config
             .agents()
             .get(agent_name)
@@ -4020,11 +4023,7 @@ impl RuntimeCommandDispatcher {
     pub fn from_default_config(agent_name: &str) -> Result<Self, RuntimeCommandDispatcherError> {
         let bootstrap =
             load_default_runtime_agent(agent_name).map_err(runtime_dispatcher_bootstrap_error)?;
-        Self::from_selected_agent_with_live(
-            &bootstrap.selected_agent,
-            bootstrap.runtime_home,
-            false,
-        )
+        Self::from_default_bootstrap_with_live(&bootstrap, false)
     }
 
     pub fn from_selected_agent(
@@ -4038,11 +4037,39 @@ impl RuntimeCommandDispatcher {
         runtime_home: PathBuf,
         stream: bool,
     ) -> Result<Self, RuntimeCommandDispatcherError> {
+        let memory_path = runtime_home.join("memory").join("tool-results.jsonl");
+        Self::from_selected_agent_with_live_and_memory_path(
+            selected,
+            runtime_home,
+            memory_path,
+            stream,
+        )
+    }
+
+    pub fn from_default_bootstrap_with_live(
+        bootstrap: &RuntimeAgentBootstrap,
+        stream: bool,
+    ) -> Result<Self, RuntimeCommandDispatcherError> {
+        Self::from_selected_agent_with_live_and_memory_path(
+            &bootstrap.selected_agent,
+            bootstrap.runtime_home.clone(),
+            bootstrap.memory_path.clone(),
+            stream,
+        )
+    }
+
+    pub fn from_selected_agent_with_live_and_memory_path(
+        selected: &SelectedAgentConfig,
+        runtime_home: PathBuf,
+        memory_path: PathBuf,
+        stream: bool,
+    ) -> Result<Self, RuntimeCommandDispatcherError> {
         Self::from_selected_agent_inner(
             selected,
             Some(RuntimeLiveDispatcherConfig {
                 selected_agent: selected.clone(),
                 runtime_home,
+                memory_path,
                 stream,
             }),
         )
@@ -5544,6 +5571,40 @@ impl RuntimeCommandDispatcher {
         })
     }
 
+    fn dispatch_add_to_memory(
+        &self,
+        state: &mut RuntimeCommandDispatcherState,
+        envelope: UiCommandDispatchEnvelope,
+        session_id: SessionId,
+        turn_id: Option<TurnId>,
+        tool_call_id: Option<String>,
+        content: String,
+    ) -> Result<UiCommandDispatchReceipt, UiCommandDispatchPortError> {
+        let live = state.config.live.as_ref().ok_or_else(|| {
+            UiCommandDispatchPortError::Unsupported(
+                "memory persistence requires a live runtime home".to_owned(),
+            )
+        })?;
+        let persistence = ReasonPersistence::new(
+            live.runtime_home.clone(),
+            state.config.reason_agent_id.clone(),
+        );
+        let _entry = persistence
+            .append_tool_result_memory(
+                &live.memory_path,
+                &session_id,
+                turn_id.as_ref(),
+                tool_call_id.as_deref(),
+                &content,
+            )
+            .map_err(|error| UiCommandDispatchPortError::DispatchFailed(error.to_string()))?;
+        Ok(UiCommandDispatchReceipt {
+            ingress: envelope.ingress,
+            target_feature_id: envelope.target_feature_id,
+            dispatch_status: "memory_entry_persisted".to_owned(),
+        })
+    }
+
     fn dispatch_direct_message(
         &self,
         state: &mut RuntimeCommandDispatcherState,
@@ -6825,6 +6886,19 @@ impl UiCommandDispatchPort for RuntimeCommandDispatcher {
             | UiCommand::RollbackLatestSessionTurn { .. } => {
                 self.dispatch_session_management(&mut state, envelope)
             }
+            UiCommand::AddToMemory {
+                session_id,
+                turn_id,
+                tool_call_id,
+                content,
+            } => self.dispatch_add_to_memory(
+                &mut state,
+                envelope,
+                session_id,
+                turn_id,
+                tool_call_id,
+                content,
+            ),
             UiCommand::CancelTurn { turn_id } => {
                 self.dispatch_cancel_turn(&mut state, envelope, turn_id)
             }

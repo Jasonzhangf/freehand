@@ -69,6 +69,14 @@ pub fn validate_command(command: &UiCommand) -> Result<(), UiProtocolError> {
         UiCommand::SendDirectMessageToSlave { text, .. } if text.trim().is_empty() => {
             Err(UiProtocolError::EmptySlaveMessage)
         }
+        UiCommand::AddToMemory {
+            session_id,
+            content,
+            ..
+        } if session_id.as_str().trim().is_empty() => Err(UiProtocolError::EmptySessionId),
+        UiCommand::AddToMemory { content, .. } if content.trim().is_empty() => {
+            Err(UiProtocolError::EmptyMemoryContent)
+        }
         UiCommand::RewindCheckpoint { checkpoint_id } if checkpoint_id.trim().is_empty() => {
             Err(UiProtocolError::EmptyCheckpointId)
         }
@@ -579,6 +587,7 @@ pub fn protocol_rejection(err: UiProtocolError) -> UiProtocolRejection {
         UiProtocolError::InvalidTurnPageLimit => "invalid_turn_page_limit",
         UiProtocolError::InvalidTurnPageCursor => "invalid_turn_page_cursor",
         UiProtocolError::EmptySessionTitle => "empty_session_title",
+        UiProtocolError::EmptyMemoryContent => "empty_memory_content",
         UiProtocolError::EmptyUserInput => "empty_user_input",
         UiProtocolError::InvalidInputAttachment => "invalid_input_attachment",
         UiProtocolError::UnsupportedInputAttachmentKind => "unsupported_input_attachment_kind",

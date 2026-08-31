@@ -10,6 +10,7 @@ Generated from `docs/mainline-calls/runtime.ui-command-dispatch.json`. Do not ed
 
 ## Resource Operation Backlinks
 
+- runtime_command.append_tool_result
 - input_attachment.prepare_provider_input
 - input_attachment.project_to_ui
 - session.restore
@@ -58,6 +59,7 @@ Generated from `docs/mainline-calls/runtime.ui-command-dispatch.json`. Do not ed
 - CompactSessionContext enters through RuntimeCommandDispatcher::dispatch, restores the persisted session history from reason.persistence, runs ReasonRewriteRuntime::apply_compaction_policy with the request reason (or a manual-compaction default) through reason.rewrite-policy truth, and returns an explicit compaction_hold/soft_notice/stale_prune/staged receipt without fabricating a rewrite result; missing persisted recovery truth fails dispatch explicitly instead of falling back to an empty history
 - PullAccountConfig enters through RuntimeCommandDispatcher::dispatch, resolves the authenticated Relay account through the account-config client, persists the synced or explicit not-configured device mirror, applies a synced mirror through config.core::apply_shared_account_config to refresh the live selected agent and effective config model, and returns an account_config_pulled receipt
 - PushAccountConfig enters through RuntimeCommandDispatcher::dispatch, exports the local non-secret config through config.core::export_shared_account_config, sends the mirror etag through the account-config client, persists the synced or conflict device mirror, applies a synced mirror through config.core::apply_shared_account_config to refresh the live selected agent and effective config model, and returns an account_config_pushed receipt
+- AddToMemory enters through RuntimeCommandDispatcher::dispatch, validates the protocol envelope, and routes complete tool Markdown plus session/turn/tool identity to reason.persistence::append_tool_result_memory at the config-selected memory path
 
 ## Response Mainline
 

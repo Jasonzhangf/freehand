@@ -153,13 +153,9 @@ async fn run_master_mode(
     bind_addr: std::net::SocketAddr,
 ) -> Result<String, String> {
     let runtime_home = bootstrap.runtime_home.clone();
-    let dispatcher = RuntimeCommandDispatcher::from_selected_agent_with_live(
-        &bootstrap.selected_agent,
-        runtime_home.clone(),
-        false,
-    )
-    .map(Arc::new)
-    .map_err(|err| format!("failed to build runtime dispatcher: {err}"))?;
+    let dispatcher = RuntimeCommandDispatcher::from_default_bootstrap_with_live(&bootstrap, false)
+        .map(Arc::new)
+        .map_err(|err| format!("failed to build runtime dispatcher: {err}"))?;
     let ui_state = dispatcher.ui_state();
     let master_runner = if master_lifecycle_runner_disabled_for_test() {
         None
@@ -323,13 +319,9 @@ async fn run_worker_mode(
         run_blocking_worker_service(move || runner.run()).await?;
         return Ok(String::new());
     };
-    let dispatcher = RuntimeCommandDispatcher::from_selected_agent_with_live(
-        &bootstrap.selected_agent,
-        bootstrap.runtime_home.clone(),
-        false,
-    )
-    .map(Arc::new)
-    .map_err(|error| format!("failed to build Worker runtime dispatcher: {error}"))?;
+    let dispatcher = RuntimeCommandDispatcher::from_default_bootstrap_with_live(&bootstrap, false)
+        .map(Arc::new)
+        .map_err(|error| format!("failed to build Worker runtime dispatcher: {error}"))?;
     let runner = Arc::new(
         ProductionWorkerRunner::from_selected_agent(
             bootstrap.selected_agent,
@@ -388,13 +380,9 @@ async fn run_relay_worker_mode(
         .clone()
         .ok_or_else(|| "Relay Worker host requires a configured Relay connection".to_owned())?;
     let local_adp_token = required_local_adp_token()?;
-    let dispatcher = RuntimeCommandDispatcher::from_selected_agent_with_live(
-        &bootstrap.selected_agent,
-        bootstrap.runtime_home.clone(),
-        false,
-    )
-    .map(Arc::new)
-    .map_err(|error| format!("failed to build Worker runtime dispatcher: {error}"))?;
+    let dispatcher = RuntimeCommandDispatcher::from_default_bootstrap_with_live(&bootstrap, false)
+        .map(Arc::new)
+        .map_err(|error| format!("failed to build Worker runtime dispatcher: {error}"))?;
     let runner = Arc::new(
         ProductionWorkerRunner::from_selected_agent(
             bootstrap.selected_agent.clone(),

@@ -16830,3 +16830,41 @@ fn runtime_agent_activity_merge_preserves_active_truth_and_saturates_count() {
 fn debug_clean_search_requires_worker_workspace_is_false() {
     assert!(!LiveReasonExecutionProfile::CleanSearch.requires_worker_workspace());
 }
+
+#[test]
+fn add_to_memory_dispatch_routes_full_tool_markdown_to_configured_owner_path() {
+    let runtime_home = temp_runtime_home();
+    let memory_path = runtime_home.join("memory").join("tool-results.md");
+    let selected = selected_master_agent();
+    let runtime = RuntimeCommandDispatcher::from_selected_agent_with_live_and_memory_path(
+        &selected,
+        runtime_home.clone(),
+        memory_path.clone(),
+        false,
+    )
+    .expect("runtime");
+    let receipt = runtime
+        .dispatch(
+            build_command_dispatch_envelope(&UiCommand::AddToMemory {
+                session_id: SessionId::new("session-memory"),
+                turn_id: Some(TurnId::new("runtime-turn-1-r2")),
+                tool_call_id: Some("tool-call-1".to_owned()),
+                content: "```markdown\nfull tool output\n```".to_owned(),
+            })
+            .expect("memory command envelope"),
+        )
+        .expect("memory dispatch");
+    assert_eq!(receipt.dispatch_status, "memory_entry_persisted");
+    assert!(memory_path.is_file());
+    let reloaded = ReasonPersistence::load_tool_result_memory(&memory_path)
+        .expect("reload tool result memory");
+    assert_eq!(reloaded.len(), 1);
+    assert_eq!(reloaded[0].session_id, SessionId::new("session-memory"));
+    assert_eq!(
+        reloaded[0].turn_id.as_ref(),
+        Some(&TurnId::new("runtime-turn-1-r2"))
+    );
+    assert_eq!(reloaded[0].tool_call_id.as_deref(), Some("tool-call-1"));
+    assert_eq!(reloaded[0].content, "```markdown\nfull tool output\n```");
+    fs::remove_dir_all(runtime_home).expect("cleanup");
+}

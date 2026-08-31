@@ -1545,6 +1545,32 @@ fn session_search_query_is_runtime_owned_and_validated() {
 }
 
 #[test]
+fn tool_result_memory_command_is_public_mutation_and_requires_content() {
+    let command = UiCommand::AddToMemory {
+        session_id: SessionId::new("session-memory"),
+        turn_id: Some(TurnId::new("runtime-turn-1-r2")),
+        tool_call_id: Some("tool-call-1".to_owned()),
+        content: "```markdown\nfull tool output\n```".to_owned(),
+    };
+    validate_command(&command).expect("tool result memory command");
+    assert_eq!(command_kind(&command), "add_to_memory");
+    assert_eq!(command_frame_class(&command), UiCommandFrameClass::Mutation);
+    assert!(is_public_adp_command(&command));
+    let wire = serde_json::to_string(&command).expect("memory command wire");
+    assert!(wire.contains("\"AddToMemory\""));
+    assert_eq!(
+        validate_command(&UiCommand::AddToMemory {
+            session_id: SessionId::new("session-memory"),
+            turn_id: None,
+            tool_call_id: None,
+            content: "   ".to_owned(),
+        })
+        .expect_err("empty memory content"),
+        UiProtocolError::EmptyMemoryContent
+    );
+}
+
+#[test]
 fn session_list_page_is_runtime_owned_even_when_turns_exist() {
     let mut state = UiProtocolState::default();
     let persisted_session_id = SessionId::new("persisted-session");

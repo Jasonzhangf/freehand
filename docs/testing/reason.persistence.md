@@ -8,6 +8,7 @@
   - `session.append_turn_to_turn`
   - `session.list_persisted`
   - `session.list_persisted_page`
+  - `runtime_command.append_tool_result`
 
 ## Resource Operation Test Coverage
 
@@ -17,6 +18,7 @@
 | `session.append_turn_to_turn` | bound | `cargo test -p freehand-reason -- --nocapture` covers session snapshot, reason-ledger append, sequence, rollback, and recovery tests | `cargo test -p freehand-reason -- --nocapture` covers persistence save/reload, active-turn update, terminal materialization, sidecar rebuild, and metadata reload smokes | `cargo test -p freehand-runtime session_continue -- --nocapture` covers CLI/shared runtime persistence restore smokes and replay/debug inspection without provider raw truth |
 | `session.list_persisted` | bound | `cargo test -p freehand-runtime runtime_query_session_search_returns_worker_hits_under_parent_session -- --nocapture --test-threads=1` covers persisted index/metadata rows consumed through runtime search projection | `cargo test -p freehand-ui-protocol session_search -- --nocapture --test-threads=1` covers route separation and DTO validation while persistence remains owner truth | `node scripts/verify-webui-session-search-online.mjs` covers WebUI Search querying persisted session index truth and keeping worker matches out of the top-level result list |
 | `session.list_persisted_page` | bound | `cargo test -p freehand-reason session_list_page -- --nocapture --test-threads=1` covers ordered metadata-only summaries, owner cursors, archive separation, legacy migration, durable maintenance, and explicit unavailable-session facts | `cargo test -p freehand-reason session_list_page -- --nocapture --test-threads=1` proves unavailable poisoned rows do not block other page slots or force full transcript restore | `cargo test -p freehand-runtime runtime_session_list_page_avoids_full_transcript_restore -- --nocapture --test-threads=1` proves runtime consumes the bounded owner page without full restore |
+| `runtime_command.append_tool_result` | bound | `cargo test -p freehand-reason tool_result_memory -- --nocapture` covers append, reload, configurable path, empty content rejection, and archive/restart reload | `cargo test -p freehand-runtime add_to_memory_dispatch_routes_full_tool_markdown_to_configured_owner_path -- --nocapture` proves runtime bridges AddToMemory envelopes without direct file writes | `node scripts/verify-webui-live-tool-render-online.mjs` plus a restart/requery pass proves memory remains after session archive/delete and daemon restart |
 
 - lifecycle path under test:
   - authoritative session rewrite truth is snapshotted under `~/.freehand/state/turns`

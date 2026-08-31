@@ -43,7 +43,7 @@ pub use persistence::{
     ReasonLedgerPayload, ReasonLedgerRow, ReasonPersistence, ReasonPersistenceCursor,
     ReasonPersistenceError, ReasonSessionLatestStatus, ReasonSessionListCursor,
     ReasonSessionListPage, ReasonSessionListPageRequest, ReasonTurnPage, ReasonTurnPageDirection,
-    ReasonTurnPageRequest, RestoredReasonSession, SessionRollbackMarker,
+    ReasonTurnPageRequest, RestoredReasonSession, SessionRollbackMarker, ToolResultMemoryEntry,
 };
 pub use rewrite_runtime::{
     CompactionPolicyOutcome, CompactionPolicyRequest, CompactionRewritePayload,

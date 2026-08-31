@@ -275,6 +275,14 @@ try {
         duringContinuation.currentRunUserCycleBeforeModelCycle &&
         duringContinuation.previousCyclesBeforeCurrent,
       finalStillShowsToolCard: finalState.currentRunToolCardCount > 0,
+      eachToolCardExposesCopyAndMemoryButtons:
+        finalState.currentRunToolCards.length > 0 &&
+        finalState.currentRunToolCards.every((card) =>
+          card.copyButtonCount === 1 &&
+          card.memoryButtonCount === 1 &&
+          card.copyButtonLabel === '复制工具结果' &&
+          card.memoryButtonLabel === '把工具结果加入记忆'
+        ),
       finalCycleCardFrozen:
         finalState.currentRunSelectedCycleTerminal &&
         finalState.currentRunSelectedCycleFrozen &&
@@ -294,6 +302,33 @@ try {
     },
   };
   await fs.writeFile(path.join(artifactDir, 'summary.json'), JSON.stringify(summary, null, 2));
+
+  const firstToolCard = finalState.currentRunToolCards[0];
+  if (firstToolCard) {
+    const clickMemory = await evalInPage(
+      cdp,
+      (target) => {
+        const section = document.querySelector(`.chat-section-tool[data-tool-call-id="${target}"]`);
+        const button = section?.querySelector('.tool-chat-memory');
+        if (!section || !button) {
+          return { clicked: false, reason: 'memory button missing' };
+        }
+        button.click();
+        return { clicked: true };
+      },
+      firstToolCard.dataToolCallId || firstToolCard.toolCallId || '',
+    );
+    await fs.writeFile(
+      path.join(artifactDir, 'memory-button-click.json'),
+      JSON.stringify(clickMemory, null, 2),
+    );
+    await new Promise((resolve) => setTimeout(resolve, 1500));
+    const memoryEntry = await readDomState(cdp, scope);
+    await fs.writeFile(
+      path.join(artifactDir, 'after-memory-button.json'),
+      JSON.stringify(memoryEntry, null, 2),
+    );
+  }
   console.log(JSON.stringify(summary, null, 2));
   const failed = Object.entries(summary.checks).filter(([, value]) => !value);
   if (failed.length > 0) {
@@ -642,6 +677,13 @@ async function readDomState(cdpClient, scope = {}) {
       cycleIndex: cycleIndexForNode(node),
       messageIndex: chatNodes.indexOf(node.closest('.chat-message')),
       text: node.innerText || '',
+      copyButtonCount: node.querySelectorAll('.tool-chat-copy').length,
+      memoryButtonCount: node.querySelectorAll('.tool-chat-memory').length,
+      copyButtonLabel: node.querySelector('.tool-chat-copy')?.getAttribute('aria-label') || '',
+      memoryButtonLabel: node.querySelector('.tool-chat-memory')?.getAttribute('aria-label') || '',
+      copyButtonText: node.querySelector('.tool-chat-copy')?.textContent || '',
+      memoryButtonText: node.querySelector('.tool-chat-memory')?.textContent || '',
+      dataToolCallId: node.dataset.toolCallId || '',
     }));
     const currentRunTurnIds = new Set();
     const includeTurn = (turnId) => {

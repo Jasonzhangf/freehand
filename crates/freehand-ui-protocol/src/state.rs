@@ -37,6 +37,8 @@ pub enum UiProtocolError {
     EmptySessionId,
     #[error("session title must be non-empty when provided")]
     EmptySessionTitle,
+    #[error("memory entry requires non-empty content")]
+    EmptyMemoryContent,
     #[error("submit user input command requires non-empty text")]
     EmptyUserInput,
     #[error("input attachment requires non-empty id, name, media type, and base64 data")]

@@ -13,6 +13,7 @@
   - `config.compile_agent_local_web_directory`
   - `account_config_document.pull`
   - `account_config_document.push`
+  - `memory.tool_result_append`
 
 ## Resource Operation Test Coverage
 
@@ -25,6 +26,7 @@
 | `config.compile_agent_local_web_directory` | bound | `cargo test -p freehand-ui-protocol config_status -- --nocapture` covers typed config-status roundtrip | `cargo test -p freehand-runtime runtime_query_projects_config_status_without_secrets -- --nocapture` proves all configured local endpoints and Relay URLs are projected without credentials | `cargo test -p freehand-server --lib` proves page/asset paths are relative and can remain under a Relay Agent prefix |
 | `account_config_document.pull` | bound | `cargo test -p freehand-ui-protocol -- --nocapture` covers PullAccountConfig wire/descriptor exhaustiveness and ConfigStatus sync projection | `cargo test -p freehand-runtime --lib runtime_account_config_sync_pull -- --nocapture` covers runtime-owned pull receipt and projection | WebUI Settings online proof must match the ADP account_config_sync projection after an explicit pull |
 | `account_config_document.push` | bound | `cargo test -p freehand-ui-protocol -- --nocapture` covers PushAccountConfig wire/descriptor exhaustiveness | `cargo test -p freehand-runtime --lib runtime_account_config_sync_push_conflict -- --nocapture` covers explicit push/conflict receipt behavior | WebUI Settings online proof must show upload remains explicit and displays conflict/success from ADP truth |
+| `memory.tool_result_append` | bound | `cargo test -p freehand-ui-protocol tool_result_memory -- --nocapture` covers AddToMemory validation, mutation frame class, and public ADP manifest exposure | `cargo test -p freehand-runtime tool_result_memory -- --nocapture` covers command routing to reason.persistence and explicit persistence failures | `node scripts/verify-webui-live-tool-render-online.mjs` proves each rendered tool-result card exposes copy and memory actions, and the memory action returns an owner receipt |
 
 The config-status projection also carries a Relay-backed Agent URL for non-loopback clients; it never serializes the Relay access token.
 

@@ -20,6 +20,7 @@ pub const MIN_AGENT_RESOURCE_COUNT: usize = 1;
 pub const MAX_AGENT_RESOURCE_COUNT: usize = 5;
 pub const DEFAULT_CONTEXT_WINDOW_TOKENS: u32 = 128_000;
 pub const DEFAULT_COMPACTION_THRESHOLD_TOKENS: u32 = 100_000;
+pub const DEFAULT_MEMORY_RELATIVE_PATH: &str = "memory/tool-results.jsonl";
 pub const REMOTE_DAEMON_BOOTSTRAP_KIND: &str = "freehand.remote-daemon-bootstrap";
 pub const REMOTE_DAEMON_BOOTSTRAP_SCHEMA_VERSION: u32 = 1;
 const REMOTE_DAEMON_BOOTSTRAP_URL_PREFIX: &str = "freehand://daemon/import?payload=";
@@ -812,6 +813,7 @@ pub struct LoadedConfig {
     providers: BTreeMap<String, ProviderConfig>,
     model_groups: BTreeMap<String, ModelGroupConfig>,
     remote_daemon_registry: RemoteDaemonRegistryConfig,
+    memory_path: PathBuf,
 }
 
 impl LoadedConfig {
@@ -855,6 +857,10 @@ impl LoadedConfig {
 
     pub fn remote_daemon_registry(&self) -> &RemoteDaemonRegistryConfig {
         &self.remote_daemon_registry
+    }
+
+    pub fn memory_path(&self) -> &Path {
+        &self.memory_path
     }
 
     pub fn select_agent(&self, agent_name: &str) -> Result<SelectedAgentConfig, ConfigError> {
@@ -1176,6 +1182,7 @@ pub fn apply_shared_account_config(
         providers,
         model_groups,
         remote_daemon_registry,
+        memory_path: loaded.memory_path.clone(),
     })
 }
 
@@ -1384,6 +1391,8 @@ pub enum ConfigError {
     NoAgentsDefined,
     #[error("config must define at least one `[providers.<id>]` entry")]
     NoProvidersDefined,
+    #[error("memory path must be non-empty")]
+    EmptyMemoryPath,
     #[error("agent table `{table_name}` has mismatched name field `{field_name}`")]
     AgentNameMismatch {
         table_name: String,
@@ -1741,6 +1750,15 @@ struct RawConfig {
     remote_daemon_accounts: BTreeMap<String, RawRemoteDaemonAccountConfig>,
     #[serde(default)]
     remote_daemons: BTreeMap<String, RawRemoteDaemonConfig>,
+    #[serde(default)]
+    memory: RawMemoryConfig,
+}
+
+#[derive(Debug, Default, Deserialize)]
+#[serde(deny_unknown_fields)]
+struct RawMemoryConfig {
+    #[serde(default)]
+    path: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -2345,16 +2363,17 @@ fn parse_config(path: &Path, raw: &str) -> Result<LoadedConfig, ConfigError> {
         path: path.to_path_buf(),
         source,
     })?;
-    validate_config(parsed)
+    validate_config(path, parsed)
 }
 
-fn validate_config(parsed: RawConfig) -> Result<LoadedConfig, ConfigError> {
+fn validate_config(path: &Path, parsed: RawConfig) -> Result<LoadedConfig, ConfigError> {
     let RawConfig {
         agents: raw_agents,
         providers: raw_providers,
         model_groups: raw_model_groups,
         remote_daemon_accounts: raw_remote_daemon_accounts,
         remote_daemons: raw_remote_daemons,
+        memory: raw_memory,
     } = parsed;
 
     if raw_agents.is_empty() {
@@ -2611,13 +2630,31 @@ fn validate_config(parsed: RawConfig) -> Result<LoadedConfig, ConfigError> {
 
     let remote_daemon_registry =
         validate_remote_daemon_registry(raw_remote_daemon_accounts, raw_remote_daemons)?;
+    let memory_path = resolve_memory_path(path, raw_memory.path.as_deref())?;
 
     Ok(LoadedConfig {
         agents,
         providers,
         model_groups,
         remote_daemon_registry,
+        memory_path,
     })
+}
+
+fn resolve_memory_path(path: &Path, configured: Option<&str>) -> Result<PathBuf, ConfigError> {
+    let configured = configured.unwrap_or(DEFAULT_MEMORY_RELATIVE_PATH).trim();
+    if configured.is_empty() {
+        return Err(ConfigError::EmptyMemoryPath);
+    }
+    let configured = PathBuf::from(configured);
+    if configured.is_absolute() {
+        Ok(configured)
+    } else {
+        Ok(path
+            .parent()
+            .unwrap_or_else(|| Path::new("."))
+            .join(configured))
+    }
 }
 
 fn validate_remote_daemon_registry(
@@ -7226,6 +7263,93 @@ provider = "primary"
         let error = apply_shared_account_config(&loaded, &shared)
             .expect_err("missing route provider must fail");
         assert!(error.to_string().contains("missing provider"), "{error}");
+        fs::remove_file(path).expect("cleanup");
+    }
+
+    #[test]
+    fn memory_path_defaults_under_runtime_home_and_accepts_relative_config_path() {
+        let path = write_temp_config(
+            r#"
+[providers.primary]
+id = "primary"
+enabled = true
+type = "openai"
+protocol = "responses"
+base_url = "https://local.invalid"
+default_model = "local-model"
+
+[providers.primary.auth]
+type = "apikey"
+api_key = "secret"
+
+[agents.master]
+name = "master"
+mode = "master"
+node_id = "master-node"
+paired_agents = ["worker"]
+pair_token = "MEMORY_MASTER_TOKEN"
+provider = "primary"
+
+[agents.worker]
+name = "worker"
+mode = "slave"
+node_id = "worker-node"
+paired_agents = ["master"]
+pair_token = "MEMORY_WORKER_TOKEN"
+provider = "primary"
+
+[memory]
+path = "durable-memory/tool-results.md"
+"#,
+        );
+        let loaded = load_config_from_path(&path).expect("load memory config");
+        assert_eq!(
+            loaded.memory_path(),
+            path.parent()
+                .expect("config parent")
+                .join("durable-memory/tool-results.md")
+        );
+        fs::remove_file(path).expect("cleanup");
+    }
+
+    #[test]
+    fn memory_path_rejects_empty_string_config() {
+        let path = write_temp_config(
+            r#"
+[providers.primary]
+id = "primary"
+enabled = true
+type = "openai"
+protocol = "responses"
+base_url = "https://local.invalid"
+default_model = "local-model"
+
+[providers.primary.auth]
+type = "apikey"
+api_key = "secret"
+
+[agents.master]
+name = "master"
+mode = "master"
+node_id = "master-node"
+paired_agents = ["worker"]
+pair_token = "MEMORY_MASTER_TOKEN"
+provider = "primary"
+
+[agents.worker]
+name = "worker"
+mode = "slave"
+node_id = "worker-node"
+paired_agents = ["master"]
+pair_token = "MEMORY_WORKER_TOKEN"
+provider = "primary"
+
+[memory]
+path = "   "
+"#,
+        );
+        let err = load_config_from_path(&path).expect_err("empty memory path must fail");
+        assert!(matches!(err, ConfigError::EmptyMemoryPath));
         fs::remove_file(path).expect("cleanup");
     }
 }

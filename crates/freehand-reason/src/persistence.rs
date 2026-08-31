@@ -152,6 +152,18 @@ pub struct PersistedSessionSummaryIndex {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct ToolResultMemoryEntry {
+    pub created_at_unix_seconds: u64,
+    pub agent_id: AgentId,
+    pub session_id: SessionId,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub turn_id: Option<TurnId>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub tool_call_id: Option<String>,
+    pub content: String,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct ReasonSessionListCursor {
     pub last_activity_unix_seconds: u64,
     pub last_session_id: SessionId,
@@ -310,6 +322,65 @@ impl ReasonPersistence {
 
     pub fn agent_id(&self) -> &AgentId {
         &self.agent_id
+    }
+
+    pub fn append_tool_result_memory(
+        &self,
+        path: &Path,
+        session_id: &SessionId,
+        turn_id: Option<&TurnId>,
+        tool_call_id: Option<&str>,
+        content: &str,
+    ) -> Result<ToolResultMemoryEntry, ReasonPersistenceError> {
+        if content.trim().is_empty() {
+            return Err(ReasonPersistenceError::InvalidSessionMetadata(
+                "tool result memory content must be non-empty".to_owned(),
+            ));
+        }
+        let entry = ToolResultMemoryEntry {
+            created_at_unix_seconds: unix_seconds_now(),
+            agent_id: self.agent_id.clone(),
+            session_id: session_id.clone(),
+            turn_id: turn_id.cloned(),
+            tool_call_id: tool_call_id
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+                .map(str::to_owned),
+            content: content.to_owned(),
+        };
+        ensure_parent_dir(path)?;
+        let payload = serde_json::to_string(&entry)
+            .map_err(|err| ReasonPersistenceError::JsonRenderFailed(err.to_string()))?;
+        let mut file = fs::OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(path)
+            .map_err(|err| ReasonPersistenceError::FileIoFailed(err.to_string()))?;
+        use std::io::Write;
+        file.write_all(payload.as_bytes())
+            .and_then(|_| file.write_all(b"\n"))
+            .and_then(|_| file.sync_all())
+            .map_err(|err| ReasonPersistenceError::FileIoFailed(err.to_string()))?;
+        Ok(entry)
+    }
+
+    pub fn load_tool_result_memory(
+        path: &Path,
+    ) -> Result<Vec<ToolResultMemoryEntry>, ReasonPersistenceError> {
+        if !path.is_file() {
+            return Ok(Vec::new());
+        }
+        let payload = fs::read_to_string(path)
+            .map_err(|err| ReasonPersistenceError::FileIoFailed(err.to_string()))?;
+        payload
+            .lines()
+            .filter(|line| !line.trim().is_empty())
+            .map(|line| {
+                serde_json::from_str(line).map_err(|err| {
+                    ReasonPersistenceError::JsonParseFailed(format!("{}: {err}", path.display()))
+                })
+            })
+            .collect()
     }
 
     pub fn record_turn_started(
@@ -3814,6 +3885,30 @@ mod tests {
     }
 
     #[test]
+    fn tool_result_memory_appends_to_configured_path_and_reloads() {
+        let runtime_home = temp_runtime_home();
+        let coordinator = ReasonPersistence::new(&runtime_home, AgentId::new("agent-1"));
+        let memory_path = runtime_home
+            .join("configured-memory")
+            .join("tool-results.md");
+        let entry = coordinator
+            .append_tool_result_memory(
+                &memory_path,
+                &SessionId::new("session-memory"),
+                Some(&TurnId::new("runtime-turn-1-r2")),
+                Some("tool-call-1"),
+                "```markdown\nfull tool output\n```",
+            )
+            .expect("append tool result memory");
+        assert_eq!(entry.content, "```markdown\nfull tool output\n```");
+        assert!(memory_path.is_file());
+        let reloaded = ReasonPersistence::load_tool_result_memory(&memory_path)
+            .expect("reload tool result memory");
+        assert_eq!(reloaded, vec![entry]);
+        fs::remove_dir_all(runtime_home).expect("cleanup");
+    }
+
+    #[test]
     fn rollback_latest_session_turn_is_append_only_and_filters_effective_transcript() {
         let runtime_home = temp_runtime_home();
         let coordinator = ReasonPersistence::new(&runtime_home, AgentId::new("agent-1"));
@@ -4908,6 +5003,73 @@ mod tests {
             "cursor sequence bump must change the authoritative fingerprint"
         );
 
+        fs::remove_dir_all(runtime_home).expect("cleanup");
+    }
+
+    #[test]
+    fn tool_result_memory_rejects_empty_content() {
+        let runtime_home = temp_runtime_home();
+        let coordinator = ReasonPersistence::new(&runtime_home, AgentId::new("agent-1"));
+        let memory_path = runtime_home.join("memory").join("tool-results.jsonl");
+        let err = coordinator
+            .append_tool_result_memory(
+                &memory_path,
+                &SessionId::new("session-empty"),
+                None,
+                None,
+                "   \n\t  ",
+            )
+            .expect_err("empty content must fail");
+        assert!(matches!(
+            err,
+            ReasonPersistenceError::InvalidSessionMetadata(_)
+        ));
+        assert!(!memory_path.is_file());
+        if runtime_home.exists() {
+            fs::remove_dir_all(&runtime_home).expect("cleanup");
+        }
+    }
+
+    #[test]
+    fn tool_result_memory_survives_session_archive_and_dispatcher_restart() {
+        let runtime_home = temp_runtime_home();
+        let coordinator = ReasonPersistence::new(&runtime_home, AgentId::new("agent-1"));
+        let memory_path = runtime_home.join("memory").join("tool-results.jsonl");
+        coordinator
+            .create_session_metadata(
+                SessionId::new("session-archive"),
+                Some("archive memory session".to_owned()),
+                None,
+            )
+            .expect("create session metadata");
+        coordinator
+            .append_tool_result_memory(
+                &memory_path,
+                &SessionId::new("session-archive"),
+                Some(&TurnId::new("runtime-turn-1")),
+                Some("tool-call-1"),
+                "first entry",
+            )
+            .expect("append first");
+        coordinator
+            .append_tool_result_memory(
+                &memory_path,
+                &SessionId::new("session-archive"),
+                Some(&TurnId::new("runtime-turn-2")),
+                Some("tool-call-2"),
+                "second entry",
+            )
+            .expect("append second");
+        coordinator
+            .delete_session(&SessionId::new("session-archive"))
+            .expect("archive session");
+        let fresh = ReasonPersistence::new(&runtime_home, AgentId::new("agent-1"));
+        let reloaded = ReasonPersistence::load_tool_result_memory(&memory_path)
+            .expect("reload after archive and reopen");
+        assert_eq!(reloaded.len(), 2);
+        assert_eq!(reloaded[0].content, "first entry");
+        assert_eq!(reloaded[1].content, "second entry");
+        let _ = fresh;
         fs::remove_dir_all(runtime_home).expect("cleanup");
     }
 }

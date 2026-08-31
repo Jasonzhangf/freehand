@@ -288,6 +288,14 @@ pub(crate) const UI_COMMAND_DESCRIPTORS: &[UiCommandDescriptor] = &[
         exposure: UiAdpCommandExposure::Public,
     },
     UiCommandDescriptor {
+        serde_name: "AddToMemory",
+        semantic_kind: "add_to_memory",
+        frame_class: UiCommandFrameClass::Mutation,
+        target_owner_feature: "reason.persistence",
+        target_owner_module: "crates/freehand-reason",
+        exposure: UiAdpCommandExposure::Public,
+    },
+    UiCommandDescriptor {
         serde_name: "QueryErrorCenterEvents",
         semantic_kind: "query_error_center_events",
         frame_class: UiCommandFrameClass::Query,
@@ -619,6 +627,7 @@ pub(crate) fn command_descriptor(command: &UiCommand) -> &'static UiCommandDescr
         UiCommand::QueryDiagnostics => command_descriptor_by_serde_name("QueryDiagnostics"),
         UiCommand::PullAccountConfig => command_descriptor_by_serde_name("PullAccountConfig"),
         UiCommand::PushAccountConfig => command_descriptor_by_serde_name("PushAccountConfig"),
+        UiCommand::AddToMemory { .. } => command_descriptor_by_serde_name("AddToMemory"),
         UiCommand::QueryErrorCenterEvents { .. } => {
             command_descriptor_by_serde_name("QueryErrorCenterEvents")
         }

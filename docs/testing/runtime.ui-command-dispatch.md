@@ -325,3 +325,10 @@
     `runtime_compact_session_context_hold_when_no_provider_summary_payload` (positive: persisted history routes through reason.rewrite-policy and returns an explicit hold receipt preserving the request reason) and
     `runtime_compact_session_context_rejects_missing_recovery_truth_explicitly` (negative: missing persisted recovery truth fails dispatch instead of falling back to an empty history)
   - migrated mainline-call source and generated wiki are kept in sync with this test design
+## Tool Result Memory Entry Operation
+
+### Resource Operation Test Coverage
+
+| Resource Operation | Status | White-Box | Module Black-Box | Project Black-Box |
+| --- | --- | --- | --- | --- |
+| `runtime.dispatch.add_to_memory` | bound | `crates/freehand-runtime/src/tests.rs::add_to_memory_dispatch_routes_full_tool_markdown_to_configured_owner_path` | `cargo test -p freehand-runtime add_to_memory_dispatch_routes_full_tool_markdown_to_configured_owner_path` | restart S profile then `curl -fsS http://127.0.0.1:4042/health` plus WebUI AddToMemory roundtrip → JSONL file present |
