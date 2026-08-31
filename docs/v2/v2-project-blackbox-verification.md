@@ -76,6 +76,35 @@ The UI-specific browser acceptance is defined in
 `docs/v2/v2-ui-design.md`. It must compare rendered rows with adaptor/query
 truth rather than treating screenshots or visible text as lifecycle truth.
 
+## UI Plugin Scenarios
+
+The project black-box harness must observe the five UI-facing plugins through
+their public typed ports. Rendering is a projection check; it is not a
+replacement for plugin lifecycle evidence.
+
+| plugin | positive observation | negative observation |
+| --- | --- | --- |
+| `NotificationPlugin` | events with different importance and timestamps produce deterministic importance/time order; acknowledgement updates notification state | UI text/color cannot reorder items or mutate source task/session/error truth |
+| `TopologyPlugin` | machine -> node -> Agent -> Channel selection returns registry-backed location and capability relationships | stale generation, missing parent or inferred edge is rejected |
+| `SessionCanvasPlugin` | active/recent/history nodes and edges match Session Log-derived relationships and focus the selected Run | visual reorder, orphan edge or browser-only history cannot change Session Log truth |
+| `SearchPlugin` | keyword plus structured filters return classified results with source identity and cursor; cache/invalidation state is explicit | UI-local filtering, stale invalidated cache or control-field match is rejected |
+| `MemoryPlugin` | attach -> summarize -> record -> save -> load/search -> export returns provenance, trigger origin and artifact reference | failed save/export, missing source or cross-session record cannot become success |
+
+The harness must compare each plugin's output with the corresponding UI
+surface:
+
+```text
+NotificationProjection     -> Attention / Notifications
+TopologyProjection         -> Location / Topology
+SessionCanvasProjection    -> Sessions / Canvas
+SearchProjection            -> Global Search
+MemoryProjection            -> Session Memory
+```
+
+The Run surface remains sourced from Session Log and typed lifecycle
+projection. None of the five plugins may become a second Run or Session Log
+truth path.
+
 ## Negative Scenarios
 
 The same harness must run the following failures:
@@ -94,6 +123,11 @@ The same harness must run the following failures:
 | non-terminal reason result | running/waiting projection; no premature final state |
 | OpenCode adaptor output cannot be normalized | typed backend error; no Session Log success fact |
 | backend replacement during an active request | explicit replacement boundary; no silent provider migration |
+| notification ranking or acknowledgement mismatch | explicit notification-plugin failure; source truth unchanged |
+| topology projection references an unknown parent or stale generation | explicit topology error; no inferred location |
+| canvas edge is not backed by Session Log relationship truth | explicit canvas projection error; no browser-only edge |
+| search index is stale/corrupt after invalidation | explicit search status/error; no UI-local result |
+| memory save/export fails or source session is unavailable | explicit memory error; no successful record/artifact |
 | Registry invalid token or capability manifest | explicit registration rejection; no endpoint discovery |
 | ChannelSession reattach with a stale generation | explicit rebind failure; no invocation or local success |
 | local payload deep-copy or mutable-sharing implementation | contract rejection; no adjacent-node handoff is accepted |
@@ -143,6 +177,12 @@ The project harness and static gates must fail if:
 - a ChannelSession is reconstructed from UI/payload state or lost when its
   Connection is replaced;
 - a backend adaptor makes its native database a second Session Log truth source;
+- NotificationPlugin, TopologyPlugin, SessionCanvasPlugin, SearchPlugin or
+  MemoryPlugin is implemented as a UI-only local state path;
+- notification importance/time ordering is recalculated by UI;
+- topology or canvas relationships are invented without owner projection facts;
+- Search or Memory results bypass their plugin input/output contracts;
+- a Memory summary is presented as an original Session Log fact;
 - build outputs, generated outputs, external checkouts or runtime evidence are
   staged for commit.
 
@@ -160,6 +200,11 @@ observed_events
 observed_payload_digest
 observed_sessionlog_records
 observed_projection
+observed_notification_projection
+observed_topology_projection
+observed_canvas_projection
+observed_search_projection
+observed_memory_projection
 negative_assertions
 restart_replay_assertions
 boundary_assertions

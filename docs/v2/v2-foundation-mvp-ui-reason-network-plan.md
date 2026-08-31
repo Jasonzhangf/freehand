@@ -79,6 +79,11 @@ The formal test design and project black-box contract are:
 | `v2-reasoning-backend` | provider-neutral Reasoning Service and Freehand/OpenCode backend adaptors | additional reasoning bases and runtime-specific bindings |
 | `v2-plugin-capabilities` | Rust leaf/composition capability plugins and manifests | remote plugin execution and attestation |
 | `v2-ui-adaptor` | UI ingress, query/subscribe, public projections and backend-neutral adaptor | multi-client and remote UI transport |
+| `v2-notification-plugin` | importance/time ordered notification projection and acknowledgement lifecycle | retention, cross-node notification delivery and policy updates |
+| `v2-topology-plugin` | physical machine/node/Agent/Channel grouping and relationship projection | multi-machine topology views and live route visualization |
+| `v2-session-canvas-plugin` | Session Log-derived active/recent/history session graph | large-history layout, cross-node session graph and replay navigation |
+| `v2-search-plugin` | typed keyword/filter search, classification, index and cache lifecycle | distributed indexing and cross-node search |
+| `v2-memory-plugin` | session summarize/record/save/load/search/export lifecycle | shared memory policy, retention and cross-session federation |
 | `v2-channel-registry` | central Registry, link/transport/channel session contracts and capability reconciliation | cloud deployment, relay and multi-machine execution |
 
 Dependency direction:
@@ -91,6 +96,11 @@ v2-contracts
   -> v2-plugin-capabilities
   -> v2-cordis-ecosystem
   -> v2-ui-adaptor
+  -> v2-notification-plugin
+  -> v2-topology-plugin
+  -> v2-session-canvas-plugin
+  -> v2-search-plugin
+  -> v2-memory-plugin
   -> v2-channel-registry
 ```
 

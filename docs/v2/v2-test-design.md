@@ -49,6 +49,11 @@ control state are not test inputs and are never committed.
 | `v2-plugin-capabilities` | capability plugin owner | typed capability manifest, deterministic registration, Rust leaf/composition plugin input/output, permission and failure behavior | Cordis plugin composition invokes one local Rust capability | declared plugin result/failure returns through typed events without semantic duplication | `v2_plugin_registration`, `v2_cordis_composition_boundary` |
 | `v2-cordis-ecosystem` | Cordis ecosystem owner | fixed design plugin, runtime-group scope, Service injection, child-plugin lifecycle and hot replacement | Cordis composition consumes owner contracts and does not own payload/event/reason semantics | complete local vertical slice runs through the fixed design plugin and selected backend | `v2_cordis_composition_boundary`, `v2_plugin_hot_replace` |
 | `v2-ui-adaptor` | UI adaptor owner | command validation, query/subscribe separation, projection and redaction | adaptor client/server contract with source identity fields | one UI command enters the local graph and receives owner-backed projection only; browser layout follows `docs/v2/v2-ui-design.md` | `v2_ui_projection_boundary` |
+| `v2-notification-plugin` | notification owner | event admission, importance/time order, deduplication, read/ack/snooze/archive | notification query/action contract with stable source identity | Attention surface matches plugin order and acknowledgement changes only notification state | `v2_notification_order_and_ack` |
+| `v2-topology-plugin` | topology owner | registry projection, machine/node/Agent/Channel grouping, generation reconciliation | topology query/focus contract with explicit relationship edges | Location surface locates an Agent by physical hierarchy without inferred edges | `v2_topology_location_projection` |
+| `v2-session-canvas-plugin` | session canvas owner | Session Log relationship derivation, active/recent/history bands, focus/filter/replay | canvas projection contract with stable source Session/Turn identities | Canvas navigation focuses the same owner-backed Session/Run truth without a second store | `v2_session_canvas_source_binding` |
+| `v2-search-plugin` | search owner | keyword/filter validation, indexing, classification, cache/invalidation/rebuild | query/maintenance contract with cursor and explicit index status | Search surface uses plugin results and exposes source/classification without browser-local filtering | `v2_search_index_query_boundary` |
+| `v2-memory-plugin` | memory owner | attach/detach, summarize, record, save/load/search/export, manual/automatic triggers | session-scoped memory command/query contract with provenance | Memory flow completes without mutating or replacing original Session Log transcript | `v2_memory_lifecycle_boundary` |
 | `v2-channel-registry` | channel/registry owner | stateless token admission, endpoint registration, capability discovery/reconciliation, link frames, ChannelSession reconnect state | in-memory Registry and transport test double with accepted/rejected registration, generation and reattach paths | local MVP exercises contracts only; connection replacement retains ChannelSession state and never fabricates local completion | `v2_registry_registration`, `v2_channel_session_reconnect`, `v2_payload_control_isolation` |
 
 ## `v2-contracts`
@@ -287,6 +292,152 @@ metadata or control structures as user text.
 - browser/mobile rendering is intentionally out of scope for M0/M1;
 - public projection schemas are not implemented.
 
+## `v2-notification-plugin`
+
+### Lifecycle and logic
+
+```text
+typed source event
+  -> validate source and policy
+  -> rank by importance/time/id
+  -> publish projection
+  -> acknowledge/snooze
+  -> archive/expire
+```
+
+Positive tests cover deterministic ordering across equal timestamps, deduplication
+and acknowledgement projection. Negative tests cover missing source identity,
+UI-provided importance, invalid acknowledgement targets and attempts to mutate
+the underlying task/session truth.
+
+### Black-box impact
+
+The project black-box test supplies events with different importance and times,
+then compares the Attention surface with the plugin projection. It must prove
+that opening or acknowledging a notification does not alter the source task,
+session or error record.
+
+### Known gaps
+
+- notification persistence and retention policy are not implemented;
+- browser rendering and accessibility proof remain UI implementation work.
+
+## `v2-topology-plugin`
+
+### Lifecycle and logic
+
+```text
+Registry/Channel projection
+  -> reconcile generation
+  -> build physical grouping and edges
+  -> publish location projection
+  -> focus selected identity
+```
+
+Positive tests cover machine/node/Agent/Channel grouping, capability display and
+registry generation updates. Negative tests cover missing parent identity,
+stale generation and inferred edges not present in source projections.
+
+### Black-box impact
+
+The project black-box test selects an Agent through the topology hierarchy and
+proves that the selected source identity scopes other queries without changing
+business payloads or Session Log facts.
+
+### Known gaps
+
+- physical layout algorithm and multi-machine browser map are not implemented;
+- production Registry transport remains channel scope.
+
+## `v2-session-canvas-plugin`
+
+### Lifecycle and logic
+
+```text
+Session Log relationships
+  -> derive active/recent/history bands
+  -> publish stable nodes and edges
+  -> focus/filter
+  -> replay refresh
+```
+
+Positive tests cover stable source IDs, time-band classification and focusing a
+session into the Run surface. Negative tests cover orphan edges, browser-only
+history, visual reorder mutating Session Log sequence and unavailable source
+records.
+
+### Black-box impact
+
+The project black-box test compares canvas nodes/edges with Session Log-derived
+relationships and proves canvas selection returns the same Session/Turn truth
+through query.
+
+### Known gaps
+
+- conflict rules for relationship derivation are not implemented;
+- visual graph layout and large-history performance are UI scope.
+
+## `v2-search-plugin`
+
+### Lifecycle and logic
+
+```text
+configure
+  -> index source records
+  -> query keyword/filters
+  -> classify and page results
+  -> cache
+  -> invalidate/rebuild
+```
+
+Positive tests cover keyword search, structured filters, result classification,
+cursor paging and deterministic cache hits. Negative tests cover invalid query
+scope, stale cache after invalidation, index corruption and attempts to expose
+control/metadata/debug fields as business results.
+
+### Black-box impact
+
+The project black-box test searches sessions, topology identities and memory
+records through one Search Plugin port and proves the result source/classification
+remain explicit. It must reject a UI-only result that bypasses the plugin.
+
+### Known gaps
+
+- index implementation and database choice are not selected;
+- distributed indexing is reserved for the network extension.
+
+## `v2-memory-plugin`
+
+### Lifecycle and logic
+
+```text
+attach
+  -> manual or automatic trigger
+  -> summarize
+  -> record
+  -> save
+  -> load/search
+  -> export
+  -> detach
+```
+
+Positive tests cover per-session summary provenance, manual and automatic
+trigger identity, save/load/search/export and attach/detach. Negative tests
+cover missing Session Log source, failed save/export, summary presented as an
+original fact, cross-session leakage and browser-local persistence.
+
+### Black-box impact
+
+The project black-box test runs the complete Memory Plugin lifecycle, then
+queries the original Session Log and proves its ordered transcript is
+unchanged. A failed save/export must not produce a successful memory record or
+artifact reference.
+
+### Known gaps
+
+- summarizer implementation and memory storage are not selected;
+- retention, privacy and cross-session memory policy require a later decision.
+
 ## `v2-channel-registry`
 
 ### Lifecycle and logic
@@ -341,6 +492,11 @@ truth path.
 | `v2_cordis_composition_boundary` | Cordis composition result | fixed design plugin connects adjacent owners | Cordis does not duplicate semantic owners |
 | `v2_plugin_hot_replace` | plugin lifecycle result | unload/reactivation is scoped | stale effects/providers cannot remain active |
 | `v2_ui_projection_boundary` | public protocol result | command/query/subscribe are distinct | UI cannot mutate owner truth or expose control |
+| `v2_notification_order_and_ack` | notification plugin result | importance/time order and typed acknowledgement | UI text cannot change ranking or source truth |
+| `v2_topology_location_projection` | topology plugin result | registry-backed physical grouping | inferred relationship or stale generation is rejected |
+| `v2_session_canvas_source_binding` | canvas plugin result | stable Session Log-derived nodes/edges | visual reorder or browser history cannot mutate truth |
+| `v2_search_index_query_boundary` | search plugin result | classified query results and cache lifecycle | UI-local filter or stale invalidated cache is rejected |
+| `v2_memory_lifecycle_boundary` | memory plugin result | summarize/record/save/load/search/export completes | failed persistence/export cannot become success or alter Session Log |
 | `v2_registry_registration` | Registry result | token-authenticated endpoint registers/discovers | invalid token or manifest is rejected |
 | `v2_channel_session_reconnect` | channel reattach result | new Connection retains ChannelSession | stale generation/disconnect cannot fabricate completion |
 

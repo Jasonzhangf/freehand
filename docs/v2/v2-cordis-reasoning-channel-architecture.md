@@ -48,9 +48,37 @@ not privileged runtime layers:
 | reasoning | reasoning backend, sessionlog and model plugins | model execution and reasoning facts |
 | network / route | Registry, link, transport and route plugins | discovery, reachability and propagation |
 | input / output channels | channel session and capability endpoint plugins | capability relationship and invocation |
+| information surfaces | Notification, Topology, SessionCanvas, Search and Memory plugins | projection, navigation and session knowledge |
 
 The fixed design orchestration plugin composes these families and connects
 adjacent Services and typed events. It does not own their semantic truth.
+
+The information-surface plugins are independently addressable Cordis plugins:
+
+```text
+design-orchestration-plugin
+├── notification-plugin
+├── topology-plugin
+├── session-canvas-plugin
+├── search-plugin
+└── memory-plugin
+```
+
+Their outputs may be rendered by the UI adaptor, queried by headless clients,
+or consumed by other plugins. UI rendering is not their lifecycle owner.
+
+The ownership split is fixed:
+
+- `NotificationPlugin` ranks typed source events by importance, time and stable
+  identity, then owns acknowledgement/snooze projection state.
+- `TopologyPlugin` derives physical machine/node/Agent/Channel relationships
+  from Registry and Channel projections.
+- `SessionCanvasPlugin` derives active/recent/history session relationships
+  from Session Log facts without becoming a second log.
+- `SearchPlugin` owns typed query, classification, index, cache, invalidation
+  and rebuild behavior.
+- `MemoryPlugin` owns session-scoped summarize, record, save, load, search and
+  export behavior without rewriting Session Log facts.
 
 ## 3. Cordis Runtime Composition
 
