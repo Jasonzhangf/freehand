@@ -127,6 +127,12 @@ Use this directory family for durable design truth.
   - runtime host process that injects `freehand-runtime` into shared protocol-only HTTP/SSE transport
 - `docs/prototypes/README.md`
   - offline static prototype routing and review-only entry points
+- `docs/v2/v2-ui-plugin-contract.md`
+  - Cordis UI plugin slots, typed ports, lifecycle, replacement protocol and
+    mobile composition
+- `docs/v2/v2-plugin-ecosystem-contract.md`
+  - all executable, replaceable and externally connected product parts as
+    Cordis plugins, nested composition, typed ports and replacement boundaries
 - `test-strategy.md`
   - white-box, module black-box, and project black-box validation policy
 - `docs/function-maps/README.md`
