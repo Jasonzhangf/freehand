@@ -5,6 +5,7 @@ Project: `freehand-v2`
 Branch: `v2`
 Governance: AppSDK `0.1.6`
 Related plan: `docs/v2/v2-foundation-mvp-ui-reason-network-plan.md`
+Plugin ecosystem contract: `docs/v2/v2-plugin-ecosystem-contract.md`
 Test design: `docs/v2/v2-test-design.md`
 Project blackbox: `docs/v2/v2-project-blackbox-verification.md`
 
@@ -18,12 +19,18 @@ unload, replacement and hot-reload lifecycle.
 Freehand does not create a second plugin runtime, Service registry, universal
 event bus or hot-reload manager.
 
+The top-level v2 rule is **everything is a plugin**: every executable,
+replaceable or externally connected product part is a Cordis plugin. There is
+no privileged application layer above Cordis. Contracts, IDs and immutable
+shared data types remain typed port contracts consumed by plugins; they are
+not a second runtime.
+
 The fixed Freehand design component is a Cordis plugin:
 
 ```text
 Cordis root
 └── design-orchestration-plugin
-    ├── UI plugin family
+    ├── UI plugin family (UiAdaptor and replaceable UI surface plugins)
     ├── reasoning backend plugin family
     ├── sessionlog plugin family
     ├── channel and network plugin family
@@ -37,6 +44,35 @@ Every other product capability is also a Cordis plugin. A plugin may be:
 - an adaptor plugin that translates an external runtime into a Freehand
   Service and typed event contract.
 
+This rule includes the frontend. UI is a family of independently replaceable
+Cordis plugins, not one indivisible application layer. A UI plugin owns the
+presentation and interaction state of its assigned surface, but never owns
+Session, Turn, Reasoning, Channel, Search, Memory or other business truth.
+
+The frontend replacement unit is a stable plugin slot:
+
+```text
+UI composition plugin
+├── UI Shell plugin
+├── UI Navigation plugin
+├── UI Run plugin
+├── UI Sessions plugin
+├── UI Attention plugin
+├── UI Location plugin
+├── UI More plugin
+└── UI Detail plugin
+```
+
+The UI Adaptor is a separate adaptor plugin. It translates transport and
+owner-backed projections into stable UI ports; it is not a renderer and not a
+second truth owner.
+
+The same rule applies to reasoning, networking, input/output channels,
+information surfaces, persistence adapters and test doubles. A plugin may be
+a leaf Rust implementation, a composition plugin containing child plugins, or
+an adaptor around an external runtime. The implementation form changes; the
+Cordis ownership and typed-port boundary does not.
+
 ## 2. Four Product Zones, One Plugin Model
 
 The product remains divided into four responsibility zones, but the zones are
@@ -49,6 +85,10 @@ not privileged runtime layers:
 | network / route | Registry, link, transport and route plugins | discovery, reachability and propagation |
 | input / output channels | channel session and capability endpoint plugins | capability relationship and invocation |
 | information surfaces | Notification, Topology, SessionCanvas, Search and Memory plugins | projection, navigation and session knowledge |
+
+Every row is a plugin family, not a runtime layer. The fixed design
+orchestration plugin composes these families and connects adjacent typed
+ports; it does not implement their semantic behavior or own their truth.
 
 The fixed design orchestration plugin composes these families and connects
 adjacent Services and typed events. It does not own their semantic truth.
@@ -66,6 +106,22 @@ design-orchestration-plugin
 
 Their outputs may be rendered by the UI adaptor, queried by headless clients,
 or consumed by other plugins. UI rendering is not their lifecycle owner.
+
+The corresponding UI surface plugins are separate consumers:
+
+```text
+NotificationPlugin  -> UI Attention plugin
+TopologyPlugin      -> UI Location plugin
+SessionCanvasPlugin -> UI Sessions plugin
+SearchPlugin        -> UI More / UI Detail
+MemoryPlugin        -> UI Run / UI More / UI Detail
+Session Log         -> UI Run plugin
+```
+
+Domain plugins and UI plugins are deliberately different replacement units.
+A Search or Memory implementation can change without replacing its UI
+consumer, and a UI surface can change without changing the domain plugin that
+produces its typed projection.
 
 The ownership split is fixed:
 
@@ -94,6 +150,10 @@ RootContext
 ```
 
 It must not expose one global reasoning implementation to all runtimes.
+
+The root also treats UI composition as a child-plugin graph. Different
+runtime groups may select different UI Shell, Navigation or surface
+implementations as long as they satisfy the same typed UI slot contract.
 
 ### 3.2 Runtime groups
 
@@ -141,6 +201,21 @@ An in-flight reasoning operation must not retain an unloaded provider object.
 The backend contract therefore requires an operation-owned cancellation and
 settlement boundary. A replacement is admitted only after the old provider's
 owned operations have settled or have been explicitly interrupted.
+
+The same lifecycle applies to UI plugins:
+
+```text
+UI plugin unload
+  -> detach owned view resources and subscriptions
+  -> preserve owner-backed selection and projection identity
+  -> load replacement plugin into the same UI slot
+  -> reconnect the same typed UI ports
+```
+
+UI replacement may discard presentation state, but it may not discard or
+rewrite owner truth. A replacement is complete only when it consumes the
+current projection, restores the selected identity and exposes explicit
+loading, error or unavailable state while reconnecting.
 
 ## 4. Reasoning Backend Seam
 

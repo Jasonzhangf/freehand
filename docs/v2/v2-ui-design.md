@@ -8,6 +8,8 @@ Reference: `http://127.0.0.1:4173/docs/design/multi-agent-console-prototype.html
 Related plan: `docs/v2/v2-foundation-mvp-ui-reason-network-plan.md`
 Test design: `docs/v2/v2-test-design.md`
 Project black-box: `docs/v2/v2-project-blackbox-verification.md`
+Static prototype: `docs/v2/prototypes/v2-ui-plugin-console/index.html`
+UI plugin contract: `docs/v2/v2-ui-plugin-contract.md`
 
 ## 1. Product Job
 
@@ -34,6 +36,12 @@ access to physical location, session history, search and memory. Topology and
 session drawing are navigation and review surfaces; neither becomes the
 reasoning truth source.
 
+The review prototype also keeps the v1 global entry affordances discoverable:
+Settings, Timer dashboard, Tools registry and New session. They are composed as
+Cordis plugin surfaces in v2 and are simulated locally for interaction review;
+they do not call v1 runtime endpoints or become a second source of runtime
+truth.
+
 ## 2. Reference Adaptation
 
 The local multi-agent console prototype contributes an interaction grammar:
@@ -46,7 +54,7 @@ The local multi-agent console prototype contributes an interaction grammar:
 | Recent sessions list | Sessions/Canvas surface grouped by active, recent and history | drawing answers “what work is related and when?” |
 | Agent/session click opens nested drawer | Agent, task, plugin and event details open a single typed detail panel with breadcrumb/back | progressive disclosure without changing the primary session |
 | Filter buttons and search | Search Plugin entry with keyword, structured filters and result classification | search is a capability, not browser-local string filtering |
-| Bottom mobile navigation and drawers | mobile Location / Run / Attention / Sessions navigation with sheets | preserve the same information model under narrow width |
+| Bottom mobile navigation and drawers | one-row `Run / Sessions / Attention / Location / More` navigation with grouped secondary sheets | preserve hierarchy and avoid duplicating global entries |
 
 Do not copy the reference's fake machine data, topology lines, emoji-like text
 icons, or demo action wording. v2 uses actual typed projections and the
@@ -120,22 +128,29 @@ timeline phase or attention item is rendered from a typed projection field.
 │ result or explicit wait      │
 │ composer                     │
 ├─────────────────────────────┤
-│ Location · Run · Attention   │
-│ Sessions                     │
+│ Run · Sessions · Attention · Location · More │
 └─────────────────────────────┘
 ```
 
 Mobile rules:
 
 - the current run remains the default page;
+- the bottom navigation is exactly one row with five first-level destinations:
+  `Run`, `Sessions`, `Attention`, `Location` and `More`;
 - Location opens a full-height sheet containing machine, node, Agent and
   Channel groups;
 - Attention opens a sheet containing unresolved ranked notifications;
 - Sessions opens a sheet containing active, recent and history session bands;
-- Search opens the Search Plugin surface, not a local browser filter;
-- Memory opens the selected session's Memory Plugin surface;
+- More is the only mobile entry for secondary capabilities and is grouped as:
+  `操作` (New session, Timer), `信息` (Search, Memory), and `系统`
+  (Settings, Tools);
+- Search opens the Search Plugin surface, not a local browser filter, from
+  `More / 信息`;
+- Memory opens the selected session's Memory Plugin surface from
+  `More / 信息`;
 - Agent/task/plugin details use a stacked detail sheet with back navigation;
 - no desktop rail is squeezed into a horizontal scrolling strip;
+- desktop-only header actions are not duplicated as mobile corner navigation;
 - composer, status and primary actions remain reachable without hiding the
   current terminal state.
 
@@ -292,6 +307,12 @@ their typed ports. It does not rank notifications, draw topology, index data,
 summarize sessions or render UI. Search and Memory remain usable through
 non-UI plugin consumers as well as through the UI adaptor.
 
+The plugin family above is one slice of the v2 ecosystem. Other plugin
+families (control events, error chain, reasoning backends, capability
+registry, transport, channel session, capability endpoints) follow the same
+Cordis owner, typed-port and replacement contract described in
+`docs/v2/v2-plugin-ecosystem-contract.md`.
+
 ## 6. Adaptor Boundary
 
 The UI connects through a typed adaptor. The adaptor is a transport and
@@ -344,6 +365,33 @@ only after its owner and verification binding are registered. The UI model
 consumes `UiProjection`, `RunRow`, `AttentionItem`, `AgentSummary`,
 `TaskSummary` and typed error states; it does not consume raw Cordis events or
 sessionlog records.
+
+### UI plugin decomposition
+
+The frontend follows the v2 "everything is a plugin" rule. It is a Cordis
+plugin family, and the replacement unit is a stable UI slot, not an arbitrary
+component file:
+
+| slot | UI plugin responsibility | can be replaced without changing |
+| --- | --- | --- |
+| `ui.shell` | mount regions, lifecycle and connection boundary | domain truth owners |
+| `ui.navigation` | one-row `Run / Sessions / Attention / Location / More` route selection | route source projections |
+| `ui.run` | selected-session timeline, composer and run state | Session Log and Reasoning owners |
+| `ui.sessions` | active/recent/history session navigation and canvas entry | SessionCanvas owner |
+| `ui.attention` | ranked notifications and owner actions | Notification owner |
+| `ui.location` | machine/node/Agent/Channel navigation | Topology owner |
+| `ui.more` | grouped secondary capability entry and availability | Search, Memory, Timer and Tools owners |
+| `ui.detail` | progressive detail inspection and back/close | detail query owners |
+
+`UiAdaptor` is a separate adaptor plugin, not a UI surface plugin. It is the
+only bridge from UI plugins to owner-backed command, query and subscribe
+ports. Search, Memory, Timer and Tools remain capability plugins; their UI
+views are replaceable consumers mounted into the relevant UI slots.
+
+Each UI plugin must declare one stable `slot_id`, typed input projections,
+typed command/query/subscribe output ports, mount/subscribe/render/unmount
+lifecycle, explicit unavailable/error state and rebuildable local presentation
+state. UI plugins must not import or mutate domain truth directly.
 
 ### Local and remote adapters
 
@@ -493,7 +541,7 @@ The first implementation should be built from these owner-facing components:
 | `SearchSurface` | keyword/filter query and classified results | `SearchPlugin` projection |
 | `MemorySurface` | summarize/record/save/load/search/export state | `MemoryPlugin` projection |
 | `DetailPanel` | progressive inspection and owner actions | typed query result |
-| `MobileNavigation` | Location/Run/Attention/Sessions route selection | transient UI route only |
+| `MobileNavigation` | one-row Run/Sessions/Attention/Location/More route selection | `ui.navigation` plugin |
 | `ConnectionState` | local/remote/disconnected transport signal | adaptor connection state |
 
 These are UI composition names, not permission to add runtime managers or

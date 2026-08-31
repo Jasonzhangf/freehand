@@ -6,6 +6,7 @@ Branch: `v2`
 Governance: AppSDK `0.1.6`
 Test design: `docs/v2/v2-test-design.md`
 UI design: `docs/v2/v2-ui-design.md`
+Plugin ecosystem contract: `docs/v2/v2-plugin-ecosystem-contract.md`
 
 ## Purpose
 

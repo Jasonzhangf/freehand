@@ -7,6 +7,7 @@ Governance: AppSDK `0.1.6`
 Plan: `docs/v2/v2-foundation-mvp-ui-reason-network-plan.md`
 Project black-box contract: `docs/v2/v2-project-blackbox-verification.md`
 UI design: `docs/v2/v2-ui-design.md`
+Plugin ecosystem contract: `docs/v2/v2-plugin-ecosystem-contract.md`
 
 ## Test Contract
 
@@ -49,6 +50,7 @@ control state are not test inputs and are never committed.
 | `v2-plugin-capabilities` | capability plugin owner | typed capability manifest, deterministic registration, Rust leaf/composition plugin input/output, permission and failure behavior | Cordis plugin composition invokes one local Rust capability | declared plugin result/failure returns through typed events without semantic duplication | `v2_plugin_registration`, `v2_cordis_composition_boundary` |
 | `v2-cordis-ecosystem` | Cordis ecosystem owner | fixed design plugin, runtime-group scope, Service injection, child-plugin lifecycle and hot replacement | Cordis composition consumes owner contracts and does not own payload/event/reason semantics | complete local vertical slice runs through the fixed design plugin and selected backend | `v2_cordis_composition_boundary`, `v2_plugin_hot_replace` |
 | `v2-ui-adaptor` | UI adaptor owner | command validation, query/subscribe separation, projection and redaction | adaptor client/server contract with source identity fields | one UI command enters the local graph and receives owner-backed projection only; browser layout follows `docs/v2/v2-ui-design.md` | `v2_ui_projection_boundary` |
+| `v2-ui-plugin-family` | UI plugin family owner | slot identity, typed UI ports, mount/unmount lifecycle, unavailable/error state, replacement without owner-truth mutation | one replacement implementation claims the same `slot_id` and rebuilds from the current projection and selection | mobile and desktop surfaces retain the same selected identity and owner-backed projection across one UI plugin replacement | `v2_ui_plugin_slot_replacement` |
 | `v2-notification-plugin` | notification owner | event admission, importance/time order, deduplication, read/ack/snooze/archive | notification query/action contract with stable source identity | Attention surface matches plugin order and acknowledgement changes only notification state | `v2_notification_order_and_ack` |
 | `v2-topology-plugin` | topology owner | registry projection, machine/node/Agent/Channel grouping, generation reconciliation | topology query/focus contract with explicit relationship edges | Location surface locates an Agent by physical hierarchy without inferred edges | `v2_topology_location_projection` |
 | `v2-session-canvas-plugin` | session canvas owner | Session Log relationship derivation, active/recent/history bands, focus/filter/replay | canvas projection contract with stable source Session/Turn identities | Canvas navigation focuses the same owner-backed Session/Run truth without a second store | `v2_session_canvas_source_binding` |

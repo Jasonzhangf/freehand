@@ -24,6 +24,10 @@ Cordis plugins with typed inputs, typed outputs, lifecycle state and owners.
 The fixed Cordis design orchestration plugin composes them; `UiAdaptor` exposes
 their projections and commands to the frontend.
 
+This follows the v2 ecosystem rule: UI renderers, UI adaptor, information
+surfaces, reasoning, channels and capabilities are all plugins. The UI is a
+replaceable plugin family, not a privileged layer above the plugin ecosystem.
+
 The design preserves the existing reference prototype's compact desktop/mobile
 grammar while changing the source of truth:
 
@@ -225,14 +229,81 @@ The surfaces may share selection identity and navigation, but they do not
 share persistence. All writes go through typed commands to the owning plugin
 or owner module.
 
+## 4.1 UI plugin decomposition
+
+The information surfaces above are domain projections. Their frontend
+renderers are separate Cordis UI plugins:
+
+```text
+UiAdaptor
+  -> ui.shell
+  -> ui.navigation
+  -> ui.run
+  -> ui.sessions
+  -> ui.attention
+  -> ui.location
+  -> ui.more
+  -> ui.detail
+```
+
+The domain plugin and UI plugin are different owners:
+
+```text
+SearchPlugin        -> ui.more / ui.detail
+MemoryPlugin        -> ui.run / ui.more / ui.detail
+SessionCanvasPlugin -> ui.sessions
+NotificationPlugin  -> ui.attention
+TopologyPlugin      -> ui.location
+Session Log         -> ui.run
+```
+
+Every UI plugin has one stable `slot_id`, typed input projections, typed
+command/query/subscribe output ports and an explicit mount/unmount lifecycle.
+Its local state is disposable: after unload and replacement, the new
+implementation rebuilds from the current projection and selected identity.
+
+Replacement rules:
+
+1. Replacing a UI plugin does not replace the domain plugin that supplies its
+   projection.
+2. Replacing a domain plugin implementation does not require replacing its UI
+   consumer when the typed projection contract remains valid.
+3. UI plugins never import truth-owner modules directly when the adaptor port
+   exists.
+4. Missing, incompatible or disconnected plugins render an explicit
+   unavailable/error state; they do not silently render empty success.
+5. The fixed design orchestration plugin composes and reconnects UI plugins,
+   but does not render their surfaces or own their presentation state.
+
+### Mobile entry hierarchy
+
+Mobile has one primary navigation row only:
+
+```text
+Run | Sessions | Attention | Location | More
+```
+
+`More` is a second-level capability surface, not a peer information surface.
+It is the only mobile entry for:
+
+```text
+操作: 新会话, 定时任务
+信息: 搜索, 记忆
+系统: 配置, 内置工具
+```
+
+This keeps information surfaces at level one and keeps operational, knowledge
+and system capabilities at level two. No separate corner bar or parallel
+mobile shortcut row is allowed.
+
 ## 5. Frontend Validation
 
 The reference prototype was inspected at desktop and mobile widths. The
 validated interaction grammar is:
 
 - desktop: grouped navigation, central work surface, right-side attention;
-- mobile: central work surface remains primary, secondary surfaces open as
-  full-height sheets and bottom navigation;
+- mobile: central work surface remains primary, five first-level destinations
+  stay in one bottom row, and secondary capabilities open from grouped `More`;
 - progressive detail: one detail panel with breadcrumb/back;
 - compact rows: stable geometry for live updates and long content.
 

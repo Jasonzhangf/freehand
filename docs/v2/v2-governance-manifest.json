@@ -16,7 +16,9 @@
     },
     "business_manifest": "docs/v2/v2-governance-manifest.json",
     "ui_design": "docs/v2/v2-ui-design.md",
-    "ui_information_architecture": "docs/v2/v2-ui-plugin-information-architecture.md"
+    "ui_information_architecture": "docs/v2/v2-ui-plugin-information-architecture.md",
+    "ui_plugin_contract": "docs/v2/v2-ui-plugin-contract.md",
+    "plugin_ecosystem_contract": "docs/v2/v2-plugin-ecosystem-contract.md"
   },
   "modules": [
     {
@@ -92,6 +94,17 @@
       "source_paths": ["playground/experiments/v2/ui-adaptor/**"],
       "test_paths": ["tests/v2/ui-adaptor/**"],
       "depends_on": ["v2-contracts", "v2-control-events", "v2-cordis-ecosystem"],
+      "test_design": "docs/v2/v2-test-design.md",
+      "project_blackbox": "docs/v2/v2-project-blackbox-verification.md",
+      "mvp": true
+    },
+    {
+      "module_id": "v2-ui-plugin-family",
+      "status": "planned",
+      "owner": "v2-ui-plugin-family",
+      "source_paths": ["playground/experiments/v2/ui-plugins/**"],
+      "test_paths": ["tests/v2/ui-plugins/**"],
+      "depends_on": ["v2-contracts", "v2-control-events", "v2-cordis-ecosystem", "v2-ui-adaptor"],
       "test_design": "docs/v2/v2-test-design.md",
       "project_blackbox": "docs/v2/v2-project-blackbox-verification.md",
       "mvp": true
@@ -176,6 +189,7 @@
     {"resource_id": "v2_search_projection", "owner": "v2-search-plugin", "truth_store": "typed search index/cache projection", "operations": ["configure", "index", "query", "classify", "invalidate", "rebuild"]},
     {"resource_id": "v2_memory_projection", "owner": "v2-memory-plugin", "truth_store": "session-scoped memory records and projection", "operations": ["attach", "summarize", "record", "save", "load", "search", "export", "detach"]},
     {"resource_id": "v2_orchestration_graph", "owner": "v2-cordis-ecosystem", "truth_store": "Cordis composition and injected Service graph", "operations": ["compose", "activate", "replace", "unload"]},
+    {"resource_id": "v2_ui_plugin_slot", "owner": "v2-ui-plugin-family", "truth_store": "Cordis UI slot registry and mounted plugin instance state", "operations": ["discover", "validate", "mount", "subscribe", "render", "unmount", "replace"]},
     {"resource_id": "v2_registry", "owner": "v2-channel-registry", "truth_store": "central Registry control-plane state", "operations": ["register", "renew", "discover", "publish_change", "resolve_route"]},
     {"resource_id": "v2_channel_session", "owner": "v2-channel-registry", "truth_store": "channel-session plugin state", "operations": ["open", "attach", "suspend", "reattach", "invoke", "close"]}
   ],
@@ -221,6 +235,19 @@
         ["ui_adaptor_projection", "surface_rendered"]
       ],
       "terminal": "surface_rendered"
+    },
+    {
+      "mainline_id": "v2-ui-plugin-replacement",
+      "status": "planned",
+      "entry": "ui_plugin_discovered",
+      "nodes": ["ui_plugin_discovered", "ui_plugin_validated", "ui_plugin_mounted", "ui_plugin_reconnected", "ui_plugin_replaced"],
+      "edges": [
+        ["ui_plugin_discovered", "ui_plugin_validated"],
+        ["ui_plugin_validated", "ui_plugin_mounted"],
+        ["ui_plugin_mounted", "ui_plugin_reconnected"],
+        ["ui_plugin_reconnected", "ui_plugin_replaced"]
+      ],
+      "terminal": "ui_plugin_replaced"
     }
   ],
   "verification": [
@@ -235,6 +262,7 @@
     {"gate_id": "v2_cordis_composition_boundary", "status": "planned", "required_for": ["v2-cordis-ecosystem"], "test_design": "docs/v2/v2-test-design.md", "project_blackbox": "docs/v2/v2-project-blackbox-verification.md"},
     {"gate_id": "v2_plugin_hot_replace", "status": "planned", "required_for": ["v2-cordis-ecosystem"], "test_design": "docs/v2/v2-test-design.md", "project_blackbox": "docs/v2/v2-project-blackbox-verification.md"},
     {"gate_id": "v2_ui_projection_boundary", "status": "planned", "required_for": ["v2-ui-adaptor"], "test_design": "docs/v2/v2-test-design.md", "project_blackbox": "docs/v2/v2-project-blackbox-verification.md"},
+    {"gate_id": "v2_ui_plugin_slot_replacement", "status": "planned", "required_for": ["v2-ui-plugin-family"], "test_design": "docs/v2/v2-test-design.md", "project_blackbox": "docs/v2/v2-project-blackbox-verification.md"},
     {"gate_id": "v2_notification_order_and_ack", "status": "planned", "required_for": ["v2-notification-plugin"], "test_design": "docs/v2/v2-test-design.md", "project_blackbox": "docs/v2/v2-project-blackbox-verification.md"},
     {"gate_id": "v2_topology_location_projection", "status": "planned", "required_for": ["v2-topology-plugin"], "test_design": "docs/v2/v2-test-design.md", "project_blackbox": "docs/v2/v2-project-blackbox-verification.md"},
     {"gate_id": "v2_session_canvas_source_binding", "status": "planned", "required_for": ["v2-session-canvas-plugin"], "test_design": "docs/v2/v2-test-design.md", "project_blackbox": "docs/v2/v2-project-blackbox-verification.md"},

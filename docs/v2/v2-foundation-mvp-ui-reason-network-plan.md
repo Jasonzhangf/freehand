@@ -4,6 +4,7 @@ Status: design-admitted
 Branch: `v2`
 Governance: AppSDK `0.1.6`
 Baseline: `5c879c6155d8c3e6febc3d0a13b4716b9f544948`
+Plugin ecosystem contract: `docs/v2/v2-plugin-ecosystem-contract.md`
 
 ## 1. Decision Summary
 
@@ -79,6 +80,7 @@ The formal test design and project black-box contract are:
 | `v2-reasoning-backend` | provider-neutral Reasoning Service and Freehand/OpenCode backend adaptors | additional reasoning bases and runtime-specific bindings |
 | `v2-plugin-capabilities` | Rust leaf/composition capability plugins and manifests | remote plugin execution and attestation |
 | `v2-ui-adaptor` | UI ingress, query/subscribe, public projections and backend-neutral adaptor | multi-client and remote UI transport |
+| `v2-ui-plugin-family` | independently replaceable UI Shell, Navigation, Run, Sessions, Attention, Location, More and Detail plugins | alternate UI implementations and UI plugin hot replacement |
 | `v2-notification-plugin` | importance/time ordered notification projection and acknowledgement lifecycle | retention, cross-node notification delivery and policy updates |
 | `v2-topology-plugin` | physical machine/node/Agent/Channel grouping and relationship projection | multi-machine topology views and live route visualization |
 | `v2-session-canvas-plugin` | Session Log-derived active/recent/history session graph | large-history layout, cross-node session graph and replay navigation |
@@ -96,6 +98,7 @@ v2-contracts
   -> v2-plugin-capabilities
   -> v2-cordis-ecosystem
   -> v2-ui-adaptor
+  -> v2-ui-plugin-family
   -> v2-notification-plugin
   -> v2-topology-plugin
   -> v2-session-canvas-plugin
