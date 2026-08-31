@@ -7,12 +7,16 @@ const repo = process.cwd();
 const home = process.env.HOME;
 const baseUrl = normalizedBaseUrl(process.env.FREEHAND_NEW_SESSION_BASE_URL || 'http://127.0.0.1:4042/');
 const adpUrl = process.env.FREEHAND_NEW_SESSION_ADP_URL || adpUrlFromBaseUrl(baseUrl);
+const adpAuthToken = process.env.FREEHAND_ADP_AUTH_TOKEN || '';
+const adpProtocolVersion = 3;
 const chromePath = process.env.FREEHAND_NEW_SESSION_CHROME || defaultBrowserPath();
 const debugPort = Number.parseInt(process.env.FREEHAND_NEW_SESSION_DEBUG_PORT || '9278', 10);
 const conversationSessionId = process.env.FREEHAND_NEW_CONVERSATION_SESSION_ID || 'webui-new-conversation-fixed';
 const taskSessionId = process.env.FREEHAND_NEW_TASK_SESSION_ID || 'webui-new-task-fixed';
 const taskCwd = process.env.FREEHAND_NEW_TASK_CWD || repo;
-const assetVersion = '20260726-stale-lifecycle-reconcile';
+const assetSource = await fs.readFile(path.join(repo, 'apps/freehand-server/src/assets.rs'), 'utf8');
+const assetVersion = assetSource.match(/WEBUI_ASSET_VERSION:\s*&str\s*=\s*"([^"]+)"/)?.[1];
+if (!assetVersion) throw new Error('unable to read WEBUI_ASSET_VERSION');
 const runId = `webui-new-session-${Date.now()}`;
 const artifactDir = path.join(repo, 'artifacts', 'webui-online', runId);
 
@@ -213,16 +217,43 @@ async function adpQuery(query) {
 }
 
 function adpRequest(kind, payloadKey, payload, timeoutMs) {
-  const socket = new WebSocket(adpUrl);
+  const socket = new WebSocket(
+    adpUrl,
+    adpAuthToken ? { headers: { Authorization: `Bearer ${adpAuthToken}` } } : undefined,
+  );
   const requestId = `${kind}-${Date.now()}-${Math.random().toString(36).slice(2)}`;
+  const handshakeId = `${requestId}-handshake`;
+  let handshakeAccepted = false;
   return new Promise((resolve, reject) => {
     const timer = setTimeout(() => {
       socket.close();
       reject(new Error(`ADP ${kind} timeout`));
     }, timeoutMs);
-    socket.addEventListener('open', () => socket.send(JSON.stringify({ kind, request_id: requestId, [payloadKey]: payload })));
+    socket.addEventListener('open', () => socket.send(JSON.stringify({
+      protocol_version: adpProtocolVersion,
+      kind: 'handshake',
+      request_id: handshakeId,
+      client_name: 'freehand-new-session-verifier',
+      capabilities: ['query', 'command', 'subscribe'],
+    })));
     socket.addEventListener('message', (event) => {
       const message = JSON.parse(event.data);
+      if (!handshakeAccepted) {
+        if (message.kind !== 'handshake_accepted' || message.request_id !== handshakeId) {
+          clearTimeout(timer);
+          socket.close();
+          reject(new Error(`ADP handshake failed: ${JSON.stringify(message)}`));
+          return;
+        }
+        handshakeAccepted = true;
+        socket.send(JSON.stringify({
+          protocol_version: adpProtocolVersion,
+          kind,
+          request_id: requestId,
+          [payloadKey]: payload,
+        }));
+        return;
+      }
       if (message.request_id !== requestId) return;
       clearTimeout(timer);
       socket.close();

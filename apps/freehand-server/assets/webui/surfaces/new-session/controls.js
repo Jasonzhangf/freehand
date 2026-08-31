@@ -37,7 +37,13 @@ export function openNewSessionSurface(kind = 'conversation', context) {
     context.dom.cwdInput.value = context.selectedWorkspaceCwd();
   }
   syncNewSessionDialogMode(context);
+  if (context.dom.dialog.dataset) {
+    context.dom.dialog.classList.remove('is-closing');
+  }
   context.dom.dialog.showModal();
+  context.dom.dialog.classList.remove('is-open');
+  void context.dom.dialog.offsetWidth;
+  context.dom.dialog.classList.add('is-open');
   window.setTimeout(() => {
     if (context.state.newSessionKind === 'task') {
       (context.dom.browseButton || context.dom.cwdInput || context.dom.confirmButton)?.focus();
@@ -49,7 +55,19 @@ export function openNewSessionSurface(kind = 'conversation', context) {
 
 export function closeNewSessionSurface(context) {
   if (context.dom.dialog && context.dom.dialog.open) {
-    context.dom.dialog.close();
+    context.dom.dialog.classList.remove('is-open');
+    context.dom.dialog.classList.add('is-closing');
+    const closeMs = parseFloat(
+      getComputedStyle(document.documentElement).getPropertyValue('--modal-close-dur'),
+    ) || 150;
+    window.clearTimeout(context.state.newSessionCloseTimer);
+    context.state.newSessionCloseTimer = window.setTimeout(() => {
+      if (context.dom.dialog?.open) {
+        context.dom.dialog.close();
+      }
+      context.dom.dialog?.classList.remove('is-closing');
+      context.state.newSessionCloseTimer = null;
+    }, closeMs);
   }
   if (context.state.route === 'new_session') {
     context.dispatchEdge('root.open_home');

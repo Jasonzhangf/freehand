@@ -333,6 +333,8 @@ const state = {
   submitInFlight: false,
   commandStatusMessage: "正在连接服务...",
   commandStatusStickyUntil: 0,
+  commandStatusTransitionTimer: null,
+  newSessionCloseTimer: null,
   adpFailure: null,
   adpStatus: "connecting",
   adpSocket: null,
@@ -405,6 +407,15 @@ function shellConfig() {
 function applyMobileDrawerState() {
   const shape = document.body.dataset.layoutShape || applyLayoutShape();
   const drawer = isMobileDrawerLayout(shape) ? state.mobileDrawer : null;
+  const mobileDrawerLayout = isMobileDrawerLayout(shape);
+  const sidebar = document.querySelector(".sidebar");
+  const inspector = document.querySelector(".inspector");
+  if (sidebar) {
+    sidebar.inert = mobileDrawerLayout && drawer !== "sessions";
+  }
+  if (inspector) {
+    inspector.inert = mobileDrawerLayout && drawer !== "settings";
+  }
   if (drawer) {
     document.body.dataset.mobileDrawer = drawer;
     if (shell) {
@@ -991,6 +1002,15 @@ function setCommandStatus(message, options = {}) {
   state.commandStatusMessage = message;
   state.commandStatusStickyUntil = options.stickyMs ? Date.now() + options.stickyMs : 0;
   renderCommandStatus();
+  const status = document.getElementById("command-status");
+  if (status) {
+    window.clearTimeout(state.commandStatusTransitionTimer);
+    status.classList.add("is-updating");
+    state.commandStatusTransitionTimer = window.setTimeout(() => {
+      status.classList.remove("is-updating");
+      state.commandStatusTransitionTimer = null;
+    }, 180);
+  }
 }
 
 function providerConfigReceiptStatus(receipt) {
