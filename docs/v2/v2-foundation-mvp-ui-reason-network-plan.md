@@ -45,6 +45,7 @@ The formal test design and project black-box contract are:
 
 - `docs/v2/v2-test-design.md`
 - `docs/v2/v2-project-blackbox-verification.md`
+- `docs/v2/v2-ui-design.md`
 
 | Module | MVP responsibility | Future extension |
 | --- | --- | --- |
@@ -312,8 +313,10 @@ receives its result event, runs one reason turn, and emits terminal truth.
 
 ### M4: UI protocol
 
-Expose one command, one query and one subscription/projection. Prove UI is
-only ingress/read-only projection and cannot mutate reason or event truth.
+Implement the UI adaptor and the first compact operating console. Expose one
+command, one query and one subscription/projection. Prove UI is only
+ingress/read-only projection and cannot mutate reason or event truth. Use
+`docs/v2/v2-ui-design.md` as the layout, state and adaptor contract.
 
 ### M5: Network extension skeleton
 

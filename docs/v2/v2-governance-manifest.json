@@ -14,7 +14,8 @@
       "mainline": ".appsdk/maps/mainline-call-map.json",
       "verification": ".appsdk/maps/verification-map.json"
     },
-    "business_manifest": "docs/v2/v2-governance-manifest.json"
+    "business_manifest": "docs/v2/v2-governance-manifest.json",
+    "ui_design": "docs/v2/v2-ui-design.md"
   },
   "modules": [
     {

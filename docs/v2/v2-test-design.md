@@ -6,6 +6,7 @@ Branch: `v2`
 Governance: AppSDK `0.1.5`
 Plan: `docs/v2/v2-foundation-mvp-ui-reason-network-plan.md`
 Project black-box contract: `docs/v2/v2-project-blackbox-verification.md`
+UI design: `docs/v2/v2-ui-design.md`
 
 ## Test Contract
 
@@ -46,7 +47,7 @@ control state are not test inputs and are never committed.
 | `v2-reason-sessionlog` | reason/sessionlog owner | append/read/replay/restore cursor, interrupted-turn recovery, corruption/lock/version errors | storage-neutral adapter contract with one deterministic local test adapter | one accepted input produces one reason turn, survives restore, and does not double-write | `v2_sessionlog_append_replay` |
 | `v2-plugin-runtime` | plugin owner | capability declaration, deterministic registration, typed input/output, permission and failure behavior | registry-to-invocation contract with one local Rust plugin | Cordis invokes one plugin and routes result/failure through typed events and reason input | `v2_plugin_registration` |
 | `v2-orchestration` | orchestration owner | adjacent-node transitions, continuation, stop, retry and terminal decisions | orchestration port consumes owner contracts without redefining semantics | complete local vertical slice from UI command to terminal projection | `v2_orchestration_adjacency` |
-| `v2-ui-protocol` | UI protocol owner | command validation, query/subscribe separation, projection and redaction | protocol client/server contract with source identity fields | one UI command enters the local graph and receives owner-backed projection only | `v2_ui_projection_boundary` |
+| `v2-ui-protocol` | UI protocol owner | command validation, query/subscribe separation, projection and redaction | protocol client/server contract with source identity fields | one UI command enters the local graph and receives owner-backed projection only; browser layout follows `docs/v2/v2-ui-design.md` | `v2_ui_projection_boundary` |
 | `v2-network-extension` | network extension owner | node identity, capability/version negotiation, frame classes, sequence/ack/replay, disconnect state | in-memory transport test double with explicit accepted/rejected paths | network contracts remain unused by the single-machine MVP except for contract tests; no local fallback is fabricated | `v2_network_capability_version`, `v2_network_disconnect_explicit`, `v2_payload_control_isolation` |
 
 ## `v2-contracts`

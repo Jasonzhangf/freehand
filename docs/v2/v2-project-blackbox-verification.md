@@ -5,6 +5,7 @@ Project: `freehand-v2`
 Branch: `v2`
 Governance: AppSDK `0.1.5`
 Test design: `docs/v2/v2-test-design.md`
+UI design: `docs/v2/v2-ui-design.md`
 
 ## Purpose
 
@@ -67,6 +68,10 @@ The harness must assert these observations independently:
 8. The final projection contains user-visible result data only, not internal
    event envelopes, metadata, debug fields, network frames or raw storage
    paths.
+
+The UI-specific browser acceptance is defined in
+`docs/v2/v2-ui-design.md`. It must compare rendered rows with adaptor/query
+truth rather than treating screenshots or visible text as lifecycle truth.
 
 ## Negative Scenarios
 
