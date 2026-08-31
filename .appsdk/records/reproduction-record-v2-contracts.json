@@ -6,11 +6,11 @@
   "worktree_id": "WT-20260831-FREEHAND-V2-CONTRACTS-M1A-001",
   "base_commit": "844db4b3c6103afc4c046b0f3b495b5854714f36",
   "input_hashes": [
-    "sha256:25c8cba36550ac11993146663c7a120b1884f9ed5d5ca7560b215b6007c71fa5",
-    "git:844db4b3c6103afc4c046b0f3b495b5854714f36"
+    "sha256:65e2f01f21bfb16060f07b64781646599e409d6d0e6f2bc794b9bb2339da1cdc",
+    "git:8839130ec559eb5b96789470ca2bab605c50b97b"
   ],
-  "baseline_evidence_id": "ev-v2-contracts-m1a-baseline-20260831",
-  "first_divergence": "At the v2 base commit, the contract boundary test could not import the missing v2 contracts owner; after the candidate implementation, the same test path executes the typed boundary and Arc sharing assertions.",
+  "baseline_evidence_id": "ev-v2-contracts-m1a-r3-baseline-20260831",
+  "first_divergence": "At the v2 base commit, the contract boundary test could not import the missing v2 contracts owner; after the candidate commit 8839130 with the persisted architecture_stable transition, the same test path executes the typed boundary, Arc sharing and pre-review payload sentinel assertions on the rebuilt deployed artifact.",
   "result": "reproduced",
-  "created_at": "2026-08-31T09:30:00Z"
+  "created_at": "2026-08-31T14:23:30Z"
 }

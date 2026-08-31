@@ -5,9 +5,9 @@
   "module_id": "v2-contracts",
   "worktree_id": "WT-20260831-FREEHAND-V2-CONTRACTS-M1A-001",
   "base_commit": "844db4b3c6103afc4c046b0f3b495b5854714f36",
-  "head_commit": "44a8111190de5acee5b2407e8c81a181dca726e4",
-  "tree_hash": "193783d08e458bdb130dce3751358ef1e4d19c51",
-  "diff_hash": "sha256:63d3e82d3dcc8a719ee122a5529570028c43a3355dfbc29a7d40e6d8148ffe75",
+  "head_commit": "8839130ec559eb5b96789470ca2bab605c50b97b",
+  "tree_hash": "07f9227990a626b1d29eae2b075c57ce0a7562ba",
+  "diff_hash": "sha256:63fe8f061d925771893d45e87df43e486c49fe5c8953eaf54f58cd671b5c2b6e",
   "design_id": "docs/v2/v2-foundation-mvp-ui-reason-network-plan.md#v2-contracts",
   "owner": "v2-contracts",
   "scope_hash": "sha256:28361473065c201b3ac961acbfd5fe44ce95a949fa899a44810a8ea653c661ac",
@@ -21,14 +21,14 @@
     "tests/v2/contracts/contract_boundary.rs"
   ],
   "verification_evidence_ids": [
-    "ev-v2-contracts-m1a-r2-fix-20260831",
-    "ev-v2-contracts-m1a-r2-whitebox-20260831",
-    "ev-v2-contracts-m1a-r2-install-20260831",
-    "ev-v2-contracts-m1a-r2-restart-20260831",
-    "ev-v2-contracts-m1a-r2-blackbox-20260831",
-    "ev-v2-contracts-m1a-r2-positive-20260831",
-    "ev-v2-contracts-m1a-r2-negative-20260831",
-    "ev-v2-contracts-m1a-r2-artifact-20260831"
+    "ev-v2-contracts-m1a-r3-fix-20260831",
+    "ev-v2-contracts-m1a-r3-whitebox-20260831",
+    "ev-v2-contracts-m1a-r3-install-20260831",
+    "ev-v2-contracts-m1a-r3-restart-20260831",
+    "ev-v2-contracts-m1a-r3-blackbox-20260831",
+    "ev-v2-contracts-m1a-r3-effective-positive-20260831",
+    "ev-v2-contracts-m1a-r3-effective-negative-20260831",
+    "ev-v2-contracts-m1a-r3-artifact-20260831"
   ],
-  "created_at": "2026-08-31T10:30:54Z"
+  "created_at": "2026-08-31T14:23:35Z"
 }

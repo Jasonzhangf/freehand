@@ -1,0 +1,29 @@
+{
+  "$schema": "https://appsdk.local/contracts/records/evidence-record.schema.json",
+  "evidence_id": "v2-contracts-m1a-r3-agy-20260831",
+  "issue_id": "v2-contracts-m1a-20260831",
+  "experiment_id": "v2-contracts-m1a-20260831",
+  "phase": "artifact",
+  "kind": "artifact",
+  "source_commit": "8839130ec559eb5b96789470ca2bab605c50b97b",
+  "scope": {
+    "module_id": "v2-contracts",
+    "feature_id": "v2-contracts",
+    "entrypoint": ".agent-collab/review/v2-contracts-m1a-r3-agy-20260831/review.final.md"
+  },
+  "producer": {
+    "adapter": "agy-review",
+    "identity": "v2-contracts-m1a-r3-agy-20260831"
+  },
+  "result": "pass",
+  "confidence": 0.99,
+  "confidence_rationale": "The AGY controller completed the read-only architecture review for the exact candidate commit, base, module boundary and governance scope with zero findings; the review exit code is 0.",
+  "created_at": "2026-08-31T14:33:18Z",
+  "expires_at": "2026-09-01T14:33:18Z",
+  "input_hashes": [
+    "git:8839130ec559eb5b96789470ca2bab605c50b97b",
+    "agy-review:v2-contracts-m1a-r3-agy-20260831:review.final.md",
+    "agy-review:v2-contracts-m1a-r3-agy-20260831:review.exit"
+  ],
+  "scope_hash": "sha256:28361473065c201b3ac961acbfd5fe44ce95a949fa899a44810a8ea653c661ac"
+}

@@ -7,7 +7,7 @@
   "base_ref": "origin/v2",
   "base_commit": "844db4b3c6103afc4c046b0f3b495b5854714f36",
   "branch": "codex/v2-contracts-m1a-20260831-r1",
-  "head_commit": "44a8111190de5acee5b2407e8c81a181dca726e4",
+  "head_commit": "8839130ec559eb5b96789470ca2bab605c50b97b",
   "initial_clean": true,
   "final_clean": true,
   "isolation_mode": "isolated_worktree",
