@@ -1977,6 +1977,8 @@ mod tests {
         assert!(!html.contains("Sessions and workspace"));
         assert!(!html.contains("api-key"));
         assert!(html.contains("id=\"new-session-dialog\""));
+        assert!(html.contains("class=\"new-session-dialog t-modal\""));
+        assert!(html.contains("role=\"status\" aria-live=\"polite\""));
         assert!(html.contains("id=\"new-session-form\""));
         assert!(html.contains("id=\"new-task-path-presets\""));
         assert!(html.contains("data-cwd=\"/Volumes/extension/code/freehand\""));
@@ -2383,6 +2385,16 @@ mod tests {
         assert!(
             webui_css_body.contains("body[data-mobile-agent-sheet=\"open\"] .mobile-drawer-scrim")
         );
+        assert!(webui_css_body.contains(
+            "body[data-layout-shape=\"phone_portrait\"] .new-session-dialog .new-session-actions"
+        ));
+        assert!(webui_css_body.contains(
+            "body[data-layout-shape=\"tablet_portrait\"] .new-session-dialog .new-session-actions > button"
+        ));
+        assert!(webui_css_body.contains(".t-modal.is-open"));
+        assert!(webui_css_body.contains(".t-modal.is-closing"));
+        assert!(webui_css_body.contains(".command-status.is-updating"));
+        assert!(webui_css_body.contains("@media (prefers-reduced-motion: reduce)"));
         assert!(webui_css_body.contains("--mobile-agent-blue: #1f5fbf"));
         assert!(webui_css_body.contains("--mobile-agent-green: #1f7a4d"));
         assert!(webui_css_body.contains("--mobile-agent-panel: #ffffff"));
@@ -2502,6 +2514,13 @@ mod tests {
         );
         assert!(legacy_body.contains("function renderMobileHomeDashboard"));
         assert!(legacy_body.contains("function mobileHomeSessionButton"));
+        assert!(
+            legacy_body.contains("sidebar.inert = mobileDrawerLayout && drawer !== \"sessions\"")
+        );
+        assert!(
+            legacy_body.contains("inspector.inert = mobileDrawerLayout && drawer !== \"settings\"")
+        );
+        assert!(legacy_body.contains("status.classList.add(\"is-updating\")"));
         assert!(legacy_body.contains("renderHomeDashboardSurface"));
         assert!(legacy_body.contains("renderToolsRegistrySurface"));
         assert!(legacy_body.contains("renderTimerDashboardSurface"));
@@ -2754,6 +2773,24 @@ mod tests {
                 "asset {asset} should contain {symbol}"
             );
         }
+
+        let new_session_controls = client
+            .get(format!(
+                "{}/assets/webui/surfaces/new-session/controls.js",
+                server.base_url
+            ))
+            .send()
+            .await
+            .expect("new-session controls response");
+        assert_eq!(new_session_controls.status(), StatusCode::OK);
+        let new_session_controls_body = new_session_controls
+            .text()
+            .await
+            .expect("new-session controls body");
+        assert!(new_session_controls_body.contains("context.dom.dialog.classList.add('is-open')"));
+        assert!(
+            new_session_controls_body.contains("context.dom.dialog.classList.add('is-closing')")
+        );
 
         assert!(root_body.contains("模型服务配置"));
         assert!(root_body.contains("模型服务切换与策略"));

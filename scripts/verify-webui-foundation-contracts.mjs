@@ -37,6 +37,10 @@ const onlineVerifier = await readFile(
   new URL('scripts/verify-webui-mobile-ui-tree-online.mjs', root),
   'utf8',
 );
+const newSessionVerifier = await readFile(
+  new URL('scripts/verify-webui-new-session-online.mjs', root),
+  'utf8',
+);
 const webuiCss = await readFile(
   new URL('apps/freehand-server/assets/webui.css', root),
   'utf8',
@@ -123,6 +127,7 @@ assert.match(legacyWebui, /typeof loaded !== "boolean"/);
 assert.match(legacyWebui, /!Array\.isArray\(sessions\)/);
 assert.match(onlineVerifier, /async function productionAssetVersion\(\)/);
 assert.doesNotMatch(onlineVerifier, /const assetVersion = ['"][^'"]+['"]/);
+assert.doesNotMatch(newSessionVerifier, /const assetVersion = ['"][^'"]+['"]/);
 assert.match(onlineVerifier, /runningHomeClearsSharedActiveState/);
 assert.match(webuiCss, /@media \(pointer: coarse\)/);
 assert.match(webuiCss, /min-width:\s*44px/);

@@ -15,7 +15,9 @@ const debugPort = Number.parseInt(process.env.FREEHAND_NEW_SESSION_DEBUG_PORT ||
 const conversationSessionId = process.env.FREEHAND_NEW_CONVERSATION_SESSION_ID || 'webui-new-conversation-fixed';
 const taskSessionId = process.env.FREEHAND_NEW_TASK_SESSION_ID || 'webui-new-task-fixed';
 const taskCwd = process.env.FREEHAND_NEW_TASK_CWD || repo;
-const assetVersion = '20260824-session-list-page';
+const assetSource = await fs.readFile(path.join(repo, 'apps/freehand-server/src/assets.rs'), 'utf8');
+const assetVersion = assetSource.match(/WEBUI_ASSET_VERSION:\s*&str\s*=\s*"([^"]+)"/)?.[1];
+if (!assetVersion) throw new Error('unable to read WEBUI_ASSET_VERSION');
 const runId = `webui-new-session-${Date.now()}`;
 const artifactDir = path.join(repo, 'artifacts', 'webui-online', runId);
 
