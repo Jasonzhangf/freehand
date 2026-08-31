@@ -4023,11 +4023,6 @@ body[data-layout-shape="tablet_portrait"] .composer-command-menu button {
   font-size: 13px;
 }
 
-body[data-mobile-command-menu="open"] .mobile-drawer-scrim {
-  opacity: 1;
-  pointer-events: auto;
-}
-
 body[data-layout-shape="phone_landscape"] .workspace {
   display: grid;
   grid-template-rows: minmax(0, 1fr);
@@ -4629,19 +4624,28 @@ body[data-layout-shape="tall_phone"] .composer-input,
 body[data-layout-shape="tablet_portrait"] .composer-input {
   min-height: 46px;
   max-height: 12svh;
-  padding: 8px 9px 8px 46px;
+  padding: 8px 9px 8px 40px;
   border-radius: 13px;
   font-size: 12px;
   line-height: 1.42;
 }
 
+body[data-layout-shape="phone_portrait"] .composer-input-shell,
+body[data-layout-shape="tall_phone"] .composer-input-shell,
+body[data-layout-shape="tablet_portrait"] .composer-input-shell {
+  position: relative;
+  min-height: 46px;
+  overflow: visible;
+}
+
 body[data-layout-shape="phone_portrait"] .composer-attach-image,
 body[data-layout-shape="tall_phone"] .composer-attach-image,
 body[data-layout-shape="tablet_portrait"] .composer-attach-image {
-  left: 5px;
-  bottom: 5px;
-  width: 32px;
-  height: 32px;
+  left: 6px;
+  bottom: 6px;
+  z-index: 3;
+  width: 28px;
+  height: 28px;
   border-radius: 10px;
 }
 

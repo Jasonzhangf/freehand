@@ -1998,10 +1998,24 @@ mod tests {
         assert!(html.contains("id=\"attachment-tray\""));
         assert!(html.contains("class=\"composer-input-shell\""));
         assert!(html.contains("id=\"composer-command-menu-button\""));
+        assert!(html.contains(">功能</button>"));
         assert!(html.contains("id=\"composer-command-menu\""));
-        assert!(html.contains("data-composer-command=\"/help\""));
+        assert!(html.contains("data-composer-action=\"new\""));
+        assert!(html.contains("data-composer-action=\"task\""));
+        assert!(html.contains("data-composer-action=\"settings\""));
+        assert!(html.contains("data-composer-action=\"sessions\""));
+        assert!(html.contains("data-composer-action=\"reload\""));
+        assert!(html.contains("data-composer-action=\"attachments\""));
         assert!(html.contains("data-composer-action=\"tools\""));
         assert!(html.contains("data-composer-action=\"compact\""));
+        assert!(!html.contains("data-composer-command=\"/success\""));
+        assert!(!html.contains("data-composer-command=\"/failure\""));
+        assert!(!html.contains("data-composer-command=\"/cancel\""));
+        assert!(!html.contains("成功样例"));
+        assert!(!html.contains("失败样例"));
+        assert!(!html.contains("Slash 命令"));
+        assert!(!html.contains(">命令</button>"));
+        assert!(html.contains(">操作空闲</div>"));
         assert!(!html.contains("work-context-tags"));
         assert!(!html.contains("topbar-strip"));
         assert!(!html.contains("slave-drawer"));
@@ -2416,6 +2430,15 @@ mod tests {
         assert!(webui_css_body.contains("body[data-layout-shape=\"phone_portrait\"][data-composer-focused=\"true\"] .composer-control-strip"));
         assert!(webui_css_body.contains(".composer-input-shell"));
         assert!(webui_css_body.contains(".composer-attach-image"));
+        assert!(
+            webui_css_body
+                .contains("body[data-layout-shape=\"phone_portrait\"] .composer-input-shell")
+        );
+        assert!(webui_css_body.contains("padding: 8px 9px 8px 40px"));
+        assert!(
+            webui_css_body
+                .contains("body[data-layout-shape=\"phone_portrait\"] .mobile-bottom-entries")
+        );
         assert!(webui_css_body.contains(".composer-command-menu"));
         assert!(webui_css_body.contains(".composer-command-menu-button"));
         assert!(
@@ -2552,6 +2575,8 @@ mod tests {
         assert!(legacy_body.contains("function setComposerCommandMenuOpen"));
         assert!(legacy_body.contains("composerCommandMenuButton"));
         assert!(legacy_body.contains("data-composer-action"));
+        assert!(!legacy_body.contains("loadSamplePrompt"));
+        assert!(!legacy_body.contains("definitely-missing-freehand-task"));
         assert!(legacy_body.contains("__freehandOpenAndroidComposerForReadyHost"));
         assert!(legacy_body.contains("openAndroidComposerForReadyHost"));
         assert!(legacy_body.contains("scheduleAndroidComposerFocus"));

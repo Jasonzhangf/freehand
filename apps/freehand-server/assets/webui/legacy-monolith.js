@@ -213,13 +213,6 @@ const contextStatThinking = document.getElementById("context-stat-thinking");
 const contextStatContext = document.getElementById("context-stat-context");
 const contextStatCompacted = document.getElementById("context-stat-compacted");
 
-const samplePrompts = {
-  success:
-    "Answer with one short sentence and a valid Freehand completion schema. Do not call tools.",
-  failure:
-    'Call the task tool exactly once with {"op":"query","task_id":"definitely-missing-freehand-task"}, then use the failed tool result to continue and report success through the required Freehand completion schema.',
-};
-
 const selectedSessionStorageKey = "freehand-webui-selected-session";
 const selectedCwdStorageKey = "freehand-webui-selected-cwd";
 const attachmentDraftStorageKey = "freehand-webui-attachment-drafts-v1";
@@ -238,7 +231,7 @@ const liveTruthWatchdogIntervalMs = 10000;
 const headerWorkerRailStatusRefreshMs = 3000;
 const workerTranscriptRefreshRetryDelayMs = 3000;
 const shortcutHelp =
-  "快捷键：Cmd/Ctrl+Enter 发送 · Esc 停止/清空 · Cmd/Ctrl+R 刷新 · Cmd/Ctrl+K 聚焦输入框 · Cmd/Ctrl+1 成功样例 · Cmd/Ctrl+2 失败样例。Slash：/help /new /task /设置 /cwd /sessions /reload /success /failure /cancel /clear /附件 /model";
+  "快捷键：Cmd/Ctrl+Enter 发送 · Esc 停止/清空 · Cmd/Ctrl+R 刷新服务 · Cmd/Ctrl+K 聚焦输入框。输入框菜单提供新建、配置、刷新、附件、工具注册表和压缩上下文。";
 const initialSelectedSessionId = window.localStorage.getItem(selectedSessionStorageKey) || null;
 const initialSelectedCwd = window.localStorage.getItem(selectedCwdStorageKey) || "";
 
@@ -2898,7 +2891,7 @@ function commandReceiptStatus(receipt) {
   const rawStatus = `${(receipt && receipt.dispatch_status) || ""}`.trim();
   const statusCode = commandReceiptCode(rawStatus);
   if (!statusCode) {
-    return "不支持的命令回执：缺少派发状态";
+    return "不支持的操作回执：缺少派发状态";
   }
   switch (statusCode) {
     case "reason_live_turn_cancel_requested":
@@ -2941,11 +2934,11 @@ function commandReceiptStatus(receipt) {
     case "master_poll_recorded":
       return "任务已更新";
     case "queued_by_static_dispatch_port":
-      return "命令已排队";
+      return "操作已排队";
     case "memory_entry_persisted":
       return "已加入记忆";
     default:
-      return `不支持的命令回执：${truncateForChat(statusCode, 80)}`;
+      return `不支持的操作回执：${truncateForChat(statusCode, 80)}`;
   }
 }
 
@@ -5790,6 +5783,39 @@ function runComposerCommandMenuItem(item) {
       setCommandStatus(`工具注册表面板打开失败: ${error.message}`, { stickyMs: 9000 });
       renderToolsDashboard();
     });
+    return;
+  }
+  if (action === "new") {
+    openNewSessionDialog("conversation");
+    return;
+  }
+  if (action === "task") {
+    openNewSessionDialog("task");
+    return;
+  }
+  if (action === "settings") {
+    openSettingsPanel();
+    return;
+  }
+  if (action === "sessions") {
+    setCommandStatus("正在刷新会话...", { stickyMs: 3000 });
+    refreshSessions()
+      .then(() => refreshSelectedSession())
+      .then(() => setCommandStatus("会话已刷新", { stickyMs: 5000 }))
+      .catch((error) => setCommandStatus(`会话刷新失败: ${error.message}`, { stickyMs: 8000 }));
+    return;
+  }
+  if (action === "reload") {
+    setCommandStatus("正在刷新服务状态...", { stickyMs: 3000 });
+    refreshAllProtocolState()
+      .then(() => setCommandStatus("服务状态已刷新", { stickyMs: 5000 }))
+      .catch((error) => setCommandStatus(`服务刷新失败: ${error.message}`, { stickyMs: 8000 }));
+    return;
+  }
+  if (action === "attachments") {
+    state.attachmentsPreviewOpen = !state.attachmentsPreviewOpen;
+    renderAttachmentTray();
+    setCommandStatus(`附件 ${state.attachmentsPreviewOpen ? "预览已显示" : "预览已收起"}: ${attachmentSummary()}`, { stickyMs: 5000 });
     return;
   }
   if (action === "compact") {
@@ -10178,9 +10204,6 @@ async function runSlashCommand(rawText) {
     "/cwd",
     "/sessions",
     "/reload",
-    "/success",
-    "/failure",
-    "/cancel",
     "/clear",
     "/附件",
     "/model",
@@ -10233,12 +10256,6 @@ async function runSlashCommand(rawText) {
       setCommandStatus("正在刷新服务状态...", { stickyMs: 3000 });
       await refreshAllProtocolState();
       setCommandStatus("服务状态已刷新", { stickyMs: 5000 });
-      return true;
-    case "/success":
-      loadSamplePrompt("success");
-      return true;
-    case "/failure":
-      loadSamplePrompt("failure");
       return true;
     case "/cancel":
       await cancelActiveTurn();
@@ -10326,7 +10343,7 @@ composerForm.addEventListener("submit", async (event) => {
       return;
     }
   } catch (error) {
-    setCommandStatus(`斜杠命令失败: ${error.message}`, { stickyMs: 8000 });
+    setCommandStatus(`功能输入失败: ${error.message}`, { stickyMs: 8000 });
     return;
   }
   let submitMetadata = { attachments: [] };
@@ -10403,16 +10420,6 @@ cancelButton.addEventListener("click", () => {
     setCommandStatus(`取消失败: ${error.message}`);
   });
 });
-
-function loadSamplePrompt(kind) {
-  const prompt = samplePrompts[kind];
-  if (!prompt) {
-    return;
-  }
-  composerInput.value = prompt;
-  composerInput.focus();
-  setCommandStatus(`${kind} scenario loaded; press 发送 to run`, { stickyMs: 5000 });
-}
 
 function renderDebugDetailsToggle() {
   if (!debugDetailsToggle) {
@@ -10961,16 +10968,6 @@ document.addEventListener("keydown", (event) => {
       event.preventDefault();
       composerInput.focus();
       setCommandStatus("输入框已聚焦", { stickyMs: 3000 });
-      return;
-    }
-    if (usesModifier && event.key === "1") {
-      event.preventDefault();
-      loadSamplePrompt("success");
-      return;
-    }
-    if (usesModifier && event.key === "2") {
-      event.preventDefault();
-      loadSamplePrompt("failure");
       return;
     }
     return;

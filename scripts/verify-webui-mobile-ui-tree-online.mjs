@@ -8,6 +8,7 @@ const chromePath = process.env.FREEHAND_WEBUI_CHROME ||
   '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
 const debugPort = Number.parseInt(process.env.FREEHAND_WEBUI_DEBUG_PORT || '9247', 10);
 const baseUrl = normalizedBaseUrl(process.env.FREEHAND_WEBUI_BASE_URL || 'http://127.0.0.1:4042/');
+const baseOrigin = new URL(baseUrl).origin;
 const adpUrl = process.env.FREEHAND_WEBUI_ADP_URL || adpUrlFromBaseUrl(baseUrl);
 const adpAuthToken = process.env.FREEHAND_ADP_AUTH_TOKEN || '';
 const adpProtocolVersion = 4;
@@ -48,7 +49,7 @@ const localAgentTargets = [
   },
   {
     agentId: 'master',
-    origin: 'http://127.0.0.1:4042',
+    origin: baseOrigin,
     label: 'Master',
     markerSessionId: 'webui-local-agent-namespace-master',
     authEnvFile: path.join(os.homedir(), '.freehand', 'daemonS.env'),

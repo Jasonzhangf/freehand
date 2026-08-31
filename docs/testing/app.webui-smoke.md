@@ -72,10 +72,10 @@
   - opening or closing the mobile Agent sheet is presentation-only and preserves selected session, transcript, composer draft, pending submit, scroll anchor, and lifecycle clocks
   - WebUI default command/query/status path uses ADP WebSocket `/adp`; the client sends a versioned first-frame handshake, waits for `handshake_accepted`, and only then sends query/subscribe/command frames; latest-turn SSE is consumed as a display-refresh mirror
   - WebUI command/query/subscribe payloads are created through the Rust-generated `webui/generated/adp-protocol.js` constructors, not handwritten frame-class wrappers
-  - WebUI exposes hidden success/failure diagnostic prompts through slash commands and keyboard shortcuts while preserving the normal ADP submit path; persistent Success/Failure composer buttons must not render
+  - WebUI composer menu exposes only normal product actions through the existing protocol path; debug/sample scenario actions must not render as product commands
   - WebUI Android ready-host composer entry waits for canonical ADP protocol refresh, opens the valid persisted selected session or protocol-owned new conversation, and focuses the composer only in `SessionDetail`; it must not auto-send input, show a Home composer, or create a native input fallback
-- WebUI control strip and session rail expose session switching, `/new` New dialog, `/task` task mode in that dialog, refresh, cwd selection, model selection, attachment upload, file/image/video preview, slash commands, and keyboard shortcuts as input-layer affordances
-- WebUI composer image attachment entry stays visible at the lower-left of the input on desktop and phone focus states, and the command port exposes built-in tools plus Slash commands with compression context as one action, not the only action
+  - WebUI control strip and session rail expose session switching, `/new` New dialog, `/task` task mode in that dialog, refresh, cwd selection, model selection, attachment upload, file/image/video preview, supported slash commands, and keyboard shortcuts as input-layer affordances
+  - WebUI composer image attachment entry stays visible at the lower-left of the input on desktop and phone focus states, and the command port exposes normal product actions with context compaction as one action, not the only action
 - WebUI mobile command-port menu must open from the command button left edge inside the viewport, stay above the composer, remain scrollable within the phone height, and must not create horizontal overflow
 - WebUI settings shell exposes only coarse top-level entries for 模型, 智能体运行时, 连接, 可观测性, 外观, and 关于 on initial open. Provider rows, registry cards, forms, primary/fallback selectors, model-group controls, Worker-limit controls, APK controls, and Diagnostics rows must all remain hidden until the matching owner page is opened through explicit drilldown navigation.
 - WebUI settings drilldown has an explicit return path at every detail level. 模型 first opens a second-level menu, then separates 模型服务配置, 模型服务切换与策略, and 模型组 into three independently visible pages; no completed detail page may remain visible after navigating to another page.
@@ -139,9 +139,9 @@
 - WebUI asset and online smoke must prove user-visible status text, failure cards, and verifier-submitted diagnostic prompts do not expose `ADP`; protocol naming is allowed only in internal code, docs, CLI, and test harness output
 - `node scripts/lib/adp-verifier-client.test.mjs` locks the shared verifier client positively for accepted v4 handshake/query settlement and negatively for rejected handshake frames; it also distinguishes valid empty SessionListPage projections (including an omitted terminal-page `next_cursor`) from missing/malformed sessions/page metadata.
   - WebUI hidden failure diagnostic prompts must stay within the active Master tool surface: current-cwd workspace tools such as `read_file` should succeed, so use cross-cwd workspace-boundary or 不可用-tool samples when a failed tool card is needed
-  - WebUI hidden success/failure diagnostic prompt asset smoke and no persistent sample-button smoke
-  - WebUI keyboard shortcut smoke for submit, cancel, refresh, focus composer, and sample 加载中
-  - WebUI slash command smoke for `/help`, `/sessions`, `/reload`, `/success`, `/failure`, `/cancel`, and `/clear`
+  - WebUI composer product-action asset smoke for new conversation/task, permission settings, session/service refresh, attachment preview, tool registry, and context compaction
+  - WebUI keyboard shortcut smoke for submit, cancel, refresh, and focus composer
+  - WebUI slash command smoke for supported operational commands such as `/help`, `/sessions`, `/reload`, `/cancel`, and `/clear`; diagnostic fixtures remain verifier-owned and are not menu actions
   - WebUI attachment control smoke for multi-image add/remove/preview and session-scoped draft retention
   - WebUI attachment success-clear smoke
   - WebUI attachment failure-retain smoke
@@ -304,7 +304,7 @@
 - WebUI JS asset smoke locks that latest-turn merging must not key only on `turn_id`; WebUI replacement requires the same `session_id` plus `turn_id`, and must not use visible `user_text` as identity because live provider retry projections can arrive before the transcript projection materializes the user row for the same turn
 - WebUI JS asset smoke locks Android/mobile foreground recovery: `pageshow`, window `focus`, `online`, and visible `visibilitychange` events call a throttled `refreshProtocolStateAfterForeground`, which re-queries 权威真源 while preserving selected/pending session state and never renders clean empty conversation merely because the page resumed.
 - WebUI JS asset smoke locks that tool card rendering consumes protocol `display` fields, including `parameter_summary`, and does not implement category parsing from raw tool argument/result text
-- `scripts/verify-webui-mobile-command-tool-online.mjs` checks copy action, copied owner-projected result text, tool-before-final DOM order, command-menu visibility, and image attachment button geometry at a mobile viewport
+- `scripts/verify-webui-mobile-command-tool-online.mjs` checks copy action, copied owner-projected result text, tool-before-final DOM order, normal product command-menu actions, and image attachment button geometry at a mobile viewport
   - WebUI JS asset smoke locks chronological per-round rendering so `runtime-turn-N` and `runtime-turn-N-rM` render as separate lifecycle cards instead of one all-in summary card
   - WebUI JS asset smoke locks internal 运行时 continuation prompt hiding and raw completion-schema stripping while preserving Final card projection at the end of the round sequence
   - WebUI JS asset smoke locks that `/new` opens the New dialog, new conversation routes through `CreateSession` without cwd, new task requires a selected or typed cwd and routes through `CreateSession` with cwd, optional `SubmitUserInput.cwd` forwarding remains available, and the old selected-session/no-turns system chat card stays absent
@@ -341,7 +341,7 @@
     fixture gap, not a UI fallback permission
 - project black-box impact:
   - app boundary proves WebUI can consume `freehand-ui-protocol` without owning reason/provider semantics
-  - app boundary gives 诊断 a repeatable way to generate success/failure ADP scenarios from WebUI without a second transport path or persistent composer buttons
+- app boundary gives the WebUI a repeatable product-action path without a second transport path or persistent debug/sample composer buttons
   - app boundary proves it does not need direct reason/provider/node/config imports
   - app boundary proves the 定时任务面板 can consume 运行时 timer owner
     projections and command receipts without becoming timer schedule, ledger,
@@ -381,9 +381,9 @@
   - WebUI New dialog action controls keep equal mobile sizing and safe-area clearance through the server asset smoke plus the real mobile dialog screenshot matrix
   - `node scripts/verify-webui-new-session-online.mjs` reads `WEBUI_ASSET_VERSION` from `apps/freehand-server/src/assets.rs`, so served-version verification stays on the single server-owned truth instead of a stale hard-coded string
   - `node scripts/verify-webui-new-session-online.mjs` reuses `FREEHAND_ADP_AUTH_TOKEN` as the Bearer header for direct ADP checks, matching the mobile verifier contract
-  - WebUI root shell intentionally does not expose persistent success/failure buttons, while WebUI JS still carries paired diagnostic prompts for slash commands and shortcuts
+- WebUI root shell and WebUI JS do not expose success/failure sample prompts; the composer menu exposes only normal product actions and diagnostic fixtures remain verifier-owned
   - WebUI terminal display defaults to summary-only; evidence, learned notes, and completion reason require debug details to be enabled
-  - WebUI JS must keep shortcuts and slash commands as input-layer affordances that call existing ADP query/command helpers instead of 会修改 protocol truth directly
+  - WebUI JS must keep product actions as input-layer affordances that call existing ADP query/command helpers instead of 会修改 protocol truth directly
 - WebUI session creation and selection must remain input-layer affordances over ADP/query state, not local truth writers
 - WebUI selected empty-session rendering now shows only the clean empty-state prompt and does not leak prior session turns or generic system feedback into a new session
   - WebUI release online verifier now clears old sessions by ADP `DeleteSession` before proving `/new`, preventing stale persisted sessions from masking or reproducing clean-session failures
