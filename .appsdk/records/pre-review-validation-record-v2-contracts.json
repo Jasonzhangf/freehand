@@ -4,31 +4,31 @@
   "issue_id": "v2-contracts-m1a-20260831",
   "module_id": "v2-contracts",
   "fix_candidate_id": "FIX-20260831-FREEHAND-V2-CONTRACTS-M1A-001",
-  "candidate_commit": "4efeace301f028b2e0f8fd9869a57a151c2ee801",
-  "candidate_tree_hash": "a93b2ed5ac897ee1c21a392dca49a48526d2de40",
-  "artifact_hash": "sha256:06c11d6da0cf661802fe2db9a38db7e26edb7aa2a174ca127c97a46f48a046fa",
+  "candidate_commit": "44a8111190de5acee5b2407e8c81a181dca726e4",
+  "candidate_tree_hash": "193783d08e458bdb130dce3751358ef1e4d19c51",
+  "artifact_hash": "sha256:34a850ac60a64d3cf9d87eca8fce3f1d7f1076d1836cd8712f1b37df376a98a7",
   "whitebox_producer": {
     "adapter": "cargo-test",
-    "identity": "freehand-v2-contracts-m1a-whitebox"
+    "identity": "freehand-v2-contracts-m1a-r2-whitebox"
   },
   "whitebox_evidence_ids": [
-    "ev-v2-contracts-m1a-whitebox-20260831"
+    "ev-v2-contracts-m1a-r2-whitebox-20260831"
   ],
   "blackbox_evidence_ids": [
-    "ev-v2-contracts-m1a-blackbox-20260831"
+    "ev-v2-contracts-m1a-r2-blackbox-20260831"
   ],
   "deployment": {
-    "environment_id": "local-freehand-v2-contracts-m1a-20260831",
-    "install_receipt_id": "ev-v2-contracts-m1a-install-20260831",
-    "restart_receipt_id": "ev-v2-contracts-m1a-restart-20260831",
+    "environment_id": "local-freehand-v2-contracts-m1a-r2-20260831",
+    "install_receipt_id": "ev-v2-contracts-m1a-r2-install-20260831",
+    "restart_receipt_id": "ev-v2-contracts-m1a-r2-restart-20260831",
     "entrypoint": "temporary installed v2-contracts-public NDJSON stdin/stdout probe",
     "producer": {
       "adapter": "installed-artifact-probe",
-      "identity": "freehand-v2-contracts-m1a-deployed-probe"
+      "identity": "freehand-v2-contracts-m1a-r2-deployed-probe"
     },
-    "observed_at": "2026-08-31T10:32:07Z"
+    "observed_at": "2026-08-31T14:00:26Z"
   },
   "source_unchanged": true,
   "result": "pass",
-  "created_at": "2026-08-31T10:32:07Z"
+  "created_at": "2026-08-31T14:00:27Z"
 }
