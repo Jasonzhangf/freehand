@@ -140,7 +140,7 @@
       "build": {
         "args": [
           "-c",
-          "cargo test --manifest-path playground/experiments/v2/contracts/Cargo.toml --test v2_contract_boundary && mkdir -p generated/modules/v2-contracts/lib && printf 'v2-contracts contract artifact\\n' > generated/modules/v2-contracts/lib/v2-contracts.module"
+          "cargo test --manifest-path playground/experiments/v2/contracts/Cargo.toml --test v2_contract_boundary && cargo build --manifest-path playground/experiments/v2/contracts/Cargo.toml --bin v2-contracts-public && mkdir -p generated/modules/v2-contracts/lib && cp playground/experiments/v2/contracts/target/debug/v2-contracts-public generated/modules/v2-contracts/lib/v2-contracts.module"
         ],
         "program": "sh",
         "working_directory": "."
@@ -179,7 +179,7 @@
           "playground/experiments/v2/contracts/**",
           "tests/v2/contracts/**"
         ],
-        "minimum_test_count": 7,
+        "minimum_test_count": 8,
         "ordinary_mode_after_freeze": "disabled",
         "reenable_on": [
           "source_change",
