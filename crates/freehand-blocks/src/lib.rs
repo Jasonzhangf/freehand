@@ -1908,6 +1908,7 @@ fn context_segment_kind_label(kind: ContextSegmentKind) -> &'static str {
         ContextSegmentKind::InstructionCapability => "instruction_capability",
         ContextSegmentKind::TaskContract => "task_contract",
         ContextSegmentKind::TaskSpaceSnapshot => "task_space_snapshot",
+        ContextSegmentKind::CurrentTime => "current_time",
         ContextSegmentKind::AttentionResolution => "attention_resolution",
         ContextSegmentKind::SubagentConclusion => "subagent_conclusion",
         ContextSegmentKind::ToolResultEvidence => "tool_result_evidence",
@@ -2054,6 +2055,11 @@ fn expected_segment_contract(
             ContextCachePolicy::NoCache,
             Some(ContextRole::Developer),
         ),
+        ContextSegmentKind::CurrentTime => (
+            ContextStability::TurnVolatile,
+            ContextCachePolicy::NoCache,
+            Some(ContextRole::Developer),
+        ),
         ContextSegmentKind::AttentionResolution => (
             ContextStability::TurnVolatile,
             ContextCachePolicy::NoCache,
@@ -2163,10 +2169,11 @@ fn segment_order_key(kind: ContextSegmentKind) -> u8 {
         ContextSegmentKind::SessionMemory => 5,
         ContextSegmentKind::SessionSummary => 6,
         ContextSegmentKind::TaskSpaceSnapshot => 7,
-        ContextSegmentKind::AttentionResolution => 8,
-        ContextSegmentKind::SubagentConclusion => 9,
-        ContextSegmentKind::ToolResultEvidence => 10,
-        ContextSegmentKind::UserTurnInput => 11,
+        ContextSegmentKind::CurrentTime => 8,
+        ContextSegmentKind::AttentionResolution => 9,
+        ContextSegmentKind::SubagentConclusion => 10,
+        ContextSegmentKind::ToolResultEvidence => 11,
+        ContextSegmentKind::UserTurnInput => 12,
     }
 }
 
@@ -2531,6 +2538,11 @@ mod tests {
                 ContextRole::Developer,
             ),
             ContextSegmentKind::TaskSpaceSnapshot => (
+                ContextStability::TurnVolatile,
+                ContextCachePolicy::NoCache,
+                ContextRole::Developer,
+            ),
+            ContextSegmentKind::CurrentTime => (
                 ContextStability::TurnVolatile,
                 ContextCachePolicy::NoCache,
                 ContextRole::Developer,

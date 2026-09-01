@@ -8360,7 +8360,7 @@ fn live_bridge_runs_single_shot_anthropic_provider_into_turn_truth() {
                     && record.write_node.pipeline_node == "RuntimeLive01ContextSegmentStarted"
             })
             .count(),
-        7
+        8
     );
     assert_eq!(
         metadata
@@ -8370,7 +8370,7 @@ fn live_bridge_runs_single_shot_anthropic_provider_into_turn_truth() {
                     && record.write_node.pipeline_node == "RuntimeLive01ContextSegmentCompleted"
             })
             .count(),
-        7
+        8
     );
     assert!(metadata.iter().any(|record| {
         record.owner.feature_id.as_str() == "provider.reason-live-bridge"
@@ -8427,11 +8427,11 @@ fn live_bridge_runs_single_shot_anthropic_provider_into_turn_truth() {
     );
     assert_eq!(
         runtime_debug_events(&debug_events, "RuntimeLive01ContextSegmentStarted").len(),
-        7
+        8
     );
     assert_eq!(
         runtime_debug_events(&debug_events, "RuntimeLive01ContextSegmentCompleted").len(),
-        7
+        8
     );
     assert_eq!(
         runtime_debug_events(&debug_events, "RuntimeLive01ContextPlanningCompleted").len(),

@@ -217,6 +217,9 @@
   - runtime white-box coverage locks OpenAI-compatible `responses` and `chat_completions` descriptor mapping through the same provider-neutral live bridge abstraction
   - runtime white-box coverage locks provider-hosted web_search capability selection for OpenAI Responses, disabled/unsupported combinations, search-only non-mixing, and clean_search Worker request shape
   - runtime white-box coverage now explicitly locks context economy for repaired logical turns: superseded failed repair attempts do not leak into rebuilt future prompt context
+  - runtime white-box coverage now locks a typed `CurrentTime` turn-volatile/no-cache
+    segment on every role/profile path, carrying UTC, local RFC3339, and Unix
+    seconds for search and relative-date reasoning
   - runtime white-box coverage now locks long operator task admission through the live bridge: `original-task` budget scales with actual prompt content and the provider request preserves the prompt tail sentinel
   - runtime white-box coverage now locks `original-task` as a `TaskContract` segment and proves second-round requests still carry control status and runtime tool guidance
   - runtime white-box coverage now locks master-autonomy tool-loop outcomes with `live_bridge_master_autonomy_success_dispatches_worker_and_closes_task`, `live_bridge_master_autonomy_execution_error_blocks_without_success_close`, and `live_bridge_master_autonomy_rejected_review_retries_and_closes`

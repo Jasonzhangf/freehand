@@ -30,6 +30,8 @@
 - upstream restore/context rebuild callers may pre-prune superseded repaired-failure rounds before passing session-memory segments to the planner; raw failure truth remains outside request content in ledgers/UI projections
 - it asks the planner owner path to classify context into stable and volatile segments
 - task contract segments are session-stable/cacheable and task-space snapshots are turn-volatile/no-cache, so task state can be visible without poisoning the stable cache prefix
+- current framework time is a turn-volatile/no-cache developer segment, so
+  relative-date/search context is explicit without changing stable cache truth
 - attention resolution segments are turn-volatile/no-cache developer context,
   ordered after the refreshed task-space snapshot, and carry only typed changed
   truth plus resume identity for the original foreground turn

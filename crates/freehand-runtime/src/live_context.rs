@@ -4,6 +4,7 @@ use std::sync::mpsc;
 use std::thread;
 use std::time::{Duration, Instant};
 
+use chrono::{Local, Utc};
 use freehand_blocks::completion_schema_guidance;
 use freehand_contracts::{
     AgentId, ContextCachePolicy, ContextProvenance, ContextRole, ContextSegment, ContextSegmentId,
@@ -551,6 +552,33 @@ pub(crate) fn original_task_segment(prompt: &str) -> ContextSegment {
     }
 }
 
+fn current_time_segment() -> ContextSegment {
+    let now_utc = Utc::now();
+    let now_local = now_utc.with_timezone(&Local);
+    let content = format!(
+        "Current framework time (use this for relative dates and search recency):\n\
+- UTC: {}\n\
+- Local: {}\n\
+- Unix seconds: {}",
+        now_utc.to_rfc3339(),
+        now_local.to_rfc3339(),
+        now_utc.timestamp(),
+    );
+    ContextSegment {
+        segment_id: ContextSegmentId::new("current-time"),
+        kind: ContextSegmentKind::CurrentTime,
+        stability: ContextStability::TurnVolatile,
+        cache_policy: ContextCachePolicy::NoCache,
+        role: ContextRole::Developer,
+        token_budget: runtime_prompt_segment_token_budget(&content),
+        content,
+        provenance: ContextProvenance {
+            source: "freehand_runtime".to_owned(),
+            reference: Some("harness_clock".to_owned()),
+        },
+    }
+}
+
 #[allow(clippy::too_many_arguments)]
 pub(crate) fn base_live_context_segments(
     original_prompt: &str,
@@ -608,6 +636,11 @@ where
     {
         segments.push(segment);
     }
+    segments.push(build_required_context_segment(
+        "current-time",
+        &mut observe,
+        || Ok(current_time_segment()),
+    )?);
     segments.push(build_required_context_segment(
         "runtime-tool-guidance",
         &mut observe,
@@ -725,10 +758,33 @@ pub(crate) fn runtime_prompt_segment_token_budget(content: &str) -> u32 {
 #[cfg(test)]
 mod tests {
     use super::{
-        master_task_orchestration_guidance, search_evidence_contract_guidance,
-        search_evidence_contract_segment, worker_execution_guidance,
+        base_live_context_segments, master_task_orchestration_guidance,
+        search_evidence_contract_guidance, search_evidence_contract_segment,
+        worker_execution_guidance,
     };
-    use freehand_contracts::ContextSegmentKind;
+    use freehand_contracts::{AgentId, ContextSegmentKind};
+    use std::path::Path;
+
+    #[test]
+    fn base_context_includes_current_time_for_search_reasoning() {
+        let segments = base_live_context_segments(
+            "Find current information",
+            super::LiveReasonExecutionRole::Worker,
+            super::LiveReasonExecutionProfile::CleanSearch,
+            None,
+            None,
+            Path::new("/tmp/freehand-runtime-test"),
+            None,
+            &AgentId::new("worker-test"),
+        )
+        .expect("base context");
+        let current_time = segments
+            .iter()
+            .find(|segment| segment.kind == ContextSegmentKind::CurrentTime)
+            .expect("current time context");
+        assert!(current_time.content.contains("UTC"));
+        assert!(current_time.content.contains("Unix seconds"));
+    }
 
     #[test]
     fn worker_guidance_locks_exact_tool_surface_and_workspace_paths() {

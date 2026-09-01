@@ -288,6 +288,11 @@ mod tests {
                 ContextCachePolicy::NoCache,
                 ContextRole::Developer,
             ),
+            ContextSegmentKind::CurrentTime => (
+                ContextStability::TurnVolatile,
+                ContextCachePolicy::NoCache,
+                ContextRole::Developer,
+            ),
             _ => panic!("unsupported stable segment kind"),
         };
         ContextSegment {

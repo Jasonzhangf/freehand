@@ -43,6 +43,10 @@
   newest master-visible events, so the model can see known tasks, configured
   Worker, valid status filters, blocked/review-ready ids, and recent framework
   events before it calls task query/list/history tools
+- every live round also receives a runtime-owned volatile `CurrentTime` segment
+  containing UTC RFC3339, local RFC3339, and Unix seconds; search reasoning must
+  use this harness clock for relative dates and recency instead of assuming the
+  model knows wall-clock time
 - multi-round carryover retains completion contract, control status contract, runtime tool guidance, and `TaskContract` before volatile `previous-visible-output` or schema feedback; runtime must not impose arbitrary small input caps such as 512 tokens on model-visible context, while the planner remains responsible for rejecting context that truly exceeds the model/context policy
 - live context segment construction is owned by
   `crates/freehand-runtime/src/live_context.rs`; `src/lib.rs` remains the live
