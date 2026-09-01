@@ -43,7 +43,8 @@
     "claim persists one execution id and lease heartbeat",
     "task target cwd expands a leading ~, canonicalizes through symlinks, and becomes the locked Worker execution root",
     "Worker live reasoning receives the requested target_cwd, canonical locked workspace, and path-preflight instructions for absolute paths, ~, and symlinks; target_cwd preflight failures include shared path diagnostics with symlink ancestors, canonical nearest parent, and missing suffix",
-    "while Worker execution is active, the runner monitors same-task/same-execution WorkerControl pause truth and wires applied pause into LiveReasonCancelToken so the live bridge stops only at existing safe points",
+    "while Worker execution is active, the runner monitors same-task/same-execution WorkerControl pause/cancel truth and wires applied state into LiveReasonCancelToken so the live bridge stops only at existing safe points",
+    "while Worker execution is active, the runner consumes queued safe-point WorkerControl question/constraint/checkpoint/submission events before the next provider request and records model_execution progress before provider IO",
     "Worker provider requests expose governed workspace tools but exclude recursive `task` and unrestricted shell tools",
     "Master provider guidance binds dispatch to the ordered configured Worker id set, excludes historical AgentBoard entries as production targets, forbids task lifecycle calls in Worker task content, and requires path/symlink/canonical evidence for external cwd delegation",
     "Runtime rejects a Master user-session claim=waiting unless current owner truth has an open same-session child task or an active/running source timer; terminal child history plus no source timer is not a self-waking lifecycle and user-choice waits must close as blocked/user-needed instead of ToolPending",
@@ -290,13 +291,35 @@
     },
     {
       "step": "05a",
-      "symbol_path": "WorkerPauseMonitor::start / worker_pause_requested",
+      "symbol_path": "WorkerPauseMonitor::start / worker_pause_requested / worker_cancel_requested",
       "file_path": "crates/freehand-runtime/src/worker_runner.rs",
-      "responsibility": "poll same-task/same-execution WorkerControl ledger truth and set the live cancel token when latest task-state control is applied pause; after execution, suppress stale review/block/heartbeat overwrite while TaskPaused remains truth",
+      "responsibility": "poll same-task/same-execution WorkerControl ledger truth, set the live cancel token for applied pause or cancel, and suppress stale review/block/heartbeat overwrite after external terminalization",
       "input_semantic": "task id, execution id, and persisted WorkerControl events",
-      "output_semantic": "cooperative live pause at safe point plus idle runner outcome",
+      "output_semantic": "cooperative live pause/cancel at safe point plus idle runner outcome",
       "caller": "ProductionWorkerRunner::run_once",
       "callee": "task owner and live bridge cancel token",
+      "binding_status": "bound"
+    },
+    {
+      "step": "05b",
+      "symbol_path": "worker_live_request / worker_control_prompt_context / render_worker_control_context",
+      "file_path": "crates/freehand-runtime/src/worker_runner.rs",
+      "responsibility": "read queued safe-point WorkerControl events from Task Center truth and render their question, constraint, checkpoint, and submission semantics into the next Worker model request",
+      "input_semantic": "task id, execution id, and queued WorkerControl events",
+      "output_semantic": "Worker live request with explicit Master control context and no control metadata payload mixing",
+      "caller": "ProductionWorkerRunner::run_once",
+      "callee": "TaskRuntime::query_worker_control_events / Worker live bridge",
+      "binding_status": "bound"
+    },
+    {
+      "step": "05c",
+      "symbol_path": "TaskRuntime::record_execution",
+      "file_path": "crates/freehand-runtime/src/worker_runner.rs",
+      "responsibility": "persist model_execution progress after the Worker request is built and before provider IO so Master status queries observe active Worker execution",
+      "input_semantic": "task id, execution id, Worker turn id, and execution progress evidence",
+      "output_semantic": "event-backed running execution progress",
+      "caller": "ProductionWorkerRunner::run_once",
+      "callee": "task owner",
       "binding_status": "bound"
     },
     {

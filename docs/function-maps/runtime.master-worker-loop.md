@@ -180,6 +180,10 @@
   canonical parent, and missing suffix before the Master asks the user for
   clarification
 - while a Worker execution is active, the runner monitors persisted `WorkerControlOp::Pause` truth for the same task/execution and wires it into `LiveReasonCancelToken`; the live bridge may only stop at its existing provider/tool/terminal safe points
+- while a Worker execution is active, the runner also consumes queued safe-point
+  WorkerControl events before each provider request, renders their control
+  context into the Worker prompt, and records `TaskRuntime::record_execution`
+  before provider IO so Master status can observe active execution progress
 - worker provider requests expose governed workspace tools but exclude recursive `task` and unrestricted shell tools
 - Master provider guidance binds dispatch to the ordered configured Worker id set,
   rejects historical AgentBoard entries as production dispatch targets, and

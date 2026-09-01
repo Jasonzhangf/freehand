@@ -24,6 +24,10 @@
 - op-specific validation happens before any write: `ask_at_safe_point` requires `question`, `add_constraint` requires `constraint`
 - framework-answerable `query_status` reads Task Center, AgentSnapshot, and AgentLifecycle truth, then writes an auditable control event
 - safe-point requests `ask_at_safe_point`, `add_constraint`, `request_checkpoint`, and `request_submission_now` write pending/deferred control events and do not mutate task status
+- the Worker runner consumes queued safe-point events at the next provider
+  request boundary and renders their question/constraint/checkpoint/submission
+  semantics as explicit model context; the Task Center ledger remains the
+  control truth
 - task-state controls `pause`, `resume`, and `cancel` route consequences through existing Task Center APIs first, then write an `applied` control event only after the Task Center consequence succeeds
 
 ## Response Mainline
