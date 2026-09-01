@@ -98,7 +98,7 @@ impl WorkerTurnExecutor for CancelDuringExecutionExecutor {
     fn execute(
         &self,
         _selected: &SelectedAgentConfig,
-        _request: LiveReasonTurnRequest,
+        request: LiveReasonTurnRequest,
     ) -> Result<WorkerTurnExecution, String> {
         let task_id = self
             .task_id
@@ -109,11 +109,16 @@ impl WorkerTurnExecutor for CancelDuringExecutionExecutor {
         let runtime =
             TaskRuntime::boot(&self.runtime_home, AgentId::new("master")).expect("task runtime");
         runtime
-            .cancel_task(TaskMutationRequest {
-                task_id,
-                actor: test_actor("master"),
-                watermark: test_watermark("external-cancel"),
-            })
+            .apply_worker_control(worker_control_request(
+                &task_id,
+                request
+                    .turn_id
+                    .as_str()
+                    .strip_prefix("worker-turn-")
+                    .expect("worker turn id carries execution id"),
+                WorkerControlOp::Cancel,
+                "external-cancel",
+            ))
             .expect("external cancel");
         Ok(WorkerTurnExecution {
             status: TerminalStatus::Success,
@@ -382,10 +387,10 @@ fn production_worker_runner_rejects_result_after_external_cancel_without_termina
     let task_id = seed_assigned_task(&runtime_home, Some(&workspace));
     executor.set_task_id(task_id.clone());
 
-    let error = runner
-        .run_once()
-        .expect_err("stale worker result after cancel must fail");
-    assert!(matches!(error, ProductionWorkerRunnerError::TaskCenter(_)));
+    assert_eq!(
+        runner.run_once().expect("cancelled worker tick"),
+        ProductionWorkerTickOutcome::Idle
+    );
 
     let runtime = TaskRuntime::boot(&runtime_home, AgentId::new("master")).expect("runtime");
     let task = runtime.query_task(&task_id).expect("task");
@@ -986,6 +991,142 @@ fn production_worker_runner_resume_reenters_reasoning_and_submits_review() {
     assert!(event_types.contains(&"TaskPaused".to_owned()));
     assert!(event_types.contains(&"TaskResumed".to_owned()));
     assert!(event_types.contains(&"TaskReviewSubmitted".to_owned()));
+
+    fs::remove_dir_all(runtime_home).expect("cleanup runtime");
+    fs::remove_dir_all(workspace).expect("cleanup workspace");
+}
+
+#[test]
+fn production_worker_runner_renders_queued_controls_before_provider_request() {
+    let runtime_home = temp_path("queued-controls-prompt");
+    let workspace = temp_path("queued-controls-prompt-workspace");
+    fs::create_dir_all(&workspace).expect("workspace");
+    let executor = Arc::new(StubExecutor::new(Ok(WorkerTurnExecution {
+        status: TerminalStatus::Success,
+        summary: "control-aware execution".to_owned(),
+        turn_id: TurnId::new("worker-turn-controls"),
+    })));
+    let runner = test_runner(runtime_home.clone(), executor.clone());
+    let task_id = seed_assigned_task(&runtime_home, Some(&workspace));
+    let execution_id = "exec-queued-controls".to_owned();
+    let runtime = TaskRuntime::boot(&runtime_home, AgentId::new("master")).expect("runtime");
+    runtime
+        .claim_next_task(TaskClaimRequest {
+            agent_id: AgentId::new("worker"),
+            execution_id: execution_id.clone(),
+            ttl_seconds: 300,
+            actor: test_actor("worker"),
+            watermark: test_watermark("queued-controls-claim"),
+        })
+        .expect("claim task");
+    let mut question = worker_control_request(
+        &task_id,
+        &execution_id,
+        WorkerControlOp::AskAtSafePoint,
+        "question",
+    );
+    question.question = Some("please report the current blocker".to_owned());
+    runtime
+        .apply_worker_control(question)
+        .expect("queue question");
+    let mut constraint = worker_control_request(
+        &task_id,
+        &execution_id,
+        WorkerControlOp::AddConstraint,
+        "constraint",
+    );
+    constraint.constraint = Some("do not change generated files".to_owned());
+    runtime
+        .apply_worker_control(constraint)
+        .expect("queue constraint");
+    runtime
+        .apply_worker_control(worker_control_request(
+            &task_id,
+            &execution_id,
+            WorkerControlOp::RequestCheckpoint,
+            "checkpoint-now",
+        ))
+        .expect("queue checkpoint");
+    runtime
+        .apply_worker_control(worker_control_request(
+            &task_id,
+            &execution_id,
+            WorkerControlOp::RequestSubmissionNow,
+            "submit-now",
+        ))
+        .expect("queue submission");
+    runtime
+        .apply_worker_control(worker_control_request(
+            &task_id,
+            &execution_id,
+            WorkerControlOp::Pause,
+            "pause-before-control-aware-run",
+        ))
+        .expect("pause before control-aware run");
+    runtime
+        .apply_worker_control(worker_control_request(
+            &task_id,
+            &execution_id,
+            WorkerControlOp::Resume,
+            "resume-before-control-aware-run",
+        ))
+        .expect("resume before control-aware run");
+
+    let outcome = runner.run_once().expect("worker tick");
+    assert!(matches!(
+        outcome,
+        ProductionWorkerTickOutcome::ReviewReady { .. }
+    ));
+    let prompt = &executor.prompts()[0];
+    assert!(prompt.contains("Master question: please report the current blocker"));
+    assert!(prompt.contains("Master constraint: do not change generated files"));
+    assert!(prompt.contains("Master requested a checkpoint at the next safe point."));
+    assert!(prompt.contains("Master requested submission at the next safe point."));
+    let history = TaskRuntime::boot(&runtime_home, AgentId::new("master"))
+        .expect("runtime")
+        .task_history(&task_id)
+        .expect("history");
+    assert!(
+        history
+            .iter()
+            .any(|event| event.event_type == "TaskExecutionRecorded")
+    );
+
+    fs::remove_dir_all(runtime_home).expect("cleanup runtime");
+    fs::remove_dir_all(workspace).expect("cleanup workspace");
+}
+
+#[test]
+fn production_worker_runner_cancel_does_not_publish_stale_result() {
+    let runtime_home = temp_path("cancel-before-result");
+    let workspace = temp_path("cancel-before-result-workspace");
+    fs::create_dir_all(&workspace).expect("workspace");
+    let executor = Arc::new(CancelDuringExecutionExecutor::new(runtime_home.clone()));
+    let runner = test_runner(runtime_home.clone(), executor.clone());
+    let task_id = seed_assigned_task(&runtime_home, Some(&workspace));
+    executor.set_task_id(task_id.clone());
+
+    assert_eq!(
+        runner.run_once().expect("cancelled worker tick"),
+        ProductionWorkerTickOutcome::Idle
+    );
+    let runtime = TaskRuntime::boot(&runtime_home, AgentId::new("master")).expect("runtime");
+    let history = runtime.task_history(&task_id).expect("history");
+    assert!(
+        history
+            .iter()
+            .any(|event| event.event_type == "TaskCancelled")
+    );
+    assert!(
+        !history
+            .iter()
+            .any(|event| event.event_type == "TaskReviewSubmitted")
+    );
+    assert!(
+        !history
+            .iter()
+            .any(|event| event.event_type == "TaskBlocked")
+    );
 
     fs::remove_dir_all(runtime_home).expect("cleanup runtime");
     fs::remove_dir_all(workspace).expect("cleanup workspace");

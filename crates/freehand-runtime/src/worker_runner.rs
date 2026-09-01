@@ -11,9 +11,10 @@ use freehand_contracts::{AgentId, SessionId, TerminalStatus, TraceId, TurnId};
 use freehand_task::{
     AgentCreateRequest, AgentLifecycleEvent, AgentLifecycleState, ExecutionFact, ExecutionFactKind,
     TaskActor, TaskAssignRequest, TaskClaimOutcome, TaskClaimRequest, TaskError,
-    TaskExecutionProfile, TaskId, TaskListQuery, TaskRuntime, TaskSnapshot, TaskStatus,
-    TaskWatermark, WorkerControlEvent, WorkerControlOp,
+    TaskExecutionProfile, TaskExecutionRecordRequest, TaskId, TaskListQuery, TaskRuntime,
+    TaskSnapshot, TaskStatus, TaskWatermark, WorkerControlEvent, WorkerControlOp,
 };
+use serde_json::Value;
 use thiserror::Error;
 
 use super::{
@@ -335,11 +336,26 @@ impl ProductionWorkerRunner {
             workspace,
             retry_kind,
             Some(Arc::clone(&pause_token)),
-        );
+        )?;
         let worker_turn_id = request.turn_id.clone();
+        task_runtime
+            .record_execution(TaskExecutionRecordRequest {
+                task_id: task.task_id.clone(),
+                phase: "model_execution".to_owned(),
+                summary: "Worker is executing the assigned model turn".to_owned(),
+                evidence: vec![
+                    format!("execution_id={execution_id}"),
+                    format!("turn_id={}", worker_turn_id.as_str()),
+                ],
+                actor: worker_actor(&self.worker_agent_id, Some(worker_turn_id.clone())),
+                watermark: worker_watermark(&execution_id, "model_execution"),
+            })
+            .map_err(task_center_error)?;
         let execution = self.executor.execute(&self.selected, request);
         let pause_monitor_result = pause_monitor.stop();
         let pause_requested = worker_pause_requested(&task_runtime, &task.task_id, &execution_id)?;
+        let cancel_requested =
+            worker_cancel_requested(&task_runtime, &task.task_id, &execution_id)?;
         pause_monitor_result?;
         if let Err(error) = heartbeat.stop() {
             if host_cancel.load(Ordering::Acquire) {
@@ -361,7 +377,7 @@ impl ProductionWorkerRunner {
                 error.to_string(),
             );
         }
-        if pause_requested {
+        if pause_requested || cancel_requested {
             return Ok(ProductionWorkerTickOutcome::Idle);
         }
         if host_cancel.load(Ordering::Acquire) {
@@ -371,6 +387,10 @@ impl ProductionWorkerRunner {
                 &execution_id,
                 &worker_turn_id,
             );
+        }
+
+        if worker_cancel_requested(&task_runtime, &task.task_id, &execution_id)? {
+            return Ok(ProductionWorkerTickOutcome::Idle);
         }
 
         match execution {
@@ -807,7 +827,8 @@ impl WorkerPauseMonitor {
                 match task_runtime.query_worker_control_events(&task_id, &execution_id) {
                     Ok(events) => {
                         if latest_task_state_worker_control(&events).is_some_and(|event| {
-                            event.op == WorkerControlOp::Pause && event.status == "applied"
+                            matches!(event.op, WorkerControlOp::Pause | WorkerControlOp::Cancel)
+                                && event.status == "applied"
                         }) {
                             pause_token.store(true, Ordering::SeqCst);
                             break;
@@ -886,6 +907,18 @@ fn worker_pause_requested(
         .is_some_and(|event| event.op == WorkerControlOp::Pause && event.status == "applied"))
 }
 
+fn worker_cancel_requested(
+    task_runtime: &TaskRuntime,
+    task_id: &TaskId,
+    execution_id: &str,
+) -> Result<bool, ProductionWorkerRunnerError> {
+    let controls = task_runtime
+        .query_worker_control_events(task_id, execution_id)
+        .map_err(task_center_error)?;
+    Ok(latest_task_state_worker_control(&controls)
+        .is_some_and(|event| event.op == WorkerControlOp::Cancel && event.status == "applied"))
+}
+
 fn worker_live_request(
     runtime_home: &Path,
     task: &TaskSnapshot,
@@ -893,11 +926,15 @@ fn worker_live_request(
     workspace: Option<PathBuf>,
     retry_kind: Option<WorkerRetryKind>,
     cancel_token: Option<LiveReasonCancelToken>,
-) -> LiveReasonTurnRequest {
+) -> Result<LiveReasonTurnRequest, ProductionWorkerRunnerError> {
     let task_key = sanitize_identifier(task.task_id.as_str());
     let execution_key = sanitize_identifier(execution_id);
-    let prompt = worker_task_prompt(task, workspace.as_deref(), retry_kind);
-    LiveReasonTurnRequest {
+    let task_runtime = TaskRuntime::boot_read_only(runtime_home, AgentId::new("master"))
+        .map_err(task_center_error)?;
+    let control_context = worker_control_prompt_context(&task_runtime, &task.task_id, execution_id)
+        .map_err(task_center_error)?;
+    let prompt = worker_task_prompt(task, workspace.as_deref(), retry_kind, &control_context);
+    Ok(LiveReasonTurnRequest {
         runtime_home: runtime_home.to_path_buf(),
         session_id: SessionId::new(format!("worker-task-{task_key}")),
         turn_id: TurnId::new(format!("worker-turn-{execution_key}")),
@@ -909,7 +946,7 @@ fn worker_live_request(
         execution_profile: LiveReasonExecutionProfile::from(task.execution_profile),
         stream: false,
         cancel_token,
-    }
+    })
 }
 
 fn selected_provider_supports_clean_search(selected: &SelectedAgentConfig) -> Result<(), String> {
@@ -940,12 +977,13 @@ fn worker_task_prompt(
     task: &TaskSnapshot,
     canonical_workspace: Option<&Path>,
     retry_kind: Option<WorkerRetryKind>,
+    control_context: &str,
 ) -> String {
     if task.execution_profile == TaskExecutionProfile::CleanSearch {
-        return worker_clean_search_task_prompt(task, retry_kind);
+        return worker_clean_search_task_prompt(task, retry_kind, control_context);
     }
     if task.execution_profile == TaskExecutionProfile::SourcedSearch {
-        return worker_sourced_search_task_prompt(task, retry_kind);
+        return worker_sourced_search_task_prompt(task, retry_kind, control_context);
     }
     let canonical_workspace =
         canonical_workspace.expect("workspace execution profile must pass canonical workspace");
@@ -975,7 +1013,7 @@ Goal: {}\n\
 	- Before path-sensitive work, verify whether relevant paths are absolute, whether they contain a leading ~, and whether the requested path or any parent is a symlink.\n\
 	- If a symlink is present, report both requested and canonical paths in evidence.\n\
 	- If a required path is missing, block with the exact path and canonicalization error; do not invent alternate directories.\n\
-	Work only inside the locked target workspace. Complete the implementation and verification, then return the required Freehand completion schema.{}",
+        Work only inside the locked target workspace. Complete the implementation and verification, then return the required Freehand completion schema.{}{}",
         task.task_id.as_str(),
         task.title,
         task.goal,
@@ -985,12 +1023,58 @@ Goal: {}\n\
         render_lines(&task.deliverables),
         render_lines(&task.acceptance),
         retry_context,
+        render_worker_control_context(control_context),
     )
+}
+
+fn worker_control_prompt_context(
+    task_runtime: &TaskRuntime,
+    task_id: &TaskId,
+    execution_id: &str,
+) -> Result<String, freehand_task::TaskError> {
+    let events = task_runtime.query_worker_control_events(task_id, execution_id)?;
+    let mut lines = Vec::new();
+    for event in events {
+        if event.status != "queued" {
+            continue;
+        }
+        match event.op {
+            WorkerControlOp::AskAtSafePoint => {
+                if let Some(question) = event.payload.get("question").and_then(Value::as_str) {
+                    lines.push(format!("- Master question: {question}"));
+                }
+            }
+            WorkerControlOp::AddConstraint => {
+                if let Some(constraint) = event.payload.get("constraint").and_then(Value::as_str) {
+                    lines.push(format!("- Master constraint: {constraint}"));
+                }
+            }
+            WorkerControlOp::RequestCheckpoint => {
+                lines.push("- Master requested a checkpoint at the next safe point.".to_owned());
+            }
+            WorkerControlOp::RequestSubmissionNow => {
+                lines.push("- Master requested submission at the next safe point.".to_owned());
+            }
+            WorkerControlOp::QueryStatus
+            | WorkerControlOp::Pause
+            | WorkerControlOp::Resume
+            | WorkerControlOp::Cancel => {}
+        }
+    }
+    Ok(lines.join("\n"))
+}
+
+fn render_worker_control_context(control_context: &str) -> String {
+    if control_context.trim().is_empty() {
+        return String::new();
+    }
+    format!("\nMaster controls for this execution:\n{control_context}")
 }
 
 fn worker_clean_search_task_prompt(
     task: &TaskSnapshot,
     retry_kind: Option<WorkerRetryKind>,
+    control_context: &str,
 ) -> String {
     let retry_context = match retry_kind {
         Some(WorkerRetryKind::ReviewRejected) => format!(
@@ -1016,7 +1100,7 @@ Rules:\n\
 - Do not inspect or mutate files. No target_cwd is needed for this task.\n\
 - Use provider-hosted web_search to discover current/broad source evidence.\n\
 - Return one compact conclusion for the Master with query terms, source/evidence summary, gaps, and recommended next action.\n\
-- If hosted search is unavailable or evidence is insufficient, return blocked with the exact provider/capability reason.{}",
+        - If hosted search is unavailable or evidence is insufficient, return blocked with the exact provider/capability reason.{}{}",
         task.task_id.as_str(),
         task.title,
         task.goal,
@@ -1024,12 +1108,14 @@ Rules:\n\
         render_lines(&task.deliverables),
         render_lines(&task.acceptance),
         retry_context,
+        render_worker_control_context(control_context),
     )
 }
 
 fn worker_sourced_search_task_prompt(
     task: &TaskSnapshot,
     retry_kind: Option<WorkerRetryKind>,
+    control_context: &str,
 ) -> String {
     let retry_context = match retry_kind {
         Some(WorkerRetryKind::ReviewRejected) => format!(
@@ -1055,7 +1141,7 @@ Rules:\n\
 - Do not inspect or mutate files. No target_cwd is needed for this task.\n\
 - Use provider-hosted web_search to discover source evidence, then verify key sources through the camo verification tool before the final delivery.\n\
 - Return one compact conclusion for the Master with query terms, source/evidence summary with verification status, gaps, and recommended next action.\n\
-- If hosted search is unavailable, camo verification is unavailable, or evidence is insufficient, return blocked with the exact provider/capability reason.{}",
+        - If hosted search is unavailable, camo verification is unavailable, or evidence is insufficient, return blocked with the exact provider/capability reason.{}{}",
         task.task_id.as_str(),
         task.title,
         task.goal,
@@ -1063,6 +1149,7 @@ Rules:\n\
         render_lines(&task.deliverables),
         render_lines(&task.acceptance),
         retry_context,
+        render_worker_control_context(control_context),
     )
 }
 

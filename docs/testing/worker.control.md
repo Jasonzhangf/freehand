@@ -55,6 +55,11 @@
     verifies `resume` re-enters the same task/execution and submits review
   - `production_worker_runner_paused_without_resume_stays_idle` verifies paused
     work remains idle until a persisted resume control exists
+  - `production_worker_runner_renders_queued_controls_before_provider_request`
+    verifies queued questions, constraints, checkpoint requests, and submission
+    requests are rendered into the next Worker model request before execution
+  - `production_worker_runner_renders_queued_controls_before_provider_request`
+    also verifies running execution progress is durable before provider IO
 - `freehand-cli`
   - `worker-control-foundation-sample` mock ADP test creates a worker execution, sends query/safe-point/pause/resume/cancel commands, and verifies explicit output
   - verify mode mock test checks same task/execution/agent/control ids after restart
@@ -62,7 +67,8 @@
 ## Project Black-Box Impact
 
 - no WebUI/Android dashboard claim in Phase 2C
-- no model prompt dependency for worker-control closure
+  - queued safe-point controls are model-visible at the next Worker request;
+    lifecycle control remains Task Center-owned
 - no private Agent-to-Agent mutation path; all commands enter ADP/protocol/runtime owner routing
 - no fallback to empty success on owner error
 - S-profile `127.0.0.1:4042` proof must run:
@@ -94,7 +100,8 @@ git diff --check
   live bridge safe points without review/block publication, leaves paused work
   idle without resume, and re-enters the same execution after persisted resume.
   Product closure still requires a full online multi-Worker convergence proof.
-- Worker execution does not yet consume safe-point queued questions,
-  constraints, checkpoint requests, or submission requests in a real model
-  loop; Phase 2C only persists and exposes the queue.
+- queued safe-point questions, constraints, checkpoint requests, and submission
+  requests are consumed at the next Worker request boundary and rendered as
+  explicit Worker control context; the Task Center ledger remains the control
+  truth and is not copied into metadata or task payloads.
 - Cross-machine worker control is out of scope until node transport is expanded.
