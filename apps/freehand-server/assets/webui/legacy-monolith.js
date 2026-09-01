@@ -6029,9 +6029,26 @@ function currentSessionTaskCounts(tasks = currentSessionTasks()) {
   };
 }
 
+function currentSessionTaskLifecycleSummary(counts) {
+  const safe = counts || currentSessionTaskCounts();
+  const pieces = [];
+  if (safe.activeCount > 0) {
+    pieces.push(`${safe.activeCount} 活动`);
+  }
+  if (safe.reviewCount > 0) {
+    pieces.push(`${safe.reviewCount} 审核`);
+  }
+  if (safe.blockedCount > 0) {
+    pieces.push(`${safe.blockedCount} 阻塞`);
+  }
+  if (safe.staleCount > 0) {
+    pieces.push(`${safe.staleCount} 过期`);
+  }
+  return pieces.length > 0 ? pieces.join(" · ") : "无活跃任务";
+}
+
 function currentSessionTaskStatusLabel(tasks = currentSessionTasks()) {
-  const counts = currentSessionTaskCounts(tasks);
-  return `${counts.activeCount} 活动 · ${counts.reviewCount} 审核 · ${counts.blockedCount} 阻塞 · ${counts.closedCount} 关闭 · ${counts.staleCount} 过期`;
+  return currentSessionTaskLifecycleSummary(currentSessionTaskCounts(tasks));
 }
 
 function sessionSummaryById(sessionId) {
@@ -7029,18 +7046,22 @@ function renderMobileAgentTaskList(model) {
 }
 
 function mobileAgentLifecycleSummary(counts) {
+  if (!state.selectedSessionId) {
+    return "未选择会话";
+  }
+  const safe = counts || currentSessionTaskCounts();
   const pieces = [];
-  if (counts.activeCount > 0) {
-    pieces.push(`${counts.activeCount} 个运行任务`);
+  if (safe.activeCount > 0) {
+    pieces.push(`${safe.activeCount} 个运行任务`);
   }
-  if (counts.reviewCount > 0) {
-    pieces.push(`${counts.reviewCount} 个审核任务`);
+  if (safe.reviewCount > 0) {
+    pieces.push(`${safe.reviewCount} 个审核任务`);
   }
-  if (counts.blockedCount > 0) {
-    pieces.push(`${counts.blockedCount} 个阻塞任务`);
+  if (safe.blockedCount > 0) {
+    pieces.push(`${safe.blockedCount} 个阻塞任务`);
   }
-  if (pieces.length === 0 && counts.closedCount > 0) {
-    pieces.push(`${counts.closedCount} 个关闭任务`);
+  if (pieces.length === 0 && safe.staleCount > 0) {
+    pieces.push(`${safe.staleCount} 个等待任务`);
   }
   return pieces.length > 0 ? pieces.join(" · ") : "0 个任务";
 }
@@ -7533,12 +7554,14 @@ function renderSessionRelationHeader(model = buildMobileAgentDashboardModel()) {
   sessionRelationHeader.dataset.liveTurnId = liveObservation ? liveObservation.turnId : "";
   setText("session-relation-kicker", selectedWorkerSession ? "工作器会话" : "当前会话");
   setText("session-relation-title", compactSentence(title, 96));
- setText(
-   "session-relation-metrics",
-   liveObservation
-     ? `${liveObservation.label} · ${liveObservation.turnId || "活动 turn"} · ${runningAgents} 个 Agent${workerLimitText}`
-     : `${counts.activeCount} 活动 · ${counts.reviewCount} 审核 · ${counts.blockedCount} 阻塞 · ${counts.closedCount} 关闭`,
- );
+setText(
+  "session-relation-metrics",
+  liveObservation
+    ? `${liveObservation.label} · ${liveObservation.turnId || "活动 turn"} · ${runningAgents} 个 Agent${workerLimitText}`
+     : state.selectedSessionId
+       ? currentSessionTaskLifecycleSummary(counts)
+       : "未选择会话",
+);
   // copy omitted on mobile - compact metrics pill + title carry the signal
   if (sessionRelationToggleButton) {
     sessionRelationToggleButton.setAttribute("aria-expanded", state.sessionTreeOpen ? "true" : "false");

@@ -2584,11 +2584,17 @@ mod tests {
         assert!(legacy_body.contains("((read / total) * 100).toFixed(3)"));
         assert!(legacy_body.contains("if (total <= 0)"));
         assert!(!legacy_body.contains("if (read <= 0 || total <= 0)"));
-        assert!(legacy_body.contains("counts.activeCount} 活动"));
-        assert!(legacy_body.contains("counts.reviewCount} 审核"));
-        assert!(legacy_body.contains("counts.blockedCount} 阻塞"));
-        assert!(legacy_body.contains("counts.closedCount} 关闭"));
+        assert!(legacy_body.contains("currentSessionTaskLifecycleSummary"));
+        assert!(legacy_body.contains("safe.activeCount} 活动"));
+        assert!(legacy_body.contains("safe.reviewCount} 审核"));
+        assert!(legacy_body.contains("safe.blockedCount} 阻塞"));
+        assert!(legacy_body.contains("safe.staleCount} 过期"));
+        assert!(!legacy_body.contains("counts.closedCount} 关闭"));
         assert!(!legacy_body.contains("counts.activeCount}A"));
+        assert!(legacy_body.contains("state.selectedSessionId"));
+        assert!(legacy_body.contains("currentSessionTaskLifecycleSummary(counts)"));
+        assert!(legacy_body.contains(": \"未选择会话\""));
+        assert!(legacy_body.contains("无活跃任务"));
 
         let layout_shape = client
             .get(format!(
