@@ -21,6 +21,7 @@ The long-form architecture and milestone contract remain:
 - `docs/v2/v2-cordis-reasoning-channel-architecture.md`
 - `docs/v2/v2-plugin-ecosystem-contract.md`
 - `docs/v2/v2-test-design.md`
+- `docs/v2/v2-sessionlog-test-vectors.md`
 - `docs/v2/v2-project-blackbox-verification.md`
 
 ## 1. Current State
@@ -138,6 +139,10 @@ Owner: `v2-sessionlog`
 M2 is the next implementation milestone after M1b. It owns one canonical
 Session Log and one local persistence adapter. It does not own provider
 execution, UI state, or network transport.
+
+The pre-implementation vector and failure contract is frozen in
+`docs/v2/v2-sessionlog-test-vectors.md`. It must be bound to real Rust
+symbols and verification gates before M2 source work begins.
 
 Minimum source surface:
 

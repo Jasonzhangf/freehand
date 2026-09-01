@@ -8,6 +8,7 @@ Plan: `docs/v2/v2-foundation-mvp-ui-reason-network-plan.md`
 Project black-box contract: `docs/v2/v2-project-blackbox-verification.md`
 UI design: `docs/v2/v2-ui-design.md`
 Plugin ecosystem contract: `docs/v2/v2-plugin-ecosystem-contract.md`
+Session Log vectors: `docs/v2/v2-sessionlog-test-vectors.md`
 
 ## Test Contract
 
@@ -128,6 +129,9 @@ requested cursor and that an event acknowledgement is not a business result.
 - cross-node replication and acknowledgement durability are network scope.
 
 ## `v2-sessionlog`
+
+The detailed M2 vector and recovery contract is maintained in
+`docs/v2/v2-sessionlog-test-vectors.md`.
 
 ### Lifecycle and logic
 

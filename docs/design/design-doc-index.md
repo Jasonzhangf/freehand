@@ -118,6 +118,9 @@ Use this directory family for durable design truth.
 - `docs/v2/v2-plugin-ecosystem-contract.md`
   - all executable, replaceable and externally connected product parts as
     Cordis plugins, nested composition, typed ports and replacement boundaries
+- `docs/v2/v2-sessionlog-test-vectors.md`
+  - pre-implementation Session Log positive, negative, crash-recovery and DSH
+    adaptor test vectors
 - `test-strategy.md`
   - white-box, module black-box, and project black-box validation policy
 - `docs/function-maps/README.md`
