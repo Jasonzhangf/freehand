@@ -196,7 +196,7 @@
         "suite_id": "v2-contracts-regression"
       },
       "source_owner": "v2-contracts",
-      "stage": "architecture_stable"
+      "stage": "source_implemented"
     }
   ],
   "project_id": "freehand-v2",
