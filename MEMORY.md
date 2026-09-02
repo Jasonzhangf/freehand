@@ -1106,3 +1106,21 @@ Tags: #architecture #gap5 #node #ui-protocol #dependency-edge
   all task ledgers. Fix this under the separate runtime-loop/task owner with
   positive change visibility and negative idle-no-reparse/restart-recovery
   coverage; do not hide it by only increasing poll sleep.
+
+## 2026-09-02 - v2 mainline rebased onto main
+
+- `origin/main=84ccb44` carries the v2 entry docs. `origin/v2=1791e39` was
+  updated by a rebased v2 mainline branch after full `make ci` and pre-push gate
+  passed; the remote update used `--force-with-lease` because rebase rewrites
+  v2 history.
+- The rebased tree keeps all old `origin/v2` content (no file-level deletions
+  relative to the prior v2 tree), removes the 202 tracked `artifacts/*` files
+  inherited from main, and does not add `target/`, `generated/`,
+  `.appsdk-control/`, or other build outputs.
+- The original dirty `/Volumes/extension/code/freehand/v2` worktree was not
+  modified. The collab rebase task remains `merged` because `collab task close`
+  refuses to delete a branch that is not merged into main HEAD; cleanup is not
+  forced.
+- AppSDK `appsdk verify .` still reports `INVALID_ARTIFACT_SCHEMA` in v2
+  worktrees; this is a v2 governance gap from before the rebase and remains a
+  separate adapter/record binding work item.
