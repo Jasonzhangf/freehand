@@ -1,0 +1,47 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Freehand v2 Console Prototype</title>
+  <link rel="stylesheet" href="styles.css">
+  <link rel="stylesheet" href="styles-entry.css">
+</head>
+<body>
+  <a class="skip-link" href="#main-content">跳到主要内容</a>
+  <div class="app-shell">
+    <header class="topbar">
+      <div class="brand-lockup"><span class="brand-mark">F</span><div><strong>Freehand</strong><span>v2 operating console</span></div></div>
+      <div class="topbar-context"><span class="status-dot online"></span><span>Local runtime</span><span class="context-divider"></span><strong id="header-agent">Atlas</strong><span class="muted">·</span><span id="header-session">Research brief</span></div>
+      <div class="topbar-actions">
+        <button class="icon-button" data-action="search" aria-label="打开全局搜索" title="搜索">⌕</button>
+        <button class="icon-button" data-action="open-timer" aria-label="打开定时任务" title="定时任务">⏱</button>
+        <button class="icon-button" data-action="open-tools" aria-label="打开内置工具" title="内置工具">⛭</button>
+        <button class="icon-button" data-action="settings" aria-label="打开设置" title="设置">⚙</button>
+        <button class="primary-button" data-action="new-session">+ 新会话</button>
+      </div>
+    </header>
+    <main id="main-content" class="workspace" tabindex="-1">
+      <aside class="left-rail" aria-label="位置与会话导航">
+        <section class="rail-section"><div class="section-heading"><div><span class="eyebrow">Location plugin</span><h2>Topology</h2></div><button class="icon-button small" data-action="refresh-topology" aria-label="刷新拓扑">↻</button></div><div id="topology-tree" class="topology-tree"></div></section>
+        <section class="rail-section"><div class="section-heading"><div><span class="eyebrow">Canvas plugin</span><h2>Sessions</h2></div><button class="icon-button small" data-action="open-canvas" aria-label="打开会话画布">↗</button></div><div class="session-tabs" role="tablist"><button class="session-tab active" data-session-filter="active" role="tab">Active <span id="active-count">2</span></button><button class="session-tab" data-session-filter="recent" role="tab">Recent</button><button class="session-tab" data-session-filter="history" role="tab">History</button></div><div id="session-list" class="session-list"></div></section>
+      </aside>
+      <section class="main-column" aria-label="当前会话运行区">
+        <div class="run-header"><div><span class="eyebrow">Current run · Session Log</span><h1 id="run-title">Research brief</h1><p id="run-meta">Atlas · local-freehand · updated just now</p></div><div class="run-actions"><button class="ghost-button" data-action="open-memory">Memory <span class="plugin-badge">M</span></button><button class="ghost-button" data-action="open-details">Details</button></div></div>
+        <div id="run-status" class="run-status running"></div><div id="timeline" class="timeline" aria-live="polite"></div>
+        <form id="composer" class="composer"><label for="prompt">Continue this session</label><div class="composer-row"><textarea id="prompt" rows="2" placeholder="Ask Atlas to continue..." required></textarea><button class="send-button" type="submit" aria-label="发送消息">↑</button></div><div class="composer-footer"><span><kbd>⌘</kbd><kbd>Enter</kbd> to send</span><span id="receipt" class="receipt">Adaptor ready · typed command port connected</span></div></form>
+      </section>
+      <aside class="right-rail" aria-label="通知与插件状态"><section><div class="section-heading"><div><span class="eyebrow">Notification plugin</span><h2>Attention <span id="attention-count" class="count-badge">3</span></h2></div><button class="text-button" data-action="mark-all-read">Mark all read</button></div><div id="notifications" class="notification-list"></div></section><section class="plugins-section"><div class="section-heading"><div><span class="eyebrow">Cordis ecosystem</span><h2>Plugins</h2></div></div><div id="plugin-list" class="plugin-list"></div></section></aside>
+    </main>
+    <nav class="mobile-nav" aria-label="移动端主导航">
+      <button class="mobile-nav-item active" data-mobile-view="run"><span>◉</span>Run</button>
+      <button class="mobile-nav-item" data-mobile-view="sessions"><span>▦</span>Sessions</button>
+      <button class="mobile-nav-item" data-mobile-view="attention"><span>!</span>Attention <b id="mobile-attention-count">3</b></button>
+      <button class="mobile-nav-item" data-mobile-view="location"><span>⌖</span>Location</button>
+      <button class="mobile-nav-item" data-mobile-view="more"><span>•••</span>More</button>
+    </nav>
+    <div id="modal-root"></div><div id="toast" class="toast" role="status" aria-live="polite"></div>
+  </div>
+  <script src="app.js"></script>
+</body>
+</html>

@@ -49,6 +49,21 @@ Use this directory family for durable design truth.
 - `docs/design/acp-v1-agent-server-design.md`
 - `docs/prototypes/README.md`
 
+## v2
+
+- `docs/v2/README.md`
+  - main 侧固定入口，指向 v2 worktree / `v2` branch 与核心 v2 文档
+- `docs/v2/v2-cordis-reasoning-channel-architecture.md`
+  - v2 架构总设计：Cordis 编排、event 控制路径、Rust 插件、Arc 共享 payload
+- `docs/v2/v2-development-roadmap.md`
+  - v2 阶段路线、M1/M2 执行顺序与验证门禁
+- `docs/goals/v2-completion-plan.md`
+  - v2 MVP 到可运行纵向切片的完成执行计划
+- `docs/v2/v2-plugin-ecosystem-contract.md`
+  - 插件生态契约：可执行、可替换、可外部连接的产品部分均作为插件
+- `docs/v2/v2-sessionlog-test-vectors.md`
+  - Session Log 正向、反向、恢复与 DSH 适配边界测试契约
+
 ## Rule
 
 - design decisions that change owner, boundary, runtime path, or debug flow must be reflected in docs here or linked architecture docs
