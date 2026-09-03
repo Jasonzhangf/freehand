@@ -43,6 +43,18 @@
       ],
       "forbidden_paths": ["active/lib/**", "protected/**", "generated/**", "docs/v2/v2-ui-design.md", "docs/v2/v2-cordis-reasoning-channel-architecture.md"],
       "verification_gates": ["fix_lifecycle_graph", "mainline_merge_identity"]
+    },
+    {
+      "module_id": "v2-reasoning-backend",
+      "status": "active",
+      "owner": "v2-reasoning-backend",
+      "owned_paths": [
+        "docs/design/v2-reasoning-backend-owner-binding.md",
+        "playground/experiments/v2/reasoning-backend/**",
+        "tests/v2/reasoning-backend/**"
+      ],
+      "forbidden_paths": ["active/lib/**", "protected/**", "generated/**", "docs/v2/v2-ui-design.md", "docs/v2/v2-cordis-reasoning-channel-architecture.md"],
+      "verification_gates": ["fix_lifecycle_graph", "mainline_merge_identity"]
     }
   ]
 }

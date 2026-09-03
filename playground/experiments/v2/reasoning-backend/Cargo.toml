@@ -1,0 +1,21 @@
+[package]
+name = "freehand-v2-reasoning-backend"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[dependencies]
+freehand-v2-contracts = { path = "../contracts" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+
+[[test]]
+name = "v2_reasoning_backend_boundary"
+path = "../../../../tests/v2/reasoning-backend/reasoning_boundary.rs"
+
+[[bin]]
+name = "v2-reasoning-public"
+path = "src/bin/v2-reasoning-public.rs"
+
+[workspace]

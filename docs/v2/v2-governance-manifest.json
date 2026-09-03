@@ -55,8 +55,8 @@
       "mvp": true
     },
     {
-      "module_id": "v2-reasoning-backend",
-      "status": "planned",
+     "module_id": "v2-reasoning-backend",
+     "status": "active",
       "owner": "v2-reasoning-backend",
       "source_paths": ["playground/experiments/v2/reasoning-backend/**"],
       "test_paths": ["tests/v2/reasoning-backend/**"],

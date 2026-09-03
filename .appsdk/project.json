@@ -334,6 +334,74 @@
       },
       "source_owner": "v2-sessionlog",
       "stage": "source_implemented"
+    },
+    {
+      "active_artifact": "active/lib/v2-reasoning-backend/**",
+      "artifact_paths": [
+        "v2-reasoning-backend.module"
+      ],
+      "build": {
+        "args": [
+          "-c",
+          "cargo test --manifest-path playground/experiments/v2/reasoning-backend/Cargo.toml --test v2_reasoning_backend_boundary && cargo build --release --manifest-path playground/experiments/v2/reasoning-backend/Cargo.toml --bin v2-reasoning-public && mkdir -p generated/modules/v2-reasoning-backend/lib && cp playground/experiments/v2/reasoning-backend/target/release/v2-reasoning-public generated/modules/v2-reasoning-backend/lib/v2-reasoning-backend.module"
+        ],
+        "program": "sh",
+        "working_directory": "."
+      },
+      "contract_paths": [
+        ".appsdk/goal.json",
+        ".appsdk/project.json",
+        ".appsdk/contracts/**",
+        "docs/design/v2-reasoning-backend-owner-binding.md",
+        "docs/v2/v2-governance-manifest.json",
+        "docs/v2/v2-test-design.md",
+        "docs/v2/v2-project-blackbox-verification.md"
+      ],
+      "dependency_modules": [],
+      "generated_outputs": [
+        "generated/**"
+      ],
+      "module_id": "v2-reasoning-backend",
+      "owned_paths": [
+        "playground/experiments/v2/reasoning-backend/Cargo.lock",
+        "playground/experiments/v2/reasoning-backend/Cargo.toml",
+        "playground/experiments/v2/reasoning-backend/src/**",
+        "tests/v2/reasoning-backend/**",
+        "docs/design/v2-reasoning-backend-owner-binding.md"
+      ],
+      "regression": {
+        "allow_skipped": false,
+        "command": {
+          "args": [
+            "test",
+            "--manifest-path",
+            "playground/experiments/v2/reasoning-backend/Cargo.toml",
+            "--test",
+            "v2_reasoning_backend_boundary"
+          ],
+          "program": "cargo",
+          "working_directory": "."
+        },
+        "input_paths": [
+          "playground/experiments/v2/reasoning-backend/Cargo.lock",
+          "playground/experiments/v2/reasoning-backend/Cargo.toml",
+          "playground/experiments/v2/reasoning-backend/src/**",
+          "tests/v2/reasoning-backend/**"
+        ],
+        "minimum_test_count": 9,
+        "ordinary_mode_after_freeze": "disabled",
+        "reenable_on": [
+          "source_change",
+          "contract_change",
+          "public_api_change",
+          "artifact_change",
+          "dependency_change"
+        ],
+        "required_before_freeze": true,
+        "suite_id": "v2-reasoning-backend-regression"
+      },
+      "source_owner": "v2-reasoning-backend",
+      "stage": "source_implemented"
     }
   ],
   "project_id": "freehand-v2",
