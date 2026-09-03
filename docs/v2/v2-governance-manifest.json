@@ -34,7 +34,7 @@
     },
     {
       "module_id": "v2-control-events",
-      "status": "planned",
+      "status": "active",
       "owner": "v2-control-events",
       "source_paths": ["playground/experiments/v2/control-events/**"],
       "test_paths": ["tests/v2/control-events/**"],

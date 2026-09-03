@@ -18,6 +18,18 @@
       "verification_gates": ["fix_lifecycle_graph", "mainline_merge_identity"]
     },
     {
+      "module_id": "v2-control-events",
+      "status": "active",
+      "owner": "v2-control-events",
+      "owned_paths": [
+        "docs/design/v2-control-events-owner-binding.md",
+        "playground/experiments/v2/control-events/**",
+        "tests/v2/control-events/**"
+      ],
+      "forbidden_paths": ["active/lib/**", "protected/**", "generated/**", "docs/v2/v2-ui-design.md", "docs/v2/v2-cordis-reasoning-channel-architecture.md"],
+      "verification_gates": ["fix_lifecycle_graph", "mainline_merge_identity"]
+    },
+    {
       "module_id": "v2-sessionlog",
       "status": "active",
       "owner": "v2-sessionlog",

@@ -1,0 +1,21 @@
+[package]
+name = "freehand-v2-control-events"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[dependencies]
+freehand-v2-contracts = { path = "../contracts" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+
+[[test]]
+name = "v2_control_event_boundary"
+path = "../../../../tests/v2/control-events/control_event_boundary.rs"
+
+[[bin]]
+name = "v2-control-events-public"
+path = "src/bin/v2-control-events-public.rs"
+
+[workspace]

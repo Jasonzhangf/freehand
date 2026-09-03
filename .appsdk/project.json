@@ -199,6 +199,76 @@
       "stage": "source_implemented"
     },
     {
+      "active_artifact": "active/lib/v2-control-events/**",
+      "artifact_paths": [
+        "v2-control-events.module"
+      ],
+      "build": {
+        "args": [
+          "-c",
+          "cargo test --manifest-path playground/experiments/v2/control-events/Cargo.toml --test v2_control_event_boundary && cargo build --release --manifest-path playground/experiments/v2/control-events/Cargo.toml --bin v2-control-events-public && mkdir -p generated/modules/v2-control-events/lib && cp playground/experiments/v2/control-events/target/release/v2-control-events-public generated/modules/v2-control-events/lib/v2-control-events.module"
+        ],
+        "program": "sh",
+        "working_directory": "."
+      },
+      "contract_paths": [
+        ".appsdk/goal.json",
+        ".appsdk/project.json",
+        ".appsdk/contracts/**",
+        "docs/design/v2-control-events-owner-binding.md",
+        "docs/v2/v2-governance-manifest.json",
+        "docs/v2/v2-test-design.md",
+        "docs/v2/v2-project-blackbox-verification.md"
+      ],
+      "dependency_modules": [
+        "v2-contracts"
+      ],
+      "generated_outputs": [
+        "generated/**"
+      ],
+      "module_id": "v2-control-events",
+      "owned_paths": [
+        "playground/experiments/v2/control-events/Cargo.lock",
+        "playground/experiments/v2/control-events/Cargo.toml",
+        "playground/experiments/v2/control-events/src/**",
+        "tests/v2/control-events/**",
+        "docs/design/v2-control-events-owner-binding.md"
+      ],
+      "regression": {
+        "allow_skipped": false,
+        "command": {
+          "args": [
+            "test",
+            "--manifest-path",
+            "playground/experiments/v2/control-events/Cargo.toml",
+            "--test",
+            "v2_control_event_boundary"
+          ],
+          "program": "cargo",
+          "working_directory": "."
+        },
+        "input_paths": [
+          "playground/experiments/v2/control-events/Cargo.lock",
+          "playground/experiments/v2/control-events/Cargo.toml",
+          "playground/experiments/v2/control-events/src/**",
+          "tests/v2/control-events/**"
+        ],
+        "minimum_test_count": 9,
+        "ordinary_mode_after_freeze": "disabled",
+        "reenable_on": [
+          "source_change",
+          "contract_change",
+          "public_api_change",
+          "artifact_change",
+          "dependency_change"
+        ],
+        "required_before_freeze": true,
+        "suite_id": "v2-control-events-regression"
+      },
+      "source_owner": "v2-control-events",
+      "stage": "source_implemented"
+    },
+    {
       "active_artifact": "active/lib/v2-sessionlog/**",
       "artifact_paths": [
         "v2-sessionlog.module"
