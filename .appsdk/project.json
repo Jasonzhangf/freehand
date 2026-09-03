@@ -562,7 +562,7 @@
         "docs/v2/v2-test-design.md",
         "docs/v2/v2-project-blackbox-verification.md"
       ],
-      "dependency_modules": ["v2-contracts", "v2-control-events", "v2-cordis-ecosystem"],
+      "dependency_modules": [],
       "generated_outputs": [
         "generated/**"
       ],
@@ -631,7 +631,7 @@
         "docs/v2/v2-test-design.md",
         "docs/v2/v2-project-blackbox-verification.md"
       ],
-      "dependency_modules": ["v2-ui-adaptor"],
+      "dependency_modules": [],
       "generated_outputs": [
         "generated/**"
       ],
