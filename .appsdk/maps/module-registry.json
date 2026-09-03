@@ -79,6 +79,30 @@
       ],
       "forbidden_paths": ["active/lib/**", "protected/**", "generated/**", "docs/v2/v2-ui-design.md", "docs/v2/v2-cordis-reasoning-channel-architecture.md"],
       "verification_gates": ["fix_lifecycle_graph", "mainline_merge_identity"]
+    },
+    {
+      "module_id": "v2-ui-adaptor",
+      "status": "active",
+      "owner": "v2-ui-adaptor",
+      "owned_paths": [
+        "docs/design/v2-ui-adaptor-owner-binding.md",
+        "playground/experiments/v2/ui-adaptor/**",
+        "tests/v2/ui-adaptor/**"
+      ],
+      "forbidden_paths": ["active/lib/**", "protected/**", "generated/**", "docs/v2/v2-ui-design.md", "docs/v2/v2-cordis-reasoning-channel-architecture.md"],
+      "verification_gates": ["fix_lifecycle_graph", "mainline_merge_identity"]
+    },
+    {
+      "module_id": "v2-ui-plugin-family",
+      "status": "active",
+      "owner": "v2-ui-plugin-family",
+      "owned_paths": [
+        "docs/design/v2-ui-plugin-family-owner-binding.md",
+        "playground/experiments/v2/ui-plugins/**",
+        "tests/v2/ui-plugins/**"
+      ],
+      "forbidden_paths": ["active/lib/**", "protected/**", "generated/**", "docs/v2/v2-ui-design.md", "docs/v2/v2-cordis-reasoning-channel-architecture.md"],
+      "verification_gates": ["fix_lifecycle_graph", "mainline_merge_identity"]
     }
   ]
 }

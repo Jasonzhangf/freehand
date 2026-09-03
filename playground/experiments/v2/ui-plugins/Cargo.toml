@@ -1,0 +1,22 @@
+[package]
+name = "freehand-v2-ui-plugin-family"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[dependencies]
+freehand-v2-contracts = { path = "../contracts" }
+freehand-v2-ui-adaptor = { path = "../ui-adaptor" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+
+[[test]]
+name = "v2_ui_plugin_family_boundary"
+path = "../../../../tests/v2/ui-plugins/ui_plugin_family_boundary.rs"
+
+[[bin]]
+name = "v2-ui-plugins-public"
+path = "src/bin/v2-ui-plugins-public.rs"
+
+[workspace]

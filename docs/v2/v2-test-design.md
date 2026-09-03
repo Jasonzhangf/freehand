@@ -444,6 +444,80 @@ artifact reference.
 - summarizer implementation and memory storage are not selected;
 - retention, privacy and cross-session memory policy require a later decision.
 
+## `v2-ui-adaptor`
+
+### Lifecycle and logic
+
+```text
+UI command
+  -> UiAdaptor::accept_command
+  -> one UiCommandReceipt
+  -> typed UiControlEvent without business payload
+
+owner projection
+  -> UiAdaptor::publish_projection
+  -> Arc shared UiProjection
+  -> query and subscribe projection
+```
+
+Positive tests cover one-time command acceptance, published projections that
+share the exact `Arc<ImmutablePayload>` allocation, latest-revision queries,
+subscription attach and non-empty typed IDs. Negative tests cover duplicate
+command correlation, unknown-slot queries, unknown-slot subscriptions and
+empty query/subscription IDs.
+
+Verification commands:
+
+- `cargo test --manifest-path playground/experiments/v2/ui-adaptor/Cargo.toml --test v2_ui_adaptor_boundary`
+- `cargo clippy --manifest-path playground/experiments/v2/ui-adaptor/Cargo.toml --all-targets -- -D warnings`
+- `cargo run --quiet --manifest-path playground/experiments/v2/ui-adaptor/Cargo.toml --bin v2-ui-adaptor-public` with a valid publish/query smoke input
+
+### Black-box impact
+
+The project black-box test publishes one projection and queries it back through
+the adaptor. It must reject duplicate command correlation and unknown-slot
+queries. No UI control event may contain the business payload sentinel.
+
+### Known gaps
+
+- transport serialization is only exercised through the public stdin binary;
+- UI adaptor does not yet connect to the full v2 local mainline.
+
+## `v2-ui-plugin-family`
+
+### Lifecycle and logic
+
+```text
+UiPluginDefinition
+  -> UiPluginSlotRegistry::mount
+  -> render current UiProjection
+  -> preserve selection across replace
+  -> unmount slot
+```
+
+Positive tests cover mounting one plugin per slot, rendering while preserving
+the same Arc payload, replacing a plugin in the same slot while preserving
+selection and latest projection, and unmounting known slots. Negative tests
+cover duplicate slot mount, unknown-slot render/unmount and invalid plugin
+definitions.
+
+Verification commands:
+
+- `cargo test --manifest-path playground/experiments/v2/ui-plugins/Cargo.toml --test v2_ui_plugin_family_boundary`
+- `cargo clippy --manifest-path playground/experiments/v2/ui-plugins/Cargo.toml --all-targets -- -D warnings`
+- `cargo run --quiet --manifest-path playground/experiments/v2/ui-plugins/Cargo.toml --bin v2-ui-plugins-public` with a mount/replace/render smoke input
+
+### Black-box impact
+
+The project black-box test mounts one plugin, renders a projection, replaces it
+with another implementation on the same slot and proves the selection and
+projection identity survive. Unknown-slot replacement must fail explicitly.
+
+### Known gaps
+
+- browser rendering is not implemented in this module;
+- actual mobile/desktop UI surfaces are later UI plugin consumers.
+
 ## `v2-channel-registry`
 
 ### Lifecycle and logic

@@ -238,6 +238,18 @@ impl UiCommand {
         }
     }
 
+    pub fn correlation_id(&self) -> &CorrelationId {
+        &self.correlation_id
+    }
+
+    pub fn session_id(&self) -> &SessionId {
+        &self.session_id
+    }
+
+    pub fn capability_id(&self) -> &CapabilityId {
+        &self.capability_id
+    }
+
     pub fn payload(&self) -> &ImmutablePayload {
         &self.payload
     }
@@ -268,6 +280,24 @@ pub struct UiCommandWire {
     session_id: SessionId,
     capability_id: CapabilityId,
     payload: PayloadWire,
+}
+
+impl UiCommandWire {
+    pub fn correlation_id(&self) -> &CorrelationId {
+        &self.correlation_id
+    }
+
+    pub fn session_id(&self) -> &SessionId {
+        &self.session_id
+    }
+
+    pub fn capability_id(&self) -> &CapabilityId {
+        &self.capability_id
+    }
+
+    pub fn payload(&self) -> &PayloadWire {
+        &self.payload
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]

@@ -539,6 +539,143 @@
       },
       "source_owner": "v2-cordis-ecosystem",
       "stage": "source_implemented"
+    },
+    {
+      "active_artifact": "active/lib/v2-ui-adaptor/**",
+      "artifact_paths": [
+        "v2-ui-adaptor.module"
+      ],
+      "build": {
+        "args": [
+          "-c",
+          "cargo test --manifest-path playground/experiments/v2/ui-adaptor/Cargo.toml --test v2_ui_adaptor_boundary && cargo build --release --manifest-path playground/experiments/v2/ui-adaptor/Cargo.toml --bin v2-ui-adaptor-public && mkdir -p generated/modules/v2-ui-adaptor/lib && cp playground/experiments/v2/ui-adaptor/target/release/v2-ui-adaptor-public generated/modules/v2-ui-adaptor/lib/v2-ui-adaptor.module"
+        ],
+        "program": "sh",
+        "working_directory": "."
+      },
+      "contract_paths": [
+        ".appsdk/goal.json",
+        ".appsdk/project.json",
+        ".appsdk/contracts/**",
+        "docs/design/v2-ui-adaptor-owner-binding.md",
+        "docs/v2/v2-governance-manifest.json",
+        "docs/v2/v2-test-design.md",
+        "docs/v2/v2-project-blackbox-verification.md"
+      ],
+      "dependency_modules": ["v2-contracts", "v2-control-events", "v2-cordis-ecosystem"],
+      "generated_outputs": [
+        "generated/**"
+      ],
+      "module_id": "v2-ui-adaptor",
+      "owned_paths": [
+        "playground/experiments/v2/ui-adaptor/Cargo.lock",
+        "playground/experiments/v2/ui-adaptor/Cargo.toml",
+        "playground/experiments/v2/ui-adaptor/src/**",
+        "tests/v2/ui-adaptor/**",
+        "docs/design/v2-ui-adaptor-owner-binding.md"
+      ],
+      "regression": {
+        "allow_skipped": false,
+        "command": {
+          "args": [
+            "test",
+            "--manifest-path",
+            "playground/experiments/v2/ui-adaptor/Cargo.toml",
+            "--test",
+            "v2_ui_adaptor_boundary"
+          ],
+          "program": "cargo",
+          "working_directory": "."
+        },
+        "input_paths": [
+          "playground/experiments/v2/ui-adaptor/Cargo.lock",
+          "playground/experiments/v2/ui-adaptor/Cargo.toml",
+          "playground/experiments/v2/ui-adaptor/src/**",
+          "tests/v2/ui-adaptor/**"
+        ],
+        "minimum_test_count": 7,
+        "ordinary_mode_after_freeze": "disabled",
+        "reenable_on": [
+          "source_change",
+          "contract_change",
+          "public_api_change",
+          "artifact_change",
+          "dependency_change"
+        ],
+        "required_before_freeze": true,
+        "suite_id": "v2-ui-adaptor-regression"
+      },
+      "source_owner": "v2-ui-adaptor",
+      "stage": "source_implemented"
+    },
+    {
+      "active_artifact": "active/lib/v2-ui-plugin-family/**",
+      "artifact_paths": [
+        "v2-ui-plugin-family.module"
+      ],
+      "build": {
+        "args": [
+          "-c",
+          "cargo test --manifest-path playground/experiments/v2/ui-plugins/Cargo.toml --test v2_ui_plugin_family_boundary && cargo build --release --manifest-path playground/experiments/v2/ui-plugins/Cargo.toml --bin v2-ui-plugins-public && mkdir -p generated/modules/v2-ui-plugin-family/lib && cp playground/experiments/v2/ui-plugins/target/release/v2-ui-plugins-public generated/modules/v2-ui-plugin-family/lib/v2-ui-plugin-family.module"
+        ],
+        "program": "sh",
+        "working_directory": "."
+      },
+      "contract_paths": [
+        ".appsdk/goal.json",
+        ".appsdk/project.json",
+        ".appsdk/contracts/**",
+        "docs/design/v2-ui-adaptor-owner-binding.md",
+        "docs/design/v2-ui-plugin-family-owner-binding.md",
+        "docs/v2/v2-governance-manifest.json",
+        "docs/v2/v2-test-design.md",
+        "docs/v2/v2-project-blackbox-verification.md"
+      ],
+      "dependency_modules": ["v2-ui-adaptor"],
+      "generated_outputs": [
+        "generated/**"
+      ],
+      "module_id": "v2-ui-plugin-family",
+      "owned_paths": [
+        "playground/experiments/v2/ui-plugins/Cargo.lock",
+        "playground/experiments/v2/ui-plugins/Cargo.toml",
+        "playground/experiments/v2/ui-plugins/src/**",
+        "tests/v2/ui-plugins/**",
+        "docs/design/v2-ui-plugin-family-owner-binding.md"
+      ],
+      "regression": {
+        "allow_skipped": false,
+        "command": {
+          "args": [
+            "test",
+            "--manifest-path",
+            "playground/experiments/v2/ui-plugins/Cargo.toml",
+            "--test",
+            "v2_ui_plugin_family_boundary"
+          ],
+          "program": "cargo",
+          "working_directory": "."
+        },
+        "input_paths": [
+          "playground/experiments/v2/ui-plugins/Cargo.lock",
+          "playground/experiments/v2/ui-plugins/Cargo.toml",
+          "playground/experiments/v2/ui-plugins/src/**",
+          "tests/v2/ui-plugins/**"
+        ],
+        "minimum_test_count": 7,
+        "ordinary_mode_after_freeze": "disabled",
+        "reenable_on": [
+          "source_change",
+          "contract_change",
+          "public_api_change",
+          "artifact_change",
+          "dependency_change"
+        ],
+        "required_before_freeze": true,
+        "suite_id": "v2-ui-plugin-family-regression"
+      },
+      "source_owner": "v2-ui-plugin-family",
+      "stage": "source_implemented"
     }
   ],
   "project_id": "freehand-v2",
