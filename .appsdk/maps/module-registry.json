@@ -16,6 +16,21 @@
       "owned_paths": ["playground/experiments/v2/contracts/**", "tests/v2/contracts/**"],
       "forbidden_paths": ["active/lib/**", "protected/**", "generated/**", "docs/v2/**"],
       "verification_gates": ["fix_lifecycle_graph", "mainline_merge_identity"]
+    },
+    {
+      "module_id": "v2-sessionlog",
+      "status": "active",
+      "owner": "v2-sessionlog",
+      "owned_paths": [
+        "docs/design/v2-sessionlog-owner-binding.md",
+        "docs/v2/v2-sessionlog-test-vectors.md",
+        "docs/v2/v2-test-design.md",
+        "docs/v2/v2-project-blackbox-verification.md",
+        "playground/experiments/v2/sessionlog/**",
+        "tests/v2/sessionlog/**"
+      ],
+      "forbidden_paths": ["active/lib/**", "protected/**", "generated/**", "docs/v2/v2-ui-design.md", "docs/v2/v2-cordis-reasoning-channel-architecture.md"],
+      "verification_gates": ["fix_lifecycle_graph", "mainline_merge_identity"]
     }
   ]
 }

@@ -45,7 +45,7 @@
     },
     {
       "module_id": "v2-sessionlog",
-      "status": "planned",
+      "status": "active",
       "owner": "v2-sessionlog",
       "source_paths": ["playground/experiments/v2/sessionlog/**"],
       "test_paths": ["tests/v2/sessionlog/**"],

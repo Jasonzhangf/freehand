@@ -197,6 +197,75 @@
       },
       "source_owner": "v2-contracts",
       "stage": "source_implemented"
+    },
+    {
+      "active_artifact": "active/lib/v2-sessionlog/**",
+      "artifact_paths": [
+        "v2-sessionlog.module"
+      ],
+      "build": {
+        "args": [
+          "-c",
+          "cargo test --manifest-path playground/experiments/v2/sessionlog/Cargo.toml --test v2_sessionlog_boundary && cargo build --release --manifest-path playground/experiments/v2/sessionlog/Cargo.toml --bin v2-sessionlog-public && mkdir -p generated/modules/v2-sessionlog/lib && cp playground/experiments/v2/sessionlog/target/release/v2-sessionlog-public generated/modules/v2-sessionlog/lib/v2-sessionlog.module"
+        ],
+        "program": "sh",
+        "working_directory": "."
+      },
+      "contract_paths": [
+        ".appsdk/goal.json",
+        ".appsdk/project.json",
+        ".appsdk/contracts/**",
+        "docs/design/v2-sessionlog-owner-binding.md",
+        "docs/v2/v2-governance-manifest.json",
+        "docs/v2/v2-sessionlog-test-vectors.md",
+        "docs/v2/v2-test-design.md",
+        "docs/v2/v2-project-blackbox-verification.md"
+      ],
+      "dependency_modules": [],
+      "generated_outputs": [
+        "generated/**"
+      ],
+      "module_id": "v2-sessionlog",
+      "owned_paths": [
+        "playground/experiments/v2/sessionlog/Cargo.lock",
+        "playground/experiments/v2/sessionlog/Cargo.toml",
+        "playground/experiments/v2/sessionlog/src/**",
+        "tests/v2/sessionlog/**",
+        "docs/design/v2-sessionlog-owner-binding.md"
+      ],
+      "regression": {
+        "allow_skipped": false,
+        "command": {
+          "args": [
+            "test",
+            "--manifest-path",
+            "playground/experiments/v2/sessionlog/Cargo.toml",
+            "--test",
+            "v2_sessionlog_boundary"
+          ],
+          "program": "cargo",
+          "working_directory": "."
+        },
+        "input_paths": [
+          "playground/experiments/v2/sessionlog/Cargo.lock",
+          "playground/experiments/v2/sessionlog/Cargo.toml",
+          "playground/experiments/v2/sessionlog/src/**",
+          "tests/v2/sessionlog/**"
+        ],
+        "minimum_test_count": 9,
+        "ordinary_mode_after_freeze": "disabled",
+        "reenable_on": [
+          "source_change",
+          "contract_change",
+          "public_api_change",
+          "artifact_change",
+          "dependency_change"
+        ],
+        "required_before_freeze": true,
+        "suite_id": "v2-sessionlog-regression"
+      },
+      "source_owner": "v2-sessionlog",
+      "stage": "source_implemented"
     }
   ],
   "project_id": "freehand-v2",

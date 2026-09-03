@@ -1,0 +1,29 @@
+{
+  "$schema": "https://appsdk.local/contracts/records/evidence-record.schema.json",
+  "artifact_hash": "sha256:cc64d17691ad1307c94c7ea58e9d1ed99a06e3fff0f873c09916164851a0247e",
+  "created_at": "2026-09-03T18:18:19.113728Z",
+  "entrypoint": "/tmp/freehand-v2-sessionlog-20260903181818-baa0a808/v2-sessionlog-public",
+  "environment_id": "local-freehand-v2-sessionlog-20260903181818-baa0a808",
+  "evidence_id": "ev-v2-sessionlog-blackbox-20260903181818-baa0a808",
+  "execution_surface": "deployed_blackbox",
+  "experiment_id": "v2-sessionlog-20260903181818-baa0a808",
+  "expires_at": "2026-09-04T18:18:19.514586Z",
+  "input_hashes": [
+    "sha256:a8050f6057a0f9d2f0addf97de984dfca39fd0803cdbbdbc1dc4d0eccd56c5a7"
+  ],
+  "issue_id": "freehand-v2-sessionlog-milestone",
+  "kind": "runtime",
+  "phase": "deployed_blackbox",
+  "producer": {
+    "adapter": "freehand-v2-sessionlog-adapter",
+    "identity": "20260903181818-baa0a808"
+  },
+  "result": "pass",
+  "scope": {
+    "entrypoint": "/tmp/freehand-v2-sessionlog-20260903181818-baa0a808/v2-sessionlog-public",
+    "feature_id": "v2-sessionlog",
+    "module_id": "v2-sessionlog"
+  },
+  "scope_hash": "sha256:0695b69cafbd6e3f2cc28248964addabe27e52f0426b3f5be62b4f850547417c",
+  "source_commit": "3d787ed5fc283a70eb06debc6c6c1e36ccc78d17"
+}
