@@ -103,6 +103,66 @@
       ],
       "forbidden_paths": ["active/lib/**", "protected/**", "generated/**", "docs/v2/v2-ui-design.md", "docs/v2/v2-cordis-reasoning-channel-architecture.md"],
       "verification_gates": ["fix_lifecycle_graph", "mainline_merge_identity"]
+    },
+    {
+      "module_id": "v2-notification-plugin",
+      "status": "active",
+      "owner": "v2-notification-plugin",
+      "owned_paths": [
+        "docs/design/v2-notification-plugin-owner-binding.md",
+        "playground/experiments/v2/notification-plugin/**",
+        "tests/v2/notification-plugin/**"
+      ],
+      "forbidden_paths": ["active/lib/**", "protected/**", "generated/**", "docs/v2/v2-ui-design.md", "docs/v2/v2-cordis-reasoning-channel-architecture.md"],
+      "verification_gates": ["fix_lifecycle_graph", "mainline_merge_identity"]
+    },
+    {
+      "module_id": "v2-topology-plugin",
+      "status": "active",
+      "owner": "v2-topology-plugin",
+      "owned_paths": [
+        "docs/design/v2-topology-plugin-owner-binding.md",
+        "playground/experiments/v2/topology-plugin/**",
+        "tests/v2/topology-plugin/**"
+      ],
+      "forbidden_paths": ["active/lib/**", "protected/**", "generated/**", "docs/v2/v2-ui-design.md", "docs/v2/v2-cordis-reasoning-channel-architecture.md"],
+      "verification_gates": ["fix_lifecycle_graph", "mainline_merge_identity"]
+    },
+    {
+      "module_id": "v2-session-canvas-plugin",
+      "status": "active",
+      "owner": "v2-session-canvas-plugin",
+      "owned_paths": [
+        "docs/design/v2-session-canvas-plugin-owner-binding.md",
+        "playground/experiments/v2/session-canvas-plugin/**",
+        "tests/v2/session-canvas-plugin/**"
+      ],
+      "forbidden_paths": ["active/lib/**", "protected/**", "generated/**", "docs/v2/v2-ui-design.md", "docs/v2/v2-cordis-reasoning-channel-architecture.md"],
+      "verification_gates": ["fix_lifecycle_graph", "mainline_merge_identity"]
+    },
+    {
+      "module_id": "v2-search-plugin",
+      "status": "active",
+      "owner": "v2-search-plugin",
+      "owned_paths": [
+        "docs/design/v2-search-plugin-owner-binding.md",
+        "playground/experiments/v2/search-plugin/**",
+        "tests/v2/search-plugin/**"
+      ],
+      "forbidden_paths": ["active/lib/**", "protected/**", "generated/**", "docs/v2/v2-ui-design.md", "docs/v2/v2-cordis-reasoning-channel-architecture.md"],
+      "verification_gates": ["fix_lifecycle_graph", "mainline_merge_identity"]
+    },
+    {
+      "module_id": "v2-memory-plugin",
+      "status": "active",
+      "owner": "v2-memory-plugin",
+      "owned_paths": [
+        "docs/design/v2-memory-plugin-owner-binding.md",
+        "playground/experiments/v2/memory-plugin/**",
+        "tests/v2/memory-plugin/**"
+      ],
+      "forbidden_paths": ["active/lib/**", "protected/**", "generated/**", "docs/v2/v2-ui-design.md", "docs/v2/v2-cordis-reasoning-channel-architecture.md"],
+      "verification_gates": ["fix_lifecycle_graph", "mainline_merge_identity"]
     }
   ]
 }

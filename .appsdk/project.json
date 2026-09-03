@@ -676,6 +676,136 @@
       },
       "source_owner": "v2-ui-plugin-family",
       "stage": "source_implemented"
+    },
+    {
+      "active_artifact": "active/lib/v2-notification-plugin/**",
+      "artifact_paths": ["v2-notification-plugin.module"],
+      "build": {
+        "args": ["-c", "cargo test --manifest-path playground/experiments/v2/notification-plugin/Cargo.toml --test v2_notification_plugin_boundary && cargo build --release --manifest-path playground/experiments/v2/notification-plugin/Cargo.toml --bin v2-notification-plugin-public && mkdir -p generated/modules/v2-notification-plugin/lib && cp playground/experiments/v2/notification-plugin/target/release/v2-notification-plugin-public generated/modules/v2-notification-plugin/lib/v2-notification-plugin.module"],
+        "program": "sh",
+        "working_directory": "."
+      },
+      "contract_paths": [".appsdk/goal.json", ".appsdk/project.json", ".appsdk/contracts/**", "docs/design/v2-notification-plugin-owner-binding.md", "docs/v2/v2-governance-manifest.json", "docs/v2/v2-test-design.md", "docs/v2/v2-project-blackbox-verification.md"],
+      "dependency_modules": [],
+      "generated_outputs": ["generated/**"],
+      "module_id": "v2-notification-plugin",
+      "owned_paths": ["playground/experiments/v2/notification-plugin/Cargo.lock", "playground/experiments/v2/notification-plugin/Cargo.toml", "playground/experiments/v2/notification-plugin/src/**", "tests/v2/notification-plugin/**", "docs/design/v2-notification-plugin-owner-binding.md"],
+      "regression": {
+        "allow_skipped": false,
+        "command": {"args": ["test", "--manifest-path", "playground/experiments/v2/notification-plugin/Cargo.toml", "--test", "v2_notification_plugin_boundary"], "program": "cargo", "working_directory": "."},
+        "input_paths": ["playground/experiments/v2/notification-plugin/Cargo.lock", "playground/experiments/v2/notification-plugin/Cargo.toml", "playground/experiments/v2/notification-plugin/src/**", "tests/v2/notification-plugin/**"],
+        "minimum_test_count": 5,
+        "ordinary_mode_after_freeze": "disabled",
+        "reenable_on": ["source_change", "contract_change", "public_api_change", "artifact_change", "dependency_change"],
+        "required_before_freeze": true,
+        "suite_id": "v2-notification-plugin-regression"
+      },
+      "source_owner": "v2-notification-plugin",
+      "stage": "source_implemented"
+    },
+    {
+      "active_artifact": "active/lib/v2-topology-plugin/**",
+      "artifact_paths": ["v2-topology-plugin.module"],
+      "build": {
+        "args": ["-c", "cargo test --manifest-path playground/experiments/v2/topology-plugin/Cargo.toml --test v2_topology_plugin_boundary && cargo build --release --manifest-path playground/experiments/v2/topology-plugin/Cargo.toml --bin v2-topology-plugin-public && mkdir -p generated/modules/v2-topology-plugin/lib && cp playground/experiments/v2/topology-plugin/target/release/v2-topology-plugin-public generated/modules/v2-topology-plugin/lib/v2-topology-plugin.module"],
+        "program": "sh",
+        "working_directory": "."
+      },
+      "contract_paths": [".appsdk/goal.json", ".appsdk/project.json", ".appsdk/contracts/**", "docs/design/v2-topology-plugin-owner-binding.md", "docs/v2/v2-governance-manifest.json", "docs/v2/v2-test-design.md", "docs/v2/v2-project-blackbox-verification.md"],
+      "dependency_modules": [],
+      "generated_outputs": ["generated/**"],
+      "module_id": "v2-topology-plugin",
+      "owned_paths": ["playground/experiments/v2/topology-plugin/Cargo.lock", "playground/experiments/v2/topology-plugin/Cargo.toml", "playground/experiments/v2/topology-plugin/src/**", "tests/v2/topology-plugin/**", "docs/design/v2-topology-plugin-owner-binding.md"],
+      "regression": {
+        "allow_skipped": false,
+        "command": {"args": ["test", "--manifest-path", "playground/experiments/v2/topology-plugin/Cargo.toml", "--test", "v2_topology_plugin_boundary"], "program": "cargo", "working_directory": "."},
+        "input_paths": ["playground/experiments/v2/topology-plugin/Cargo.lock", "playground/experiments/v2/topology-plugin/Cargo.toml", "playground/experiments/v2/topology-plugin/src/**", "tests/v2/topology-plugin/**"],
+        "minimum_test_count": 3,
+        "ordinary_mode_after_freeze": "disabled",
+        "reenable_on": ["source_change", "contract_change", "public_api_change", "artifact_change", "dependency_change"],
+        "required_before_freeze": true,
+        "suite_id": "v2-topology-plugin-regression"
+      },
+      "source_owner": "v2-topology-plugin",
+      "stage": "source_implemented"
+    },
+    {
+      "active_artifact": "active/lib/v2-session-canvas-plugin/**",
+      "artifact_paths": ["v2-session-canvas-plugin.module"],
+      "build": {
+        "args": ["-c", "cargo test --manifest-path playground/experiments/v2/session-canvas-plugin/Cargo.toml --test v2_session_canvas_plugin_boundary && cargo build --release --manifest-path playground/experiments/v2/session-canvas-plugin/Cargo.toml --bin v2-session-canvas-plugin-public && mkdir -p generated/modules/v2-session-canvas-plugin/lib && cp playground/experiments/v2/session-canvas-plugin/target/release/v2-session-canvas-plugin-public generated/modules/v2-session-canvas-plugin/lib/v2-session-canvas-plugin.module"],
+        "program": "sh",
+        "working_directory": "."
+      },
+      "contract_paths": [".appsdk/goal.json", ".appsdk/project.json", ".appsdk/contracts/**", "docs/design/v2-session-canvas-plugin-owner-binding.md", "docs/v2/v2-governance-manifest.json", "docs/v2/v2-test-design.md", "docs/v2/v2-project-blackbox-verification.md"],
+      "dependency_modules": [],
+      "generated_outputs": ["generated/**"],
+      "module_id": "v2-session-canvas-plugin",
+      "owned_paths": ["playground/experiments/v2/session-canvas-plugin/Cargo.lock", "playground/experiments/v2/session-canvas-plugin/Cargo.toml", "playground/experiments/v2/session-canvas-plugin/src/**", "tests/v2/session-canvas-plugin/**", "docs/design/v2-session-canvas-plugin-owner-binding.md"],
+      "regression": {
+        "allow_skipped": false,
+        "command": {"args": ["test", "--manifest-path", "playground/experiments/v2/session-canvas-plugin/Cargo.toml", "--test", "v2_session_canvas_plugin_boundary"], "program": "cargo", "working_directory": "."},
+        "input_paths": ["playground/experiments/v2/session-canvas-plugin/Cargo.lock", "playground/experiments/v2/session-canvas-plugin/Cargo.toml", "playground/experiments/v2/session-canvas-plugin/src/**", "tests/v2/session-canvas-plugin/**"],
+        "minimum_test_count": 4,
+        "ordinary_mode_after_freeze": "disabled",
+        "reenable_on": ["source_change", "contract_change", "public_api_change", "artifact_change", "dependency_change"],
+        "required_before_freeze": true,
+        "suite_id": "v2-session-canvas-plugin-regression"
+      },
+      "source_owner": "v2-session-canvas-plugin",
+      "stage": "source_implemented"
+    },
+    {
+      "active_artifact": "active/lib/v2-search-plugin/**",
+      "artifact_paths": ["v2-search-plugin.module"],
+      "build": {
+        "args": ["-c", "cargo test --manifest-path playground/experiments/v2/search-plugin/Cargo.toml --test v2_search_plugin_boundary && cargo build --release --manifest-path playground/experiments/v2/search-plugin/Cargo.toml --bin v2-search-plugin-public && mkdir -p generated/modules/v2-search-plugin/lib && cp playground/experiments/v2/search-plugin/target/release/v2-search-plugin-public generated/modules/v2-search-plugin/lib/v2-search-plugin.module"],
+        "program": "sh",
+        "working_directory": "."
+      },
+      "contract_paths": [".appsdk/goal.json", ".appsdk/project.json", ".appsdk/contracts/**", "docs/design/v2-search-plugin-owner-binding.md", "docs/v2/v2-governance-manifest.json", "docs/v2/v2-test-design.md", "docs/v2/v2-project-blackbox-verification.md"],
+      "dependency_modules": [],
+      "generated_outputs": ["generated/**"],
+      "module_id": "v2-search-plugin",
+      "owned_paths": ["playground/experiments/v2/search-plugin/Cargo.lock", "playground/experiments/v2/search-plugin/Cargo.toml", "playground/experiments/v2/search-plugin/src/**", "tests/v2/search-plugin/**", "docs/design/v2-search-plugin-owner-binding.md"],
+      "regression": {
+        "allow_skipped": false,
+        "command": {"args": ["test", "--manifest-path", "playground/experiments/v2/search-plugin/Cargo.toml", "--test", "v2_search_plugin_boundary"], "program": "cargo", "working_directory": "."},
+        "input_paths": ["playground/experiments/v2/search-plugin/Cargo.lock", "playground/experiments/v2/search-plugin/Cargo.toml", "playground/experiments/v2/search-plugin/src/**", "tests/v2/search-plugin/**"],
+        "minimum_test_count": 4,
+        "ordinary_mode_after_freeze": "disabled",
+        "reenable_on": ["source_change", "contract_change", "public_api_change", "artifact_change", "dependency_change"],
+        "required_before_freeze": true,
+        "suite_id": "v2-search-plugin-regression"
+      },
+      "source_owner": "v2-search-plugin",
+      "stage": "source_implemented"
+    },
+    {
+      "active_artifact": "active/lib/v2-memory-plugin/**",
+      "artifact_paths": ["v2-memory-plugin.module"],
+      "build": {
+        "args": ["-c", "cargo test --manifest-path playground/experiments/v2/memory-plugin/Cargo.toml --test v2_memory_plugin_boundary && cargo build --release --manifest-path playground/experiments/v2/memory-plugin/Cargo.toml --bin v2-memory-plugin-public && mkdir -p generated/modules/v2-memory-plugin/lib && cp playground/experiments/v2/memory-plugin/target/release/v2-memory-plugin-public generated/modules/v2-memory-plugin/lib/v2-memory-plugin.module"],
+        "program": "sh",
+        "working_directory": "."
+      },
+      "contract_paths": [".appsdk/goal.json", ".appsdk/project.json", ".appsdk/contracts/**", "docs/design/v2-memory-plugin-owner-binding.md", "docs/v2/v2-governance-manifest.json", "docs/v2/v2-test-design.md", "docs/v2/v2-project-blackbox-verification.md"],
+      "dependency_modules": [],
+      "generated_outputs": ["generated/**"],
+      "module_id": "v2-memory-plugin",
+      "owned_paths": ["playground/experiments/v2/memory-plugin/Cargo.lock", "playground/experiments/v2/memory-plugin/Cargo.toml", "playground/experiments/v2/memory-plugin/src/**", "tests/v2/memory-plugin/**", "docs/design/v2-memory-plugin-owner-binding.md"],
+      "regression": {
+        "allow_skipped": false,
+        "command": {"args": ["test", "--manifest-path", "playground/experiments/v2/memory-plugin/Cargo.toml", "--test", "v2_memory_plugin_boundary"], "program": "cargo", "working_directory": "."},
+        "input_paths": ["playground/experiments/v2/memory-plugin/Cargo.lock", "playground/experiments/v2/memory-plugin/Cargo.toml", "playground/experiments/v2/memory-plugin/src/**", "tests/v2/memory-plugin/**"],
+        "minimum_test_count": 4,
+        "ordinary_mode_after_freeze": "disabled",
+        "reenable_on": ["source_change", "contract_change", "public_api_change", "artifact_change", "dependency_change"],
+        "required_before_freeze": true,
+        "suite_id": "v2-memory-plugin-regression"
+      },
+      "source_owner": "v2-memory-plugin",
+      "stage": "source_implemented"
     }
   ],
   "project_id": "freehand-v2",
