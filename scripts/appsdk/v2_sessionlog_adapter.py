@@ -120,7 +120,7 @@ def main() -> None:
     if args.module != "v2-sessionlog":
         fail("unknown", "argument", f"unsupported module {args.module}")
 
-    attempt = args.attempt or f"{datetime.datetime.now(datetime.timezone.utc):%Y%m%dT%H%M%S}-{uuid.uuid4().hex[:8]}"
+    attempt = args.attempt or f"{datetime.datetime.now(datetime.timezone.utc):%Y%m%d%H%M%S}-{uuid.uuid4().hex[:8]}"
     issue_id = "freehand-v2-sessionlog-milestone"
     experiment_id = f"v2-sessionlog-{attempt}"
     records_dir = project / ".appsdk" / "records"
