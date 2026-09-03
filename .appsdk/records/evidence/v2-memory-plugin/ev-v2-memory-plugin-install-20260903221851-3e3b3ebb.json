@@ -1,0 +1,29 @@
+{
+  "$schema": "https://appsdk.local/contracts/records/evidence-record.schema.json",
+  "artifact_hash": "sha256:ceb560f861e109f12727c76dc0fa6b6041c596ff5e1511ccbeb7db3080cdf7c0",
+  "created_at": "2026-09-03T22:19:03.361277Z",
+  "entrypoint": "/tmp/freehand-v2-memory-plugin-20260903221851-3e3b3ebb/v2-memory-plugin-public",
+  "environment_id": "local-v2-memory-plugin-20260903221851-3e3b3ebb",
+  "evidence_id": "ev-v2-memory-plugin-install-20260903221851-3e3b3ebb",
+  "execution_surface": "deployed_blackbox",
+  "experiment_id": "v2-memory-plugin-20260903221851-3e3b3ebb",
+  "expires_at": "2026-09-04T22:19:03.364136Z",
+  "input_hashes": [
+    "sha256:ccd069d1689a60c8c715a09c768ce78b5195ce9a066c84b8f7792ceb05f07a49"
+  ],
+  "issue_id": "freehand-v2-memory-plugin-milestone",
+  "kind": "install",
+  "phase": "deployment_install",
+  "producer": {
+    "adapter": "freehand-v2-information-plugins-adapter",
+    "identity": "20260903221851-3e3b3ebb"
+  },
+  "result": "pass",
+  "scope": {
+    "entrypoint": "/tmp/freehand-v2-memory-plugin-20260903221851-3e3b3ebb/v2-memory-plugin-public",
+    "feature_id": "v2-memory-plugin",
+    "module_id": "v2-memory-plugin"
+  },
+  "scope_hash": "sha256:41ad0a6385043ec4b65924552da483c74f076db114d50090269ffb13ce673fd6",
+  "source_commit": "5ca7b9c7702709ff1ff4f941bd4832b70d4939f2"
+}

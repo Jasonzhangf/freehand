@@ -1,0 +1,29 @@
+{
+  "$schema": "https://appsdk.local/contracts/records/evidence-record.schema.json",
+  "artifact_hash": "sha256:47c925fad5d076793888f817573d8095717dc090c88f6c9989b0f2269b55ec7c",
+  "created_at": "2026-09-03T22:18:38.988749Z",
+  "entrypoint": "/tmp/freehand-v2-session-canvas-plugin-20260903221827-7371a079/v2-session-canvas-plugin-public",
+  "environment_id": "local-v2-session-canvas-plugin-20260903221827-7371a079",
+  "evidence_id": "ev-v2-session-canvas-plugin-restart-20260903221827-7371a079",
+  "execution_surface": "deployed_blackbox",
+  "experiment_id": "v2-session-canvas-plugin-20260903221827-7371a079",
+  "expires_at": "2026-09-04T22:18:39.360996Z",
+  "input_hashes": [
+    "sha256:2ec76292c7184a982b395f2eea323a29bf7e61a93c0a644ab69d98a492b34800"
+  ],
+  "issue_id": "freehand-v2-session-canvas-plugin-milestone",
+  "kind": "restart",
+  "phase": "deployment_restart",
+  "producer": {
+    "adapter": "freehand-v2-information-plugins-adapter",
+    "identity": "20260903221827-7371a079"
+  },
+  "result": "pass",
+  "scope": {
+    "entrypoint": "/tmp/freehand-v2-session-canvas-plugin-20260903221827-7371a079/v2-session-canvas-plugin-public",
+    "feature_id": "v2-session-canvas-plugin",
+    "module_id": "v2-session-canvas-plugin"
+  },
+  "scope_hash": "sha256:41ad0a6385043ec4b65924552da483c74f076db114d50090269ffb13ce673fd6",
+  "source_commit": "5ca7b9c7702709ff1ff4f941bd4832b70d4939f2"
+}

@@ -1,0 +1,26 @@
+{
+  "$schema": "https://appsdk.local/contracts/records/evidence-record.schema.json",
+  "artifact_hash": "sha256:ceb560f861e109f12727c76dc0fa6b6041c596ff5e1511ccbeb7db3080cdf7c0",
+  "created_at": "2026-09-03T22:19:03.361277Z",
+  "evidence_id": "ev-v2-memory-plugin-whitebox-20260903221851-3e3b3ebb",
+  "execution_surface": "development_whitebox",
+  "experiment_id": "v2-memory-plugin-20260903221851-3e3b3ebb",
+  "expires_at": "2026-09-04T22:19:03.361458Z",
+  "input_hashes": [
+    "sha256:08b0db3e71a6871786f368893cc9507d14b6c3fd783d2b3eeef0208776e885f1"
+  ],
+  "issue_id": "freehand-v2-memory-plugin-milestone",
+  "kind": "gate",
+  "phase": "development_whitebox",
+  "producer": {
+    "adapter": "freehand-v2-information-plugins-adapter",
+    "identity": "20260903221851-3e3b3ebb"
+  },
+  "result": "pass",
+  "scope": {
+    "feature_id": "v2-memory-plugin",
+    "module_id": "v2-memory-plugin"
+  },
+  "scope_hash": "sha256:41ad0a6385043ec4b65924552da483c74f076db114d50090269ffb13ce673fd6",
+  "source_commit": "5ca7b9c7702709ff1ff4f941bd4832b70d4939f2"
+}

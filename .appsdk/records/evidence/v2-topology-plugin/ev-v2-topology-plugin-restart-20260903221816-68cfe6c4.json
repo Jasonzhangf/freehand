@@ -1,0 +1,29 @@
+{
+  "$schema": "https://appsdk.local/contracts/records/evidence-record.schema.json",
+  "artifact_hash": "sha256:d056be58cf5250ee84d78efe6a1282ca81bf8934d8abe4815c72107c57b2aafa",
+  "created_at": "2026-09-03T22:18:26.911795Z",
+  "entrypoint": "/tmp/freehand-v2-topology-plugin-20260903221816-68cfe6c4/v2-topology-plugin-public",
+  "environment_id": "local-v2-topology-plugin-20260903221816-68cfe6c4",
+  "evidence_id": "ev-v2-topology-plugin-restart-20260903221816-68cfe6c4",
+  "execution_surface": "deployed_blackbox",
+  "experiment_id": "v2-topology-plugin-20260903221816-68cfe6c4",
+  "expires_at": "2026-09-04T22:18:27.290607Z",
+  "input_hashes": [
+    "sha256:7238e5e148538c329185066e8733b8e7f3d07f0b94088c94ce7cd5be50c32b6a"
+  ],
+  "issue_id": "freehand-v2-topology-plugin-milestone",
+  "kind": "restart",
+  "phase": "deployment_restart",
+  "producer": {
+    "adapter": "freehand-v2-information-plugins-adapter",
+    "identity": "20260903221816-68cfe6c4"
+  },
+  "result": "pass",
+  "scope": {
+    "entrypoint": "/tmp/freehand-v2-topology-plugin-20260903221816-68cfe6c4/v2-topology-plugin-public",
+    "feature_id": "v2-topology-plugin",
+    "module_id": "v2-topology-plugin"
+  },
+  "scope_hash": "sha256:41ad0a6385043ec4b65924552da483c74f076db114d50090269ffb13ce673fd6",
+  "source_commit": "5ca7b9c7702709ff1ff4f941bd4832b70d4939f2"
+}

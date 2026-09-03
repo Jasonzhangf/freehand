@@ -1,0 +1,29 @@
+{
+  "$schema": "https://appsdk.local/contracts/records/evidence-record.schema.json",
+  "artifact_hash": "sha256:b429bf035e71fa5c76d2d538a48cb1115048643d4c6029c934b1f42e65ac9a4f",
+  "created_at": "2026-09-03T22:18:51.356197Z",
+  "entrypoint": "/tmp/freehand-v2-search-plugin-20260903221839-1a2efd9b/v2-search-plugin-public",
+  "environment_id": "local-v2-search-plugin-20260903221839-1a2efd9b",
+  "evidence_id": "ev-v2-search-plugin-blackbox-20260903221839-1a2efd9b",
+  "execution_surface": "deployed_blackbox",
+  "experiment_id": "v2-search-plugin-20260903221839-1a2efd9b",
+  "expires_at": "2026-09-04T22:18:51.725201Z",
+  "input_hashes": [
+    "sha256:b96b11dc9045bca2106eaafb5475eaabc94ec5fb35edaa1a62b7d183a678c3d7"
+  ],
+  "issue_id": "freehand-v2-search-plugin-milestone",
+  "kind": "runtime",
+  "phase": "deployed_blackbox",
+  "producer": {
+    "adapter": "freehand-v2-information-plugins-adapter",
+    "identity": "20260903221839-1a2efd9b"
+  },
+  "result": "pass",
+  "scope": {
+    "entrypoint": "/tmp/freehand-v2-search-plugin-20260903221839-1a2efd9b/v2-search-plugin-public",
+    "feature_id": "v2-search-plugin",
+    "module_id": "v2-search-plugin"
+  },
+  "scope_hash": "sha256:41ad0a6385043ec4b65924552da483c74f076db114d50090269ffb13ce673fd6",
+  "source_commit": "5ca7b9c7702709ff1ff4f941bd4832b70d4939f2"
+}

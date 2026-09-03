@@ -1,0 +1,34 @@
+{
+  "$schema": "https://appsdk.local/contracts/records/pre-review-validation-record.schema.json",
+  "artifact_hash": "sha256:d056be58cf5250ee84d78efe6a1282ca81bf8934d8abe4815c72107c57b2aafa",
+  "blackbox_evidence_ids": [
+    "ev-v2-topology-plugin-blackbox-20260903221816-68cfe6c4"
+  ],
+  "candidate_commit": "5ca7b9c7702709ff1ff4f941bd4832b70d4939f2",
+  "candidate_tree_hash": "f6bab85803f45ab3add49d7015f2e12dc09bff70",
+  "created_at": "2026-09-03T22:18:26.911795Z",
+  "deployment": {
+    "entrypoint": "/tmp/freehand-v2-topology-plugin-20260903221816-68cfe6c4/v2-topology-plugin-public",
+    "environment_id": "local-v2-topology-plugin-20260903221816-68cfe6c4",
+    "install_receipt_id": "ev-v2-topology-plugin-install-20260903221816-68cfe6c4",
+    "observed_at": "2026-09-03T22:18:26.911795Z",
+    "producer": {
+      "adapter": "freehand-v2-information-plugins-adapter",
+      "identity": "20260903221816-68cfe6c4"
+    },
+    "restart_receipt_id": "ev-v2-topology-plugin-restart-20260903221816-68cfe6c4"
+  },
+  "fix_candidate_id": "fix-v2-topology-plugin-20260903221816-68cfe6c4",
+  "issue_id": "freehand-v2-topology-plugin-milestone",
+  "module_id": "v2-topology-plugin",
+  "result": "pass",
+  "source_unchanged": true,
+  "validation_id": "prv-v2-topology-plugin-20260903221816-68cfe6c4",
+  "whitebox_evidence_ids": [
+    "ev-v2-topology-plugin-whitebox-20260903221816-68cfe6c4"
+  ],
+  "whitebox_producer": {
+    "adapter": "freehand-v2-information-plugins-adapter",
+    "identity": "20260903221816-68cfe6c4"
+  }
+}

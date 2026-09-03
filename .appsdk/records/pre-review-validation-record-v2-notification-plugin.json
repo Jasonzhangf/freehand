@@ -1,0 +1,34 @@
+{
+  "$schema": "https://appsdk.local/contracts/records/pre-review-validation-record.schema.json",
+  "artifact_hash": "sha256:40d9f91872a71a5e9adbcd3d4025fa98ceda70b5b574a178cc7b8498e0fa1297",
+  "blackbox_evidence_ids": [
+    "ev-v2-notification-plugin-blackbox-20260903221750-82d49013"
+  ],
+  "candidate_commit": "5ca7b9c7702709ff1ff4f941bd4832b70d4939f2",
+  "candidate_tree_hash": "f6bab85803f45ab3add49d7015f2e12dc09bff70",
+  "created_at": "2026-09-03T22:18:02.890800Z",
+  "deployment": {
+    "entrypoint": "/tmp/freehand-v2-notification-plugin-20260903221750-82d49013/v2-notification-plugin-public",
+    "environment_id": "local-v2-notification-plugin-20260903221750-82d49013",
+    "install_receipt_id": "ev-v2-notification-plugin-install-20260903221750-82d49013",
+    "observed_at": "2026-09-03T22:18:02.890800Z",
+    "producer": {
+      "adapter": "freehand-v2-information-plugins-adapter",
+      "identity": "20260903221750-82d49013"
+    },
+    "restart_receipt_id": "ev-v2-notification-plugin-restart-20260903221750-82d49013"
+  },
+  "fix_candidate_id": "fix-v2-notification-plugin-20260903221750-82d49013",
+  "issue_id": "freehand-v2-notification-plugin-milestone",
+  "module_id": "v2-notification-plugin",
+  "result": "pass",
+  "source_unchanged": true,
+  "validation_id": "prv-v2-notification-plugin-20260903221750-82d49013",
+  "whitebox_evidence_ids": [
+    "ev-v2-notification-plugin-whitebox-20260903221750-82d49013"
+  ],
+  "whitebox_producer": {
+    "adapter": "freehand-v2-information-plugins-adapter",
+    "identity": "20260903221750-82d49013"
+  }
+}

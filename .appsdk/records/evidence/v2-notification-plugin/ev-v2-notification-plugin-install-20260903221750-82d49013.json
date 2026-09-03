@@ -1,0 +1,29 @@
+{
+  "$schema": "https://appsdk.local/contracts/records/evidence-record.schema.json",
+  "artifact_hash": "sha256:40d9f91872a71a5e9adbcd3d4025fa98ceda70b5b574a178cc7b8498e0fa1297",
+  "created_at": "2026-09-03T22:18:02.890800Z",
+  "entrypoint": "/tmp/freehand-v2-notification-plugin-20260903221750-82d49013/v2-notification-plugin-public",
+  "environment_id": "local-v2-notification-plugin-20260903221750-82d49013",
+  "evidence_id": "ev-v2-notification-plugin-install-20260903221750-82d49013",
+  "execution_surface": "deployed_blackbox",
+  "experiment_id": "v2-notification-plugin-20260903221750-82d49013",
+  "expires_at": "2026-09-04T22:18:02.892144Z",
+  "input_hashes": [
+    "sha256:801b70296266b0e43ead3808aa6458f31108c055486af47c1e9950f440211ef5"
+  ],
+  "issue_id": "freehand-v2-notification-plugin-milestone",
+  "kind": "install",
+  "phase": "deployment_install",
+  "producer": {
+    "adapter": "freehand-v2-information-plugins-adapter",
+    "identity": "20260903221750-82d49013"
+  },
+  "result": "pass",
+  "scope": {
+    "entrypoint": "/tmp/freehand-v2-notification-plugin-20260903221750-82d49013/v2-notification-plugin-public",
+    "feature_id": "v2-notification-plugin",
+    "module_id": "v2-notification-plugin"
+  },
+  "scope_hash": "sha256:41ad0a6385043ec4b65924552da483c74f076db114d50090269ffb13ce673fd6",
+  "source_commit": "5ca7b9c7702709ff1ff4f941bd4832b70d4939f2"
+}
