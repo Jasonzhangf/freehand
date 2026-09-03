@@ -1,0 +1,29 @@
+{
+  "$schema": "https://appsdk.local/contracts/records/evidence-record.schema.json",
+  "artifact_hash": "sha256:3900d1e437be170dc0b6ba2066b75aaa2ca5a70dc9feba58bf06847e9d00d554",
+  "created_at": "2026-09-03T21:33:47.597547Z",
+  "entrypoint": "/tmp/freehand-v2-ui-plugin-family-20260903213335-0dd55395/v2-ui-plugins-public",
+  "environment_id": "local-v2-ui-plugin-family-20260903213335-0dd55395",
+  "evidence_id": "ev-v2-ui-plugin-family-blackbox-20260903213335-0dd55395",
+  "execution_surface": "deployed_blackbox",
+  "experiment_id": "v2-ui-plugin-family-20260903213335-0dd55395",
+  "expires_at": "2026-09-04T21:33:47.978598Z",
+  "input_hashes": [
+    "sha256:0fb7ef84392de6c9090f69f7ff2b52191a11c3704e153385d11c63311f42c3e0"
+  ],
+  "issue_id": "freehand-v2-ui-plugin-family-milestone",
+  "kind": "runtime",
+  "phase": "deployed_blackbox",
+  "producer": {
+    "adapter": "freehand-v2-ui-plugin-adapter",
+    "identity": "20260903213335-0dd55395"
+  },
+  "result": "pass",
+  "scope": {
+    "entrypoint": "/tmp/freehand-v2-ui-plugin-family-20260903213335-0dd55395/v2-ui-plugins-public",
+    "feature_id": "v2-ui-plugin-family",
+    "module_id": "v2-ui-plugin-family"
+  },
+  "scope_hash": "sha256:d250586cc24d34393d578c77546acde8ba3d6f745281d35d5732b35ea159b37f",
+  "source_commit": "6231ad21967bb319e24f0ff1605f9e2ef054af3d"
+}

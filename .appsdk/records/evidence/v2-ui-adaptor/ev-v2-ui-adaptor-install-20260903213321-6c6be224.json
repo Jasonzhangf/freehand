@@ -1,0 +1,29 @@
+{
+  "$schema": "https://appsdk.local/contracts/records/evidence-record.schema.json",
+  "artifact_hash": "sha256:0c51026a7816ee6942bdb05ed460f4d6f067a083e77aa8250d1780f3c56d15ff",
+  "created_at": "2026-09-03T21:33:23.111883Z",
+  "entrypoint": "/tmp/freehand-v2-ui-adaptor-20260903213321-6c6be224/v2-ui-adaptor-public",
+  "environment_id": "local-v2-ui-adaptor-20260903213321-6c6be224",
+  "evidence_id": "ev-v2-ui-adaptor-install-20260903213321-6c6be224",
+  "execution_surface": "deployed_blackbox",
+  "experiment_id": "v2-ui-adaptor-20260903213321-6c6be224",
+  "expires_at": "2026-09-04T21:33:23.114921Z",
+  "input_hashes": [
+    "sha256:3e322a99add141151a1179de9d82fb6efc292139a2f574c74671cb7f71b2c6a0"
+  ],
+  "issue_id": "freehand-v2-ui-adaptor-milestone",
+  "kind": "install",
+  "phase": "deployment_install",
+  "producer": {
+    "adapter": "freehand-v2-ui-plugin-adapter",
+    "identity": "20260903213321-6c6be224"
+  },
+  "result": "pass",
+  "scope": {
+    "entrypoint": "/tmp/freehand-v2-ui-adaptor-20260903213321-6c6be224/v2-ui-adaptor-public",
+    "feature_id": "v2-ui-adaptor",
+    "module_id": "v2-ui-adaptor"
+  },
+  "scope_hash": "sha256:d250586cc24d34393d578c77546acde8ba3d6f745281d35d5732b35ea159b37f",
+  "source_commit": "6231ad21967bb319e24f0ff1605f9e2ef054af3d"
+}
