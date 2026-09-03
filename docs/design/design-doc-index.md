@@ -25,6 +25,7 @@ Use this directory family for durable design truth.
 - `docs/design/master-worker-prompt-contract-phase1.md`
 - `docs/design/master-worker-tool-action-contract-phase1.md`
 - `docs/design/multi-task-foundation-implementation-plan.md`
+- `docs/design/v2-sessionlog-owner-binding.md`
 - `docs/design/workspace-session-execution-taxonomy.md`
 - `docs/design/multi-agent-dispatch-alignment.md`
 - `docs/design/ui-and-runtime-topology.md`
@@ -105,6 +106,8 @@ Use this directory family for durable design truth.
   - Phase 1 tool/action contract requiring a small owner-scoped tool surface with typed `op` parameters, semantic-action-to-op mapping, owner boundaries, and paired action validation errors
 - `multi-task-foundation-implementation-plan.md`
   - staged plan for implementing Task Center, Agent Lifecycle, lifecycle-to-task sync, scheduler tick, runtime control channel, headless samples, and UI projection before full multi-agent scheduling
+- `v2-sessionlog-owner-binding.md`
+  - canonical M2 Session Log owner, resource, function, mainline and verification binding before source implementation
 - `workspace-session-execution-taxonomy.md`
   - canonical vocabulary and ownership rules for master, worker resources, cwd-bound workspaces, workspace-owned sessions, and worker executions
 - `multi-agent-dispatch-alignment.md`
