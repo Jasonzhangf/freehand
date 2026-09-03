@@ -166,7 +166,7 @@
     },
     {
       "module_id": "v2-channel-registry",
-      "status": "planned",
+      "status": "active",
       "owner": "v2-channel-registry",
       "source_paths": ["playground/experiments/v2/channel-registry/**"],
       "test_paths": ["tests/v2/channel-registry/**"],
@@ -268,8 +268,8 @@
     {"gate_id": "v2_session_canvas_source_binding", "status": "active", "required_for": ["v2-session-canvas-plugin"], "test_design": "docs/v2/v2-test-design.md", "project_blackbox": "docs/v2/v2-project-blackbox-verification.md"},
     {"gate_id": "v2_search_index_query_boundary", "status": "active", "required_for": ["v2-search-plugin"], "test_design": "docs/v2/v2-test-design.md", "project_blackbox": "docs/v2/v2-project-blackbox-verification.md"},
     {"gate_id": "v2_memory_lifecycle_boundary", "status": "active", "required_for": ["v2-memory-plugin"], "test_design": "docs/v2/v2-test-design.md", "project_blackbox": "docs/v2/v2-project-blackbox-verification.md"},
-    {"gate_id": "v2_registry_registration", "status": "planned", "required_for": ["v2-channel-registry"], "test_design": "docs/v2/v2-test-design.md", "project_blackbox": "docs/v2/v2-project-blackbox-verification.md"},
-    {"gate_id": "v2_channel_session_reconnect", "status": "planned", "required_for": ["v2-channel-registry"], "test_design": "docs/v2/v2-test-design.md", "project_blackbox": "docs/v2/v2-project-blackbox-verification.md"}
+    {"gate_id": "v2_registry_registration", "status": "active", "required_for": ["v2-channel-registry"], "test_design": "docs/v2/v2-test-design.md", "project_blackbox": "docs/v2/v2-project-blackbox-verification.md"},
+    {"gate_id": "v2_channel_session_reconnect", "status": "active", "required_for": ["v2-channel-registry"], "test_design": "docs/v2/v2-test-design.md", "project_blackbox": "docs/v2/v2-project-blackbox-verification.md"}
   ],
   "artifact_policy": {
     "committed": ["v2 source", "v2 tests", "v2 docs", ".appsdk contracts and records"],

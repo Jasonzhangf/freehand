@@ -163,6 +163,18 @@
       ],
       "forbidden_paths": ["active/lib/**", "protected/**", "generated/**", "docs/v2/v2-ui-design.md", "docs/v2/v2-cordis-reasoning-channel-architecture.md"],
       "verification_gates": ["fix_lifecycle_graph", "mainline_merge_identity"]
+    },
+    {
+      "module_id": "v2-channel-registry",
+      "status": "active",
+      "owner": "v2-channel-registry",
+      "owned_paths": [
+        "docs/design/v2-channel-registry-owner-binding.md",
+        "playground/experiments/v2/channel-registry/**",
+        "tests/v2/channel-registry/**"
+      ],
+      "forbidden_paths": ["active/lib/**", "protected/**", "generated/**", "docs/v2/v2-ui-design.md", "docs/v2/v2-cordis-reasoning-channel-architecture.md"],
+      "verification_gates": ["fix_lifecycle_graph", "mainline_merge_identity"]
     }
   ]
 }
