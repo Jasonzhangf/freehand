@@ -100,6 +100,8 @@ def evidence_record(
     if phase == "development_whitebox":
         record["execution_surface"] = "development_whitebox"
         record["scope"]["entrypoint"] = "cargo test --manifest-path playground/experiments/v2/sessionlog/Cargo.toml --test v2_sessionlog_boundary"
+        if artifact_hash:
+            record["artifact_hash"] = artifact_hash
     if phase in {"deployment_install", "deployment_restart", "deployed_blackbox"}:
         record["artifact_hash"] = artifact_hash
         record["execution_surface"] = "deployed_blackbox"
@@ -203,6 +205,7 @@ def main() -> None:
         producer_identity=attempt,
         created_at=created_at,
         input_hashes=[whitebox_input_hash],
+        artifact_hash=artifact_hash,
     )
     stage(staging_dir / "whitebox.json", whitebox)
     if whitebox_proc.returncode != 0:
