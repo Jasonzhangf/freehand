@@ -1,0 +1,33 @@
+{
+  "$schema": "https://appsdk.local/contracts/records/fix-candidate-record.schema.json",
+  "base_commit": "bf6efc127aba124318e3fbd7a16dd68fd9a30e76",
+  "changed_paths": [
+    ".appsdk/maps/module-registry.json",
+    ".appsdk/project.json",
+    "docs/design/v2-reasoning-backend-owner-binding.md",
+    "docs/v2/v2-governance-manifest.json",
+    "playground/experiments/v2/reasoning-backend/Cargo.lock",
+    "playground/experiments/v2/reasoning-backend/Cargo.toml",
+    "playground/experiments/v2/reasoning-backend/src/bin/v2-reasoning-public.rs",
+    "playground/experiments/v2/reasoning-backend/src/lib.rs",
+    "scripts/appsdk/v2_reasoning_backend_adapter.py",
+    "tests/v2/reasoning-backend/reasoning_boundary.rs"
+  ],
+  "created_at": "2026-09-03T20:23:54.084998Z",
+  "design_id": "docs/design/v2-reasoning-backend-owner-binding.md",
+  "diff_hash": "sha256:729c3672b54ca779119e343224ede5c077b1635c5a3504569223f31ec0877625",
+  "fix_candidate_id": "fix-v2-reasoning-backend-20260903202353-de69450f",
+  "head_commit": "ddd20ed661d8aa3d9386e135fd922a41c4b82256",
+  "issue_id": "freehand-v2-reasoning-backend-milestone",
+  "module_id": "v2-reasoning-backend",
+  "owner": "v2-reasoning-backend",
+  "scope_hash": "sha256:d49d93f7149b724e64f51b2f00afa20b4d52a548de9137589b765307f3c1e084",
+  "tree_hash": "7595cb8c679f6ca9ebcdbdd72548d4e946f51d78",
+  "verification_evidence_ids": [
+    "ev-v2-reasoning-backend-whitebox-20260903202353-de69450f",
+    "ev-v2-reasoning-backend-install-20260903202353-de69450f",
+    "ev-v2-reasoning-backend-restart-20260903202353-de69450f",
+    "ev-v2-reasoning-backend-blackbox-20260903202353-de69450f"
+  ],
+  "worktree_id": "playground/v2-reasoning-backend-20260903"
+}

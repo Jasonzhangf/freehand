@@ -1,0 +1,34 @@
+{
+  "$schema": "https://appsdk.local/contracts/records/pre-review-validation-record.schema.json",
+  "artifact_hash": "sha256:5921d7b1fae78e3ab9960a38917153f2d11653d2f86cca9ea0566f3d45d87ee7",
+  "blackbox_evidence_ids": [
+    "ev-v2-reasoning-backend-blackbox-20260903202353-de69450f"
+  ],
+  "candidate_commit": "ddd20ed661d8aa3d9386e135fd922a41c4b82256",
+  "candidate_tree_hash": "7595cb8c679f6ca9ebcdbdd72548d4e946f51d78",
+  "created_at": "2026-09-03T20:23:54.084998Z",
+  "deployment": {
+    "entrypoint": "/tmp/freehand-v2-reasoning-backend-20260903202353-de69450f/v2-reasoning-backend-public",
+    "environment_id": "local-freehand-v2-reasoning-backend-20260903202353-de69450f",
+    "install_receipt_id": "ev-v2-reasoning-backend-install-20260903202353-de69450f",
+    "observed_at": "2026-09-03T20:23:54.084998Z",
+    "producer": {
+      "adapter": "freehand-v2-reasoning-backend-adapter",
+      "identity": "20260903202353-de69450f"
+    },
+    "restart_receipt_id": "ev-v2-reasoning-backend-restart-20260903202353-de69450f"
+  },
+  "fix_candidate_id": "fix-v2-reasoning-backend-20260903202353-de69450f",
+  "issue_id": "freehand-v2-reasoning-backend-milestone",
+  "module_id": "v2-reasoning-backend",
+  "result": "pass",
+  "source_unchanged": true,
+  "validation_id": "prv-v2-reasoning-backend-20260903202353-de69450f",
+  "whitebox_evidence_ids": [
+    "ev-v2-reasoning-backend-whitebox-20260903202353-de69450f"
+  ],
+  "whitebox_producer": {
+    "adapter": "freehand-v2-reasoning-backend-adapter",
+    "identity": "20260903202353-de69450f"
+  }
+}

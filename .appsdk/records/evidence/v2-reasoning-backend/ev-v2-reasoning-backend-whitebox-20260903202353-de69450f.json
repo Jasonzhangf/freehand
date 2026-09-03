@@ -1,0 +1,27 @@
+{
+  "$schema": "https://appsdk.local/contracts/records/evidence-record.schema.json",
+  "artifact_hash": "sha256:5921d7b1fae78e3ab9960a38917153f2d11653d2f86cca9ea0566f3d45d87ee7",
+  "created_at": "2026-09-03T20:23:54.084998Z",
+  "evidence_id": "ev-v2-reasoning-backend-whitebox-20260903202353-de69450f",
+  "execution_surface": "development_whitebox",
+  "experiment_id": "v2-reasoning-backend-20260903202353-de69450f",
+  "expires_at": "2026-09-04T20:23:54.085088Z",
+  "input_hashes": [
+    "sha256:0916c81d0c3a7d80770ca07c66340982e9b897bdf21ccf458cca9e816b49bf18"
+  ],
+  "issue_id": "freehand-v2-reasoning-backend-milestone",
+  "kind": "gate",
+  "phase": "development_whitebox",
+  "producer": {
+    "adapter": "freehand-v2-reasoning-backend-adapter",
+    "identity": "20260903202353-de69450f"
+  },
+  "result": "pass",
+  "scope": {
+    "entrypoint": "cargo test --manifest-path playground/experiments/v2/reasoning-backend/Cargo.toml --test v2_reasoning_backend_boundary",
+    "feature_id": "v2-reasoning-backend",
+    "module_id": "v2-reasoning-backend"
+  },
+  "scope_hash": "sha256:d49d93f7149b724e64f51b2f00afa20b4d52a548de9137589b765307f3c1e084",
+  "source_commit": "ddd20ed661d8aa3d9386e135fd922a41c4b82256"
+}
