@@ -1,0 +1,26 @@
+{
+  "$schema": "https://appsdk.local/contracts/records/evidence-record.schema.json",
+  "artifact_hash": "sha256:9bd79bf2ad658521ea90a0df7540613c38d27c0a54be14aebd1f143a0c34f02b",
+  "created_at": "2026-09-03T22:51:37.338768Z",
+  "evidence_id": "ev-v2-channel-registry-whitebox-20260903225124-fb6a6776",
+  "execution_surface": "development_whitebox",
+  "experiment_id": "v2-channel-registry-20260903225124-fb6a6776",
+  "expires_at": "2026-09-04T22:51:37.338914Z",
+  "input_hashes": [
+    "sha256:91eb24e5594c763831a764383e781ec0c4cd28f6934a5905308126d6953be6a9"
+  ],
+  "issue_id": "freehand-v2-channel-registry-milestone",
+  "kind": "gate",
+  "phase": "development_whitebox",
+  "producer": {
+    "adapter": "freehand-v2-channel-registry-adapter",
+    "identity": "20260903225124-fb6a6776"
+  },
+  "result": "pass",
+  "scope": {
+    "feature_id": "v2-channel-registry",
+    "module_id": "v2-channel-registry"
+  },
+  "scope_hash": "sha256:de83dc3f47e98f610a2a2f745b5c1e9171f34ae5b1e1c96fdf4d207772396376",
+  "source_commit": "61606f5b8e9b32110cd08d846b1dc2819495a120"
+}
