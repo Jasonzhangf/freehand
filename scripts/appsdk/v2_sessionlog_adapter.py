@@ -114,7 +114,7 @@ def main() -> None:
     if args.module != "v2-sessionlog":
         fail("unknown", "argument", f"unsupported module {args.module}")
 
-    attempt = args.attempt or f"{datetime.datetime.utcnow():%Y%m%dT%H%M%S}-{uuid.uuid4().hex[:8]}"
+    attempt = args.attempt or f"{datetime.datetime.now(datetime.timezone.utc):%Y%m%dT%H%M%S}-{uuid.uuid4().hex[:8]}"
     issue_id = "freehand-v2-sessionlog-milestone"
     experiment_id = f"v2-sessionlog-{attempt}"
     records_dir = project / ".appsdk" / "records"
@@ -126,10 +126,14 @@ def main() -> None:
     if head_proc.returncode != 0:
         fail(attempt, "candidate_identity", "cannot resolve HEAD")
     head_commit = head_proc.stdout.strip()
-    base_proc = git(project, ["rev-parse", f"{head_commit}^"])
-    if base_proc.returncode != 0:
-        fail(attempt, "candidate_identity", "cannot resolve HEAD parent")
-    base_commit = base_proc.stdout.strip()
+    base_commit = None
+    for ref in ("origin/v2", f"{head_commit}^"):
+        base_proc = git(project, ["rev-parse", ref])
+        if base_proc.returncode == 0:
+            base_commit = base_proc.stdout.strip()
+            break
+    if base_commit is None:
+        fail(attempt, "candidate_identity", "cannot resolve origin/v2 or HEAD parent")
 
     tree_proc = git(project, ["rev-parse", f"{head_commit}^{{tree}}"])
     if tree_proc.returncode != 0:
