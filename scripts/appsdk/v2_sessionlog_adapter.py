@@ -75,13 +75,17 @@ def evidence_record(
     entrypoint: str | None = None,
 ) -> dict:
     record = {
+        "$schema": "https://appsdk.local/contracts/records/evidence-record.schema.json",
         "evidence_id": evidence_id,
         "issue_id": issue_id,
         "experiment_id": experiment_id,
         "phase": phase,
         "kind": kind,
         "source_commit": source_commit,
-        "scope": {"module_id": "v2-sessionlog"},
+        "scope": {
+            "module_id": "v2-sessionlog",
+            "feature_id": "v2-sessionlog",
+        },
         "producer": {"adapter": "freehand-v2-sessionlog-adapter", "identity": producer_identity},
         "result": "pass",
         "created_at": created_at,
@@ -95,11 +99,13 @@ def evidence_record(
     }
     if phase == "development_whitebox":
         record["execution_surface"] = "development_whitebox"
+        record["scope"]["entrypoint"] = "cargo test --manifest-path playground/experiments/v2/sessionlog/Cargo.toml --test v2_sessionlog_boundary"
     if phase in {"deployment_install", "deployment_restart", "deployed_blackbox"}:
         record["artifact_hash"] = artifact_hash
         record["execution_surface"] = "deployed_blackbox"
         record["environment_id"] = environment_id
         record["entrypoint"] = entrypoint
+        record["scope"]["entrypoint"] = entrypoint
     return record
 
 
@@ -191,7 +197,7 @@ def main() -> None:
         issue_id=issue_id,
         experiment_id=experiment_id,
         phase="development_whitebox",
-        kind="positive_test",
+        kind="gate",
         source_commit=head_commit,
         scope_hash=scope_hash,
         producer_identity=attempt,
@@ -289,6 +295,7 @@ def main() -> None:
 
     fix_candidate_id = f"fix-v2-sessionlog-{attempt}"
     fix_candidate = {
+        "$schema": "https://appsdk.local/contracts/records/fix-candidate-record.schema.json",
         "fix_candidate_id": fix_candidate_id,
         "issue_id": issue_id,
         "module_id": "v2-sessionlog",
@@ -308,6 +315,7 @@ def main() -> None:
 
     validation_id = f"prv-v2-sessionlog-{attempt}"
     pre_review = {
+        "$schema": "https://appsdk.local/contracts/records/pre-review-validation-record.schema.json",
         "validation_id": validation_id,
         "issue_id": issue_id,
         "module_id": "v2-sessionlog",
@@ -333,10 +341,10 @@ def main() -> None:
     stage(staging_dir / "pre-review.json", pre_review)
 
     evidence_dir.mkdir(parents=True, exist_ok=True)
-    finalize(evidence_dir / f"whitebox-{attempt}.json", whitebox)
-    finalize(evidence_dir / f"install-{attempt}.json", install)
-    finalize(evidence_dir / f"restart-{attempt}.json", restart)
-    finalize(evidence_dir / f"blackbox-{attempt}.json", blackbox)
+    finalize(evidence_dir / f"{whitebox_id}.json", whitebox)
+    finalize(evidence_dir / f"{install_id}.json", install)
+    finalize(evidence_dir / f"{restart_id}.json", restart)
+    finalize(evidence_dir / f"{blackbox_id}.json", blackbox)
     finalize(records_dir / "fix-candidate-record-v2-sessionlog.json", fix_candidate)
     finalize(pre_review_path, pre_review)
 
