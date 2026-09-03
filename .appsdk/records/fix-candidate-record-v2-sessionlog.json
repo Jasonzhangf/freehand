@@ -4,6 +4,12 @@
   "changed_paths": [
     ".appsdk/maps/module-registry.json",
     ".appsdk/project.json",
+    ".appsdk/records/evidence/v2-sessionlog/ev-v2-sessionlog-blackbox-20260903181818-baa0a808.json",
+    ".appsdk/records/evidence/v2-sessionlog/ev-v2-sessionlog-install-20260903181818-baa0a808.json",
+    ".appsdk/records/evidence/v2-sessionlog/ev-v2-sessionlog-restart-20260903181818-baa0a808.json",
+    ".appsdk/records/evidence/v2-sessionlog/ev-v2-sessionlog-whitebox-20260903181818-baa0a808.json",
+    ".appsdk/records/fix-candidate-record-v2-sessionlog.json",
+    ".appsdk/records/pre-review-validation-record-v2-sessionlog.json",
     "docs/design/design-doc-index.md",
     "docs/design/v2-sessionlog-owner-binding.md",
     "docs/v2/v2-governance-manifest.json",
@@ -14,21 +20,21 @@
     "scripts/appsdk/v2_sessionlog_adapter.py",
     "tests/v2/sessionlog/sessionlog_boundary.rs"
   ],
-  "created_at": "2026-09-03T18:18:19.113728Z",
+  "created_at": "2026-09-03T18:39:08.092891Z",
   "design_id": "docs/design/v2-sessionlog-owner-binding.md",
-  "diff_hash": "sha256:92fac108a6594fb5b1da5a9133b88fbe8f363ae51edeedbdb309797f611351a1",
-  "fix_candidate_id": "fix-v2-sessionlog-20260903181818-baa0a808",
-  "head_commit": "3d787ed5fc283a70eb06debc6c6c1e36ccc78d17",
+  "diff_hash": "sha256:c6e7cfb687bc0559cbbde408da6e31b0d415eac566ee7426de2119a39433223c",
+  "fix_candidate_id": "fix-v2-sessionlog-20260903183907-0dc15e22",
+  "head_commit": "2d1339156beba492ecee7e37512b8a745a1f39dd",
   "issue_id": "freehand-v2-sessionlog-milestone",
   "module_id": "v2-sessionlog",
   "owner": "v2-sessionlog",
-  "scope_hash": "sha256:0695b69cafbd6e3f2cc28248964addabe27e52f0426b3f5be62b4f850547417c",
-  "tree_hash": "fecb4ee478d4ac937589e46e1703226ad771c2c2",
+  "scope_hash": "sha256:187c575bd2229a9b0d8f239a30f112f88e1af342cc7d12abde2828c7c2f42e0f",
+  "tree_hash": "81a226d81ba945a2c96e163a58c477dad3d6c600",
   "verification_evidence_ids": [
-    "ev-v2-sessionlog-whitebox-20260903181818-baa0a808",
-    "ev-v2-sessionlog-install-20260903181818-baa0a808",
-    "ev-v2-sessionlog-restart-20260903181818-baa0a808",
-    "ev-v2-sessionlog-blackbox-20260903181818-baa0a808"
+    "ev-v2-sessionlog-whitebox-20260903183907-0dc15e22",
+    "ev-v2-sessionlog-install-20260903183907-0dc15e22",
+    "ev-v2-sessionlog-restart-20260903183907-0dc15e22",
+    "ev-v2-sessionlog-blackbox-20260903183907-0dc15e22"
   ],
   "worktree_id": "playground/v2-sessionlog-20260903"
 }

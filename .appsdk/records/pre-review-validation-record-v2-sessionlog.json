@@ -1,34 +1,34 @@
 {
   "$schema": "https://appsdk.local/contracts/records/pre-review-validation-record.schema.json",
-  "artifact_hash": "sha256:cc64d17691ad1307c94c7ea58e9d1ed99a06e3fff0f873c09916164851a0247e",
+  "artifact_hash": "sha256:87b55f1afc37c44f898a82d5d5db8795416ed6d9ff28b615cade29a5343f25bc",
   "blackbox_evidence_ids": [
-    "ev-v2-sessionlog-blackbox-20260903181818-baa0a808"
+    "ev-v2-sessionlog-blackbox-20260903183907-0dc15e22"
   ],
-  "candidate_commit": "3d787ed5fc283a70eb06debc6c6c1e36ccc78d17",
-  "candidate_tree_hash": "fecb4ee478d4ac937589e46e1703226ad771c2c2",
-  "created_at": "2026-09-03T18:18:19.113728Z",
+  "candidate_commit": "2d1339156beba492ecee7e37512b8a745a1f39dd",
+  "candidate_tree_hash": "81a226d81ba945a2c96e163a58c477dad3d6c600",
+  "created_at": "2026-09-03T18:39:08.092891Z",
   "deployment": {
-    "entrypoint": "/tmp/freehand-v2-sessionlog-20260903181818-baa0a808/v2-sessionlog-public",
-    "environment_id": "local-freehand-v2-sessionlog-20260903181818-baa0a808",
-    "install_receipt_id": "ev-v2-sessionlog-install-20260903181818-baa0a808",
-    "observed_at": "2026-09-03T18:18:19.113728Z",
+    "entrypoint": "/tmp/freehand-v2-sessionlog-20260903183907-0dc15e22/v2-sessionlog-public",
+    "environment_id": "local-freehand-v2-sessionlog-20260903183907-0dc15e22",
+    "install_receipt_id": "ev-v2-sessionlog-install-20260903183907-0dc15e22",
+    "observed_at": "2026-09-03T18:39:08.092891Z",
     "producer": {
       "adapter": "freehand-v2-sessionlog-adapter",
-      "identity": "20260903181818-baa0a808"
+      "identity": "20260903183907-0dc15e22"
     },
-    "restart_receipt_id": "ev-v2-sessionlog-restart-20260903181818-baa0a808"
+    "restart_receipt_id": "ev-v2-sessionlog-restart-20260903183907-0dc15e22"
   },
-  "fix_candidate_id": "fix-v2-sessionlog-20260903181818-baa0a808",
+  "fix_candidate_id": "fix-v2-sessionlog-20260903183907-0dc15e22",
   "issue_id": "freehand-v2-sessionlog-milestone",
   "module_id": "v2-sessionlog",
   "result": "pass",
   "source_unchanged": true,
-  "validation_id": "prv-v2-sessionlog-20260903181818-baa0a808",
+  "validation_id": "prv-v2-sessionlog-20260903183907-0dc15e22",
   "whitebox_evidence_ids": [
-    "ev-v2-sessionlog-whitebox-20260903181818-baa0a808"
+    "ev-v2-sessionlog-whitebox-20260903183907-0dc15e22"
   ],
   "whitebox_producer": {
     "adapter": "freehand-v2-sessionlog-adapter",
-    "identity": "20260903181818-baa0a808"
+    "identity": "20260903183907-0dc15e22"
   }
 }

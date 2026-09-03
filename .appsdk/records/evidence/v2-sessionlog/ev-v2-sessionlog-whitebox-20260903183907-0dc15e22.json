@@ -1,0 +1,27 @@
+{
+  "$schema": "https://appsdk.local/contracts/records/evidence-record.schema.json",
+  "artifact_hash": "sha256:87b55f1afc37c44f898a82d5d5db8795416ed6d9ff28b615cade29a5343f25bc",
+  "created_at": "2026-09-03T18:39:08.092891Z",
+  "evidence_id": "ev-v2-sessionlog-whitebox-20260903183907-0dc15e22",
+  "execution_surface": "development_whitebox",
+  "experiment_id": "v2-sessionlog-20260903183907-0dc15e22",
+  "expires_at": "2026-09-04T18:39:08.092927Z",
+  "input_hashes": [
+    "sha256:838c227640ca61f792a82e8cc0acb64323a684def7158f8500ad55d3708148b2"
+  ],
+  "issue_id": "freehand-v2-sessionlog-milestone",
+  "kind": "gate",
+  "phase": "development_whitebox",
+  "producer": {
+    "adapter": "freehand-v2-sessionlog-adapter",
+    "identity": "20260903183907-0dc15e22"
+  },
+  "result": "pass",
+  "scope": {
+    "entrypoint": "cargo test --manifest-path playground/experiments/v2/sessionlog/Cargo.toml --test v2_sessionlog_boundary",
+    "feature_id": "v2-sessionlog",
+    "module_id": "v2-sessionlog"
+  },
+  "scope_hash": "sha256:187c575bd2229a9b0d8f239a30f112f88e1af342cc7d12abde2828c7c2f42e0f",
+  "source_commit": "2d1339156beba492ecee7e37512b8a745a1f39dd"
+}
