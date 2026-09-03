@@ -1,0 +1,26 @@
+{
+  "$schema": "https://appsdk.local/contracts/records/evidence-record.schema.json",
+  "artifact_hash": "sha256:0624ce69bf2bc78d84cbd4c9274853029eebba61852f1f8b42221c18018874ff",
+  "created_at": "2026-09-03T20:56:50.913570Z",
+  "evidence_id": "ev-v2-cordis-ecosystem-whitebox-20260903205634-fe4a0636",
+  "execution_surface": "development_whitebox",
+  "experiment_id": "v2-cordis-ecosystem-20260903205634-fe4a0636",
+  "expires_at": "2026-09-04T20:56:50.913690Z",
+  "input_hashes": [
+    "sha256:a425841dbfb2fec1d377bf9a5eb1bae87da7b012175972f7ac8f7461f7f532a8"
+  ],
+  "issue_id": "freehand-v2-cordis-ecosystem-milestone",
+  "kind": "gate",
+  "phase": "development_whitebox",
+  "producer": {
+    "adapter": "freehand-v2-capability-cordis-adapter",
+    "identity": "20260903205634-fe4a0636"
+  },
+  "result": "pass",
+  "scope": {
+    "feature_id": "v2-cordis-ecosystem",
+    "module_id": "v2-cordis-ecosystem"
+  },
+  "scope_hash": "sha256:596c2185055efddc3b6eecdeca25ee7463c766d866e03b1f0636d8c8f4ff3e61",
+  "source_commit": "67f09701b7cf55d7e07b7e50868da9d79ef3c82a"
+}

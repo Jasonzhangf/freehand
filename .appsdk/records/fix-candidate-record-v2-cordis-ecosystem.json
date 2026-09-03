@@ -1,0 +1,39 @@
+{
+  "$schema": "https://appsdk.local/contracts/records/fix-candidate-record.schema.json",
+  "base_commit": "e49f5ec2d054db54e5a96a9f840808a40c2845fd",
+  "changed_paths": [
+    ".appsdk/maps/module-registry.json",
+    ".appsdk/project.json",
+    "docs/design/v2-cordis-ecosystem-owner-binding.md",
+    "docs/design/v2-plugin-capabilities-owner-binding.md",
+    "docs/v2/v2-governance-manifest.json",
+    "playground/experiments/v2/cordis-ecosystem/Cargo.lock",
+    "playground/experiments/v2/cordis-ecosystem/Cargo.toml",
+    "playground/experiments/v2/cordis-ecosystem/src/bin/v2-cordis-public.rs",
+    "playground/experiments/v2/cordis-ecosystem/src/lib.rs",
+    "playground/experiments/v2/plugin-capabilities/Cargo.lock",
+    "playground/experiments/v2/plugin-capabilities/Cargo.toml",
+    "playground/experiments/v2/plugin-capabilities/src/bin/v2-plugin-capabilities-public.rs",
+    "playground/experiments/v2/plugin-capabilities/src/lib.rs",
+    "scripts/appsdk/v2_capability_cordis_adapter.py",
+    "tests/v2/cordis-ecosystem/cordis_ecosystem_boundary.rs",
+    "tests/v2/plugin-capabilities/plugin_capabilities_boundary.rs"
+  ],
+  "created_at": "2026-09-03T20:56:50.913570Z",
+  "design_id": "docs/design/v2-cordis-ecosystem-owner-binding.md",
+  "diff_hash": "sha256:4c6d5c4477fe76055a44bfc095573495d9c97253873c377f009b4ef6f419bdc3",
+  "fix_candidate_id": "fix-v2-cordis-ecosystem-20260903205634-fe4a0636",
+  "head_commit": "67f09701b7cf55d7e07b7e50868da9d79ef3c82a",
+  "issue_id": "freehand-v2-cordis-ecosystem-milestone",
+  "module_id": "v2-cordis-ecosystem",
+  "owner": "v2-cordis-ecosystem",
+  "scope_hash": "sha256:596c2185055efddc3b6eecdeca25ee7463c766d866e03b1f0636d8c8f4ff3e61",
+  "tree_hash": "6c8eacc8e05f95d84c38683cdac293ebc574d0d8",
+  "verification_evidence_ids": [
+    "ev-v2-cordis-ecosystem-whitebox-20260903205634-fe4a0636",
+    "ev-v2-cordis-ecosystem-install-20260903205634-fe4a0636",
+    "ev-v2-cordis-ecosystem-restart-20260903205634-fe4a0636",
+    "ev-v2-cordis-ecosystem-blackbox-20260903205634-fe4a0636"
+  ],
+  "worktree_id": "playground/v2-capability-cordis-20260903"
+}

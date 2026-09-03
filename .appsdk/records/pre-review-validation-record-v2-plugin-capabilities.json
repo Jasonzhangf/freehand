@@ -1,0 +1,34 @@
+{
+  "$schema": "https://appsdk.local/contracts/records/pre-review-validation-record.schema.json",
+  "artifact_hash": "sha256:3fbac9f5c86bc5962f840f5b235eded2697a9525fa58817e57ee9aeca48b47f6",
+  "blackbox_evidence_ids": [
+    "ev-v2-plugin-capabilities-blackbox-20260903205634-90ce2c3d"
+  ],
+  "candidate_commit": "67f09701b7cf55d7e07b7e50868da9d79ef3c82a",
+  "candidate_tree_hash": "6c8eacc8e05f95d84c38683cdac293ebc574d0d8",
+  "created_at": "2026-09-03T20:56:49.350896Z",
+  "deployment": {
+    "entrypoint": "/tmp/freehand-v2-plugin-capabilities-20260903205634-90ce2c3d/v2-plugin-capabilities-public",
+    "environment_id": "local-v2-plugin-capabilities-20260903205634-90ce2c3d",
+    "install_receipt_id": "ev-v2-plugin-capabilities-install-20260903205634-90ce2c3d",
+    "observed_at": "2026-09-03T20:56:49.350896Z",
+    "producer": {
+      "adapter": "freehand-v2-capability-cordis-adapter",
+      "identity": "20260903205634-90ce2c3d"
+    },
+    "restart_receipt_id": "ev-v2-plugin-capabilities-restart-20260903205634-90ce2c3d"
+  },
+  "fix_candidate_id": "fix-v2-plugin-capabilities-20260903205634-90ce2c3d",
+  "issue_id": "freehand-v2-plugin-capabilities-milestone",
+  "module_id": "v2-plugin-capabilities",
+  "result": "pass",
+  "source_unchanged": true,
+  "validation_id": "prv-v2-plugin-capabilities-20260903205634-90ce2c3d",
+  "whitebox_evidence_ids": [
+    "ev-v2-plugin-capabilities-whitebox-20260903205634-90ce2c3d"
+  ],
+  "whitebox_producer": {
+    "adapter": "freehand-v2-capability-cordis-adapter",
+    "identity": "20260903205634-90ce2c3d"
+  }
+}
