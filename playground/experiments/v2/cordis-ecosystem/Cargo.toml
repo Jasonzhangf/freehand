@@ -1,0 +1,23 @@
+[package]
+name = "freehand-v2-cordis-ecosystem"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[dependencies]
+freehand-v2-contracts = { path = "../contracts" }
+freehand-v2-control-events = { path = "../control-events" }
+freehand-v2-plugin-capabilities = { path = "../plugin-capabilities" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+
+[[test]]
+name = "v2_cordis_ecosystem_boundary"
+path = "../../../../tests/v2/cordis-ecosystem/cordis_ecosystem_boundary.rs"
+
+[[bin]]
+name = "v2-cordis-public"
+path = "src/bin/v2-cordis-public.rs"
+
+[workspace]

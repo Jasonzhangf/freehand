@@ -402,6 +402,143 @@
       },
       "source_owner": "v2-reasoning-backend",
       "stage": "source_implemented"
+    },
+    {
+      "active_artifact": "active/lib/v2-plugin-capabilities/**",
+      "artifact_paths": [
+        "v2-plugin-capabilities.module"
+      ],
+      "build": {
+        "args": [
+          "-c",
+          "cargo test --manifest-path playground/experiments/v2/plugin-capabilities/Cargo.toml --test v2_plugin_capabilities_boundary && cargo build --release --manifest-path playground/experiments/v2/plugin-capabilities/Cargo.toml --bin v2-plugin-capabilities-public && mkdir -p generated/modules/v2-plugin-capabilities/lib && cp playground/experiments/v2/plugin-capabilities/target/release/v2-plugin-capabilities-public generated/modules/v2-plugin-capabilities/lib/v2-plugin-capabilities.module"
+        ],
+        "program": "sh",
+        "working_directory": "."
+      },
+      "contract_paths": [
+        ".appsdk/goal.json",
+        ".appsdk/project.json",
+        ".appsdk/contracts/**",
+        "docs/design/v2-plugin-capabilities-owner-binding.md",
+        "docs/v2/v2-governance-manifest.json",
+        "docs/v2/v2-test-design.md",
+        "docs/v2/v2-project-blackbox-verification.md"
+      ],
+      "dependency_modules": [],
+      "generated_outputs": [
+        "generated/**"
+      ],
+      "module_id": "v2-plugin-capabilities",
+      "owned_paths": [
+        "playground/experiments/v2/plugin-capabilities/Cargo.lock",
+        "playground/experiments/v2/plugin-capabilities/Cargo.toml",
+        "playground/experiments/v2/plugin-capabilities/src/**",
+        "tests/v2/plugin-capabilities/**",
+        "docs/design/v2-plugin-capabilities-owner-binding.md"
+      ],
+      "regression": {
+        "allow_skipped": false,
+        "command": {
+          "args": [
+            "test",
+            "--manifest-path",
+            "playground/experiments/v2/plugin-capabilities/Cargo.toml",
+            "--test",
+            "v2_plugin_capabilities_boundary"
+          ],
+          "program": "cargo",
+          "working_directory": "."
+        },
+        "input_paths": [
+          "playground/experiments/v2/plugin-capabilities/Cargo.lock",
+          "playground/experiments/v2/plugin-capabilities/Cargo.toml",
+          "playground/experiments/v2/plugin-capabilities/src/**",
+          "tests/v2/plugin-capabilities/**"
+        ],
+        "minimum_test_count": 9,
+        "ordinary_mode_after_freeze": "disabled",
+        "reenable_on": [
+          "source_change",
+          "contract_change",
+          "public_api_change",
+          "artifact_change",
+          "dependency_change"
+        ],
+        "required_before_freeze": true,
+        "suite_id": "v2-plugin-capabilities-regression"
+      },
+      "source_owner": "v2-plugin-capabilities",
+      "stage": "source_implemented"
+    },
+    {
+      "active_artifact": "active/lib/v2-cordis-ecosystem/**",
+      "artifact_paths": [
+        "v2-cordis-ecosystem.module"
+      ],
+      "build": {
+        "args": [
+          "-c",
+          "cargo test --manifest-path playground/experiments/v2/cordis-ecosystem/Cargo.toml --test v2_cordis_ecosystem_boundary && cargo build --release --manifest-path playground/experiments/v2/cordis-ecosystem/Cargo.toml --bin v2-cordis-public && mkdir -p generated/modules/v2-cordis-ecosystem/lib && cp playground/experiments/v2/cordis-ecosystem/target/release/v2-cordis-public generated/modules/v2-cordis-ecosystem/lib/v2-cordis-ecosystem.module"
+        ],
+        "program": "sh",
+        "working_directory": "."
+      },
+      "contract_paths": [
+        ".appsdk/goal.json",
+        ".appsdk/project.json",
+        ".appsdk/contracts/**",
+        "docs/design/v2-plugin-capabilities-owner-binding.md",
+        "docs/design/v2-cordis-ecosystem-owner-binding.md",
+        "docs/v2/v2-governance-manifest.json",
+        "docs/v2/v2-test-design.md",
+        "docs/v2/v2-project-blackbox-verification.md"
+      ],
+      "dependency_modules": [],
+      "generated_outputs": [
+        "generated/**"
+      ],
+      "module_id": "v2-cordis-ecosystem",
+      "owned_paths": [
+        "playground/experiments/v2/cordis-ecosystem/Cargo.lock",
+        "playground/experiments/v2/cordis-ecosystem/Cargo.toml",
+        "playground/experiments/v2/cordis-ecosystem/src/**",
+        "tests/v2/cordis-ecosystem/**",
+        "docs/design/v2-cordis-ecosystem-owner-binding.md"
+      ],
+      "regression": {
+        "allow_skipped": false,
+        "command": {
+          "args": [
+            "test",
+            "--manifest-path",
+            "playground/experiments/v2/cordis-ecosystem/Cargo.toml",
+            "--test",
+            "v2_cordis_ecosystem_boundary"
+          ],
+          "program": "cargo",
+          "working_directory": "."
+        },
+        "input_paths": [
+          "playground/experiments/v2/cordis-ecosystem/Cargo.lock",
+          "playground/experiments/v2/cordis-ecosystem/Cargo.toml",
+          "playground/experiments/v2/cordis-ecosystem/src/**",
+          "tests/v2/cordis-ecosystem/**"
+        ],
+        "minimum_test_count": 7,
+        "ordinary_mode_after_freeze": "disabled",
+        "reenable_on": [
+          "source_change",
+          "contract_change",
+          "public_api_change",
+          "artifact_change",
+          "dependency_change"
+        ],
+        "required_before_freeze": true,
+        "suite_id": "v2-cordis-ecosystem-regression"
+      },
+      "source_owner": "v2-cordis-ecosystem",
+      "stage": "source_implemented"
     }
   ],
   "project_id": "freehand-v2",

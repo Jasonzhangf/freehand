@@ -55,6 +55,30 @@
       ],
       "forbidden_paths": ["active/lib/**", "protected/**", "generated/**", "docs/v2/v2-ui-design.md", "docs/v2/v2-cordis-reasoning-channel-architecture.md"],
       "verification_gates": ["fix_lifecycle_graph", "mainline_merge_identity"]
+    },
+    {
+      "module_id": "v2-plugin-capabilities",
+      "status": "active",
+      "owner": "v2-plugin-capabilities",
+      "owned_paths": [
+        "docs/design/v2-plugin-capabilities-owner-binding.md",
+        "playground/experiments/v2/plugin-capabilities/**",
+        "tests/v2/plugin-capabilities/**"
+      ],
+      "forbidden_paths": ["active/lib/**", "protected/**", "generated/**", "docs/v2/v2-ui-design.md", "docs/v2/v2-cordis-reasoning-channel-architecture.md"],
+      "verification_gates": ["fix_lifecycle_graph", "mainline_merge_identity"]
+    },
+    {
+      "module_id": "v2-cordis-ecosystem",
+      "status": "active",
+      "owner": "v2-cordis-ecosystem",
+      "owned_paths": [
+        "docs/design/v2-cordis-ecosystem-owner-binding.md",
+        "playground/experiments/v2/cordis-ecosystem/**",
+        "tests/v2/cordis-ecosystem/**"
+      ],
+      "forbidden_paths": ["active/lib/**", "protected/**", "generated/**", "docs/v2/v2-ui-design.md", "docs/v2/v2-cordis-reasoning-channel-architecture.md"],
+      "verification_gates": ["fix_lifecycle_graph", "mainline_merge_identity"]
     }
   ]
 }

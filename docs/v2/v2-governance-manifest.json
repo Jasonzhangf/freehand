@@ -67,7 +67,7 @@
     },
     {
       "module_id": "v2-plugin-capabilities",
-      "status": "planned",
+      "status": "active",
       "owner": "v2-plugin-capabilities",
       "source_paths": ["playground/experiments/v2/plugin-capabilities/**"],
       "test_paths": ["tests/v2/plugin-capabilities/**"],
@@ -78,7 +78,7 @@
     },
     {
       "module_id": "v2-cordis-ecosystem",
-      "status": "planned",
+      "status": "active",
       "owner": "v2-cordis-ecosystem",
       "source_paths": ["playground/experiments/v2/cordis-ecosystem/**"],
       "test_paths": ["tests/v2/cordis-ecosystem/**"],
