@@ -220,9 +220,7 @@
         "docs/v2/v2-test-design.md",
         "docs/v2/v2-project-blackbox-verification.md"
       ],
-      "dependency_modules": [
-        "v2-contracts"
-      ],
+      "dependency_modules": [],
       "generated_outputs": [
         "generated/**"
       ],
