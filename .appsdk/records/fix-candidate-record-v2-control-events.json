@@ -1,0 +1,33 @@
+{
+  "$schema": "https://appsdk.local/contracts/records/fix-candidate-record.schema.json",
+  "base_commit": "1d09f93cf2ae867d98615bf1c979123a96f85144",
+  "changed_paths": [
+    ".appsdk/maps/module-registry.json",
+    ".appsdk/project.json",
+    "docs/design/v2-control-events-owner-binding.md",
+    "docs/v2/v2-governance-manifest.json",
+    "playground/experiments/v2/control-events/Cargo.lock",
+    "playground/experiments/v2/control-events/Cargo.toml",
+    "playground/experiments/v2/control-events/src/bin/v2-control-events-public.rs",
+    "playground/experiments/v2/control-events/src/lib.rs",
+    "scripts/appsdk/v2_control_events_adapter.py",
+    "tests/v2/control-events/control_event_boundary.rs"
+  ],
+  "created_at": "2026-09-03T19:42:33.634020Z",
+  "design_id": "docs/design/v2-control-events-owner-binding.md",
+  "diff_hash": "sha256:ec22702bc098f22d15ba547d676b82c6f6e1b6b398ee90b8f0e1086eb82cc2a7",
+  "fix_candidate_id": "fix-v2-control-events-20260903194216-e6e85c92",
+  "head_commit": "4bc4cc9e7ad1322068ef6cf2c8962d2a72f45eb6",
+  "issue_id": "freehand-v2-control-events-milestone",
+  "module_id": "v2-control-events",
+  "owner": "v2-control-events",
+  "scope_hash": "sha256:81a9b324b8152ffd49b5ba386b07f403c76c2a6ac7f0b3681ace27a85564981c",
+  "tree_hash": "e8ceeea58f9a9e883ddb0bba9ea81b4e408bd46f",
+  "verification_evidence_ids": [
+    "ev-v2-control-events-whitebox-20260903194216-e6e85c92",
+    "ev-v2-control-events-install-20260903194216-e6e85c92",
+    "ev-v2-control-events-restart-20260903194216-e6e85c92",
+    "ev-v2-control-events-blackbox-20260903194216-e6e85c92"
+  ],
+  "worktree_id": "playground/v2-control-events-20260903"
+}

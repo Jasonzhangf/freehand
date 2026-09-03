@@ -1,0 +1,29 @@
+{
+  "$schema": "https://appsdk.local/contracts/records/evidence-record.schema.json",
+  "artifact_hash": "sha256:0611d9c2dc048b251f30336e8ec67772ef1b1434004e5eb29bb4c41a7873dc19",
+  "created_at": "2026-09-03T19:42:33.634020Z",
+  "entrypoint": "/tmp/freehand-v2-control-events-20260903194216-e6e85c92/v2-control-events-public",
+  "environment_id": "local-freehand-v2-control-events-20260903194216-e6e85c92",
+  "evidence_id": "ev-v2-control-events-install-20260903194216-e6e85c92",
+  "execution_surface": "deployed_blackbox",
+  "experiment_id": "v2-control-events-20260903194216-e6e85c92",
+  "expires_at": "2026-09-04T19:42:33.636537Z",
+  "input_hashes": [
+    "sha256:1d8efe440f8d5dd7ae020318100bd7a941370d0c9d62291d0b27d1f705be74e7"
+  ],
+  "issue_id": "freehand-v2-control-events-milestone",
+  "kind": "install",
+  "phase": "deployment_install",
+  "producer": {
+    "adapter": "freehand-v2-control-events-adapter",
+    "identity": "20260903194216-e6e85c92"
+  },
+  "result": "pass",
+  "scope": {
+    "entrypoint": "/tmp/freehand-v2-control-events-20260903194216-e6e85c92/v2-control-events-public",
+    "feature_id": "v2-control-events",
+    "module_id": "v2-control-events"
+  },
+  "scope_hash": "sha256:81a9b324b8152ffd49b5ba386b07f403c76c2a6ac7f0b3681ace27a85564981c",
+  "source_commit": "4bc4cc9e7ad1322068ef6cf2c8962d2a72f45eb6"
+}

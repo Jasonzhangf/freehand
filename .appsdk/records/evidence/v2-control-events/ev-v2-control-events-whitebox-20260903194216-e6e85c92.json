@@ -1,0 +1,27 @@
+{
+  "$schema": "https://appsdk.local/contracts/records/evidence-record.schema.json",
+  "artifact_hash": "sha256:0611d9c2dc048b251f30336e8ec67772ef1b1434004e5eb29bb4c41a7873dc19",
+  "created_at": "2026-09-03T19:42:33.634020Z",
+  "evidence_id": "ev-v2-control-events-whitebox-20260903194216-e6e85c92",
+  "execution_surface": "development_whitebox",
+  "experiment_id": "v2-control-events-20260903194216-e6e85c92",
+  "expires_at": "2026-09-04T19:42:33.634079Z",
+  "input_hashes": [
+    "sha256:9308c2299a47bdb6717bc5b242dd8dd810c6e0d4252d682bad492f5ece8dd47d"
+  ],
+  "issue_id": "freehand-v2-control-events-milestone",
+  "kind": "gate",
+  "phase": "development_whitebox",
+  "producer": {
+    "adapter": "freehand-v2-control-events-adapter",
+    "identity": "20260903194216-e6e85c92"
+  },
+  "result": "pass",
+  "scope": {
+    "entrypoint": "cargo test --manifest-path playground/experiments/v2/control-events/Cargo.toml --test v2_control_event_boundary",
+    "feature_id": "v2-control-events",
+    "module_id": "v2-control-events"
+  },
+  "scope_hash": "sha256:81a9b324b8152ffd49b5ba386b07f403c76c2a6ac7f0b3681ace27a85564981c",
+  "source_commit": "4bc4cc9e7ad1322068ef6cf2c8962d2a72f45eb6"
+}
