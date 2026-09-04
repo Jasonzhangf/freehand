@@ -1,0 +1,29 @@
+{
+  "$schema": "https://appsdk.local/contracts/records/evidence-record.schema.json",
+  "artifact_hash": "sha256:5f30a5751b552fc042c0e1873f20c14dcf6f3874dae7e6ba3e321f9ebfef243d",
+  "created_at": "2026-09-04T00:22:48.915869Z",
+  "entrypoint": "/tmp/freehand-v2-public-vertical-slice-20260904002233-f7045e83/v2-public-vertical-slice-public",
+  "environment_id": "local-v2-public-vertical-slice-20260904002233-f7045e83",
+  "evidence_id": "ev-v2-public-vertical-slice-blackbox-20260904002233-f7045e83",
+  "execution_surface": "deployed_blackbox",
+  "experiment_id": "v2-public-vertical-slice-20260904002233-f7045e83",
+  "expires_at": "2026-09-05T00:22:49.701169Z",
+  "input_hashes": [
+    "sha256:4d248b1ca3c302df7b757c5ea6ee21df79079ad95383ccb9d16677b90fe4076e"
+  ],
+  "issue_id": "freehand-v2-public-vertical-slice-milestone",
+  "kind": "runtime",
+  "phase": "deployed_blackbox",
+  "producer": {
+    "adapter": "freehand-v2-public-vertical-slice-adapter",
+    "identity": "20260904002233-f7045e83"
+  },
+  "result": "pass",
+  "scope": {
+    "entrypoint": "/tmp/freehand-v2-public-vertical-slice-20260904002233-f7045e83/v2-public-vertical-slice-public",
+    "feature_id": "v2-public-vertical-slice",
+    "module_id": "v2-public-vertical-slice"
+  },
+  "scope_hash": "sha256:b076c757f3180e7513798224611f745ecc8dde0ba093c3d479cc52468b2c3d90",
+  "source_commit": "66297cca724d1b26b87b299f716321145410d7bd"
+}
