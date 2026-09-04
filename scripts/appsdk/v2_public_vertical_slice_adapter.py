@@ -79,6 +79,48 @@ def finalize(path: pathlib.Path, record: dict) -> None:
     path.write_text(json.dumps(record, indent=2, sort_keys=True) + "\n")
 
 
+def archive_current_record(
+    records_dir: pathlib.Path,
+    path: pathlib.Path,
+    record: dict,
+    kind: str,
+) -> None:
+    """Rotate a fixed-name control record to a candidate-keyed history file.
+
+    Evidence files stay immutable.  fix-candidate and pre-review-validation are
+    canonical current-state records that AppSDK reads by module name, so a new
+    candidate must replace the canonical pointer without destroying the old one.
+    """
+    candidate_commit = record.get("head_commit") or record.get("candidate_commit")
+    if not path.exists():
+        finalize(path, record)
+        return
+    existing = json.loads(path.read_text())
+    existing_commit = existing.get("head_commit") or existing.get("candidate_commit")
+    if existing_commit == candidate_commit:
+        if existing != record:
+            fail(
+                record.get("fix_candidate_id") or record.get("validation_id") or path.stem,
+                kind,
+                f"refusing to overwrite active record with different payload: {path}",
+            )
+        return
+    history_dir = records_dir / "history" / kind / path.stem
+    history_path = history_dir / f"{existing_commit}.json"
+    history_path.parent.mkdir(parents=True, exist_ok=True)
+    if not history_path.exists():
+        history_path.write_text(json.dumps(existing, indent=2, sort_keys=True) + "\n")
+    else:
+        preserved = json.loads(history_path.read_text())
+        if preserved != existing:
+            fail(
+                record.get("fix_candidate_id") or record.get("validation_id") or path.stem,
+                kind,
+                f"history record mismatch for {history_path}",
+            )
+    path.write_text(json.dumps(record, indent=2, sort_keys=True) + "\n")
+
+
 def evidence_record(
     *,
     module_id: str,
@@ -233,20 +275,6 @@ def main() -> None:
     scope_hash = sha256_text(json.dumps(changed_paths, sort_keys=True))
 
     pre_review_path = records_dir / f"pre-review-validation-record-{MODULE_ID}.json"
-    if pre_review_path.exists():
-        existing = json.loads(pre_review_path.read_text())
-        if existing.get("candidate_commit") == head_commit:
-            print(
-                json.dumps(
-                    {
-                        "existing_validation_id": existing.get("validation_id"),
-                        "candidate_commit": head_commit,
-                    },
-                    sort_keys=True,
-                )
-            )
-            return
-        fail(attempt, "pre_review_validation", "existing pre-review record binds another candidate")
 
     appsdk_bin = shutil.which("appsdk")
     if not appsdk_bin:
@@ -421,8 +449,18 @@ def main() -> None:
     finalize(evidence_dir / f"{install_id}.json", install)
     finalize(evidence_dir / f"{restart_id}.json", restart)
     finalize(evidence_dir / f"{blackbox_id}.json", blackbox)
-    finalize(records_dir / f"fix-candidate-record-{MODULE_ID}.json", fix_candidate)
-    finalize(pre_review_path, pre_review)
+    archive_current_record(
+        records_dir,
+        records_dir / f"fix-candidate-record-{MODULE_ID}.json",
+        fix_candidate,
+        "fix-candidate",
+    )
+    archive_current_record(
+        records_dir,
+        pre_review_path,
+        pre_review,
+        "pre-review-validation",
+    )
 
     print(
         json.dumps(
