@@ -1,0 +1,31 @@
+[package]
+name = "freehand-v2-public-vertical-slice"
+version = "0.1.0"
+edition = "2024"
+publish = false
+
+[dependencies]
+freehand-v2-contracts = { path = "../contracts" }
+freehand-v2-control-events = { path = "../control-events" }
+freehand-v2-sessionlog = { path = "../sessionlog" }
+freehand-v2-reasoning-backend = { path = "../reasoning-backend" }
+freehand-v2-plugin-capabilities = { path = "../plugin-capabilities" }
+freehand-v2-cordis-ecosystem = { path = "../cordis-ecosystem" }
+freehand-v2-ui-adaptor = { path = "../ui-adaptor" }
+freehand-v2-ui-plugin-family = { path = "../ui-plugins" }
+freehand-v2-memory-plugin = { path = "../memory-plugin" }
+freehand-v2-search-plugin = { path = "../search-plugin" }
+freehand-v2-channel-registry = { path = "../channel-registry" }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+thiserror = "2"
+
+[[test]]
+name = "v2_public_vertical_slice_boundary"
+path = "../../../../tests/v2/public-vertical-slice/public_vertical_slice_boundary.rs"
+
+[[bin]]
+name = "v2-public-vertical-slice-public"
+path = "src/bin/v2-public-vertical-slice-public.rs"
+
+[workspace]

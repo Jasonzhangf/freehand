@@ -175,6 +175,18 @@
       ],
       "forbidden_paths": ["active/lib/**", "protected/**", "generated/**", "docs/v2/v2-ui-design.md", "docs/v2/v2-cordis-reasoning-channel-architecture.md"],
       "verification_gates": ["fix_lifecycle_graph", "mainline_merge_identity"]
+    },
+    {
+      "module_id": "v2-public-vertical-slice",
+      "status": "active",
+      "owner": "v2-public-vertical-slice",
+      "owned_paths": [
+        "playground/experiments/v2/public-vertical-slice/**",
+        "tests/v2/public-vertical-slice/**",
+        "scripts/appsdk/v2_public_vertical_slice_adapter.py"
+      ],
+      "forbidden_paths": ["active/lib/**", "protected/**", "generated/**", "docs/v2/v2-ui-design.md", "docs/v2/v2-cordis-reasoning-channel-architecture.md"],
+      "verification_gates": ["fix_lifecycle_graph", "mainline_merge_identity"]
     }
   ]
 }

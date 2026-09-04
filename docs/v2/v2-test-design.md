@@ -58,6 +58,7 @@ control state are not test inputs and are never committed.
 | `v2-search-plugin` | search owner | keyword/filter validation, indexing, classification, cache/invalidation/rebuild | query/maintenance contract with cursor and explicit index status | Search surface uses plugin results and exposes source/classification without browser-local filtering | `v2_search_index_query_boundary` |
 | `v2-memory-plugin` | memory owner | attach/detach, summarize, record, save/load/search/export, manual/automatic triggers | session-scoped memory command/query contract with provenance | Memory flow completes without mutating or replacing original Session Log transcript | `v2_memory_lifecycle_boundary` |
 | `v2-channel-registry` | channel/registry owner | stateless token admission, endpoint registration, capability discovery/reconciliation, link frames, ChannelSession reconnect state | in-memory Registry and transport test double with accepted/rejected registration, generation and reattach paths | local MVP exercises contracts only; connection replacement retains ChannelSession state and never fabricates local completion | `v2_registry_registration`, `v2_channel_session_reconnect`, `v2_payload_control_isolation` |
+| `v2-public-vertical-slice` | public vertical slice integration owner | UI command -> UI adaptor -> Cordis design plugin -> Rust capability plugin -> typed control event -> Arc payload handoff -> Session Log surface -> reasoning backend -> Session Log result -> UI projection | focused boundary test proves success, capability failure, waiting/terminal rejection, UI plugin replacement, channel session replacement, search/memory plugin use, control/payload isolation | full local MVP path is observable through one command and returns an owner-backed UI projection without internal control fields | `v2_public_vertical_slice_boundary` |
 
 ## `v2-contracts`
 
@@ -557,6 +558,49 @@ truth path.
 - authentication mechanism is a contract placeholder;
 - payload transfer/reference storage is not implemented.
 
+## `v2-public-vertical-slice`
+
+### Lifecycle and logic
+
+```text
+UiCommand
+  -> UiAdaptor::accept_command
+  -> Cordis design plugin invokes local Rust capability
+  -> typed ControlEvent ledger
+  -> Arc immutable payload handoff
+  -> Session Log Input
+  -> Session Log Surface
+  -> ReasoningService start/subscribe
+  -> Session Log Result
+  -> UiAdaptor projection
+```
+
+The vertical slice is the project black-box path for the local MVP. Positive
+tests prove one accepted UI command reaches a UI projection, the original Arc
+payload is shared with the capability path, Session Log contains
+input/surface/result facts, and the stored UI projection uses the same Arc as
+the returned projection. Negative tests prove capability failure returns an
+explicit error without a successful projection, already-terminal correlations
+are rejected, and control fields cannot enter the business payload wire.
+
+Verification commands:
+
+- `cargo test --manifest-path playground/experiments/v2/public-vertical-slice/Cargo.toml --test v2_public_vertical_slice_boundary`
+- `cargo clippy --manifest-path playground/experiments/v2/public-vertical-slice/Cargo.toml --all-targets -- -D warnings`
+
+### Black-box impact
+
+This is the local mainline proof. It composes existing v2 modules and must not
+own provider, persistence, network or UI rendering truth. Search and memory
+remain independent plugin consumers in the M8 boundary test.
+
+### Known gaps
+
+- browser/UI plugin rendering is verified only through the in-memory UI plugin
+  registry in this milestone;
+- real Session Log restart uses the same in-memory Session Log recovery
+  contract until a durable v2 adapter is added.
+
 ## Verification Mapping
 
 | gate_id | required evidence | positive lock | negative lock |
@@ -579,6 +623,7 @@ truth path.
 | `v2_memory_lifecycle_boundary` | memory plugin result | summarize/record/save/load/search/export completes | failed persistence/export cannot become success or alter Session Log |
 | `v2_registry_registration` | Registry result | token-authenticated endpoint registers/discovers | invalid token or manifest is rejected |
 | `v2_channel_session_reconnect` | channel reattach result | new Connection retains ChannelSession | stale generation/disconnect cannot fabricate completion |
+| `v2_public_vertical_slice_boundary` | focused vertical-slice test result | one UI command reaches UI projection with Arc/Session Log/control isolation locks | capability failure, already-terminal, malformed payload wire and UI projection leaks are rejected |
 
 ## Completion Rule
 
