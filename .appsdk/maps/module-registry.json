@@ -5,7 +5,11 @@
       "module_id": "v2-foundation-plan",
       "status": "active",
       "owner": "v2-foundation-plan",
-      "owned_paths": ["docs/v2/**"],
+      "owned_paths": [
+        "docs/design/v2-module-block-and-skeleton.md",
+        "docs/design/v2-mvp-scope-and-acceptance.md",
+        "docs/v2/**"
+      ],
       "forbidden_paths": ["active/lib/**", "protected/**", "generated/**", "playground/experiments/v2/contracts/**", "tests/v2/contracts/**"],
       "verification_gates": ["fix_lifecycle_graph", "mainline_merge_identity"]
     },

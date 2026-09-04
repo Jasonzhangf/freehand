@@ -56,6 +56,10 @@ Use this directory family for durable design truth.
   - main 侧固定入口，指向 v2 worktree / `v2` branch 与核心 v2 文档
 - `docs/v2/v2-cordis-reasoning-channel-architecture.md`
   - v2 架构总设计：Cordis 编排、event 控制路径、Rust 插件、Arc 共享 payload
+- `docs/design/v2-module-block-and-skeleton.md`
+  - v2 模块分块与骨架设计 frozen：Cordis 插件角色、控制/payload 隔离、网络预留边界
+- `docs/design/v2-mvp-scope-and-acceptance.md`
+  - v2 MVP 范围与验收标准 frozen：单机 vertical slice、真实 evidence 顺序
 - `docs/v2/v2-development-roadmap.md`
   - v2 阶段路线、M1/M2 执行顺序与验证门禁
 - `docs/goals/v2-completion-plan.md`

@@ -10,6 +10,8 @@ v2 的本地开发入口在独立 worktree：
 对应分支为 `v2`，远端正源为 `origin/v2`。v2 设计、计划、测试契约和治理清单先看本目录：
 
 - 架构总设计：`docs/v2/v2-cordis-reasoning-channel-architecture.md`
+- 模块分块与骨架设计：`docs/design/v2-module-block-and-skeleton.md`
+- MVP 范围与验收标准：`docs/design/v2-mvp-scope-and-acceptance.md`
 - 插件生态总合同：`docs/v2/v2-plugin-ecosystem-contract.md`
 - MVP 与模块分块：`docs/v2/v2-foundation-mvp-ui-reason-network-plan.md`
 - 开发路线：`docs/v2/v2-development-roadmap.md`

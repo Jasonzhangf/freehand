@@ -18,7 +18,9 @@
     "ui_design": "docs/v2/v2-ui-design.md",
     "ui_information_architecture": "docs/v2/v2-ui-plugin-information-architecture.md",
     "ui_plugin_contract": "docs/v2/v2-ui-plugin-contract.md",
-    "plugin_ecosystem_contract": "docs/v2/v2-plugin-ecosystem-contract.md"
+    "plugin_ecosystem_contract": "docs/v2/v2-plugin-ecosystem-contract.md",
+    "design_module_blocks": "docs/design/v2-module-block-and-skeleton.md",
+    "design_mvp_scope": "docs/design/v2-mvp-scope-and-acceptance.md"
   },
   "modules": [
     {

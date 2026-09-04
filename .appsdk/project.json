@@ -102,6 +102,8 @@
       ],
       "module_id": "v2-foundation-plan",
       "owned_paths": [
+        "docs/design/v2-module-block-and-skeleton.md",
+        "docs/design/v2-mvp-scope-and-acceptance.md",
         "docs/v2/**"
       ],
       "regression": {
