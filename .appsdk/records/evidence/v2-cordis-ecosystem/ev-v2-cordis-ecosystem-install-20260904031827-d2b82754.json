@@ -1,0 +1,29 @@
+{
+  "$schema": "https://appsdk.local/contracts/records/evidence-record.schema.json",
+  "artifact_hash": "sha256:1a257aa56647a51b6b4ab6a13168c838467c66ea6dccceaad448eca828f1cd8e",
+  "created_at": "2026-09-04T03:18:39.241634Z",
+  "entrypoint": "/tmp/freehand-v2-cordis-ecosystem-20260904031827-d2b82754/v2-cordis-public",
+  "environment_id": "local-v2-cordis-ecosystem-20260904031827-d2b82754",
+  "evidence_id": "ev-v2-cordis-ecosystem-install-20260904031827-d2b82754",
+  "execution_surface": "deployed_blackbox",
+  "experiment_id": "v2-cordis-ecosystem-20260904031827-d2b82754",
+  "expires_at": "2026-09-05T03:18:39.243013Z",
+  "input_hashes": [
+    "sha256:59b0f71a30f3f41f7f07888521ee49da8d709f771cfd347209b06b2091d4bb15"
+  ],
+  "issue_id": "freehand-v2-cordis-plugin-registry-20260904",
+  "kind": "install",
+  "phase": "deployment_install",
+  "producer": {
+    "adapter": "freehand-v2-capability-cordis-adapter",
+    "identity": "20260904031827-d2b82754"
+  },
+  "result": "pass",
+  "scope": {
+    "entrypoint": "/tmp/freehand-v2-cordis-ecosystem-20260904031827-d2b82754/v2-cordis-public",
+    "feature_id": "v2-cordis-ecosystem",
+    "module_id": "v2-cordis-ecosystem"
+  },
+  "scope_hash": "sha256:6f5201c0bcbf2d9b76fde7fc7f724b2ef5cd8cf676eed0cfec1a459b872467f3",
+  "source_commit": "cafc5ccf686f94e8f58cf2dfbbe34c892424a822"
+}

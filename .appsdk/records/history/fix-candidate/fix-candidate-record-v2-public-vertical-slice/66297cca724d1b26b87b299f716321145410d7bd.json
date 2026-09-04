@@ -1,0 +1,33 @@
+{
+  "$schema": "https://appsdk.local/contracts/records/fix-candidate-record.schema.json",
+  "base_commit": "44532d142588e36ce5b00870a23703c8e82cde07",
+  "changed_paths": [
+    ".appsdk/maps/module-registry.json",
+    ".appsdk/project.json",
+    "docs/v2/v2-governance-manifest.json",
+    "docs/v2/v2-test-design.md",
+    "playground/experiments/v2/public-vertical-slice/Cargo.lock",
+    "playground/experiments/v2/public-vertical-slice/Cargo.toml",
+    "playground/experiments/v2/public-vertical-slice/src/bin/v2-public-vertical-slice-public.rs",
+    "playground/experiments/v2/public-vertical-slice/src/lib.rs",
+    "scripts/appsdk/v2_public_vertical_slice_adapter.py",
+    "tests/v2/public-vertical-slice/public_vertical_slice_boundary.rs"
+  ],
+  "created_at": "2026-09-04T00:22:48.915869Z",
+  "design_id": "docs/v2/v2-development-roadmap.md",
+  "diff_hash": "sha256:f49cd27cc5bc180dcab29cc1ccbd98af5f0e874b822fbfbcc2aa1f341c084133",
+  "fix_candidate_id": "fix-v2-public-vertical-slice-20260904002233-f7045e83",
+  "head_commit": "66297cca724d1b26b87b299f716321145410d7bd",
+  "issue_id": "freehand-v2-public-vertical-slice-milestone",
+  "module_id": "v2-public-vertical-slice",
+  "owner": "v2-public-vertical-slice",
+  "scope_hash": "sha256:b076c757f3180e7513798224611f745ecc8dde0ba093c3d479cc52468b2c3d90",
+  "tree_hash": "54a3f4300d976f2248e1dcd02732dcb7f9a454c5",
+  "verification_evidence_ids": [
+    "ev-v2-public-vertical-slice-whitebox-20260904002233-f7045e83",
+    "ev-v2-public-vertical-slice-install-20260904002233-f7045e83",
+    "ev-v2-public-vertical-slice-restart-20260904002233-f7045e83",
+    "ev-v2-public-vertical-slice-blackbox-20260904002233-f7045e83"
+  ],
+  "worktree_id": "playground/v2-m8-vertical-slice"
+}

@@ -1,0 +1,26 @@
+{
+  "$schema": "https://appsdk.local/contracts/records/evidence-record.schema.json",
+  "artifact_hash": "sha256:45ba30db2b8bbb5b8467f539aef3b1c751970f521e09761707af8882394f6cc6",
+  "created_at": "2026-09-04T03:19:40.763042Z",
+  "evidence_id": "ev-v2-public-vertical-slice-whitebox-20260904031927-41f91f84",
+  "execution_surface": "development_whitebox",
+  "experiment_id": "v2-public-vertical-slice-20260904031927-41f91f84",
+  "expires_at": "2026-09-05T03:19:40.763154Z",
+  "input_hashes": [
+    "sha256:e547f9bc1ba32ed75832c6799b40302bea8e99e6792553b283ddd3f183bb5cb7"
+  ],
+  "issue_id": "freehand-v2-plugin-registry-20260904",
+  "kind": "gate",
+  "phase": "development_whitebox",
+  "producer": {
+    "adapter": "freehand-v2-public-vertical-slice-adapter",
+    "identity": "20260904031927-41f91f84"
+  },
+  "result": "pass",
+  "scope": {
+    "feature_id": "v2-public-vertical-slice",
+    "module_id": "v2-public-vertical-slice"
+  },
+  "scope_hash": "sha256:6f5201c0bcbf2d9b76fde7fc7f724b2ef5cd8cf676eed0cfec1a459b872467f3",
+  "source_commit": "cafc5ccf686f94e8f58cf2dfbbe34c892424a822"
+}
