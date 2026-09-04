@@ -353,8 +353,8 @@ The next design work is therefore:
 - [x] Each resource retains one truth owner.
 - [x] Replacement preserves owner truth and stable identity.
 - [x] Local immutable payload handoff uses `Arc<T>`.
-- [ ] exact Rust manifest and port types;
-- [ ] compiled plugin registry;
+- [ ] full Rust manifest and typed port schemas (MVP covers plugin role/registration manifest only);
+- [x] compiled plugin registry: MVP in-memory typed `PluginRole`/`PluginRegistration` registry in `v2-cordis-ecosystem`;
 - [ ] runtime replacement gate;
 - [ ] dynamic loading/process-isolation policy.
 

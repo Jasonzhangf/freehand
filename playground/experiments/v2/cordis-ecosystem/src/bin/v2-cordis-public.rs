@@ -2,7 +2,10 @@ use std::io::{self, BufRead};
 use std::sync::Arc;
 
 use freehand_v2_contracts::{CapabilityId, CorrelationId, ImmutablePayload, PluginId};
-use freehand_v2_cordis_ecosystem::{CordisContext, CordisError, public_result};
+use freehand_v2_cordis_ecosystem::{
+    CordisContext, CordisError, PLUGIN_CONTRACT_VERSION, PluginRegistration, PluginRole,
+    public_result,
+};
 use freehand_v2_plugin_capabilities::{CapabilityManifest, LocalCapabilityPlugin};
 use serde::Deserialize;
 
@@ -16,6 +19,8 @@ struct Command {
     events: Option<Vec<String>>,
     permissions: Option<Vec<String>>,
     scope: Option<String>,
+    role: Option<String>,
+    contract_version: Option<u32>,
     correlation_id: Option<String>,
     payload: Option<String>,
     fail_next: Option<bool>,
@@ -108,11 +113,72 @@ fn dispatch(
                 capability_id.as_str().to_owned(),
             )]))
         }
+        "register_role" => {
+            let plugin_id = PluginId::try_new(command.plugin_id.unwrap_or_default())
+                .map_err(|err| CordisError::EventId(err.to_string()))?;
+            let role = parse_role(command.role)?;
+            let registration = PluginRegistration::try_new(
+                plugin_id,
+                role,
+                command.contract_version.unwrap_or(PLUGIN_CONTRACT_VERSION),
+            )?;
+            let registered = context.register_plugin(registration)?;
+            Ok(map(vec![
+                ("plugin_id", registered.plugin_id().as_str().to_owned()),
+                ("role", registered.role().as_str().to_owned()),
+                (
+                    "contract_version",
+                    registered.contract_version().to_string(),
+                ),
+            ]))
+        }
+        "plugins" => {
+            let registrations = context.plugin_registrations();
+            let plugins = registrations
+                .iter()
+                .map(|registration| {
+                    serde_json::json!({
+                        "plugin_id": registration.plugin_id().as_str(),
+                        "role": registration.role().as_str(),
+                        "contract_version": registration.contract_version(),
+                    })
+                })
+                .collect::<Vec<_>>();
+            Ok(serde_json::json!({
+                "plugin_count": registrations.len(),
+                "plugins": plugins,
+            })
+            .as_object()
+            .cloned()
+            .unwrap_or_default())
+        }
         other => Err(CordisError::Capability(
             freehand_v2_plugin_capabilities::CapabilityError::InvalidManifest(format!(
                 "unknown action: {other}"
             )),
         )),
+    }
+}
+
+fn parse_role(value: Option<String>) -> Result<PluginRole, CordisError> {
+    match value.as_deref() {
+        Some("orchestration") => Ok(PluginRole::Orchestration),
+        Some("capability") => Ok(PluginRole::Capability),
+        Some("ui") => Ok(PluginRole::Ui),
+        Some("reasoning_backend") => Ok(PluginRole::ReasoningBackend),
+        Some("memory") => Ok(PluginRole::Memory),
+        Some("search") => Ok(PluginRole::Search),
+        Some("channel") => Ok(PluginRole::Channel),
+        Some("network_reserved") => Ok(PluginRole::NetworkReserved),
+        Some("session_log") => Ok(PluginRole::SessionLog),
+        Some("control_events") => Ok(PluginRole::ControlEvents),
+        Some("notification") => Ok(PluginRole::Notification),
+        Some("topology") => Ok(PluginRole::Topology),
+        Some("session_canvas") => Ok(PluginRole::SessionCanvas),
+        _ => Err(CordisError::PluginRegistration(format!(
+            "unknown plugin role: {}",
+            value.unwrap_or_default()
+        ))),
     }
 }
 

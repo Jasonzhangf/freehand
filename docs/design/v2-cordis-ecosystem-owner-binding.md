@@ -14,10 +14,18 @@ It does not own capability semantics, Session Log truth, reasoning decisions,
 UI rendering or network truth. Cordis itself is treated as the external plugin
 substrate the Freehand MVP exposes typed ports for.
 
+`CordisContext` also owns the compiled in-memory plugin registration surface:
+every executable, replaceable or externally connected v2 component registers a
+stable `plugin_id`, a `PluginRole` and a contract version before it is loadable
+or replaceable through Cordis. Capability implementations still register their
+CapabilityManifest separately through the capability owner; the Cordis plugin
+registration is the control-plane identity, not a second capability truth.
+
 ## Boundary
 
 ```text
 CordisRoot / CordisContext
+  -> PluginRegistration (role + contract version)
   -> CapabilityPlugin manifest
   -> invoke
   -> EventLedger control event
@@ -46,6 +54,8 @@ does not leak in-flight correlation state.
 
 Replacement and unload are allowed only when no operation is pending. Unknown
 capability, duplicate registration and failed invocation fail closed.
+Plugin registration is deterministic, duplicate `plugin_id`s are rejected, and
+unknown roles or unsupported contract versions fail before any mutation.
 
 ## Gates
 

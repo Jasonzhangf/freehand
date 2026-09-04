@@ -86,11 +86,24 @@ fn dispatch(slice: &mut PublicVerticalSlice, command: Command) -> Result<Value, 
         "status" => {
             let session_id = SessionId::try_new(command.session_id.unwrap_or_default())
                 .map_err(|error| error.to_string())?;
+            let registrations = slice.registered_plugins();
+            let registered_plugins = registrations
+                .iter()
+                .map(|registration| {
+                    serde_json::json!({
+                        "plugin_id": registration.plugin_id().as_str(),
+                        "role": registration.role().as_str(),
+                        "contract_version": registration.contract_version(),
+                    })
+                })
+                .collect::<Vec<_>>();
             Ok(json!({
                 "ok": true,
                 "projection_count": slice.projection_count(&slot),
                 "control_event_count": slice.control_events().len(),
                 "session_event_count": slice.session_events(&session_id).len(),
+                "registered_plugin_count": registrations.len(),
+                "registered_plugins": registered_plugins,
             }))
         }
         other => Err(format!("unknown action: {other}")),

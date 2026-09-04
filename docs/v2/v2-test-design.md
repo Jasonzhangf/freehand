@@ -241,6 +241,7 @@ orchestration plugin imports or duplicates capability semantic logic.
 ```text
 Cordis root
   -> fixed design orchestration plugin
+  -> typed PluginRegistration registry
   -> runtime-group scope
   -> Service injection
   -> capability invocation and Reasoning Service
@@ -251,11 +252,13 @@ The Cordis ecosystem owner may compose adjacent plugins and carry correlation
 identity. It may not validate payload semantics, implement event policy, write
 Session Log truth, parse UI rendering data, or create network fallback.
 
-Positive tests cover root -> fixed design plugin -> capability -> reasoning ->
-terminal. Reverse tests cover rejected composition, missing Service injection,
-plugin failure, non-terminal reasoning result, duplicate event and explicit
-stop. Each case must end in an owner-backed state, not an orchestration-local
-boolean.
+Positive tests cover typed plugin registration for every MVP role, deterministic
+registration order, root -> fixed design plugin -> capability -> reasoning ->
+terminal, and replacement after no in-flight work. Reverse tests cover duplicate
+`plugin_id`, unsupported contract version, unknown role, rejected composition,
+missing Service injection, plugin failure, non-terminal reasoning result,
+duplicate event and explicit stop. Each case must end in an owner-backed state,
+not an orchestration-local boolean.
 
 ### Black-box impact
 
@@ -266,7 +269,8 @@ sessionlog records and final UI projection as separate observations.
 ### Known gaps
 
 - Cordis dependency/API is not yet selected or bound;
-- no ecosystem binding source exists;
+- full typed port schemas and dynamic-library/process-isolation loading are
+  still pending;
 - retry policy remains an event/reason owner decision, not a generic loop.
 
 ## `v2-ui-adaptor`

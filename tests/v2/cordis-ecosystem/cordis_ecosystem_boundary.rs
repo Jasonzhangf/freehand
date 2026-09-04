@@ -1,7 +1,10 @@
 use std::sync::Arc;
 
 use freehand_v2_contracts::{CapabilityId, CorrelationId, ImmutablePayload, PluginId};
-use freehand_v2_cordis_ecosystem::{CompositionEvent, CordisContext, CordisError};
+use freehand_v2_cordis_ecosystem::{
+    CompositionEvent, CordisContext, CordisError, PLUGIN_CONTRACT_VERSION, PluginRegistration,
+    PluginRole,
+};
 use freehand_v2_plugin_capabilities::{CapabilityManifest, LocalCapabilityPlugin};
 
 fn plugin_id(value: &str) -> PluginId {
@@ -187,4 +190,96 @@ fn event_ledger_records_plugin_invoked_completed_without_business_payload() {
     assert_eq!(records.len(), 2);
     assert!(records.iter().all(|record| record.payload_ref().is_none()));
     assert!(context.events().is_terminal(&correlation("c5")));
+}
+
+#[test]
+fn cordis_registers_typed_plugin_roles_in_deterministic_order() {
+    let mut context = CordisContext::new();
+    context
+        .register_plugin(
+            PluginRegistration::try_new(
+                plugin_id("ui.run"),
+                PluginRole::Ui,
+                PLUGIN_CONTRACT_VERSION,
+            )
+            .expect("plugin registration"),
+        )
+        .expect("register UI plugin");
+    context
+        .register_plugin(
+            PluginRegistration::try_new(
+                plugin_id("design.orchestration"),
+                PluginRole::Orchestration,
+                PLUGIN_CONTRACT_VERSION,
+            )
+            .expect("plugin registration"),
+        )
+        .expect("register orchestration plugin");
+
+    let registrations = context.plugin_registrations();
+    assert_eq!(registrations.len(), 2);
+    assert_eq!(
+        registrations[0].plugin_id().as_str(),
+        "design.orchestration"
+    );
+    assert_eq!(registrations[0].role(), PluginRole::Orchestration);
+    assert_eq!(
+        context
+            .plugin_by_id(&plugin_id("ui.run"))
+            .expect("registered plugin")
+            .role(),
+        PluginRole::Ui
+    );
+}
+
+#[test]
+fn duplicate_plugin_id_is_rejected_without_mutating_registry() {
+    let mut context = CordisContext::new();
+    let first = PluginRegistration::try_new(
+        plugin_id("duplicate"),
+        PluginRole::Memory,
+        PLUGIN_CONTRACT_VERSION,
+    )
+    .expect("plugin registration");
+    let second = PluginRegistration::try_new(
+        plugin_id("duplicate"),
+        PluginRole::Search,
+        PLUGIN_CONTRACT_VERSION,
+    )
+    .expect("plugin registration");
+    context.register_plugin(first).expect("first registration");
+
+    let error = context
+        .register_plugin(second)
+        .expect_err("duplicate plugin");
+    assert!(error.to_string().contains("plugin already registered"));
+    assert_eq!(context.plugin_registrations().len(), 1);
+    assert_eq!(
+        context
+            .plugin_by_id(&plugin_id("duplicate"))
+            .expect("original plugin")
+            .role(),
+        PluginRole::Memory
+    );
+}
+
+#[test]
+fn invalid_plugin_registration_is_rejected_before_storage() {
+    let context = CordisContext::new();
+    let error =
+        PluginRegistration::try_new(plugin_id("invalid-version"), PluginRole::NetworkReserved, 0)
+            .expect_err("invalid contract version");
+    assert!(
+        error
+            .to_string()
+            .contains("unsupported plugin contract version")
+    );
+    assert!(context.plugin_registrations().is_empty());
+
+    let unknown_role = serde_json::from_value::<PluginRegistration>(serde_json::json!({
+        "plugin_id": "unknown-role",
+        "role": "UnknownRole",
+        "contract_version": 1
+    }));
+    assert!(unknown_role.is_err());
 }

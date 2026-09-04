@@ -527,7 +527,7 @@
           "playground/experiments/v2/cordis-ecosystem/src/**",
           "tests/v2/cordis-ecosystem/**"
         ],
-        "minimum_test_count": 7,
+        "minimum_test_count": 11,
         "ordinary_mode_after_freeze": "disabled",
         "reenable_on": [
           "source_change",
@@ -888,7 +888,7 @@
           "playground/experiments/v2/public-vertical-slice/src/**",
           "tests/v2/public-vertical-slice/**"
         ],
-        "minimum_test_count": 7,
+        "minimum_test_count": 8,
         "ordinary_mode_after_freeze": "disabled",
         "reenable_on": [
           "source_change",

@@ -5,6 +5,7 @@ use freehand_v2_contracts::{
     CapabilityId, CorrelationId, ImmutablePayload, NodeId, PayloadFrame, PluginId, SessionId,
     UiCommand, UiCommandWire, WireFrame,
 };
+use freehand_v2_cordis_ecosystem::PluginRole;
 use freehand_v2_memory_plugin::{MemoryPlugin, MemoryRecord};
 use freehand_v2_public_vertical_slice::{PublicVerticalSlice, VerticalSliceError};
 use freehand_v2_search_plugin::{SearchPlugin, SearchRecord};
@@ -267,4 +268,41 @@ fn vertical_slice_rejects_control_fields_in_payload_wire() {
     let encoded = serde_json::to_string(&frame).expect("encode frame");
     let decoded = WireFrame::decode(&encoded).expect("decode frame");
     assert!(matches!(decoded, WireFrame::Payload(PayloadFrame { .. })));
+}
+
+#[test]
+fn vertical_slice_registers_mvp_plugins_under_typed_cordis_roles() {
+    let slice = PublicVerticalSlice::new();
+    let registrations = slice.registered_plugins();
+
+    let expected: Vec<(&str, PluginRole)> = vec![
+        ("design.orchestration", PluginRole::Orchestration),
+        ("events.local", PluginRole::ControlEvents),
+        ("sessionlog.local", PluginRole::SessionLog),
+        ("reasoning.native", PluginRole::ReasoningBackend),
+        ("capabilities.local", PluginRole::Capability),
+        ("ui.adaptor", PluginRole::Ui),
+        ("ui.run", PluginRole::Ui),
+        ("notification.local", PluginRole::Notification),
+        ("topology.local", PluginRole::Topology),
+        ("session.canvas", PluginRole::SessionCanvas),
+        ("search.local", PluginRole::Search),
+        ("memory.local", PluginRole::Memory),
+        ("channel.registry", PluginRole::Channel),
+        ("network.reserved", PluginRole::NetworkReserved),
+    ];
+    for (plugin_id, role) in expected {
+        assert!(
+            registrations.iter().any(
+                |registration| registration.plugin_id().as_str() == plugin_id
+                    && registration.role() == role
+            ),
+            "missing {plugin_id} role {role:?}"
+        );
+    }
+    assert_eq!(
+        registrations.len(),
+        14,
+        "plugin registry must include the frozen MVP role set"
+    );
 }

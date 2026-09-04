@@ -1,8 +1,8 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 use std::sync::Arc;
 
 use freehand_v2_contracts::{
-    CapabilityId, ControlKind, CorrelationId, ErrorKind, EventId, ImmutablePayload,
+    CapabilityId, ControlKind, CorrelationId, ErrorKind, EventId, ImmutablePayload, PluginId,
 };
 use freehand_v2_control_events::{EventLedger, EventLedgerError};
 use freehand_v2_plugin_capabilities::{
@@ -13,6 +13,8 @@ use thiserror::Error;
 
 #[derive(Debug, Error)]
 pub enum CordisError {
+    #[error("plugin registration error: {0}")]
+    PluginRegistration(String),
     #[error("capability error: {0}")]
     Capability(#[from] freehand_v2_plugin_capabilities::CapabilityError),
     #[error("event ledger error: {0}")]
@@ -25,6 +27,85 @@ pub enum CordisError {
     AlreadyInFlight(String),
     #[error("event id generation failed: {0}")]
     EventId(String),
+}
+
+pub const PLUGIN_CONTRACT_VERSION: u32 = 1;
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum PluginRole {
+    Orchestration,
+    Capability,
+    Ui,
+    ReasoningBackend,
+    Memory,
+    Search,
+    Channel,
+    NetworkReserved,
+    SessionLog,
+    ControlEvents,
+    Notification,
+    Topology,
+    SessionCanvas,
+}
+
+impl PluginRole {
+    pub fn as_str(self) -> &'static str {
+        match self {
+            Self::Orchestration => "orchestration",
+            Self::Capability => "capability",
+            Self::Ui => "ui",
+            Self::ReasoningBackend => "reasoning_backend",
+            Self::Memory => "memory",
+            Self::Search => "search",
+            Self::Channel => "channel",
+            Self::NetworkReserved => "network_reserved",
+            Self::SessionLog => "session_log",
+            Self::ControlEvents => "control_events",
+            Self::Notification => "notification",
+            Self::Topology => "topology",
+            Self::SessionCanvas => "session_canvas",
+        }
+    }
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct PluginRegistration {
+    plugin_id: PluginId,
+    role: PluginRole,
+    contract_version: u32,
+}
+
+impl PluginRegistration {
+    pub fn try_new(
+        plugin_id: PluginId,
+        role: PluginRole,
+        contract_version: u32,
+    ) -> Result<Self, CordisError> {
+        if contract_version != PLUGIN_CONTRACT_VERSION {
+            return Err(CordisError::PluginRegistration(format!(
+                "unsupported plugin contract version: {contract_version}"
+            )));
+        }
+        Ok(Self {
+            plugin_id,
+            role,
+            contract_version,
+        })
+    }
+
+    pub fn plugin_id(&self) -> &PluginId {
+        &self.plugin_id
+    }
+
+    pub fn role(&self) -> PluginRole {
+        self.role
+    }
+
+    pub fn contract_version(&self) -> u32 {
+        self.contract_version
+    }
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Hash, Serialize, Deserialize)]
@@ -91,6 +172,7 @@ impl CordisRoot {
 
 #[derive(Default)]
 pub struct CordisContext {
+    plugins: BTreeMap<PluginId, PluginRegistration>,
     capabilities: CapabilityRegistry,
     events: EventLedger,
     in_flight: HashSet<CorrelationId>,
@@ -99,6 +181,32 @@ pub struct CordisContext {
 impl CordisContext {
     pub fn new() -> Self {
         Self::default()
+    }
+
+    pub fn register_plugin(
+        &mut self,
+        registration: PluginRegistration,
+    ) -> Result<&PluginRegistration, CordisError> {
+        let plugin_id = registration.plugin_id().clone();
+        if self.plugins.contains_key(&plugin_id) {
+            return Err(CordisError::PluginRegistration(format!(
+                "plugin already registered: {}",
+                plugin_id.as_str()
+            )));
+        }
+        self.plugins.insert(plugin_id.clone(), registration);
+        Ok(self
+            .plugins
+            .get(&plugin_id)
+            .expect("just inserted plugin registration"))
+    }
+
+    pub fn plugin_registrations(&self) -> Vec<PluginRegistration> {
+        self.plugins.values().cloned().collect()
+    }
+
+    pub fn plugin_by_id(&self, plugin_id: &PluginId) -> Option<&PluginRegistration> {
+        self.plugins.get(plugin_id)
     }
 
     pub fn register(

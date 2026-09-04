@@ -151,8 +151,8 @@ def module_config() -> dict:
         "test_name": "v2_public_vertical_slice_boundary",
         "binary": "v2-public-vertical-slice-public",
         "artifact": "v2-public-vertical-slice.module",
-        "issue": "freehand-v2-public-vertical-slice-milestone",
-        "worktree": "playground/v2-m8-vertical-slice",
+        "issue": "freehand-v2-plugin-registry-20260904",
+        "worktree": "playground/v2-plugin-registry-20260904",
         "design": "docs/v2/v2-development-roadmap.md",
         "install_input": [
             {

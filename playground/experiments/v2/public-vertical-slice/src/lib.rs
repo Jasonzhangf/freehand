@@ -5,7 +5,9 @@ use freehand_v2_contracts::{
     CapabilityId, CorrelationId, EventId, ImmutablePayload, PluginId, SessionId, UiCommand,
 };
 use freehand_v2_control_events::{EventLedger, EventRecord};
-use freehand_v2_cordis_ecosystem::{CordisContext, CordisError};
+use freehand_v2_cordis_ecosystem::{
+    CordisContext, CordisError, PLUGIN_CONTRACT_VERSION, PluginRegistration, PluginRole,
+};
 use freehand_v2_plugin_capabilities::{CapabilityManifest, LocalCapabilityPlugin};
 use freehand_v2_reasoning_backend::{
     NativeBackend, ReasoningError, ReasoningEvent, ReasoningRequest, ReasoningService,
@@ -120,7 +122,30 @@ impl PublicVerticalSlice {
 
     fn with_capability(fail_next: bool) -> Self {
         let mut cordis = CordisContext::new();
-        let plugin_id = PluginId::try_new("local.plugin").expect("plugin id");
+        register_role(
+            &mut cordis,
+            "design.orchestration",
+            PluginRole::Orchestration,
+        );
+        register_role(&mut cordis, "events.local", PluginRole::ControlEvents);
+        register_role(&mut cordis, "sessionlog.local", PluginRole::SessionLog);
+        register_role(
+            &mut cordis,
+            "reasoning.native",
+            PluginRole::ReasoningBackend,
+        );
+        register_role(&mut cordis, "capabilities.local", PluginRole::Capability);
+        register_role(&mut cordis, "ui.adaptor", PluginRole::Ui);
+        register_role(&mut cordis, "ui.run", PluginRole::Ui);
+        register_role(&mut cordis, "notification.local", PluginRole::Notification);
+        register_role(&mut cordis, "topology.local", PluginRole::Topology);
+        register_role(&mut cordis, "session.canvas", PluginRole::SessionCanvas);
+        register_role(&mut cordis, "search.local", PluginRole::Search);
+        register_role(&mut cordis, "memory.local", PluginRole::Memory);
+        register_role(&mut cordis, "channel.registry", PluginRole::Channel);
+        register_role(&mut cordis, "network.reserved", PluginRole::NetworkReserved);
+
+        let plugin_id = PluginId::try_new("capabilities.local").expect("plugin id");
         let capability_id = CapabilityId::try_new("local.capability").expect("capability id");
         let manifest = CapabilityManifest::try_new(
             plugin_id,
@@ -219,6 +244,10 @@ impl PublicVerticalSlice {
 
     pub fn events_ledger(&self) -> &EventLedger {
         self.cordis.events()
+    }
+
+    pub fn registered_plugins(&self) -> Vec<PluginRegistration> {
+        self.cordis.plugin_registrations()
     }
 
     fn run_command(
@@ -388,4 +417,16 @@ fn make_local_capability(manifest: CapabilityManifest, fail_next: bool) -> Local
     } else {
         plugin
     }
+}
+
+fn register_role(cordis: &mut CordisContext, plugin_id: &str, role: PluginRole) {
+    let registration = PluginRegistration::try_new(
+        PluginId::try_new(plugin_id).expect("plugin id"),
+        role,
+        PLUGIN_CONTRACT_VERSION,
+    )
+    .expect("plugin registration");
+    cordis
+        .register_plugin(registration)
+        .expect("register plugin");
 }
